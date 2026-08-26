@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -157,9 +158,10 @@ func (h *Handler) handleBroadcastName(ctx context.Context, chatID int64, raw str
 // MarkdownV2), and offers confirm/cancel buttons.
 func (h *Handler) handleBroadcastDraftText(ctx context.Context, chatID int64, text string) error {
 	const maxBroadcastLen = config.MaxTelegramMessageLen * 20
-	if len(text) > maxBroadcastLen {
+	runeCount := utf8.RuneCountInString(text)
+	if runeCount > maxBroadcastLen {
 		h.clearBroadcastSession(chatID)
-		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов). Максимум — %d символов; рассылка автоматически разбивается на части по %d символов.", len(text), maxBroadcastLen, config.MaxTelegramMessageLen))
+		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Сообщение слишком длинное (%d символов). Максимум — %d символов; рассылка автоматически разбивается на части по %d символов.", runeCount, maxBroadcastLen, config.MaxTelegramMessageLen))
 
 		return nil
 	}
@@ -436,8 +438,11 @@ func (h *Handler) handleBroadcastScheduleHour(ctx context.Context, chatID int64,
 	}
 
 	hour, err := strconv.Atoi(strings.TrimPrefix(callbackData, "bsched_hour_"))
-	if err != nil || hour < 0 || hour > 23 {
+	if err != nil {
 		return fmt.Errorf("parse schedule hour: %w", err)
+	}
+	if hour < 0 || hour > 23 {
+		return fmt.Errorf("unsupported schedule hour: %d", hour)
 	}
 	now := time.Now().In(broadcastScheduleTZ)
 	day := now.AddDate(0, 0, s.scheduleDay)

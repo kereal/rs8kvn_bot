@@ -288,7 +288,7 @@ func TestBroadcastScheduleFlow(t *testing.T) {
 	}}))
 	s = handler.getBroadcastSession(broadcastTestAdminID)
 	require.NotNil(t, s.plannedAt)
-	tomorrow := time.Now().AddDate(0, 0, 1)
+	tomorrow := time.Now().In(broadcastScheduleTZ).AddDate(0, 0, 1)
 	assert.Equal(t, tomorrow.Year(), s.plannedAt.Year())
 	assert.Equal(t, tomorrow.Month(), s.plannedAt.Month())
 	assert.Equal(t, tomorrow.Day(), s.plannedAt.Day())

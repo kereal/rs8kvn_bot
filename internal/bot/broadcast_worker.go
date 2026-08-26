@@ -406,7 +406,7 @@ func (w *BroadcastWorker) sendAdminReport(ctx context.Context, campaign *databas
 func (w *BroadcastWorker) Cancel(ctx context.Context, id uint) (bool, error) {
 	canceled, err := w.h.db.CancelBroadcast(ctx, id, time.Now().UTC())
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("cancel broadcast %d: %w", id, err)
 	}
 	w.activeMu.Lock()
 	cancel := w.active[id]
