@@ -112,7 +112,6 @@ func (cb *CircuitBreaker) recordResult(err error) {
 
 		if cb.failures >= cb.maxFailures && cb.state != CircuitStateOpen {
 			cb.state = CircuitStateOpen
-
 		}
 
 		return
@@ -129,7 +128,6 @@ func (cb *CircuitBreaker) recordResult(err error) {
 			cb.failures = 0
 			cb.successes = 0
 			cb.halfOpenAttempts = 0
-
 		}
 	}
 }

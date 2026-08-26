@@ -590,5 +590,4 @@ func TestHandleUpdate_PropagatesStartErrorToMetrics(t *testing.T) {
 	}
 
 	handler.HandleUpdate(context.Background(), update)
-
 }
