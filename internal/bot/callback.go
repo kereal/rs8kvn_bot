@@ -218,10 +218,15 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		if err != nil {
 			return err
 		}
-		if err := c.h.broadcastWorker.Cancel(ctx, id); err != nil {
+		canceled, err := c.h.broadcastWorker.Cancel(ctx, id)
+		if err != nil {
 			return fmt.Errorf("cancel broadcast: %w", err)
 		}
-		c.h.SendMessage(ctx, chatID, fmt.Sprintf("⏹ Рассылка #%d отменена.", id))
+		if canceled {
+			c.h.SendMessage(ctx, chatID, fmt.Sprintf("⏹ Рассылка #%d отменена.", id))
+		} else {
+			c.h.SendMessage(ctx, chatID, fmt.Sprintf("ℹ️ Рассылка #%d уже завершена — отменять нечего.", id))
+		}
 	case strings.HasPrefix(data, "broadcast_retry_"):
 		if !c.h.isAdmin(chatID) {
 			return nil

@@ -213,7 +213,9 @@ func (s *Service) FinishBroadcastRecipient(ctx context.Context, broadcastID uint
 			recipient.UpdatedAt = now
 			return nil
 		}
-		return ErrBroadcastNotFound
+		// The broadcast exists but this recipient is not in its snapshot:
+		// report the recipient as missing, not the whole campaign.
+		return ErrBroadcastRecipientNotFound
 	})
 }
 
@@ -390,7 +392,13 @@ func applyBroadcastFilter(q *gorm.DB, filter BroadcastFilter) *gorm.DB {
 	} else if filter.SubscriptionStatus == "" {
 		q = q.Where("status = ?", string(SubscriptionStatusActive))
 	}
-	q = q.Where("plan_id != (SELECT id FROM plans WHERE name = ?)", TrialPlanName)
+	// NOT IN (not !=) so a missing standard trial plan degrades to a no-op
+	// instead of UNKNOWN: a scalar subquery without rows turns `!=` into
+	// `plan_id != NULL`, which filters out the whole audience.
+	// NOT IN (not !=) so a missing standard trial plan degrades to a no-op
+	// instead of UNKNOWN: a scalar subquery without rows turns `!=` into
+	// `plan_id != NULL`, which filters out the whole audience.
+	q = q.Where("plan_id NOT IN (SELECT id FROM plans WHERE name = ?)", TrialPlanName)
 	switch filter.PlanType {
 	case "paid":
 		q = q.Where("(product_id IS NOT NULL OR price_paid_cents > 0)")

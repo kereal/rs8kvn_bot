@@ -177,6 +177,30 @@ func TestBroadcastRecipientFinishRejectsStaleLease(t *testing.T) {
 	assert.Equal(t, []int64{710041}, report.Blocked)
 }
 
+func TestBroadcastRecipientFinishMissingRecipient(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newTestService(t)
+	b := createBroadcastForStateTest(t, svc)
+	freePlan := testFreePlanID(t, svc)
+	require.NoError(t, svc.db.Create(&Subscription{
+		TelegramID: 710042, Username: "ghost", ClientID: "ghost-client", SubscriptionID: "ghost-sub",
+		Status: string(SubscriptionStatusActive), PlanID: freePlan,
+	}).Error)
+	require.True(t, func() bool {
+		claimed, err := svc.ClaimBroadcast(ctx, b.ID, time.Now().UTC())
+		return err == nil && claimed
+	}())
+	_, err := svc.SnapshotBroadcastRecipients(ctx, b.ID, BroadcastFilter{})
+	require.NoError(t, err)
+
+	// The broadcast row exists, but this recipient ID was never claimed:
+	// the error must name the recipient, not the campaign.
+	err = svc.FinishBroadcastRecipient(ctx, b.ID, 999999, 1, BroadcastRecipientFailed, "boom", time.Now().UTC())
+	assert.ErrorIs(t, err, ErrBroadcastRecipientNotFound)
+	assert.NotErrorIs(t, err, ErrBroadcastNotFound)
+}
+
 func TestBroadcastRecipientClaimStopsAfterCancel(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

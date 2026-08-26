@@ -123,7 +123,7 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 	campaign.RecipientsTotal = total
 
 	if err := w.h.db.RecoverStaleBroadcastRecipients(campaignCtx, campaign.ID, time.Now().UTC().Add(-2*time.Minute)); err != nil {
-		return err
+		return fmt.Errorf("recover stale broadcast recipients: %w", err)
 	}
 
 	var current *database.Broadcast
@@ -147,7 +147,7 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 			if campaignCtx.Err() != nil {
 				break
 			}
-			return err
+			return fmt.Errorf("claim broadcast recipients: %w", err)
 		}
 		if len(recipients) == 0 {
 			break
@@ -371,11 +371,13 @@ func (w *BroadcastWorker) sendAdminReport(ctx context.Context, campaign *databas
 }
 
 // Cancel cancels a running/scheduled campaign and prevents pending recipients
-// from being claimed by the next worker pass.
-func (w *BroadcastWorker) Cancel(ctx context.Context, id uint) error {
-	_, err := w.h.db.CancelBroadcast(ctx, id, time.Now().UTC())
+// from being claimed by the next worker pass. The bool reports whether the
+// campaign was actually transitioned; (false, nil) means it was already
+// terminal and there was nothing to cancel.
+func (w *BroadcastWorker) Cancel(ctx context.Context, id uint) (bool, error) {
+	canceled, err := w.h.db.CancelBroadcast(ctx, id, time.Now().UTC())
 	if err != nil {
-		return err
+		return false, err
 	}
 	w.activeMu.Lock()
 	cancel := w.active[id]
@@ -383,7 +385,7 @@ func (w *BroadcastWorker) Cancel(ctx context.Context, id uint) error {
 	if cancel != nil {
 		cancel()
 	}
-	return nil
+	return canceled, nil
 }
 
 // RetryFailed makes failed recipients eligible again and reopens the campaign.

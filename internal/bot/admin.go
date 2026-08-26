@@ -756,18 +756,26 @@ func (h *Handler) startBroadcastSession(chatID int64) {
 // getBroadcastSession returns the active broadcast session for an admin, or nil.
 func (h *Handler) getBroadcastSession(chatID int64) *broadcastSession {
 	h.broadcastMu.RLock()
-	defer h.broadcastMu.RUnlock()
-
 	s, ok := h.broadcastSessions[chatID]
-	if !ok || time.Since(s.createdAt) > broadcastSessionTTL {
-		delete(h.broadcastSessions, chatID)
-		return nil
+	expired := ok && time.Since(s.createdAt) > broadcastSessionTTL
+	if ok && !expired {
+		// Return a snapshot so concurrent Telegram callbacks cannot race on the
+		// mutable session object while one callback updates the filter or stage.
+		copy := *s
+		h.broadcastMu.RUnlock()
+		return &copy
 	}
+	h.broadcastMu.RUnlock()
 
-	// Return a snapshot so concurrent Telegram callbacks cannot race on the
-	// mutable session object while one callback updates the filter or stage.
-	copy := *s
-	return &copy
+	if expired {
+		// Drop the stale entry under the exclusive lock: two concurrent readers
+		// can both observe the expiry, and deleting under RLock would be a
+		// concurrent map write (same pattern as SubscriptionCache.Get).
+		h.broadcastMu.Lock()
+		delete(h.broadcastSessions, chatID)
+		h.broadcastMu.Unlock()
+	}
+	return nil
 }
 
 // clearBroadcastSession removes the broadcast session for an admin.

@@ -40,3 +40,32 @@ func TestBroadcastAudienceFiltersExcludeTrialsAndDefinePaidByPayment(t *testing.
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), freeCount)
 }
+
+// TestBroadcastAudienceSurvivesMissingTrialPlan locks the safety behavior of
+// the trial exclusion: a plan table without the standard trial plan must not
+// blank the whole audience (plan_id != NULL is UNKNOWN), it must degrade to a
+// no-op and keep counting everyone else.
+func TestBroadcastAudienceSurvivesMissingTrialPlan(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newTestService(t)
+	freePlan := testFreePlanID(t, svc)
+	trialPlan, err := svc.GetPlanByName(ctx, TrialPlanName)
+	require.NoError(t, err)
+
+	// Rename (not delete) so the FK-referencing subscription stays valid while
+	// the standard trial plan name no longer exists in the plans table.
+	require.NoError(t, svc.db.Model(&Plan{}).Where("name = ?", TrialPlanName).Update("name", "trial-custom").Error)
+
+	subs := []Subscription{
+		{TelegramID: 720011, Username: "free-a", ClientID: "trial-missing-1", SubscriptionID: "trial-missing-1", PlanID: freePlan, Status: string(SubscriptionStatusActive)},
+		{TelegramID: 720012, Username: "trial-user", ClientID: "trial-missing-2", SubscriptionID: "trial-missing-2", PlanID: trialPlan.ID, Status: string(SubscriptionStatusActive)},
+	}
+	for i := range subs {
+		require.NoError(t, svc.db.Create(&subs[i]).Error)
+	}
+
+	allCount, err := svc.GetFilteredTelegramIDCount(ctx, BroadcastFilter{SubscriptionStatus: "all"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), allCount)
+}
