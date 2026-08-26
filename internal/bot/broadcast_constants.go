@@ -5,6 +5,17 @@ import "time"
 // scheduleDayOptions — доступные дни для планирования рассылки, offset дней от сегодня.
 var scheduleDayOptions = []int{0, 1, 2, 3, 6}
 
+// broadcastScheduleTZ — таймзона планировщика рассылок. UI обещает московское
+// время, поэтому не зависим от time.Local сервера.
+var broadcastScheduleTZ = func() *time.Location {
+	loc, err := time.LoadLocation("Europe/Moscow")
+	if err != nil {
+		// Fallback без tzdata: MSK всегда UTC+3.
+		return time.FixedZone("MSK", 3*60*60)
+	}
+	return loc
+}()
+
 // ruWeekdays — короткие названия дней недели по time.Weekday() (0 = Вс).
 var ruWeekdays = [...]string{"Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"}
 

@@ -26,10 +26,10 @@ func TestParseBroadcastCallbackID(t *testing.T) {
 	assert.Equal(t, uint(5), valid)
 
 	cases := []string{
-		"broadcast_cancel_0",      // zero is invalid
-		"broadcast_cancel_",       // empty value
-		"broadcast_cancel_abc",    // not a number
-		"broadcast_cancel_-3",     // negative
+		"broadcast_cancel_0",                    // zero is invalid
+		"broadcast_cancel_",                     // empty value
+		"broadcast_cancel_abc",                  // not a number
+		"broadcast_cancel_-3",                   // negative
 		"broadcast_cancel_18446744073709551616", // uint64 overflow
 	}
 	for _, data := range cases {
