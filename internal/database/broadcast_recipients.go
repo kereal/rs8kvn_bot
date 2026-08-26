@@ -219,9 +219,14 @@ func (s *Service) FinishBroadcastRecipient(ctx context.Context, broadcastID uint
 	})
 }
 
-// CancelBroadcast marks a campaign canceled and releases all sending leases
-// in the same transaction. The worker context is canceled separately by the
-// bot layer, so no new recipient can be claimed after this transition.
+// CancelBroadcast marks a campaign canceled. Sending leases are deliberately
+// left in place: the in-flight batch has already been claimed and its worker
+// finishes every recipient (the loop runs wg.Wait before checking status), so
+// releasing the leases here would turn those finishes into ErrBroadcastRecipientStale
+// and the delivered recipients would linger as "not processed". No new recipient
+// can be claimed after this transition anyway: ClaimBroadcastRecipients refuses
+// to claim when the campaign is not running, and a retry via
+// ResetBroadcastFailedRecipients resets sending leases before re-sending.
 func (s *Service) CancelBroadcast(ctx context.Context, id uint, now time.Time) (bool, error) {
 	var canceled bool
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -235,21 +240,8 @@ func (s *Service) CancelBroadcast(ctx context.Context, id uint, now time.Time) (
 		if broadcast.Status != string(BroadcastStatusScheduled) && broadcast.Status != string(BroadcastStatusRunning) {
 			return nil
 		}
-		state, err := parseBroadcastRecipientState(&broadcast)
-		if err != nil {
-			return err
-		}
-		for i := range state.Recipients {
-			if state.Recipients[i].Status == BroadcastRecipientSending {
-				state.Recipients[i].Status = BroadcastRecipientPending
-				state.Recipients[i].UpdatedAt = now
-			}
-		}
-		if err := setBroadcastRecipientState(&broadcast, state); err != nil {
-			return err
-		}
-		result := tx.Model(&Broadcast{}).Where("id = ? AND status IN ?", id, []BroadcastStatus{BroadcastStatusScheduled, BroadcastStatusRunning}).
-			Updates(map[string]any{"status": BroadcastStatusCanceled, "finished_at": now, "recipients_state": broadcast.RecipientsState})
+		result := tx.Model(&Broadcast{}).Where("id = ?", id).
+			Updates(map[string]any{"status": BroadcastStatusCanceled, "finished_at": now})
 		if result.Error != nil {
 			return fmt.Errorf("cancel broadcast: %w", result.Error)
 		}

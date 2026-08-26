@@ -445,12 +445,6 @@ func ensureBroadcastColumns(sqlDB *sql.DB) error {
 	return nil
 }
 
-// ensureBroadcastRecipientStateColumn remains as a narrow compatibility helper
-// for migration tests and callers that only need the original column.
-func ensureBroadcastRecipientStateColumn(sqlDB *sql.DB) error {
-	return ensureBroadcastColumns(sqlDB)
-}
-
 func latestEmbeddedMigrationVersion() (int, error) {
 	entries, err := migrationFiles.ReadDir("migrations")
 	if err != nil {

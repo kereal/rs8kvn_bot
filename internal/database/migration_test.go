@@ -186,7 +186,7 @@ func TestMigration_036StoresBroadcastStateOnExistingTable(t *testing.T) {
 	assert.Zero(t, tableCount)
 }
 
-func TestEnsureBroadcastRecipientStateColumn(t *testing.T) {
+func TestEnsureBroadcastColumns(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "legacy-broadcasts.db")
 	db, err := NewService(dbPath)
@@ -196,7 +196,7 @@ func TestEnsureBroadcastRecipientStateColumn(t *testing.T) {
 	require.NoError(t, err)
 	_, err = sqlDB.Exec("ALTER TABLE broadcasts DROP COLUMN recipients_state")
 	require.NoError(t, err)
-	require.NoError(t, ensureBroadcastRecipientStateColumn(sqlDB))
+	require.NoError(t, ensureBroadcastColumns(sqlDB))
 	for _, name := range []string{"recipients_state", "unreachable_count", "last_error", "retry_at", "retry_count"} {
 		var count int
 		require.NoError(t, sqlDB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('broadcasts') WHERE name = ?`, name).Scan(&count))

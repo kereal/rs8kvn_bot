@@ -97,7 +97,6 @@ type DatabaseService struct {
 	DeleteSubscriptionByIDFunc                  func(ctx context.Context, id uint) (*database.Subscription, error)
 	GetTelegramIDsBatchFunc                     func(ctx context.Context, offset, limit int) ([]int64, error)
 	GetTotalTelegramIDCountFunc                 func(ctx context.Context) (int64, error)
-	GetFilteredTelegramIDsBatchFunc             func(ctx context.Context, offset, limit int, filter database.BroadcastFilter) ([]int64, error)
 	GetFilteredTelegramIDCountFunc              func(ctx context.Context, filter database.BroadcastFilter) (int64, error)
 	GetOrCreateInviteFunc                       func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
 	GetInviteByReferrerFunc                     func(ctx context.Context, referrerTGID int64) (*database.Invite, error)
@@ -564,15 +563,6 @@ func (m *DatabaseService) GetTotalTelegramIDCount(ctx context.Context) (int64, e
 	return int64(len(m.Subscriptions)), nil
 }
 
-func (m *DatabaseService) GetFilteredTelegramIDsBatch(ctx context.Context, offset, limit int, filter database.BroadcastFilter) ([]int64, error) {
-	if m.GetFilteredTelegramIDsBatchFunc != nil {
-		return m.GetFilteredTelegramIDsBatchFunc(ctx, offset, limit, filter)
-	}
-
-	// Delegates to unfiltered batch — tests control via func hook.
-	return m.GetTelegramIDsBatch(ctx, offset, limit)
-}
-
 func (m *DatabaseService) GetFilteredTelegramIDCount(ctx context.Context, filter database.BroadcastFilter) (int64, error) {
 	if m.GetFilteredTelegramIDCountFunc != nil {
 		return m.GetFilteredTelegramIDCountFunc(ctx, filter)
@@ -725,7 +715,9 @@ func (m *DatabaseService) SnapshotBroadcastRecipients(ctx context.Context, broad
 	if m.SnapshotBroadcastRecipientsFunc != nil {
 		return m.SnapshotBroadcastRecipientsFunc(ctx, broadcastID, filter)
 	}
-	ids, err := m.GetFilteredTelegramIDsBatch(ctx, 0, int(^uint(0)>>1), filter)
+	// Default fallback: unfiltered audience. Tests that exercise filters set
+	// SnapshotBroadcastRecipientsFunc instead.
+	ids, err := m.GetTelegramIDsBatch(ctx, 0, int(^uint(0)>>1))
 	if err != nil {
 		return 0, err
 	}
@@ -784,16 +776,10 @@ func (m *DatabaseService) CancelBroadcast(ctx context.Context, id uint, now time
 	if b.Status != string(database.BroadcastStatusScheduled) && b.Status != string(database.BroadcastStatusRunning) {
 		return false, nil
 	}
+	// Mirrors production: sending leases are left in place so in-flight
+	// deliveries can still record their terminal outcome.
 	b.Status = string(database.BroadcastStatusCanceled)
 	b.FinishedAt = &now
-	if state, err := fakeBroadcastState(b); err == nil {
-		for i := range state.Recipients {
-			if state.Recipients[i].Status == database.BroadcastRecipientSending {
-				state.Recipients[i].Status = database.BroadcastRecipientPending
-			}
-		}
-		_ = setFakeBroadcastState(b, state)
-	}
 	return true, nil
 }
 

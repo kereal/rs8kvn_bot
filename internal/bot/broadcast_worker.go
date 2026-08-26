@@ -85,6 +85,13 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 		if resultErr == nil || errors.Is(resultErr, context.Canceled) {
 			return
 		}
+		if errors.Is(resultErr, context.DeadlineExceeded) || errors.Is(resultErr, errBroadcastIncomplete) {
+			// Planned resume: the campaign finished its time slice with
+			// recipients still in flight and will be picked up on the next
+			// pass. This is not a failed launch, so do not count it in
+			// retry_count or push retry_at into the future.
+			return
+		}
 		if retryErr := w.scheduleRetry(context.WithoutCancel(ctx), campaign.ID, resultErr); retryErr != nil {
 			logger.Error("Failed to schedule broadcast retry", zap.Uint("broadcast_id", campaign.ID), zap.Error(retryErr))
 		}

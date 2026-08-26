@@ -280,4 +280,3 @@ func TestFormatErrorList(t *testing.T) {
 	assert.Contains(t, out, "… и ещё 1")
 	assert.NotContains(t, out, "3 (", "only the visible preview items may be rendered")
 }
-
