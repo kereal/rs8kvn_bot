@@ -103,6 +103,7 @@ func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 	}
 
 	handler.HandleBroadcast(ctx, createCommandUpdate(123456, admin, "/broadcast"))
+	handler.HandleBroadcastDraft(ctx, createTextUpdate(admin, "Тестовая рассылка"))
 	handler.HandleBroadcastDraft(ctx, createTextUpdate(admin, string(justOver)))
 	assert.True(t, handler.broadcastSessionActive(123456),
 		"Handler should accept a message slightly over one Telegram message (moves to preview)")
@@ -111,6 +112,7 @@ func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 
 	// (b) A message over the hard broadcast cap is rejected.
 	handler.HandleBroadcast(ctx, createCommandUpdate(123456, admin, "/broadcast"))
+	handler.HandleBroadcastDraft(ctx, createTextUpdate(admin, "Тестовая рассылка"))
 
 	tooLong := make([]byte, config.MaxTelegramMessageLen*20+1)
 	for i := range tooLong {

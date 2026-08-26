@@ -890,10 +890,11 @@ func TestHandleMySub_Success(t *testing.T) {
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
 			Chat: &tgbotapi.Chat{ID: 123456},
-			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},				Text: "/mysub",
-				Entities: []tgbotapi.MessageEntity{
-					{Type: "bot_command", Offset: 0, Length: 6}, // "/mysub"
-				},
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Text: "/mysub",
+			Entities: []tgbotapi.MessageEntity{
+				{Type: "bot_command", Offset: 0, Length: 6}, // "/mysub"
+			},
 		},
 	}
 
@@ -928,10 +929,11 @@ func TestHandleMySub_NoSubscription(t *testing.T) {
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
 			Chat: &tgbotapi.Chat{ID: 123456},
-			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},				Text: "/mysub",
-				Entities: []tgbotapi.MessageEntity{
-					{Type: "bot_command", Offset: 0, Length: 6},
-				},
+			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
+			Text: "/mysub",
+			Entities: []tgbotapi.MessageEntity{
+				{Type: "bot_command", Offset: 0, Length: 6},
+			},
 		},
 	}
 

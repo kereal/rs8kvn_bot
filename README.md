@@ -83,7 +83,8 @@ See **[Installation Guide](doc/installation.md)** for:
 | `/lastreg` | Show the last 10 registered users |
 | `/del <id>` | Delete a subscription by database ID |
 | `/setplan <subscription_id> <plan_id> [days]` | Change a subscription's plan through the service layer (reconciles VPN nodes, extends expiry; defaults to 30 days when none given) |
-| `/broadcast <message>` | Send a message to all users who have a subscription (MarkdownV2, special chars auto-escaped) |
+| `/broadcast` | Start an asynchronous broadcast: name → message → filters → preview → confirm |
+| `/broadcasts` | Show recent broadcasts; open details, cancel active campaigns, or retry failed recipients |
 | `/send <id or @username> <message>` | Send a message to a specific user |
 | `/refstats` | Show referral statistics (count per user from cache) |
 
@@ -92,16 +93,32 @@ See **[Installation Guide](doc/installation.md)** for:
 ```text
 /del 5                                    # Delete subscription with DB ID 5
 /setplan 5 3 30                            # Change subscription 5 to plan 3 for 30 days
-/broadcast 🔔 Важное обновление!          # Broadcast to all subscribers (MarkdownV2 supported)
+/broadcast                                 # Start a broadcast (name → message → preview → confirm)
 /send 123456789 Привет!                   # Private message by Telegram ID
 /send @username Привет!                   # Private message by username
 ```
 
-**Broadcast formatting:** messages are sent as MarkdownV2. Special characters
-(`.`, `!`, `_`, `*`, etc.) are escaped automatically, so plain text needs no
-manual escaping — but `*bold*`, `_italic_`, `` `code` `` and `[text](url)` are
-preserved. At the end the admin gets a report splitting successful deliveries,
-users who blocked the bot, and other errors.
+**Broadcast flow:** `/broadcast` asks for a broadcast *name*, then the message and
+filters. Confirmation creates a queued campaign; delivery runs in a durable
+background worker. The admin can send immediately or schedule the campaign for a
+future day and hour (day picker → hour picker, Moscow time); a scheduled campaign
+stays in `scheduled` state and is claimed by the worker only when `planned_at` is
+due. The audience is snapshotted in `broadcasts.recipients_state`, so
+changes to subscriptions cannot shift pagination or add duplicate recipients.
+Anonymous trials are excluded, `active` is the default status, and `all` is an
+explicit status choice; `paid` uses payment state rather than plan name.
+Messages preserve MarkdownV2 formatting and transient failures are retried twice
+with backoff. `/broadcasts` opens recent cards with details, cancellation for
+active campaigns, and retry for failed recipients. A restart resumes scheduled or
+running campaigns and releases stale recipient leases. The worker polls every 15 seconds;
+launch and persistence failures are stored in `broadcasts.last_error`, `retry_at`, and
+`retry_count` with exponential backoff. Delivery outcomes are split into `blocked` (Telegram
+explicitly says the user blocked the bot), `unreachable` (deactivated or unavailable chat),
+and other errors. The audience snapshot and per-recipient state are stored in the
+`broadcasts.recipients_state` JSON column; for the current user count this keeps recovery
+simple, and no separate broadcast-recipient table is required. The details card sends one
+compact admin message; complete delivered and blocked ID lists remain persisted in
+`delivery_report` and can be inspected from the database.
 
 ## Health Check & Web Endpoints
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,6 +154,26 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 		subService:  subService,
 		syncService: syncService,
 	}
+}
+
+func waitForBroadcastFinished(t *testing.T, env *e2eTestEnv) database.Broadcast {
+	t.Helper()
+
+	var finished database.Broadcast
+	require.Eventually(t, func() bool {
+		broadcasts, err := env.db.ListBroadcasts(context.Background(), 1)
+		if err != nil || len(broadcasts) == 0 {
+			return false
+		}
+		status := broadcasts[0].Status
+		if status == string(database.BroadcastStatusScheduled) || status == string(database.BroadcastStatusRunning) {
+			return false
+		}
+		finished = broadcasts[0]
+		return strings.Contains(env.botAPI.LastSentTextSafe(), "Рассылка завершена")
+	}, 5*time.Second, 10*time.Millisecond)
+
+	return finished
 }
 
 func resetBotAPI(m *testutil.BotAPI) {

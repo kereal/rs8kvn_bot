@@ -129,7 +129,7 @@ internal/
 │   ├── handler.go           # Main router, update loop
 │   ├── command.go            # /start, /help, /invite
 │   ├── callback.go           # Inline keyboard callbacks
-│   ├── admin.go             # /del, /broadcast, /send, /refstats
+│   ├── admin.go             # /del, /broadcast, /send, /refstats, broadcast cards
 │   ├── subscription_handler.go # Create/view/QR subscription
 │   ├── menu.go              # Navigation: donate, help, back
 │   ├── cache.go             # LRU cache (1000 entries, 5min TTL)
@@ -904,6 +904,93 @@ The bot exposes a `/metrics` endpoint (via `promhttp.Handler()`) on the HTTP ser
 | 2026-06 | Subscription sync pipeline | 4-state sync machine (subscription_nodes) with per-sub locking |
 | 2026-06 | Prometheus metrics | `/metrics` endpoint with HTTP, bot, XUI, DB, cache metrics |
 | 2026-07 | Security hardening (S2/S3/A1) | X-Forwarded-For rightmost IP, URL scheme allowlist, web→bot dependency break |
+
+---
+
+## Broadcast Filters
+
+The broadcast system supports recipient filtering via JSON predicates stored in `broadcasts.filters`. Filters are applied server-side using SQL WHERE clauses, ensuring scalability.
+
+### Filter Schema
+
+```json
+{
+  "plan_type": "paid",
+  "subscription_status": "active",
+  "registered_after": "2026-01-01T00:00:00Z",
+  "registered_before": "2026-06-01T00:00:00Z",
+  "inactive_days": 30,
+  "ever_paid": true
+}
+```
+
+All fields are optional. Empty filter `{}` = all active users.
+
+### Filter Fields
+
+| Field | Type | SQL Condition | Notes |
+|-------|------|---------------|-------|
+| `plan_type` | `string` | `"paid"`: `product_id IS NOT NULL OR price_paid_cents > 0`; `"free"`: free plan AND `product_id IS NULL` AND `price_paid_cents <= 0` | `"paid"` or `"free"` only |
+| `subscription_status` | `string` | `status = ?` | Default: `"active"` |
+| `registered_after` | `*time.Time` | `created_at >= ?` | Inclusive |
+| `registered_before` | `*time.Time` | `created_at <= ?` | Inclusive |
+| `inactive_days` | `*int` | `last_request < datetime('now', '-N days')` | `0` = never accessed |
+| `ever_paid` | `*bool` | `id IN (SELECT subscription_id FROM orders WHERE status='paid')` | Historical check |
+
+### Filter Combination Logic
+
+All active filters are combined with **AND**:
+
+```
+WHERE telegram_id > 0
+  AND status = 'active'
+  AND (product_id IS NOT NULL OR price_paid_cents > 0)
+  AND created_at >= '2026-01-01'
+  AND last_request < datetime('now', '-30 days')
+  AND id IN (SELECT subscription_id FROM orders WHERE status = 'paid')
+```
+
+### UX Flow
+
+```
+/broadcast
+→ Enter name
+→ Enter text (MarkdownV2)
+→ Filter keyboard appears:
+  [👥 All] [💰 Paid] [🆓 Free]
+  [📋 All] [✅ Active] [🚫 Revoked]
+  [📅 Reg. 3m] [📅 Reg. 6m] [📅 Reg. 1y] [📅 Reg. all]
+  [🚫 Never accessed] [⏰ >1m] [⏰ >3m] [👤 No filter]
+  [💳 Paid] [🆓 Never paid] [👤 No filter]
+  [✅ Send] [❌ Cancel]
+→ Admin selects filters (toggle on/off)
+→ Preview updates with filter description
+→ Press "✅ Send" → Recipient count preview:
+  📦 Broadcast: Promo
+  👥 Recipients: 1234
+  🔍 Filter: Paid · Active · Inactive >30d
+  ⚡ Send to 1234 users?
+  [✅ Send now] [⏰ Schedule]
+  [🔙 Back to filters] [❌ Cancel]
+→ Press "✅ Send now" → Broadcast starts immediately
+→ Press "⏰ Schedule" → Day picker (today / tomorrow / +3d / +1w)
+  → Hour picker (00:00–23:00, Moscow time)
+  → Preview: "Scheduled for 15.08.2026 18:00"
+  [✅ Confirm] [🔙 Change time] [❌ Cancel]
+→ Press "✅ Confirm" → campaign is stored with `planned_at` set and stays
+  `scheduled`; the worker claims it once `planned_at` is due (also after restart).
+  `planned_at` is preserved, not overwritten at start time.
+```
+
+### Important Implementation Details
+
+1. **`PricePaidCents` is NOT cumulative** — it stores the current product price, not total spent. For historical payment checks, the `orders` table is used (`ever_paid` filter).
+
+2. **Plan detection uses `plans` table** — `plan_type` filter queries `plans.name = 'free'`, not `PricePaidCents`, because plan IDs are stable identifiers.
+
+3. **SQLite compatibility** — date arithmetic uses `datetime('now', '-N days')` syntax, not PostgreSQL `INTERVAL`.
+
+4. **Performance** — all filters are applied at the SQL level (subqueries for `ever_paid`), not in-memory filtering. Scales to thousands of users.
 
 ---
 

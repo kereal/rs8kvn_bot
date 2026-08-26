@@ -478,6 +478,20 @@ func (s *Service) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([
 	return ids, nil
 }
 
+// GetFilteredTelegramIDCount возвращает количество уникальных telegram_id с учётом фильтра.
+func (s *Service) GetFilteredTelegramIDCount(ctx context.Context, filter BroadcastFilter) (int64, error) {
+	var count int64
+
+	q := applyBroadcastFilter(s.db.WithContext(ctx).Model(&Subscription{}), filter).
+		Where("telegram_id > 0")
+	result := q.Distinct("telegram_id").Count(&count)
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to get filtered telegram ID count: %w", result.Error)
+	}
+
+	return count, nil
+}
+
 // GetTotalTelegramIDCount returns the count of unique Telegram IDs for active subscriptions eligible for broadcast.
 func (s *Service) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
 	var count int64

@@ -73,6 +73,7 @@ type SubscriptionCounts interface {
 	GetTelegramIDByUsername(ctx context.Context, username string) (int64, error)
 	GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error)
 	GetTotalTelegramIDCount(ctx context.Context) (int64, error)
+	GetFilteredTelegramIDCount(ctx context.Context, filter database.BroadcastFilter) (int64, error)
 }
 
 // SubscriptionStatus manages subscription lifecycle operations.
@@ -189,6 +190,24 @@ type OrderRepository interface {
 	CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error)
 }
 
+// BroadcastRepository provides CRUD for broadcast cards
+// (название, текст, статус, даты, счётчики, JSON-отчёт).
+type BroadcastRepository interface {
+	CreateBroadcast(ctx context.Context, b *database.Broadcast) error
+	GetBroadcast(ctx context.Context, id uint) (*database.Broadcast, error)
+	ListBroadcasts(ctx context.Context, limit int) ([]database.Broadcast, error)
+	UpdateBroadcast(ctx context.Context, b *database.Broadcast) error
+	SnapshotBroadcastRecipients(ctx context.Context, broadcastID uint, filter database.BroadcastFilter) (int64, error)
+	ClaimBroadcast(ctx context.Context, id uint, now time.Time) (bool, error)
+	CancelBroadcast(ctx context.Context, id uint, now time.Time) (bool, error)
+	GetRunnableBroadcasts(ctx context.Context, now time.Time) ([]database.Broadcast, error)
+	RecoverStaleBroadcastRecipients(ctx context.Context, broadcastID uint, before time.Time) error
+	ClaimBroadcastRecipients(ctx context.Context, broadcastID uint, now time.Time, limit int) ([]database.BroadcastRecipient, error)
+	FinishBroadcastRecipient(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, status database.BroadcastRecipientStatus, lastError string, now time.Time) error
+	ResetBroadcastFailedRecipients(ctx context.Context, id uint, now time.Time) error
+	GetBroadcastRecipientsStats(ctx context.Context, broadcastID uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error)
+}
+
 // DatabaseService is the composed persistence contract used by application services.
 type DatabaseService interface {
 	SubscriptionNodeRepository
@@ -199,6 +218,7 @@ type DatabaseService interface {
 	PlanRepository
 	ProductRepository
 	OrderRepository
+	BroadcastRepository
 	Ping(ctx context.Context) error
 	Close() error
 	GetPoolStats() (*database.PoolStats, error)
