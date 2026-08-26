@@ -642,8 +642,7 @@ func TestBroadcast_RecipientResumesFromSavedChunk(t *testing.T) {
 
 	require.NoError(t, handler.broadcastWorker.processCampaign(ctx, b))
 
-	assert.Len(t, sends, 2, "первый чанк уже доставлен — отправляются только второй и третий")
-	require.GreaterOrEqual(t, len(sends), 1)
+	require.Len(t, sends, 2, "первый чанк уже доставлен — отправляются только второй и третий")
 	assert.Contains(t, sends[0], strings.Repeat("2", 64), "отправка возобновляется со второго чанка")
 	assert.Contains(t, sends[1], strings.Repeat("3", 64))
 
