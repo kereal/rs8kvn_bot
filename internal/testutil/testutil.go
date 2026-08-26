@@ -483,14 +483,38 @@ func (m *DatabaseService) CountPremiumSubscriptions(ctx context.Context) (int64,
 	if m.CountPremiumSubscriptionsFunc != nil {
 		return m.CountPremiumSubscriptionsFunc(ctx)
 	}
-	return 0, nil
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var count int64
+	for _, sub := range m.Subscriptions {
+		if sub.Status == string(database.SubscriptionStatusActive) &&
+			(sub.ProductID != nil || sub.PricePaidCents > 0) {
+			count++
+		}
+	}
+
+	return count, nil
 }
 
 func (m *DatabaseService) CountFreeSubscriptions(ctx context.Context) (int64, error) {
 	if m.CountFreeSubscriptionsFunc != nil {
 		return m.CountFreeSubscriptionsFunc(ctx)
 	}
-	return 0, nil
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var count int64
+	for _, sub := range m.Subscriptions {
+		if sub.Status == string(database.SubscriptionStatusActive) &&
+			sub.TelegramID > 0 && sub.ProductID == nil && sub.PricePaidCents == 0 {
+			count++
+		}
+	}
+
+	return count, nil
 }
 
 func (m *DatabaseService) CountTrialSubscriptions(ctx context.Context) (int64, error) {

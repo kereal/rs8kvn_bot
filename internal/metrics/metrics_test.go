@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	dto "github.com/prometheus/client_model/go"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/assert"
@@ -101,11 +103,43 @@ func TestInstrumentHTTPSkipsMetricsAndStatic(t *testing.T) {
 	handler := InstrumentHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
+
+	beforeRequests := metricSamples(t, HTTPRequestsTotal)
+	beforeDuration := metricSamples(t, HTTPRequestDuration)
+
 	for _, path := range []string{"/metrics", "/static/app.js"} {
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, path, nil))
 		assert.Equal(t, http.StatusOK, resp.Code)
 	}
+
+	assert.Equal(t, beforeRequests, metricSamples(t, HTTPRequestsTotal), "skipped routes must not record request samples")
+	assert.Equal(t, beforeDuration, metricSamples(t, HTTPRequestDuration), "skipped routes must not record duration samples")
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Greater(t, metricSamples(t, HTTPRequestsTotal), beforeRequests)
+	assert.Greater(t, metricSamples(t, HTTPRequestDuration), beforeDuration)
+}
+
+func metricSamples(t *testing.T, collector prometheus.Collector) int {
+	t.Helper()
+
+	ch := make(chan prometheus.Metric, 1)
+	go func() {
+		collector.Collect(ch)
+		close(ch)
+	}()
+
+	count := 0
+	for metric := range ch {
+		dtoMetric := &dto.Metric{}
+		if metric.Write(dtoMetric) == nil {
+			count++
+		}
+	}
+	return count
 }
 
 func TestMetricsEndpoint(t *testing.T) {
