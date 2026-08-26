@@ -167,6 +167,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		}
 	case data == "broadcast_confirm":
 		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
 			return nil
 		}
 		err := c.h.handleBroadcastConfirm(ctx, chatID)
@@ -175,6 +176,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		}
 	case data == "broadcast_cancel":
 		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
 			return nil
 		}
 		err := c.h.handleBroadcastCancel(ctx, chatID)
@@ -183,6 +185,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		}
 	case data == "broadcast_final_confirm":
 		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
 			return nil
 		}
 		err := c.h.handleBroadcastFinalConfirm(ctx, chatID)
@@ -191,6 +194,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		}
 	case data == "broadcast_back_to_filters":
 		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
 			return nil
 		}
 		err := c.h.handleBroadcastBackToFilters(ctx, chatID, update.CallbackQuery.Message.MessageID)
@@ -199,6 +203,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		}
 	case data == "broadcast_schedule":
 		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
 			return nil
 		}
 		err := c.h.handleBroadcastSchedule(ctx, chatID, update.CallbackQuery.Message.MessageID)
@@ -207,6 +212,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		}
 	case strings.HasPrefix(data, "bsched_day_"):
 		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
 			return nil
 		}
 		err := c.h.handleBroadcastScheduleDay(ctx, chatID, update.CallbackQuery.Message.MessageID, data)
@@ -215,6 +221,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		}
 	case strings.HasPrefix(data, "bsched_hour_"):
 		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
 			return nil
 		}
 		err := c.h.handleBroadcastScheduleHour(ctx, chatID, update.CallbackQuery.Message.MessageID, data)
@@ -223,6 +230,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		}
 	case data == "bsched_back":
 		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
 			return nil
 		}
 		err := c.h.handleBroadcastScheduleBack(ctx, chatID, update.CallbackQuery.Message.MessageID)
@@ -231,6 +239,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		}
 	case strings.HasPrefix(data, "bfilter_"):
 		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
 			return nil
 		}
 		err := c.h.handleBroadcastFilter(ctx, chatID, update.CallbackQuery.Message.MessageID, data)
@@ -244,6 +253,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		}
 	case strings.HasPrefix(data, "broadcast_cancel_"):
 		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
 			return nil
 		}
 		id, err := parseBroadcastCallbackID(data, "broadcast_cancel_")
@@ -264,6 +274,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		}
 	case strings.HasPrefix(data, "broadcast_retry_"):
 		if !c.h.isAdmin(chatID) {
+			c.answerCallback(update.CallbackQuery.ID)
 			return nil
 		}
 		id, err := parseBroadcastCallbackID(data, "broadcast_retry_")
@@ -281,6 +292,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		if !c.h.isAdmin(chatID) {
 			logger.Warn("Non-admin user attempted to access broadcast details",
 				zap.Int64("chat_id", chatID))
+			c.answerCallback(update.CallbackQuery.ID)
 			return nil
 		}
 
@@ -299,14 +311,20 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		logger.Warn("Unknown callback data", zap.String("data", data))
 	}
 
-	callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
-
-	_, err := c.h.bot.Request(callback)
-	if err != nil {
-		logger.Error("Failed to answer callback", zap.Error(err))
-	}
+	c.answerCallback(update.CallbackQuery.ID)
 
 	return nil
+}
+
+// answerCallback acknowledges the callback query so Telegram stops showing the
+// button loading spinner. Admin-only buttons pressed by a non-admin must still
+// be acknowledged, otherwise the client keeps the spinner until the timeout.
+func (c *CallbackHandler) answerCallback(callbackID string) {
+	callback := tgbotapi.NewCallback(callbackID, "")
+
+	if _, err := c.h.bot.Request(callback); err != nil {
+		logger.Error("Failed to answer callback", zap.Error(err))
+	}
 }
 
 // handleShareInvite generates and sends an invite link.

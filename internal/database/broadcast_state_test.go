@@ -75,6 +75,46 @@ func TestBroadcastRecipientStateLifecycle(t *testing.T) {
 	assert.Empty(t, report.Errors)
 }
 
+func TestBroadcastRecipientProgressCheckpoint(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newTestService(t)
+	b := createBroadcastForStateTest(t, svc)
+	require.NoError(t, svc.db.Create(&Subscription{
+		TelegramID: 710001, Username: "user", ClientID: "progress-client", SubscriptionID: "progress-sub",
+		Status: string(SubscriptionStatusActive), PlanID: testFreePlanID(t, svc),
+	}).Error)
+
+	claimed, err := svc.ClaimBroadcast(ctx, b.ID, time.Now().UTC())
+	require.NoError(t, err)
+	assert.True(t, claimed)
+	_, err = svc.SnapshotBroadcastRecipients(ctx, b.ID, BroadcastFilter{})
+	require.NoError(t, err)
+	recipients, err := svc.ClaimBroadcastRecipients(ctx, b.ID, time.Now().UTC(), 10)
+	require.NoError(t, err)
+	require.Len(t, recipients, 1)
+	r := recipients[0]
+
+	// Прогресс фиксируется только под действующей арендой (Sending + попытка).
+	require.NoError(t, svc.UpdateBroadcastRecipientProgress(ctx, b.ID, r.ID, r.Attempts, 1, time.Now().UTC()))
+
+	// Сохранённый прогресс переживает восстановление аренды и виден при новом claim.
+	require.NoError(t, svc.RecoverStaleBroadcastRecipients(ctx, b.ID, time.Now().UTC().Add(time.Minute)))
+	reclaimed, err := svc.ClaimBroadcastRecipients(ctx, b.ID, time.Now().UTC(), 10)
+	require.NoError(t, err)
+	require.Len(t, reclaimed, 1)
+	assert.Equal(t, 1, reclaimed[0].NextChunk, "recovered recipient must resume from the saved chunk")
+	assert.Equal(t, 2, reclaimed[0].Attempts)
+
+	// Lease guard: чужая попытка и отсутствующий получатель отклоняются.
+	err = svc.UpdateBroadcastRecipientProgress(ctx, b.ID, reclaimed[0].ID, 99, 5, time.Now().UTC())
+	require.ErrorIs(t, err, ErrBroadcastRecipientStale)
+	err = svc.UpdateBroadcastRecipientProgress(ctx, b.ID, 424242, 1, 5, time.Now().UTC())
+	require.ErrorIs(t, err, ErrBroadcastRecipientNotFound)
+
+	require.NoError(t, svc.FinishBroadcastRecipient(ctx, b.ID, reclaimed[0].ID, reclaimed[0].Attempts, BroadcastRecipientSent, "", time.Now().UTC()))
+}
+
 func TestBroadcastRecipientSnapshotIsImmutableAndStoredOnBroadcast(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

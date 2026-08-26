@@ -546,6 +546,9 @@ func (h *Handler) startBroadcast(ctx context.Context, chatID int64, s *broadcast
 	if !filter.IsEmpty() {
 		data, err := json.Marshal(filter)
 		if err != nil {
+			// Персистентность не удалась — возвращаем черновик, чтобы админ мог
+			// повторить отправку или вернуться к фильтрам.
+			h.restoreBroadcastSession(chatID, current)
 			return fmt.Errorf("marshal broadcast filter: %w", err)
 		}
 		filtersJSON = string(data)
@@ -559,6 +562,10 @@ func (h *Handler) startBroadcast(ctx context.Context, chatID int64, s *broadcast
 	err := h.db.CreateBroadcast(ctx, broadcast)
 	if err != nil {
 		logger.Error("Failed to create broadcast", zap.Error(err))
+		// Сессия уже была захвачена (claim) для защиты от дублей callback'ов.
+		// Восстанавливаем её, чтобы сбой БД не уничтожил черновик: админ может
+		// повторить отправку или вернуться к фильтрам.
+		h.restoreBroadcastSession(chatID, current)
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Не удалось сохранить рассылку:\n\n%v", err))
 		return fmt.Errorf("create broadcast: %w", err)
 	}
@@ -691,4 +698,17 @@ func (h *Handler) clearBroadcastSession(chatID int64) {
 	defer h.broadcastMu.Unlock()
 
 	delete(h.broadcastSessions, chatID)
+}
+
+// restoreBroadcastSession возвращает захваченную сессию в хранилище после сбоя
+// персистентности. Claim (удаление) при этом сохраняется: пока идёт обработка
+// callback'а, дублирующий callback сессию не увидит. Сессия восстанавливается
+// только если пользователь не начал новую (например, /broadcast) за это время.
+func (h *Handler) restoreBroadcastSession(chatID int64, s *broadcastSession) {
+	h.broadcastMu.Lock()
+	defer h.broadcastMu.Unlock()
+
+	if _, exists := h.broadcastSessions[chatID]; !exists {
+		h.broadcastSessions[chatID] = s
+	}
 }

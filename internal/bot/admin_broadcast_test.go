@@ -5,7 +5,9 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -528,7 +530,7 @@ func TestBroadcast_ConfirmCreatesBroadcastAndShowsHeader(t *testing.T) {
 	assert.Equal(t, int64(1), broadcasts[0].SentCount)
 }
 
-func TestBroadcast_ConfirmDBFailureAborts(t *testing.T) {
+func TestBroadcast_ConfirmDBFailureKeepsDraftRecoverable(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -555,7 +557,8 @@ func TestBroadcast_ConfirmDBFailureAborts(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Шаг 2: Ошибка DB-фазы — CreateBroadcast падает, рассылка отменена.
+	// Шаг 2: Ошибка DB-фазы — CreateBroadcast падает, кампания не создаётся,
+	// но захваченный черновик восстанавливается для повтора или фильтров.
 	err = handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
 			From: broadcastTestAdmin(),
@@ -572,4 +575,138 @@ func TestBroadcast_ConfirmDBFailureAborts(t *testing.T) {
 	broadcasts, err := mockDB.ListBroadcasts(ctx, 10)
 	require.NoError(t, err)
 	assert.Empty(t, broadcasts)
+
+	s := handler.getBroadcastSession(broadcastTestAdminID)
+	require.NotNil(t, s, "draft must survive a persistence failure")
+	assert.Equal(t, broadcastStageConfirming, s.stage)
+	assert.Equal(t, "Привет всем!", s.text)
+
+	// БД снова доступна — повторное подтверждение создаёт кампанию.
+	mockDB.CreateBroadcastFunc = nil
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			From: broadcastTestAdmin(),
+			Data: "broadcast_final_confirm",
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: broadcastTestAdminID},
+				MessageID: 1,
+			},
+		},
+	}))
+	require.Eventually(t, func() bool {
+		broadcasts, err := mockDB.ListBroadcasts(ctx, 10)
+		return err == nil && len(broadcasts) == 1 && broadcasts[0].Status == string(database.BroadcastStatusCompleted)
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+// multiChunkText возвращает текст из трёх чанков по config.MaxTelegramMessageLen
+// байт, чтобы проверить возобновление отправки с сохранённого чанка.
+func multiChunkText() string {
+	return strings.Repeat("1", config.MaxTelegramMessageLen) +
+		strings.Repeat("2", config.MaxTelegramMessageLen) +
+		strings.Repeat("3", config.MaxTelegramMessageLen)
+}
+
+func TestBroadcast_RecipientResumesFromSavedChunk(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockDB := testutil.NewDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	handler := newBroadcastTestHandler(mockDB, mockBot)
+
+	// Первый чанк уже был доставлен до краша: в снапшоте сохранён NextChunk=1.
+	state, err := json.Marshal(map[string]any{
+		"snapshot": true,
+		"recipients": []database.BroadcastRecipient{
+			{ID: 1, TelegramID: 111, Status: database.BroadcastRecipientPending, NextChunk: 1, UpdatedAt: time.Now().UTC()},
+		},
+	})
+	require.NoError(t, err)
+	b := &database.Broadcast{
+		Name: "resume", MessageText: multiChunkText(),
+		Status: string(database.BroadcastStatusScheduled), RecipientsState: string(state),
+	}
+	require.NoError(t, mockDB.CreateBroadcast(ctx, b))
+
+	var sends []string
+	var mu sync.Mutex
+	mockBot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+		if mc, ok := c.(tgbotapi.MessageConfig); ok && mc.ChatID == 111 {
+			mu.Lock()
+			sends = append(sends, mc.Text)
+			mu.Unlock()
+		}
+		return tgbotapi.Message{MessageID: 1}, nil
+	}
+
+	require.NoError(t, handler.broadcastWorker.processCampaign(ctx, b))
+
+	assert.Len(t, sends, 2, "первый чанк уже доставлен — отправляются только второй и третий")
+	require.GreaterOrEqual(t, len(sends), 1)
+	assert.Contains(t, sends[0], strings.Repeat("2", 64), "отправка возобновляется со второго чанка")
+	assert.Contains(t, sends[1], strings.Repeat("3", 64))
+
+	stored, err := mockDB.GetBroadcast(ctx, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, string(database.BroadcastStatusCompleted), stored.Status)
+	assert.Equal(t, int64(1), stored.SentCount)
+}
+
+func TestBroadcast_ProgressPersistedAfterEachChunk(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockDB := testutil.NewDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	handler := newBroadcastTestHandler(mockDB, mockBot)
+
+	state, err := json.Marshal(map[string]any{
+		"snapshot": true,
+		"recipients": []database.BroadcastRecipient{
+			{ID: 1, TelegramID: 111, Status: database.BroadcastRecipientPending, UpdatedAt: time.Now().UTC()},
+		},
+	})
+	require.NoError(t, err)
+	b := &database.Broadcast{
+		Name: "progress", MessageText: multiChunkText(),
+		Status: string(database.BroadcastStatusScheduled), RecipientsState: string(state),
+	}
+	require.NoError(t, mockDB.CreateBroadcast(ctx, b))
+
+	var progressMu sync.Mutex
+	var checkpoints []int
+	mockDB.UpdateBroadcastRecipientProgressFunc = func(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, nextChunk int, now time.Time) error {
+		progressMu.Lock()
+		checkpoints = append(checkpoints, nextChunk)
+		progressMu.Unlock()
+		return nil
+	}
+	mockBot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+		return tgbotapi.Message{MessageID: 1}, nil
+	}
+
+	require.NoError(t, handler.broadcastWorker.processCampaign(ctx, b))
+
+	assert.Equal(t, []int{1, 2, 3}, checkpoints, "прогресс фиксируется после каждого доставленного чанка")
+}
+
+func TestHandleCallback_BroadcastNonAdminAnswersCallback(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 999999} // not the chat ID
+	mockDB := testutil.NewDatabaseService()
+	mockBot := testutil.NewBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
+
+	ctx := context.Background()
+	update := tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		ID: "cb-nonadmin", Data: "broadcast_confirm",
+		From: &tgbotapi.User{ID: 123456},
+		Message: &tgbotapi.Message{MessageID: 1, Chat: &tgbotapi.Chat{ID: 123456}},
+	}}
+	require.NoError(t, handler.HandleCallback(ctx, update))
+
+	assert.True(t, mockBot.RequestCalledSafe(), "non-admin callback must be acknowledged to clear the spinner")
+	assert.False(t, mockBot.SendCalledSafe(), "no user-facing message for a non-admin")
 }

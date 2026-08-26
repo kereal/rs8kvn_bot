@@ -175,6 +175,7 @@ type DatabaseService struct {
 	RecoverStaleBroadcastRecipientsFunc func(ctx context.Context, broadcastID uint, before time.Time) error
 	ClaimBroadcastRecipientsFunc        func(ctx context.Context, broadcastID uint, now time.Time, limit int) ([]database.BroadcastRecipient, error)
 	FinishBroadcastRecipientFunc        func(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, status database.BroadcastRecipientStatus, lastError string, now time.Time) error
+	UpdateBroadcastRecipientProgressFunc func(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, nextChunk int, now time.Time) error
 	ResetBroadcastFailedRecipientsFunc  func(ctx context.Context, id uint, now time.Time) error
 	GetBroadcastRecipientsStatsFunc     func(ctx context.Context, broadcastID uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error)
 }
@@ -881,6 +882,33 @@ func (m *DatabaseService) FinishBroadcastRecipient(ctx context.Context, broadcas
 				return database.ErrBroadcastRecipientStale
 			}
 			state.Recipients[i].Status, state.Recipients[i].LastError, state.Recipients[i].UpdatedAt = status, lastError, now
+			return setFakeBroadcastState(b, state)
+		}
+	}
+	return database.ErrBroadcastRecipientNotFound
+}
+
+func (m *DatabaseService) UpdateBroadcastRecipientProgress(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, nextChunk int, now time.Time) error {
+	if m.UpdateBroadcastRecipientProgressFunc != nil {
+		return m.UpdateBroadcastRecipientProgressFunc(ctx, broadcastID, id, expectedAttempts, nextChunk, now)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.Broadcasts[broadcastID]
+	if !ok {
+		return database.ErrBroadcastNotFound
+	}
+	state, err := fakeBroadcastState(b)
+	if err != nil {
+		return err
+	}
+	for i := range state.Recipients {
+		if state.Recipients[i].ID == id {
+			if state.Recipients[i].Status != database.BroadcastRecipientSending || state.Recipients[i].Attempts != expectedAttempts {
+				return database.ErrBroadcastRecipientStale
+			}
+			state.Recipients[i].NextChunk = nextChunk
+			state.Recipients[i].UpdatedAt = now
 			return setFakeBroadcastState(b, state)
 		}
 	}

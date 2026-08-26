@@ -27,7 +27,12 @@ type BroadcastRecipient struct {
 	Status      BroadcastRecipientStatus `json:"status"`
 	Attempts    int                      `json:"attempts"`
 	LastError   string                   `json:"last_error,omitempty"`
-	UpdatedAt   time.Time                `json:"updated_at"`
+	// NextChunk — индекс следующего чанка многочастного сообщения, который ещё
+	// не отправлен. Сохраняется после каждой успешной отправки, чтобы краш,
+	// восстановление аренды или повторная отправка не дублировали доставленные
+	// чанки. 0 = отправлять с первого чанка.
+	NextChunk int       `json:"next_chunk,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type broadcastRecipientState struct {
@@ -221,6 +226,30 @@ func (s *Service) FinishBroadcastRecipient(ctx context.Context, broadcastID uint
 		}
 		// The broadcast exists but this recipient is not in its snapshot:
 		// report the recipient as missing, not the whole campaign.
+		return ErrBroadcastRecipientNotFound
+	})
+}
+
+// UpdateBroadcastRecipientProgress persists the index of the next chunk to send
+// after each successfully delivered chunk. The same lease guard as
+// FinishBroadcastRecipient applies (status Sending + matching Attempts), so a
+// recovered or re-claimed recipient cannot be checkpointed by a stale worker.
+// The recipient keeps its Sending status: the terminal outcome is recorded
+// separately by FinishBroadcastRecipient.
+func (s *Service) UpdateBroadcastRecipientProgress(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, nextChunk int, now time.Time) error {
+	return updateBroadcastRecipientState(ctx, s, broadcastID, func(_ *Broadcast, state *broadcastRecipientState) error {
+		for i := range state.Recipients {
+			recipient := &state.Recipients[i]
+			if recipient.ID != id {
+				continue
+			}
+			if recipient.Status != BroadcastRecipientSending || recipient.Attempts != expectedAttempts {
+				return ErrBroadcastRecipientStale
+			}
+			recipient.NextChunk = nextChunk
+			recipient.UpdatedAt = now
+			return nil
+		}
 		return ErrBroadcastRecipientNotFound
 	})
 }
