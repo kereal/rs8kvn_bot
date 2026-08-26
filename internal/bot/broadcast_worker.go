@@ -338,7 +338,8 @@ func (w *BroadcastWorker) processRecipient(ctx context.Context, text string, rec
 		// ручной повтор не дублировал его. Чекпоинт best-effort: при временной
 		// ошибке БД продолжаем (сообщение уже ушло); при stale/not-found
 		// останавливаемся — получателем уже занялся другой воркер.
-		if err := w.saveRecipientProgress(ctx, recipient, chunkIndex+1); err != nil {
+		err := w.saveRecipientProgress(ctx, recipient, chunkIndex+1)
+		if err != nil {
 			if errors.Is(err, database.ErrBroadcastRecipientStale) || errors.Is(err, database.ErrBroadcastRecipientNotFound) {
 				return err
 			}

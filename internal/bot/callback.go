@@ -322,7 +322,8 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 func (c *CallbackHandler) answerCallback(callbackID string) {
 	callback := tgbotapi.NewCallback(callbackID, "")
 
-	if _, err := c.h.bot.Request(callback); err != nil {
+	_, err := c.h.bot.Request(callback)
+	if err != nil {
 		logger.Error("Failed to answer callback", zap.Error(err))
 	}
 }
