@@ -870,14 +870,11 @@ The bot exposes a `/metrics` endpoint (via `promhttp.Handler()`) on the HTTP ser
 |--------|------|--------|-------------|
 | `http_requests_total` | Counter | method, path, status | Total HTTP requests |
 | `http_request_duration_seconds` | Histogram | method, path | HTTP request latency |
-| `http_requests_in_flight` | Gauge | method, path | Current in-flight requests |
 | `bot_updates_total` | Counter | command, result | Bot updates (success/error/rate_limited) |
-| `bot_update_errors_total` | Counter | type | Bot update errors |
 | `bot_update_duration_seconds` | Histogram | — | Bot update processing time |
 | `subserver_source_fetch_total` | Counter | `result`, `format` | Upstream source fetch results |
 | `subserver_source_fetch_duration_seconds` | Histogram | `result` | Upstream source fetch duration |
 | `cache_hits_total` / `cache_misses_total` | Counter | cache | Cache hit/miss |
-| `circuit_breaker_state` | Gauge | target | Circuit breaker state when the tested breaker is wired into a live path |
 | `bot_orphaned_clients_revoked_total` | Counter | — | Orphaned subscriptions revoked during reconciliation |
 | `subserver_cache_invalidations_total` | Counter | `reason` | Cache invalidations by reason |
 | `subserver_no_items_total` | Counter | — | Requests returning no items |

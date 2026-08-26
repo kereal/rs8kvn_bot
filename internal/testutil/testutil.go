@@ -92,6 +92,8 @@ type DatabaseService struct {
 	GetAllSubscriptionsFunc                     func(ctx context.Context) ([]database.Subscription, error)
 	CountAllSubscriptionsFunc                   func(ctx context.Context) (int64, error)
 	CountActiveSubscriptionsFunc                func(ctx context.Context) (int64, error)
+	CountPremiumSubscriptionsFunc               func(ctx context.Context) (int64, error)
+	CountFreeSubscriptionsFunc                  func(ctx context.Context) (int64, error)
 	CountTrialSubscriptionsFunc                 func(ctx context.Context) (int64, error)
 	GetByIDFunc                                 func(ctx context.Context, id uint) (*database.Subscription, error)
 	GetTelegramIDByUsernameFunc                 func(ctx context.Context, username string) (int64, error)
@@ -475,6 +477,20 @@ func (m *DatabaseService) CountActiveSubscriptions(ctx context.Context) (int64, 
 	}
 
 	return count, nil
+}
+
+func (m *DatabaseService) CountPremiumSubscriptions(ctx context.Context) (int64, error) {
+	if m.CountPremiumSubscriptionsFunc != nil {
+		return m.CountPremiumSubscriptionsFunc(ctx)
+	}
+	return 0, nil
+}
+
+func (m *DatabaseService) CountFreeSubscriptions(ctx context.Context) (int64, error) {
+	if m.CountFreeSubscriptionsFunc != nil {
+		return m.CountFreeSubscriptionsFunc(ctx)
+	}
+	return 0, nil
 }
 
 func (m *DatabaseService) CountTrialSubscriptions(ctx context.Context) (int64, error) {

@@ -69,6 +69,8 @@ type SubscriptionQueries interface {
 type SubscriptionCounts interface {
 	CountAllSubscriptions(ctx context.Context) (int64, error)
 	CountActiveSubscriptions(ctx context.Context) (int64, error)
+	CountPremiumSubscriptions(ctx context.Context) (int64, error)
+	CountFreeSubscriptions(ctx context.Context) (int64, error)
 	CountTrialSubscriptions(ctx context.Context) (int64, error)
 	GetTelegramIDByUsername(ctx context.Context, username string) (int64, error)
 	GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error)
