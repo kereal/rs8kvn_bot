@@ -487,8 +487,9 @@ func (s *Subscription) SetIPs(ips []map[string]string) error {
 	return nil
 }
 
-// ParseDeliveryReport декодирует JSON-отчёт рассылки. Пустая/битая строка
-// возвращает пустой отчёт с инициализированными (не nil) списками.
+// ParseDeliveryReport декодирует JSON-отчёт рассылки. Пустая строка возвращает
+// пустой отчёт с инициализированными (не nil) списками; некорректный JSON —
+// ошибку.
 func (c *Broadcast) ParseDeliveryReport() (*BroadcastDeliveryReport, error) {
 	report := &BroadcastDeliveryReport{}
 	if c.DeliveryReport == "" {
