@@ -228,15 +228,14 @@ func TestBroadcast_DuplicateFinalConfirmCreatesOneCampaign(t *testing.T) {
 	var callbackErr error
 	var callbackMu sync.Mutex
 	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := handler.HandleCallback(ctx, update); err != nil {
+		wg.Go(func() {
+			err := handler.HandleCallback(ctx, update)
+			if err != nil {
 				callbackMu.Lock()
 				callbackErr = err
 				callbackMu.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	assert.NoError(t, callbackErr)

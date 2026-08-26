@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -51,7 +52,8 @@ func (h *Handler) editBroadcastMessage(chatID int64, messageID int, text string,
 	edit := tgbotapi.NewEditMessageText(chatID, messageID, utils.EscapeMarkdownV2(text))
 	edit.ParseMode = "MarkdownV2"
 	edit.ReplyMarkup = kb
-	if _, err := h.bot.Send(edit); err != nil {
+	_, err := h.bot.Send(edit)
+	if err != nil {
 		logger.Warn(warn, zap.Error(err))
 	}
 }
@@ -237,11 +239,12 @@ func (h *Handler) handleBroadcastFilter(ctx context.Context, chatID int64, messa
 		if val != "active" && val != "all" && val != "revoked" {
 			return fmt.Errorf("unsupported broadcast status filter: %s", val)
 		}
-		if val == "active" && f.SubscriptionStatus == "" {
+		switch {
+		case val == "active" && f.SubscriptionStatus == "":
 			// default active is already selected
-		} else if val == f.SubscriptionStatus {
+		case val == f.SubscriptionStatus:
 			f.SubscriptionStatus = ""
-		} else {
+		default:
 			f.SubscriptionStatus = val
 		}
 
@@ -405,14 +408,7 @@ func (h *Handler) handleBroadcastScheduleDay(ctx context.Context, chatID int64, 
 	if err != nil {
 		return fmt.Errorf("parse schedule day: %w", err)
 	}
-	valid := false
-	for _, o := range scheduleDayOptions {
-		if o == offset {
-			valid = true
-			break
-		}
-	}
-	if !valid {
+	if !slices.Contains(scheduleDayOptions, offset) {
 		return fmt.Errorf("unsupported schedule day offset: %d", offset)
 	}
 
@@ -560,7 +556,8 @@ func (h *Handler) startBroadcast(ctx context.Context, chatID int64, s *broadcast
 		Status:    string(database.BroadcastStatusScheduled),
 		PlannedAt: plannedAt,
 	}
-	if err := h.db.CreateBroadcast(ctx, broadcast); err != nil {
+	err := h.db.CreateBroadcast(ctx, broadcast)
+	if err != nil {
 		logger.Error("Failed to create broadcast", zap.Error(err))
 		h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Не удалось сохранить рассылку:\n\n%v", err))
 		return fmt.Errorf("create broadcast: %w", err)
@@ -584,8 +581,11 @@ func (h *Handler) startBroadcast(ctx context.Context, chatID int64, s *broadcast
 	// завершённую либо занятую кампанию.
 	if plannedAt == nil || !plannedAt.After(time.Now()) {
 		h.bgWg.Go(func() {
-			workerCtx := h.broadcastContext()
-			if err := h.broadcastWorker.processCampaign(workerCtx, broadcast); err != nil {
+			// The update loop passes the app-lifetime context (cancelled only on
+			// shutdown), the same context the broadcast worker is started with,
+			// so it is safe to reuse it for the background launch.
+			err := h.broadcastWorker.processCampaign(ctx, broadcast)
+			if err != nil {
 				switch {
 				case errors.Is(err, context.Canceled):
 					// Admin cancel or shutdown — nothing to log.

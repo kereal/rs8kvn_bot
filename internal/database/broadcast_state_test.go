@@ -65,10 +65,14 @@ func TestBroadcastRecipientStateLifecycle(t *testing.T) {
 	assert.Equal(t, 2, recipients[0].Attempts)
 
 	require.NoError(t, svc.FinishBroadcastRecipient(ctx, b.ID, recipients[0].ID, recipients[0].Attempts, BroadcastRecipientSent, "", time.Now().UTC()))
-	_, sent, _, _, failed, _, err = svc.GetBroadcastRecipientsStats(ctx, b.ID)
+	total, sent, blocked, unreachable, failed, report, err = svc.GetBroadcastRecipientsStats(ctx, b.ID)
 	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
 	assert.Equal(t, int64(1), sent)
+	assert.Zero(t, blocked)
+	assert.Zero(t, unreachable)
 	assert.Zero(t, failed)
+	assert.Empty(t, report.Errors)
 }
 
 func TestBroadcastRecipientSnapshotIsImmutableAndStoredOnBroadcast(t *testing.T) {
@@ -125,9 +129,7 @@ func TestBroadcastRecipientClaimIsAtomic(t *testing.T) {
 	claimedCount := 0
 	var claimErrs []error
 	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			recipients, err := svc.ClaimBroadcastRecipients(ctx, b.ID, time.Now().UTC(), 1)
 			mu.Lock()
 			defer mu.Unlock()
@@ -136,7 +138,7 @@ func TestBroadcastRecipientClaimIsAtomic(t *testing.T) {
 				return
 			}
 			claimedCount += len(recipients)
-		}()
+		})
 	}
 	wg.Wait()
 	require.NoError(t, errors.Join(claimErrs...))
@@ -170,10 +172,13 @@ func TestBroadcastRecipientFinishRejectsStaleLease(t *testing.T) {
 	err = svc.FinishBroadcastRecipient(ctx, b.ID, first[0].ID, first[0].Attempts, BroadcastRecipientSent, "", time.Now().UTC())
 	assert.ErrorIs(t, err, ErrBroadcastRecipientStale)
 	require.NoError(t, svc.FinishBroadcastRecipient(ctx, b.ID, second[0].ID, second[0].Attempts, BroadcastRecipientBlocked, "blocked", time.Now().UTC()))
-	_, sent, blocked, _, _, report, err := svc.GetBroadcastRecipientsStats(ctx, b.ID)
+	total, sent, blocked, unreachable, failed, report, err := svc.GetBroadcastRecipientsStats(ctx, b.ID)
 	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
 	assert.Zero(t, sent)
 	assert.Equal(t, int64(1), blocked)
+	assert.Zero(t, unreachable)
+	assert.Zero(t, failed)
 	assert.Equal(t, []int64{710041}, report.Blocked)
 }
 
