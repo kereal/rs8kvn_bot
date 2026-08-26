@@ -17,17 +17,17 @@ import (
 )
 
 type mockVPNClient struct {
-	createCalled        bool
-	deleteCalled        bool
-	updateCalled        bool
-	resetTrafficCalled  bool
-	createError         error
-	deleteError         error
-	updateError         error
-	resetTrafficError   error
-	createProvision     vpn.SubscriptionProvision
-	deleteProvision     vpn.SubscriptionProvision
-	updateProvision     vpn.SubscriptionProvision
+	createCalled       bool
+	deleteCalled       bool
+	updateCalled       bool
+	resetTrafficCalled bool
+	createError        error
+	deleteError        error
+	updateError        error
+	resetTrafficError  error
+	createProvision    vpn.SubscriptionProvision
+	deleteProvision    vpn.SubscriptionProvision
+	updateProvision    vpn.SubscriptionProvision
 }
 
 func (m *mockVPNClient) CreateSubscription(ctx context.Context, provision vpn.SubscriptionProvision) error {
