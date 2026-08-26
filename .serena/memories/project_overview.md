@@ -18,6 +18,20 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Paid-подписки автоматически помечаются `expired`, если истёк `expires_at` и план не free/trial (`GetExpiredPaidSubscriptions`).
 - Таймер истечения хранится в БД на момент Create.
 
+## Subscription traffic notifications
+- Только тарифы с ненулевым лимитом (`traffic_limit > 0`); Premium безлимит — не участвует.
+- Фоновая задача: `SubscriptionTrafficWorker` раз в 60 минут, вызывает `SubscriptionService.ProcessTrafficNotifications` для каждой подписки с лимитом (`GetActiveSubscriptionsWithTrafficLimit`).
+- Три сценария, каждый ровно один раз (bitmask `subscriptions.traffic_reminders_sent` + атомарный `ClaimTrafficReminder`/`ReleaseTrafficReminder`):
+  1. **90%** — клиент включён, использовано ≥90%: «Осталось меньше 10% трафика» + кнопка `💎 Перейти на Premium` (`buy_premium_list`).
+  2. **Исчерпан** — использовано 100%, панель отключила клиента: «Доступ приостановлен» (трафик исчерпан и VPN отключён) + кнопка Premium; клиент **не** включает обратно — предлагается покупка.
+  3. **Сброшен + включён** — счёт сброшен (`used < limit`), но клиент ещё выключен: воркер **включает** клиента (`UpdateClient(Enable=true)`) и шлёт простое «приходи пользоваться» без продажи.
+- При ошибке Telegram claim освобождается для повтора; per-nодные сбои — best-effort (`Warn`).
+- В `UpdateClient` добавлен `Enable *bool` (xui), `GetClientTraffic` отдаёт `Enable`.
+- Метрики: `TrafficNotificationsTotal{kind,result}`, `TrafficNotificationRunsTotal`.
+- Миграция 038: `subscriptions.traffic_reminders_sent` (битmask 90%/исчерпан/сброс).
+- Жизненный цикл: `SubscriptionTrafficWorker` в `cmd/bot/main.go` (startBackgroundWorkers).
+- Ограничение: работает для клиентов, которых панель **выключила, но оставила в списке**; реально удалённых из core не находит (`ErrClientNotFound` — пропускает).
+
 ## Типы подписок и фильтр планов
 - Trial-подписки теперь **не** считаются paid при автоматическом истечении и не получают напоминания: `GetExpiredPaidSubscriptions` и `GetSubscriptionsExpiringInRange` исключают `plans.name = TrialPlanName`.
 
@@ -64,6 +78,13 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Отчёт админу: счётчики `Отправлено/Заблокировали/Недоступны/Ошибок`; полные списки ID остаются в `delivery_report`. `UpdateBroadcast` обновляет только изменяемые поля, карточку не затирает.
 - **Логирование**: `Info` — создание/старт/завершение/отмена/retry кампании и черновика, плановый resume после таймаута (`DeadlineExceeded`/`errBroadcastIncomplete`); `Warn` — фоновые сбои (загрузка runnable, launch failed, markCampaignFailed, report load); `Error` — паника получателя, сбой scheduleRetry/создания, ошибки cancel/retry из callback.
 
+## News: Subscription Traffic Worker (2026-08)
+- Добавлен `SubscriptionTrafficWorker` + `SubscriptionService.ProcessTrafficNotifications`.
+- Три уведомления с битmask-дедупликацией: 90%, исчерпан (доступ приостановлен) и сброс+авто-включение.
+- Продающие тексты с кнопкой `buy_premium_list` для 90%/исчерпан; у сброса — без продажи.
+- Миграция 038 `subscriptions.traffic_reminders_sent`.
+- Тесты: xui (Enable true/false + декодирование), БД (claim/release/выборка с лимитом), service (4 сценария + кнопка Premium), scheduler (worker: итерация/skip trial/continue-on-error/repo error). До этого был детальный обзор истории, удалён ненужный legacy-коллапс, `totalGB` оставлен как есть.
+
 ## Последние изменения (2026-08-26, ветка feat/broadcast-campaigns)
 - **ResetTraffic при смене тарифа**: `vpn.Client.ResetTraffic` (3x-ui POST `/panel/api/clients/resetTraffic/{email}`; proxman/fetch — no-op). Вызывается в `processPendingUpdate` после update, **best-effort** (Warn при ошибке, не блокирует переход в `active`).
 - **CleanupExpiredTrials двухфазный**: `ClaimExpiredTrials` (атомарный claim) → deprovision внешних клиентов → `DeleteClaimedTrial` только после успеха; сбой оставляет строку для ретрая, ошибки агрегируются (`errors.Join`).
@@ -91,7 +112,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Backup ежедневно, trial cleanup сразу при старте и затем каждые 3 часа, sync workers фоном, reminders — каждые 30 минут (`SubscriptionReminderWorker`).
 
 ## Базовый worker set
-- Backup ежедневно, trial cleanup каждый час, sync workers фоном, reminders — каждые 30 минут.
+- Backup ежедневно, trial cleanup каждый час, sync workers фоном, reminders — каждые 30 минут, subscription traffic — каждые 60 минут.
 
 ## Структура
 ```text
@@ -120,7 +141,7 @@ internal/metrics/            — Prometheus/обёртка; напоминани
 1. `activate_project("rs8kvn_bot")`
 2. Прочитать памяти: `project_overview` (этот), `git-workflow`, `architecture`, `code_style`
 3. При работе с x-ui API — прочитать `xui/auth-mechanism` + `xui/client-crud`
-4. При работе с reminders/subscriptions/subscription-nodes — `architecture`, `subscription-nodes/state-machine`, `fixes/2026-07-...`
+4. При работе с reminders/subscriptions/subscription-nodes — `architecture`, `subscription-nodes/state-machine`, `fixes/2026-07-...`; при работе с traffic-уведомлениями — `fixes/2026-08-27-subscription-traffic-worker`
 5. **Отвечать на русском** (AGENTS.md)
 6. **Не удалять** legacy-код без явного запроса
 
@@ -134,5 +155,6 @@ internal/metrics/            — Prometheus/обёртка; напоминани
 - Аудиты: см. `audit/*`
 - Исторические фиксы: см. `fixes/*`
 - Рассылки (кратко): см. `doc/broadcast.md`
+- Traffic-уведомления: см. `fixes/2026-08-27-subscription-traffic-worker`
 - x-ui протокол: см. `xui/*`
 - Subscription Nodes: см. `subscription-nodes/state-machine` + `subscription-nodes/orders-table`

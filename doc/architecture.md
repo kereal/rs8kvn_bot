@@ -15,6 +15,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 - Payment/order tracking for subscription purchases
 - Node-based subscription synchronization with 4-state sync machine (`subscription_nodes`)
 - 3-touch expiry reminders (3d/1d/3h) with atomic claim and bitmask (`subscriptions.reminders_sent`)
+- Traffic quota notifications on traffic-limited plans (90%/exhausted with Premium CTA, reset-triggered re-enable) with atomic claim and bitmask (`subscriptions.traffic_reminders_sent`)
 - Dynamic plan resolution by name (no hardcoded IDs)
 
 ---
@@ -505,6 +506,7 @@ SIGQUIT (kill -3) → graceful shutdown (also handled)
 │ created_at           time     autoCreate                     │
 │ updated_at           time     autoUpdate                     │
 │ reminders_sent       int      NOT NULL default: 0 (bitmask: 3d/1d/3h)   │
+│ traffic_reminders_sent int     NOT NULL default: 0 (bitmask: 90%/exhausted/reset) │
                                │
                                │ referred_by
                                ▼
@@ -850,6 +852,7 @@ The `SyncService` manages synchronization of subscriptions with VPN nodes via a 
 | `TrialCleanupScheduler` | Immediately at startup, then every 3h | Deprovisions and removes expired anonymous trials |
 | `SubscriptionSyncWorker` | Immediately at startup, then every 5m | Processes `pending_*` states with exponential backoff |
 | `SubscriptionExpireWorker` | Immediately at startup, then every 1h | Expires paid subscriptions past `expires_at` |
+| `SubscriptionTrafficWorker` | Immediately at startup, then every 1h | Sends quota warnings (90%/exhausted) on traffic-limited plans and re-enables clients after traffic reset |
 | `SubscriptionReminderWorker` | Immediately at startup, then every 30m | Sends idempotent 3d/1d/3h expiry reminders |
 | `OrphanReconciler` | After 30s, then every 8h | Recovers missing queues and revokes fully deprovisioned subscriptions |
 | `Heartbeat` | Configured interval, default 5m | Sends optional external monitoring heartbeat |
@@ -1011,5 +1014,15 @@ WHERE telegram_id > 0
 ### N. Subscription Reminder Worker (internal/scheduler/subscription_reminder_worker.go)
 
 Worker каждые 30 минут выбирает активные платные подписки, у которых `expires_at` попадает в окна 3д / 1д / 3ч. Для каждого окна `SubscriptionService.SendExpiryReminder()` атомарно claim-ит bit только при неизменном сроке и отправляет продающее MarkdownV2-сообщение с преимуществами Premium, ссылкой на подписку и inline-кнопкой `💎 Продлить Premium` (`buy_premium_list`). При ошибке Telegram claim освобождается для повторной попытки. Повторы при пересекающихся окнах и параллельных вызовах исключаются условным claim по `subscriptions.reminders_sent`. При продлении (`RenewSubscription`) маска сбрасывается в `0` в одной транзакции с обновлением подписки и созданием order. Подписки без `expires_at`, а также free/trial планы не участвуют. Метрики: `subscription_reminders_total{window,result}` и `subscription_reminder_runs_total`.
+
+### O. Subscription Traffic Worker (internal/scheduler/subscription_traffic_worker.go)
+
+Worker каждые 60 минут обрабатывает активные подписки, привязанные к тарифам с ненулевым лимитом трафика (`plans.traffic_limit > 0`). Для каждой подписки `SubscriptionService.ProcessTrafficNotifications()` опрашивает живые 3x-ui ноды (`GetClientTraffic`) и, не чаще одного раза на условие (атомарный claim по bitmask `subscriptions.traffic_reminders_sent`), выполняет один из трёх сценариев:
+
+1. **90%** — клиент включён, исчерпано ≥90% лимита: продающее сообщение «осталось меньше 10%» с inline-кнопкой `💎 Перейти на Premium` (`buy_premium_list`).
+2. **Исчерпан** — использовано ≥100% лимита, панель отключила клиента: сообщение «Доступ приостановлен» (трафик исчерпан и VPN отключён) с кнопкой Premium. Клиент **не** перевключается автоматически — предлагается покупка Premium.
+3. **Сброшен + включён** — счётчик трафика сброшен (`used < limit`), но панель оставила клиента выключенным: воркер **включает клиента** через `UpdateClient(Enable=true)` и шлёт простое сообщение «трафик сброшен — ты снова в сети» без продажи (без кнопки Premium).
+
+При ошибке Telegram claim освобождается для повторной попытки (best-effort; по-нодные сбои логируются как `Warn` и обработка продолжается). На клиентов без traffic-лимита и на free/trial планы воркер не действует. Метрики: `traffic_notifications_total{kind,result}` и `traffic_notification_runs_total`. Миграция: `internal/database/migrations/038_add_traffic_reminders_sent.{up,down}.sql`.
 
 *End of architecture documentation.*
