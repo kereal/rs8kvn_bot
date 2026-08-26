@@ -65,7 +65,7 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - Password encoding in server links via `url.User` / `url.UserPassword`.
 
 ## Schema
-- Schema: embedded migrations are applied automatically at startup; the current repository includes migrations through 035.
+- Schema: embedded migrations are applied automatically at startup; the current repository includes migrations through 036.
 - `subscriptions.reminders_sent` stores reminder bitmask.
 - `subscription_nodes` machine: `active`, `pending_add`, `pending_remove`, `pending_update`.
 - Paid expiry excludes free/trial plans; reminder query excludes free/trial plans.
