@@ -274,5 +274,5 @@ func TestGetLatestSubscriptions_OnlyActive(t *testing.T) {
 	subs, err := db.GetLatestSubscriptions(ctx, 10)
 	require.NoError(t, err, "GetLatestSubscriptions() error")
 	assert.Len(t, subs, 1)
-}
 
+}

@@ -11,15 +11,18 @@ import (
 // Sentinel errors returned by Get* functions when a record is not found.
 // Callers should use errors.Is to distinguish "not found" from infrastructure/DB errors.
 var (
-	ErrInviteNotFound           = errors.New("invite not found")
-	ErrSubscriptionNotFound     = errors.New("subscription not found")
-	ErrPlanNotFound             = errors.New("plan not found")
-	ErrOrderNotFound            = errors.New("order not found")
-	ErrProductNotFound          = errors.New("product not found")
-	ErrProductImmutable         = errors.New("product immutable after order")
-	ErrSubscriptionNodeNotFound = errors.New("subscription node not found")
-	ErrNodeNotFound             = errors.New("node not found")
-	ErrTrialAlreadyActivated    = errors.New("trial already activated")
+	ErrInviteNotFound             = errors.New("invite not found")
+	ErrSubscriptionNotFound       = errors.New("subscription not found")
+	ErrPlanNotFound               = errors.New("plan not found")
+	ErrOrderNotFound              = errors.New("order not found")
+	ErrProductNotFound            = errors.New("product not found")
+	ErrProductImmutable           = errors.New("product immutable after order")
+	ErrSubscriptionNodeNotFound   = errors.New("subscription node not found")
+	ErrNodeNotFound               = errors.New("node not found")
+	ErrTrialAlreadyActivated      = errors.New("trial already activated")
+	ErrBroadcastNotFound          = errors.New("broadcast not found")
+	ErrBroadcastRecipientStale    = errors.New("broadcast recipient claim is stale")
+	ErrBroadcastRecipientNotFound = errors.New("broadcast recipient not found")
 )
 
 const (
@@ -192,7 +195,7 @@ type Order struct {
 	Status                   OrderStatus `gorm:"not null;size:16;column:status"`
 	AmountCents              int64       `gorm:"not null;column:amount_cents"`
 	CallbackAmountCents      *int64      `gorm:"column:callback_amount_cents"` // фактически списано с клиента (с учётом комиссии)
-	ProviderFeeCents         *int64      `gorm:"column:provider_fee_cents"`     // комиссия провайдера из API транзакции (best-effort)
+	ProviderFeeCents         *int64      `gorm:"column:provider_fee_cents"`    // комиссия провайдера из API транзакции (best-effort)
 	Currency                 string      `gorm:"size:3;not null;default:RUB;column:currency"`
 	PaymentProvider          string      `gorm:"column:payment_provider"`
 	ProviderPaymentID        string      `gorm:"column:provider_payment_id"`
@@ -216,6 +219,93 @@ type Invite struct {
 
 	Subscriptions []Subscription `gorm:"foreignKey:InviteCode"`
 }
+
+// BroadcastStatus represents the lifecycle state of a broadcast.
+//
+// Это единственный допустимый набор значений: колонка broadcasts.status
+// ограничена CHECK-constraint из миграции 036_create_broadcasts.
+// Добавление нового статуса требует и изменения констант, и новой миграции.
+//
+//   - scheduled — рассылка создана (запланирована), отправка не начиналась.
+//   - running   — отправка в процессе.
+//   - completed — отправка завершена полностью.
+//   - failed    — прервана ошибкой БД при получении батчей получателей.
+//   - canceled  — прервана таймаутом/отменой; в отчёте только обработанные.
+type BroadcastStatus string
+
+const (
+	BroadcastStatusScheduled BroadcastStatus = "scheduled"
+	BroadcastStatusRunning   BroadcastStatus = "running"
+	BroadcastStatusCompleted BroadcastStatus = "completed"
+	BroadcastStatusFailed    BroadcastStatus = "failed"
+	BroadcastStatusCanceled  BroadcastStatus = "canceled"
+)
+
+// Broadcast — карточка одной массовой рассылки (таблица broadcasts).
+//
+// Поля:
+//   - Filters        — JSON, резерв под таргетинг аудитории; сейчас всегда '{}'.
+//   - DeliveryReport — JSON-отчёт по получателям: delivered/blocked/errors
+//     (см. BroadcastDeliveryReport). Счётчики Sent/Blocked/FailedCount хранятся
+//     отдельно, чтобы список рассылок не читал большой JSON.
+//   - RecipientsState — JSON snapshot аудитории и состояния доставки каждого
+//     получателя; хранится в этой же строке для восстановления без отдельной
+//     таблицы.
+type Broadcast struct {
+	ID               uint   `gorm:"primaryKey"`
+	Name             string `gorm:"size:255;not null"`
+	Filters          string `gorm:"type:text;not null;default:'{}'"`
+	MessageText      string `gorm:"type:text;not null"`
+	Status           string `gorm:"not null;size:16;default:scheduled"`
+	PlannedAt        *time.Time
+	StartedAt        *time.Time
+	FinishedAt       *time.Time
+	RecipientsTotal  int64      `gorm:"not null;default:0"`
+	SentCount        int64      `gorm:"not null;default:0"`
+	BlockedCount     int64      `gorm:"not null;default:0"`
+	FailedCount      int64      `gorm:"not null;default:0"`
+	UnreachableCount int64      `gorm:"not null;default:0"`
+	DeliveryReport   string     `gorm:"type:text;not null;default:'{}'"`
+	LastError        string     `gorm:"type:text;not null;default:''"`
+	RetryAt          *time.Time `gorm:"index"`
+	RetryCount       int        `gorm:"not null;default:0"`
+	// RecipientsState stores the immutable audience snapshot and per-recipient
+	// delivery state as JSON. It keeps broadcast recovery durable without a
+	// separate recipient table.
+	RecipientsState string    `gorm:"type:text;not null;default:'{\"snapshot\":false,\"recipients\":[]}'"`
+	CreatedAt       time.Time `gorm:"autoCreateTime"`
+	UpdatedAt       time.Time `gorm:"autoUpdateTime"`
+}
+
+// BroadcastSendError описывает одного получателя, которому сообщение не
+// доставлено по причине, отличной от блокировки бота.
+type BroadcastSendError struct {
+	TelegramID int64  `json:"telegram_id"`
+	Error      string `json:"error"`
+}
+
+// BroadcastDeliveryReport — JSON-отчёт рассылки: списки telegram_id по исходам.
+type BroadcastDeliveryReport struct {
+	Delivered    []int64              `json:"delivered"`
+	Blocked      []int64              `json:"blocked"`
+	Unreachable  []int64              `json:"unreachable"`
+	Errors       []BroadcastSendError `json:"errors"`
+	NotProcessed []int64              `json:"not_processed"`
+}
+
+// BroadcastRecipientStatus represents the durable delivery state of one
+// recipient in a broadcast snapshot. Delivery outcomes are copied to
+// BroadcastDeliveryReport so the admin can inspect delivered and blocked IDs.
+type BroadcastRecipientStatus string
+
+const (
+	BroadcastRecipientPending     BroadcastRecipientStatus = "pending"
+	BroadcastRecipientSending     BroadcastRecipientStatus = "sending"
+	BroadcastRecipientSent        BroadcastRecipientStatus = "sent"
+	BroadcastRecipientBlocked     BroadcastRecipientStatus = "blocked"
+	BroadcastRecipientUnreachable BroadcastRecipientStatus = "unreachable"
+	BroadcastRecipientFailed      BroadcastRecipientStatus = "failed"
+)
 
 // SyncStatus represents the synchronization status of a subscription on a VPN node.
 // Statuses: active | pending_add | pending_remove | pending_update.
@@ -313,6 +403,10 @@ func (SubscriptionNode) TableName() string {
 	return "subscription_nodes"
 }
 
+func (Broadcast) TableName() string {
+	return "broadcasts"
+}
+
 // IsExpired returns true if the subscription has expired.
 // A nil ExpiresAt means the subscription is perpetual (no expiry set).
 func (s *Subscription) IsExpired() bool {
@@ -390,6 +484,63 @@ func (s *Subscription) SetIPs(ips []map[string]string) error {
 	}
 
 	s.Ips = string(data)
+
+	return nil
+}
+
+// ParseDeliveryReport декодирует JSON-отчёт рассылки. Пустая строка возвращает
+// пустой отчёт с инициализированными (не nil) списками; некорректный JSON —
+// ошибку.
+func (c *Broadcast) ParseDeliveryReport() (*BroadcastDeliveryReport, error) {
+	report := &BroadcastDeliveryReport{}
+	if c.DeliveryReport == "" {
+		report.Delivered = []int64{}
+		report.Blocked = []int64{}
+		report.Unreachable = []int64{}
+		report.Errors = []BroadcastSendError{}
+		report.NotProcessed = []int64{}
+
+		return report, nil
+	}
+
+	err := json.Unmarshal([]byte(c.DeliveryReport), report)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal broadcast delivery report: %w", err)
+	}
+
+	if report.Delivered == nil {
+		report.Delivered = []int64{}
+	}
+	if report.Blocked == nil {
+		report.Blocked = []int64{}
+	}
+	if report.Unreachable == nil {
+		report.Unreachable = []int64{}
+	}
+	if report.Errors == nil {
+		report.Errors = []BroadcastSendError{}
+	}
+	if report.NotProcessed == nil {
+		report.NotProcessed = []int64{}
+	}
+
+	return report, nil
+}
+
+// SetDeliveryReport сериализует отчёт рассылки в JSON-поле.
+func (c *Broadcast) SetDeliveryReport(report *BroadcastDeliveryReport) error {
+	if report == nil {
+		c.DeliveryReport = "{}"
+
+		return nil
+	}
+
+	data, err := json.Marshal(report)
+	if err != nil {
+		return fmt.Errorf("failed to marshal broadcast delivery report: %w", err)
+	}
+
+	c.DeliveryReport = string(data)
 
 	return nil
 }

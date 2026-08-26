@@ -49,7 +49,7 @@ func (ms *MessageSender) SendWithError(ctx context.Context, msg tgbotapi.Message
 		metrics.TelegramAPICallsTotal.WithLabelValues("send", "error").Inc()
 		metrics.TelegramAPIDuration.WithLabelValues("send").Observe(duration)
 
-		if isUserBlockedError(err) {
+		if isUserBlockedOrGoneError(err) {
 			logger.Warn("Failed to send message", zap.Error(err))
 		} else {
 			logger.Error("Failed to send message", zap.Error(err))
@@ -74,7 +74,7 @@ func (ms *MessageSender) SafeSend(chattable tgbotapi.Chattable) {
 		metrics.TelegramAPICallsTotal.WithLabelValues("send", "error").Inc()
 		metrics.TelegramAPIDuration.WithLabelValues("send").Observe(duration)
 
-		if isUserBlockedError(err) {
+		if isUserBlockedOrGoneError(err) {
 			logger.Warn("Failed to send message", zap.Error(err))
 		} else {
 			logger.Error("Failed to send message", zap.Error(err))

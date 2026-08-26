@@ -24,6 +24,7 @@ type mockVPNClient struct {
 	createError         error
 	deleteError         error
 	updateError         error
+	resetTrafficError   error
 	createProvision     vpn.SubscriptionProvision
 	deleteProvision     vpn.SubscriptionProvision
 	updateProvision     vpn.SubscriptionProvision
@@ -53,7 +54,7 @@ func (m *mockVPNClient) DeleteSubscription(ctx context.Context, provision vpn.Su
 func (m *mockVPNClient) ResetTraffic(_ context.Context, _ vpn.SubscriptionProvision) error {
 	m.resetTrafficCalled = true
 
-	return nil
+	return m.resetTrafficError
 }
 
 func (m *mockVPNClient) Close() error {
@@ -1011,6 +1012,89 @@ func TestSyncService_SyncSubscription_PendingUpdate_NoVPNClientKeepsPending(t *t
 	assert.Len(t, rows, 1)
 	assert.Equal(t, database.SyncStatusPendingUpdate, rows[0].Status)
 	assert.Equal(t, 1, rows[0].RetryCount)
+}
+
+func TestSyncService_SyncSubscription_PendingUpdate_ResetsTraffic(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-update-reset", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-update-reset-node", IsActive: true, Host: "http://sur", APIToken: "tur", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     9998,
+		Username:       "syncupdatereset",
+		ClientID:       "c-syncupdatereset",
+		SubscriptionID: "s-syncupdatereset",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingUpdate}))
+
+	mock := &mockVPNClient{}
+	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mock}, []database.Node{*node1})
+
+	err = svc.SyncSubscription(ctx, sub.ID)
+	require.NoError(t, err)
+
+	assert.True(t, mock.updateCalled, "plan change must update the VPN client")
+	assert.True(t, mock.resetTrafficCalled, "plan change must reset the traffic counter")
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
+}
+
+func TestSyncService_SyncSubscription_PendingUpdate_ResetTrafficBestEffort(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-update-reset-fail", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-update-reset-fail-node", IsActive: true, Host: "http://surf", APIToken: "turf", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     9999,
+		Username:       "syncupdateresetfail",
+		ClientID:       "c-syncupdateresetfail",
+		SubscriptionID: "s-syncupdateresetfail",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingUpdate}))
+
+	mock := &mockVPNClient{resetTrafficError: errors.New("panel reset failed")}
+	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mock}, []database.Node{*node1})
+
+	err = svc.SyncSubscription(ctx, sub.ID)
+	require.NoError(t, err, "reset traffic failure is best-effort and must not fail the sync")
+
+	assert.True(t, mock.resetTrafficCalled)
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status, "node must still be marked active despite reset failure")
 }
 
 func TestSyncService_SyncSubscription_PendingRemove_NoVPNClientKeepsPending(t *testing.T) {

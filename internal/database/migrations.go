@@ -84,6 +84,22 @@ func runMigrations(sqlDB *sql.DB) error {
 
 	// #nosec G115 -- maxEmbeddedVersion is guaranteed non-negative: the helper
 	// returns an error when no embedded .up.sql migration is found.
+	// 037 existed only in the development history of this feature. If a local
+	// database has that version, its schema already contains the same column;
+	// collapse the metadata back to the squashed 036 version before continuing.
+	if versionBefore == 37 && !dirtyBefore {
+		var stateColumns int
+		if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('broadcasts') WHERE name = 'recipients_state'`).Scan(&stateColumns); err != nil {
+			return fmt.Errorf("inspect legacy broadcast state column: %w", err)
+		}
+		if stateColumns == 0 {
+			return errors.New("database is marked at legacy migration 37 but broadcasts.recipients_state is missing")
+		}
+		if err := forceMigrationVersion(sqlDB, maxEmbeddedVersion); err != nil {
+			return fmt.Errorf("collapse legacy migration 37 to 36: %w", err)
+		}
+		versionBefore = uint(maxEmbeddedVersion)
+	}
 	if versionBefore > uint(maxEmbeddedVersion) {
 		return fmt.Errorf("database migration version %d is newer than the latest embedded migration %d; restore the missing migration files or perform a reviewed schema recovery before starting", versionBefore, maxEmbeddedVersion)
 	}
@@ -98,6 +114,9 @@ func runMigrations(sqlDB *sql.DB) error {
 	err = applyMigrations(sqlDB, maxEmbeddedVersion)
 	if err != nil {
 		return err
+	}
+	if err := ensureBroadcastColumns(sqlDB); err != nil {
+		return fmt.Errorf("failed to ensure broadcast columns: %w", err)
 	}
 
 	versionAfter, _, err := migrationState(sqlDB)
@@ -389,6 +408,41 @@ func tableRebuildComplete(sqlDB *sql.DB, tableName, oldTableName, requiredSQL st
 	}
 
 	return oldTableCount == 0, nil
+}
+
+// ensureBroadcastColumns upgrades databases created by an earlier 036 revision
+// in place; the feature deliberately keeps all state in the existing table.
+func ensureBroadcastColumns(sqlDB *sql.DB) error {
+	var tableCount int
+	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'broadcasts'`).Scan(&tableCount); err != nil {
+		return fmt.Errorf("inspect broadcasts table: %w", err)
+	}
+	if tableCount == 0 {
+		return nil
+	}
+
+	columns := []struct {
+		name string
+		ddl  string
+	}{
+		{"recipients_state", `ALTER TABLE broadcasts ADD COLUMN recipients_state TEXT NOT NULL DEFAULT '{"snapshot":false,"recipients":[]}'`},
+		{"unreachable_count", `ALTER TABLE broadcasts ADD COLUMN unreachable_count INTEGER NOT NULL DEFAULT 0`},
+		{"last_error", `ALTER TABLE broadcasts ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`},
+		{"retry_at", `ALTER TABLE broadcasts ADD COLUMN retry_at DATETIME`},
+		{"retry_count", `ALTER TABLE broadcasts ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`},
+	}
+	for _, column := range columns {
+		var count int
+		if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('broadcasts') WHERE name = ?`, column.name).Scan(&count); err != nil {
+			return fmt.Errorf("inspect broadcasts.%s: %w", column.name, err)
+		}
+		if count == 0 {
+			if _, err := sqlDB.Exec(column.ddl); err != nil {
+				return fmt.Errorf("add broadcasts.%s: %w", column.name, err)
+			}
+		}
+	}
+	return nil
 }
 
 func latestEmbeddedMigrationVersion() (int, error) {
