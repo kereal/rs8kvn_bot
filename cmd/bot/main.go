@@ -274,7 +274,7 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 // завершения при штатном выключении.
 func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subService *service.SubscriptionService, syncSvc *service.SyncService, orderSvc *service.OrderService, dbService *database.Service, cfg *config.Config) *sync.WaitGroup {
 	var wg sync.WaitGroup
-	wg.Add(8)
+	wg.Add(9)
 
 	// The services are wired before any background goroutine starts. Reuse the
 	// same SyncService instance that was injected into payment/subscription
@@ -387,6 +387,14 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 
 		reminderWorker := scheduler.NewSubscriptionReminderWorker(dbService, subService)
 		reminderWorker.Run(ctx)
+	}()
+
+	go func() {
+		defer recoverAndReport("Subscription traffic worker")
+		defer wg.Done()
+
+		trafficWorker := scheduler.NewSubscriptionTrafficWorker(dbService, subService)
+		trafficWorker.Run(ctx)
 	}()
 
 	return &wg

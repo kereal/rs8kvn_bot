@@ -24,6 +24,7 @@ import (
 type SubscriptionService struct {
 	db                interfaces.DatabaseService
 	reminderRepo      interfaces.SubscriptionReminderRepository
+	trafficRepo       interfaces.TrafficReminderRepository
 	xuiClients        map[uint]interfaces.XUIClient
 	vpnClients        map[uint]vpn.Client
 	nodes             []database.Node
@@ -57,6 +58,7 @@ func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]i
 	return &SubscriptionService{
 		db:           db,
 		reminderRepo: db,
+		trafficRepo:  db,
 		xuiClients:   xuiClients,
 		vpnClients:   vpnClients,
 		nodes:        nodes,

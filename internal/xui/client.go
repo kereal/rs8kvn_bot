@@ -73,6 +73,11 @@ type ClientRequest struct {
 	ResetDays    int       // traffic reset period; negative = use default
 	TgID         int64     // Telegram user id for panel binding (0 = none)
 	Comment      string    // free-form comment stored in the panel
+	// Enable optionally overrides the client enabled flag on update.
+	// nil keeps the backward-compatible default (true). Primarily used to
+	// re-enable a client that the panel disabled after its traffic quota was
+	// exhausted but whose counter has since been reset.
+	Enable *bool
 }
 
 // ClientTraffic — DTO трафика клиента, возвращаемого панелью.
@@ -577,6 +582,10 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, req Clien
 		"reset":      resetDays,
 		"tgId":       req.TgID,
 		"comment":    req.Comment,
+	}
+
+	if req.Enable != nil {
+		clientObj["enable"] = *req.Enable
 	}
 
 	updateURL := fmt.Sprintf("%s/panel/api/clients/update/%s", c.host, url.PathEscape(req.CurrentEmail))

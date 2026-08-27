@@ -341,6 +341,23 @@ var SubscriptionReminderRunsTotal = promauto.NewCounter(
 	},
 )
 
+// TrafficNotificationsTotal counts traffic notification sends by kind and result.
+var TrafficNotificationsTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "traffic_notifications_total",
+		Help: "Total number of traffic notification sends by kind and result.",
+	},
+	[]string{"kind", "result"},
+)
+
+// TrafficNotificationRunsTotal counts traffic notification worker scans.
+var TrafficNotificationRunsTotal = promauto.NewCounter(
+	prometheus.CounterOpts{Name: "traffic_notification_runs_total",
+
+		Help: "Total number of traffic notification worker scans.",
+	},
+)
+
 // InstrumentHTTP middleware records metrics for HTTP requests.
 func InstrumentHTTP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
