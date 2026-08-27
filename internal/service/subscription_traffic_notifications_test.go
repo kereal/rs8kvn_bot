@@ -136,12 +136,15 @@ func TestProcessTrafficNotifications_ResetAndReenable(t *testing.T) {
 	used := int64(1) * 1024 * 1024 * 1024
 	var gotEnable *bool
 	traffic := &xui.ClientTraffic{Up: used, Down: 0, Enable: false, Total: 100 * 1024 * 1024 * 1024, ExpiresAt: 0, Reset: 30, UUID: "reset-client"}
-	svc, bot, _, _, _, sentMsgs := trafficNotifySetup(t, traffic, 100*1024*1024*1024, func(ctx context.Context, req xui.ClientRequest) error {
+	svc, bot, db, _, _, sentMsgs := trafficNotifySetup(t, traffic, 100*1024*1024*1024, func(ctx context.Context, req xui.ClientRequest) error {
 		gotEnable = req.Enable
 		return nil
 	})
+	db.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
+		return &database.Subscription{RemindersSent: database.TrafficBitExhausted}, nil
+	}
 
-	sub := &database.Subscription{ID: 3, TelegramID: 123458, Username: "reset", PlanID: 1}
+	sub := &database.Subscription{ID: 3, TelegramID: 123458, Username: "reset", PlanID: 1, RemindersSent: database.TrafficBitExhausted}
 	err := svc.ProcessTrafficNotifications(context.Background(), sub)
 	require.NoError(t, err)
 	require.NotNil(t, gotEnable, "UpdateClient must be called to re-enable the client")
@@ -324,7 +327,7 @@ func TestProcessTrafficNotifications_ReenableUpdateErrorNoNotification(t *testin
 	// Counter reset (used < limit) but client disabled. If re-enabling fails,
 	// the come-back message must NOT be sent (the client is still off).
 	used := int64(1) * 1024 * 1024 * 1024
-	traffic := &xui.ClientTraffic{Up: used, Down: 0, Enable: false, Total: 100 * 1024 * 1024 * 1024}
+	traffic := &xui.ClientTraffic{Up: used, Down: 0, Enable: false, Total: 100 * 1024 * 1024 * 1024, UUID: "reset-client"}
 	svc, bot, _, _, _, _ := trafficNotifySetup(t, traffic, 100*1024*1024*1024,
 		func(ctx context.Context, req xui.ClientRequest) error {
 			return errors.New("panel update failed")

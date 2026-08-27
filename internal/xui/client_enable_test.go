@@ -2,6 +2,7 @@ package xui
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,12 +25,12 @@ func updateMock(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestUpdateClient_EnableTrue(t *testing.T) {
-	updated := false
+	var clientObj map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		updateMock(w, r)
 		if strings.Contains(r.URL.Path, "/panel/api/clients/update/") {
-			updated = true
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&clientObj))
 		}
+		updateMock(w, r)
 	}))
 	defer server.Close()
 
@@ -47,13 +48,15 @@ func TestUpdateClient_EnableTrue(t *testing.T) {
 		Enable:       &enable,
 	}
 	require.NoError(t, client.UpdateClient(context.Background(), req))
-	require.True(t, updated, "client update endpoint must be hit when Enable is set")
+	require.Equal(t, true, clientObj["enable"], "update payload must enable the client")
 }
 
 func TestUpdateClient_EnableFalse(t *testing.T) {
-	called := false
+	var clientObj map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
+		if strings.Contains(r.URL.Path, "/panel/api/clients/update/") {
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&clientObj))
+		}
 		updateMock(w, r)
 	}))
 	defer server.Close()
@@ -70,7 +73,7 @@ func TestUpdateClient_EnableFalse(t *testing.T) {
 		Enable:       &enable,
 	}
 	require.NoError(t, client.UpdateClient(context.Background(), req))
-	require.True(t, called)
+	require.Equal(t, false, clientObj["enable"], "update payload must disable the client")
 }
 
 // TestGetClientTraffic_DecodesEnable ensures GetClientTraffic surfaces the

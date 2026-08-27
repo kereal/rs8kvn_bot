@@ -22,7 +22,13 @@ import (
 const (
 	trafficQuotaWarningNumerator   int64 = 9
 	trafficQuotaWarningDenominator int64 = 10
+	maxInt64                             = int64(^uint64(0) >> 1)
 )
+
+type trafficSnapshot struct {
+	node    trafficNode
+	traffic xui.ClientTraffic
+}
 
 // trafficNode is a concrete live panel client a subscription is provisioned on.
 type trafficNode struct {
@@ -80,8 +86,9 @@ func (s *SubscriptionService) trafficNotifyCandidates(ctx context.Context, sub *
 //     notifies the user to come back.
 //
 // It never sends more than one message per subscription per condition and only
-// touches subscriptions on plans with a non-zero traffic limit. Best-effort:
-// per-node failures are logged and processing continues.
+// touches subscriptions on plans with a non-zero traffic limit. If any node
+// returns an error, an empty, negative, or overflowing snapshot, the condition
+// is logged at Warn and processing stops without taking an action.
 func (s *SubscriptionService) ProcessTrafficNotifications(ctx context.Context, sub *database.Subscription) error {
 	if sub == nil || sub.TelegramID <= 0 || s.bot == nil {
 		return nil
@@ -156,6 +163,10 @@ func (s *SubscriptionService) ProcessTrafficNotifications(ctx context.Context, s
 		// re-enable (the user should buy Premium).
 		return s.notifyExhausted(ctx, sub)
 	case !anyEnabled:
+		// Only a previously exhausted subscription may be re-enabled after reset.
+		if sub.RemindersSent&database.TrafficBitExhausted == 0 {
+			return nil
+		}
 		// Traffic counter was reset (used < limit) but the panel left the client
 		// disabled. Re-enable it and invite the user back.
 		return s.reenableAndNotify(ctx, sub, snapshots)
@@ -170,13 +181,6 @@ func (s *SubscriptionService) ProcessTrafficNotifications(ctx context.Context, s
 
 // reenableAndNotify re-enables disabled clients whose traffic has been reset and
 // sends a single "come back" notification.
-type trafficSnapshot struct {
-	node    trafficNode
-	traffic xui.ClientTraffic
-}
-
-const maxInt64 = int64(^uint64(0) >> 1)
-
 func (s *SubscriptionService) reenableAndNotify(ctx context.Context, sub *database.Subscription, snapshots []trafficSnapshot) error {
 	reenabled := false
 
@@ -248,7 +252,7 @@ func (s *SubscriptionService) notifyExhausted(ctx context.Context, sub *database
 	return s.sendOnce(ctx, sub, database.TrafficBitExhausted, "exhausted", func() (string, tgbotapi.InlineKeyboardMarkup, error) {
 		text := utils.EscapeMarkdownV2(
 			"🚫 *Доступ приостановлен*\n\n" +
-				"Ты использовал весь бесплатный лимит (100%%), и твой VPN отключён.\n\n" +
+				"Ты использовал весь бесплатный лимит (100%), и твой VPN отключён.\n\n" +
 				"Возобнови подключение на Premium — там безлимит, больше серверов и никаких ограничений.\n\n" +
 				"Выбрать тариф 👇")
 		return text, premiumKeyboard(), nil
@@ -259,8 +263,8 @@ func (s *SubscriptionService) notifyExhausted(ctx context.Context, sub *database
 func (s *SubscriptionService) notifyNinety(ctx context.Context, sub *database.Subscription) error {
 	return s.sendOnce(ctx, sub, database.TrafficBit90, "ninety", func() (string, tgbotapi.InlineKeyboardMarkup, error) {
 		text := utils.EscapeMarkdownV2(
-			"⚠️ *Осталось меньше 10%% трафика*\n\n" +
-				"Ты использовал почти весь бесплатный лимит (90%%).\n\n" +
+			"⚠️ *Осталось меньше 10% трафика*\n\n" +
+				"Ты использовал почти весь бесплатный лимит (90%).\n\n" +
 				"Не прерывай VPN — на Premium безлимит, больше серверов и никаких ограничений.\n\n" +
 				"Выбрать тариф 👇")
 		return text, premiumKeyboard(), nil

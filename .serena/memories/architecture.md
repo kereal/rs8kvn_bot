@@ -3,7 +3,7 @@
 **Branch:** `dev`
 
 ## Subscription traffic notifications (2026-08)
-- **`SubscriptionTrafficWorker`** (`internal/scheduler/subscription_traffic_worker.go`): ticks every **60 min**, scans `GetActiveSubscriptionsWithTrafficLimit`, calls `SubscriptionService.ProcessTrafficNotifications` per subscription. Best-effort: `Error` on repo query failure (aborts scan), `Warn` on per-subscription failure (continues). Negative `telegram_id` (trial) targets are skipped.
+- **`SubscriptionTrafficWorker`** (`internal/scheduler/subscription_traffic_worker.go`): performs its first scan immediately after application startup and repeats every **60 min**, scans `GetActiveSubscriptionsWithTrafficLimit`, calls `SubscriptionService.ProcessTrafficNotifications` per subscription. Best-effort: `Error` on repo query failure (aborts scan), `Warn` on per-subscription failure (continues). Negative `telegram_id` (trial) targets are skipped.
 - **`SubscriptionService.ProcessTrafficNotifications`** (`internal/service/subscription_traffic_notifications.go`): polls live 3x-ui nodes (`GetClientTraffic` via node bindings, mirrors `GetWithTraffic`), sums up/down, and switches:
   1. **90%** (`used ≥ 90% limit`, client enabled): sales text «Осталось меньше 10% трафика» + button `buy_premium_list`.
   2. **Exhausted** (`used ≥ 100% limit`): message «Доступ приостановлен» (traffic spent + VPN disabled) + Premium button. Client is **NOT** re-enabled (buy Premium CTA instead).
