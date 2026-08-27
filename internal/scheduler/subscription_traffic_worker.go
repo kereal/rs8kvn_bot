@@ -63,7 +63,8 @@ func (w *SubscriptionTrafficWorker) process(ctx context.Context) {
 			continue
 		}
 
-		if err := w.subSvc.ProcessTrafficNotifications(ctx, &sub); err != nil {
+		err = w.subSvc.ProcessTrafficNotifications(ctx, &sub)
+		if err != nil {
 			logger.Warn("Traffic notifications failed",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Int64("telegram_id", sub.TelegramID),

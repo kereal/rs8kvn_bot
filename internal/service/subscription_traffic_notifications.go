@@ -228,10 +228,12 @@ func (s *SubscriptionService) reenableAndNotify(ctx context.Context, sub *databa
 	}
 
 	// Forget the "exhausted" and "90%" bits so future cycles can fire again.
-	if rErr := s.trafficRepo.ReleaseTrafficReminder(ctx, sub.ID, database.TrafficBitExhausted); rErr != nil {
+	rErr := s.trafficRepo.ReleaseTrafficReminder(ctx, sub.ID, database.TrafficBitExhausted)
+	if rErr != nil {
 		logger.Warn("traffic notifications: failed to release exhausted bit", zap.Uint("subscription_id", sub.ID), zap.Error(rErr))
 	}
-	if rErr := s.trafficRepo.ReleaseTrafficReminder(ctx, sub.ID, database.TrafficBit90); rErr != nil {
+	rErr = s.trafficRepo.ReleaseTrafficReminder(ctx, sub.ID, database.TrafficBit90)
+	if rErr != nil {
 		logger.Warn("traffic notifications: failed to release 90 bit", zap.Uint("subscription_id", sub.ID), zap.Error(rErr))
 	}
 
@@ -285,7 +287,8 @@ func (s *SubscriptionService) sendOnce(ctx context.Context, sub *database.Subscr
 
 	text, kb, err := textFn()
 	if err != nil {
-		if rErr := s.trafficRepo.ReleaseTrafficReminder(ctx, sub.ID, bit); rErr != nil {
+		rErr := s.trafficRepo.ReleaseTrafficReminder(ctx, sub.ID, bit)
+		if rErr != nil {
 			err = errors.Join(err, rErr)
 		}
 		metrics.TrafficNotificationsTotal.WithLabelValues(kind, "error").Inc()

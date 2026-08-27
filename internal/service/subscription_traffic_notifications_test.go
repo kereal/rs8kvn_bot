@@ -95,7 +95,10 @@ func TestProcessTrafficNotifications_NinetyPercent(t *testing.T) {
 	// used = 95 GB of 100 GB, client still enabled.
 	used := int64(95) * 1024 * 1024 * 1024
 	traffic := &xui.ClientTraffic{Up: used, Down: 0, Enable: true}
-	svc, bot, _, _, _, sentMsgs := trafficNotifySetup(t, traffic, 100*1024*1024*1024, nil)
+	svc, bot, db, xuiClient, claimedBits, sentMsgs := trafficNotifySetup(t, traffic, 100*1024*1024*1024, nil)
+	_ = db
+	_ = xuiClient
+	_ = claimedBits
 
 	sub := &database.Subscription{ID: 1, TelegramID: 123456, Username: "testuser", PlanID: 1}
 	err := svc.ProcessTrafficNotifications(context.Background(), sub)
@@ -115,10 +118,13 @@ func TestProcessTrafficNotifications_ExhaustedDisabled(t *testing.T) {
 	used := int64(101) * 1024 * 1024 * 1024
 	reenableCalled := false
 	traffic := &xui.ClientTraffic{Up: used, Down: 0, Enable: false}
-	svc, bot, _, _, _, sentMsgs := trafficNotifySetup(t, traffic, 100*1024*1024*1024, func(ctx context.Context, req xui.ClientRequest) error {
+	svc, bot, db, xuiClient, claimedBits, sentMsgs := trafficNotifySetup(t, traffic, 100*1024*1024*1024, func(ctx context.Context, req xui.ClientRequest) error {
 		reenableCalled = true
 		return nil
 	})
+	_ = db
+	_ = xuiClient
+	_ = claimedBits
 
 	sub := &database.Subscription{ID: 2, TelegramID: 123457, Username: "exhausted", PlanID: 1}
 	err := svc.ProcessTrafficNotifications(context.Background(), sub)
@@ -160,7 +166,10 @@ func TestProcessTrafficNotifications_SkippedWhenBelow90(t *testing.T) {
 	// used = 10 GB of 100 GB, enabled -> no notification.
 	used := int64(10) * 1024 * 1024 * 1024
 	traffic := &xui.ClientTraffic{Up: used, Down: 0, Enable: true}
-	svc, bot, _, _, _, _ := trafficNotifySetup(t, traffic, 100*1024*1024*1024, nil)
+	svc, bot, db, xuiClient, claimedBits, _ := trafficNotifySetup(t, traffic, 100*1024*1024*1024, nil)
+	_ = db
+	_ = xuiClient
+	_ = claimedBits
 
 	sub := &database.Subscription{ID: 4, TelegramID: 123459, Username: "below", PlanID: 1}
 	err := svc.ProcessTrafficNotifications(context.Background(), sub)
@@ -171,7 +180,10 @@ func TestProcessTrafficNotifications_SkippedWhenBelow90(t *testing.T) {
 func TestProcessTrafficNotifications_NilSqlNoop(t *testing.T) {
 	t.Parallel()
 
-	svc, _, _, _, _, _ := trafficNotifySetup(t, &xui.ClientTraffic{Up: 1, Enable: true}, 100*1024*1024*1024, nil)
+	svc, _, _, xuiClient, claimedBits, sentMsgs := trafficNotifySetup(t, &xui.ClientTraffic{Up: 1, Enable: true}, 100*1024*1024*1024, nil)
+	_ = xuiClient
+	_ = claimedBits
+	_ = sentMsgs
 	err := svc.ProcessTrafficNotifications(context.Background(), nil)
 	require.NoError(t, err)
 
@@ -228,7 +240,10 @@ func TestProcessTrafficNotifications_PlanWithoutLimitNoop(t *testing.T) {
 	// Plan has traffic_limit == 0 (free premium/unlimited) -> no traffic handling.
 	used := int64(200) * 1024 * 1024 * 1024
 	traffic := &xui.ClientTraffic{Up: used, Down: 0, Enable: false}
-	svc, bot, _, _, _, _ := trafficNotifySetup(t, traffic, 0, nil)
+	svc, bot, db, xuiClient, claimedBits, _ := trafficNotifySetup(t, traffic, 0, nil)
+	_ = db
+	_ = xuiClient
+	_ = claimedBits
 
 	sub := &database.Subscription{ID: 12, TelegramID: 123462, Username: "nolimit", PlanID: 1}
 	require.NoError(t, svc.ProcessTrafficNotifications(context.Background(), sub))
@@ -240,7 +255,9 @@ func TestProcessTrafficNotifications_NoNodesRespondNoop(t *testing.T) {
 
 	used := int64(95) * 1024 * 1024 * 1024
 	traffic := &xui.ClientTraffic{Up: used, Down: 0, Enable: true}
-	svc, bot, _, xuiClient, _, _ := trafficNotifySetup(t, traffic, 100*1024*1024*1024, nil)
+	svc, bot, db, xuiClient, claimedBits, _ := trafficNotifySetup(t, traffic, 100*1024*1024*1024, nil)
+	_ = db
+	_ = claimedBits
 
 	// Every live node returns an error -> no node snapshot succeeded.
 	xuiClient.GetClientTrafficFunc = func(ctx context.Context, email string) (*xui.ClientTraffic, error) {
@@ -315,7 +332,10 @@ func TestProcessTrafficNotifications_RejectsInvalidTraffic(t *testing.T) {
 	t.Parallel()
 
 	traffic := &xui.ClientTraffic{Up: -1, Down: 0, Enable: true}
-	svc, bot, _, _, _, _ := trafficNotifySetup(t, traffic, 100*1024*1024*1024, nil)
+	svc, bot, db, xuiClient, claimedBits, _ := trafficNotifySetup(t, traffic, 100*1024*1024*1024, nil)
+	_ = db
+	_ = xuiClient
+	_ = claimedBits
 	sub := &database.Subscription{ID: 17, TelegramID: 123467, Username: "invalid", PlanID: 1}
 	require.NoError(t, svc.ProcessTrafficNotifications(context.Background(), sub))
 	require.Equal(t, 0, bot.SendCount)
@@ -328,10 +348,14 @@ func TestProcessTrafficNotifications_ReenableUpdateErrorNoNotification(t *testin
 	// the come-back message must NOT be sent (the client is still off).
 	used := int64(1) * 1024 * 1024 * 1024
 	traffic := &xui.ClientTraffic{Up: used, Down: 0, Enable: false, Total: 100 * 1024 * 1024 * 1024, UUID: "reset-client"}
-	svc, bot, _, _, _, _ := trafficNotifySetup(t, traffic, 100*1024*1024*1024,
+	svc, bot, db, xuiClient, claimedBits, sentMsgs := trafficNotifySetup(t, traffic, 100*1024*1024*1024,
 		func(ctx context.Context, req xui.ClientRequest) error {
 			return errors.New("panel update failed")
 		})
+	_ = db
+	_ = xuiClient
+	_ = claimedBits
+	_ = sentMsgs
 
 	sub := &database.Subscription{ID: 14, TelegramID: 123464, Username: "reneferr", PlanID: 1}
 	require.NoError(t, svc.ProcessTrafficNotifications(context.Background(), sub))
