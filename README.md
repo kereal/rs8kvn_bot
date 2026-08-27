@@ -98,27 +98,12 @@ See **[Installation Guide](doc/installation.md)** for:
 /send @username Привет!                   # Private message by username
 ```
 
-**Broadcast flow:** `/broadcast` asks for a broadcast *name*, then the message and
-filters. Confirmation creates a queued campaign; delivery runs in a durable
-background worker. The admin can send immediately or schedule the campaign for a
-future day and hour (day picker → hour picker, Moscow time); a scheduled campaign
-stays in `scheduled` state and is claimed by the worker only when `planned_at` is
-due. The audience is snapshotted in `broadcasts.recipients_state`, so
-changes to subscriptions cannot shift pagination or add duplicate recipients.
-Anonymous trials are excluded, `active` is the default status, and `all` is an
-explicit status choice; `paid` uses payment state rather than plan name.
-Messages preserve MarkdownV2 formatting and transient failures are retried twice
-with backoff. `/broadcasts` opens recent cards with details, cancellation for
-active campaigns, and retry for failed recipients. A restart resumes scheduled or
-running campaigns and releases stale recipient leases. The worker polls every 15 seconds;
-launch and persistence failures are stored in `broadcasts.last_error`, `retry_at`, and
-`retry_count` with exponential backoff. Delivery outcomes are split into `blocked` (Telegram
-explicitly says the user blocked the bot), `unreachable` (deactivated or unavailable chat),
-and other errors. The audience snapshot and per-recipient state are stored in the
-`broadcasts.recipients_state` JSON column; for the current user count this keeps recovery
-simple, and no separate broadcast-recipient table is required. The details card sends one
-compact admin message; complete delivered and blocked ID lists remain persisted in
-`delivery_report` and can be inspected from the database.
+**Broadcast flow:** `/broadcast` collects a name, message, filters, and confirmation.
+The campaign sends immediately or can be scheduled in Moscow time. Its audience and
+per-recipient state are persisted, so delivery is resumable after restarts without
+duplicates. MarkdownV2 is preserved; transient failures retry with backoff, and
+results are classified as `blocked`, `unreachable`, or other errors. Use `/broadcasts`
+to view details, cancel active campaigns, or retry failed recipients.
 
 ## Health Check & Web Endpoints
 
