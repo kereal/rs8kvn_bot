@@ -164,7 +164,7 @@ func (s *SubscriptionService) ProcessTrafficNotifications(ctx context.Context, s
 		return s.notifyExhausted(ctx, sub)
 	case !anyEnabled:
 		// Only a previously exhausted subscription may be re-enabled after reset.
-		if sub.RemindersSent&database.TrafficBitExhausted == 0 {
+		if sub.TrafficRemindersSent&database.TrafficBitExhausted == 0 {
 			return nil
 		}
 		// Traffic counter was reset (used < limit) but the panel left the client

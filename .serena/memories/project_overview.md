@@ -21,10 +21,10 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 ## Subscription traffic notifications
 - Только тарифы с ненулевым лимитом (`traffic_limit > 0`); Premium безлимит — не участвует.
 - Фоновая задача: `SubscriptionTrafficWorker` выполняет первый проход сразу после старта приложения, затем работает раз в 60 минут, вызывает `SubscriptionService.ProcessTrafficNotifications` для каждой подписки с лимитом (`GetActiveSubscriptionsWithTrafficLimit`).
-- Три сценария, каждый ровно один раз (битовая маска `subscriptions.traffic_reminders_sent` + атомарный `ClaimTrafficReminder`/`ReleaseTrafficReminder`):
+- Три сценария используют битовую маску `subscriptions.traffic_reminders_sent` и атомарные `ClaimTrafficReminder`/`ReleaseTrafficReminder`; уведомление 90% может повториться после освобождения `TrafficBit90` при снижении использования ниже 90%:
   1. **90%** — клиент включён, использовано ≥90%: «Осталось меньше 10% трафика» + кнопка `💎 Перейти на Premium` (`buy_premium_list`).
   2. **Исчерпан** — использовано 100%, панель отключила клиента: «Доступ приостановлен» (трафик исчерпан и VPN отключён) + кнопка Premium; клиент **не включается обратно** — предлагается покупка.
-  3. **Сброшен + включён** — счёт сброшен (`used < limit`), но клиент ещё выключен: воркер **включает** клиента (`UpdateClient(Enable=true)`) и шлёт простое «приходи пользоваться» без продажи.
+  3. **Сброшен + включён** — счёт сброшен (`used < limit`), клиент ещё выключен, и установлен `TrafficBitExhausted`: воркер **включает** клиента (`UpdateClient(Enable=true)`) и шлёт простое «приходи пользоваться» без продажи.
 - При ошибке Telegram claim освобождается для повтора; per-node сбои — best-effort (`Warn`).
 - В `UpdateClient` добавлен `Enable *bool` (xui), `GetClientTraffic` отдаёт `Enable`.
 - Метрики: `TrafficNotificationsTotal{kind,result}`, `TrafficNotificationRunsTotal`.

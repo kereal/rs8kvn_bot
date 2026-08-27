@@ -147,10 +147,10 @@ func TestProcessTrafficNotifications_ResetAndReenable(t *testing.T) {
 		return nil
 	})
 	db.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
-		return &database.Subscription{RemindersSent: database.TrafficBitExhausted}, nil
+		return &database.Subscription{TrafficRemindersSent: database.TrafficBitExhausted}, nil
 	}
 
-	sub := &database.Subscription{ID: 3, TelegramID: 123458, Username: "reset", PlanID: 1, RemindersSent: database.TrafficBitExhausted}
+	sub := &database.Subscription{ID: 3, TelegramID: 123458, Username: "reset", PlanID: 1, TrafficRemindersSent: database.TrafficBitExhausted}
 	err := svc.ProcessTrafficNotifications(context.Background(), sub)
 	require.NoError(t, err)
 	require.NotNil(t, gotEnable, "UpdateClient must be called to re-enable the client")
@@ -357,7 +357,7 @@ func TestProcessTrafficNotifications_ReenableUpdateErrorNoNotification(t *testin
 	_ = claimedBits
 	_ = sentMsgs
 
-	sub := &database.Subscription{ID: 14, TelegramID: 123464, Username: "reneferr", PlanID: 1}
+	sub := &database.Subscription{ID: 14, TelegramID: 123464, Username: "reneferr", PlanID: 1, TrafficRemindersSent: database.TrafficBitExhausted}
 	require.NoError(t, svc.ProcessTrafficNotifications(context.Background(), sub))
 	require.Equal(t, 0, bot.SendCount, "must not invite the user back when the client could not be re-enabled")
 }
