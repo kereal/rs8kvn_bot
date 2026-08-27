@@ -4,7 +4,7 @@
 Пользователям на **бесплатных тарифах с лимитом трафика** (`plans.traffic_limit > 0`) нужны уведомления о приближении/исчерпании лимита и авто-включение после сброса счётчика. Premium — безлимит, не участвует. Храним не историю трафика, а только битmask отправленных уведомлений (по принципу «проще и надёжнее»).
 
 ## Механика
-- **`SubscriptionTrafficWorker`** (`internal/scheduler/subscription_traffic_worker.go`): тик **60 мин**, выборка `GetActiveSubscriptionsWithTrafficLimit`, на каждую — `SubscriptionService.ProcessTrafficNotifications`. Best-effort: `Error` при сбое выборки (прерывает проход), `Warn` на подписку (продолжает). Trial-таргеты с `telegram_id <= 0` пропускаются.
+- **`SubscriptionTrafficWorker`** (`internal/scheduler/subscription_traffic_worker.go`): первый проход сразу после старта приложения, затем тик **60 мин**, выборка `GetActiveSubscriptionsWithTrafficLimit`, на каждую — `SubscriptionService.ProcessTrafficNotifications`. Best-effort: `Error` при сбое выборки (прерывает проход), `Warn` на подписку (продолжает). Trial-таргеты с `telegram_id <= 0` пропускаются.
 - **`SubscriptionService.ProcessTrafficNotifications`** (`internal/service/subscription_traffic_notifications.go`): опрашивает живые 3x-ui ноды (`GetClientTraffic` через node bindings, зеркалит `GetWithTraffic`), суммирует up+down и ветвится:
   1. **90%** — `used ≥ 0.9·limit`, клиент включён → текст «Осталось меньше 10% трафика. Ты использовал почти весь бесплатный лимит (90%).» + кнопка `buy_premium_list`.
   2. **Исчерпан** — `used ≥ limit` → текст «🚫 Доступ приостановлен. Ты использовал весь бесплатный лимит (100%), и твой VPN отключён.»; клиент **НЕ** включается (CTA — купить Premium).
@@ -35,7 +35,7 @@
 - Миграционные тесты 032/033 переведены с позиционных `Steps(-N)` на абсолютные `Migrate(31/32/33)` из-за отсутствия миграции 037.
 
 ## Логирование и обработка ошибок (уровни, чтобы не шуметь)
-- **Per-node `GetClientTraffic` failure** → `logger.Debug` (осознанный выбор «не шуметь»: при недоступной ноде у сотен подписок не заваливаем логами; повтор через час).
+- **Per-node `GetClientTraffic` failure** → `logger.Warn` (осознанный выбор «не шуметь»: при недоступной ноде у сотен подписок не заваливаем логами; повтор через час).
 - **Per-node re-enable failure / release-ошибки битов / fallback-ошибка `GetBySubscriptionID`** → `logger.Warn` (важное, но не фатальное; обработка продолжается).
 - **DB-сбой выборки в воркере** (`GetActiveSubscriptionsWithTrafficLimit`) → `logger.Error` (прерывает проход).
 - **Per-subscription сбой в воркере** → `logger.Warn` (продолжает скан).

@@ -71,6 +71,7 @@ func NewDatabaseService() *DatabaseService {
 	return &DatabaseService{
 		Subscriptions:     make(map[int64]*database.Subscription),
 		SubscriptionsByID: make(map[uint]*database.Subscription),
+		Plans:             make(map[uint]*database.Plan),
 		Broadcasts:        make(map[uint]*database.Broadcast),
 	}
 }
@@ -80,6 +81,7 @@ type DatabaseService struct {
 	Subscriptions     map[int64]*database.Subscription
 	SubscriptionsByID map[uint]*database.Subscription
 	Products          map[uint]*database.Product
+	Plans             map[uint]*database.Plan
 	Orders            map[uint]*database.Order
 	Broadcasts        map[uint]*database.Broadcast
 
@@ -163,12 +165,12 @@ type DatabaseService struct {
 	UpdateIPsFunc                               func(ctx context.Context, id uint, ipsJSON string) error
 	UpdateLastRequestFunc                       func(ctx context.Context, subscriptionID string) error
 
-	GetSubscriptionsExpiringInRangeFunc func(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
-	ClaimReminderFunc                   func(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
-	ReleaseReminderFunc                 func(ctx context.Context, id uint, bit int, expiresAt time.Time) error
+	GetSubscriptionsExpiringInRangeFunc        func(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
+	ClaimReminderFunc                          func(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
+	ReleaseReminderFunc                        func(ctx context.Context, id uint, bit int, expiresAt time.Time) error
 	GetActiveSubscriptionsWithTrafficLimitFunc func(ctx context.Context) ([]database.SubscriptionTrafficTarget, error)
-	ClaimTrafficReminderFunc            func(ctx context.Context, id uint, bit int) (bool, error)
-	ReleaseTrafficReminderFunc          func(ctx context.Context, id uint, bit int) error
+	ClaimTrafficReminderFunc                   func(ctx context.Context, id uint, bit int) (bool, error)
+	ReleaseTrafficReminderFunc                 func(ctx context.Context, id uint, bit int) error
 
 	CreateBroadcastFunc                  func(ctx context.Context, b *database.Broadcast) error
 	GetBroadcastFunc                     func(ctx context.Context, id uint) (*database.Broadcast, error)
@@ -1387,7 +1389,7 @@ func (m *DatabaseService) ClaimReminder(ctx context.Context, id uint, bit int, e
 
 // ReleaseReminder releases a reminder claim after a failed send.
 // GetActiveSubscriptionsWithTrafficLimit falls back to a scan of the in-memory
-// subscriptions joined with the free plan limit in the shared fake.
+// subscriptions joined with their respective plan limits in the shared fake.
 func (m *DatabaseService) GetActiveSubscriptionsWithTrafficLimit(ctx context.Context) ([]database.SubscriptionTrafficTarget, error) {
 	if m.GetActiveSubscriptionsWithTrafficLimitFunc != nil {
 		return m.GetActiveSubscriptionsWithTrafficLimitFunc(ctx)
@@ -1396,17 +1398,19 @@ func (m *DatabaseService) GetActiveSubscriptionsWithTrafficLimit(ctx context.Con
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	plan, _ := m.GetPlanByName(ctx, database.FreePlanName)
-	limit := int64(0)
-	if plan != nil {
-		limit = plan.TrafficLimit
-	}
-
 	var out []database.SubscriptionTrafficTarget
 	for _, sub := range m.Subscriptions {
-		if sub.Status == string(database.SubscriptionStatusActive) && limit > 0 {
-			out = append(out, database.SubscriptionTrafficTarget{Subscription: *sub, TrafficLimit: limit})
+		if sub.Status != string(database.SubscriptionStatusActive) {
+			continue
 		}
+		plan, ok := m.Plans[sub.PlanID]
+		if !ok {
+			plan, _ = m.GetPlanByID(ctx, sub.PlanID)
+		}
+		if plan == nil || plan.TrafficLimit <= 0 {
+			continue
+		}
+		out = append(out, database.SubscriptionTrafficTarget{Subscription: *sub, TrafficLimit: plan.TrafficLimit})
 	}
 
 	return out, nil

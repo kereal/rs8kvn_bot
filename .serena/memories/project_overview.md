@@ -20,15 +20,15 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 
 ## Subscription traffic notifications
 - Только тарифы с ненулевым лимитом (`traffic_limit > 0`); Premium безлимит — не участвует.
-- Фоновая задача: `SubscriptionTrafficWorker` раз в 60 минут, вызывает `SubscriptionService.ProcessTrafficNotifications` для каждой подписки с лимитом (`GetActiveSubscriptionsWithTrafficLimit`).
-- Три сценария, каждый ровно один раз (bitmask `subscriptions.traffic_reminders_sent` + атомарный `ClaimTrafficReminder`/`ReleaseTrafficReminder`):
+- Фоновая задача: `SubscriptionTrafficWorker` выполняет первый проход сразу после старта приложения, затем работает раз в 60 минут, вызывает `SubscriptionService.ProcessTrafficNotifications` для каждой подписки с лимитом (`GetActiveSubscriptionsWithTrafficLimit`).
+- Три сценария, каждый ровно один раз (битовая маска `subscriptions.traffic_reminders_sent` + атомарный `ClaimTrafficReminder`/`ReleaseTrafficReminder`):
   1. **90%** — клиент включён, использовано ≥90%: «Осталось меньше 10% трафика» + кнопка `💎 Перейти на Premium` (`buy_premium_list`).
-  2. **Исчерпан** — использовано 100%, панель отключила клиента: «Доступ приостановлен» (трафик исчерпан и VPN отключён) + кнопка Premium; клиент **не** включает обратно — предлагается покупка.
+  2. **Исчерпан** — использовано 100%, панель отключила клиента: «Доступ приостановлен» (трафик исчерпан и VPN отключён) + кнопка Premium; клиент **не включается обратно** — предлагается покупка.
   3. **Сброшен + включён** — счёт сброшен (`used < limit`), но клиент ещё выключен: воркер **включает** клиента (`UpdateClient(Enable=true)`) и шлёт простое «приходи пользоваться» без продажи.
-- При ошибке Telegram claim освобождается для повтора; per-nодные сбои — best-effort (`Warn`).
+- При ошибке Telegram claim освобождается для повтора; per-node сбои — best-effort (`Warn`).
 - В `UpdateClient` добавлен `Enable *bool` (xui), `GetClientTraffic` отдаёт `Enable`.
 - Метрики: `TrafficNotificationsTotal{kind,result}`, `TrafficNotificationRunsTotal`.
-- Миграция 038: `subscriptions.traffic_reminders_sent` (битmask 90%/исчерпан/сброс).
+- Миграция 038: `subscriptions.traffic_reminders_sent` (битовая маска 90%/исчерпан/сброс).
 - Жизненный цикл: `SubscriptionTrafficWorker` в `cmd/bot/main.go` (startBackgroundWorkers).
 - Ограничение: работает для клиентов, которых панель **выключила, но оставила в списке**; реально удалённых из core не находит (`ErrClientNotFound` — пропускает).
 
@@ -80,7 +80,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 
 ## News: Subscription Traffic Worker (2026-08)
 - Добавлен `SubscriptionTrafficWorker` + `SubscriptionService.ProcessTrafficNotifications`.
-- Три уведомления с битmask-дедупликацией: 90%, исчерпан (доступ приостановлен) и сброс+авто-включение.
+- Три уведомления с дедупликацией по битовой маске: 90%, исчерпан (доступ приостановлен) и сброс+авто-включение.
 - Продающие тексты с кнопкой `buy_premium_list` для 90%/исчерпан; у сброса — без продажи.
 - Миграция 038 `subscriptions.traffic_reminders_sent`.
 - Тесты: xui (Enable true/false + декодирование), БД (claim/release/выборка с лимитом), service (4 сценария + кнопка Premium), scheduler (worker: итерация/skip trial/continue-on-error/repo error). До этого был детальный обзор истории, удалён ненужный legacy-коллапс, `totalGB` оставлен как есть.
@@ -112,7 +112,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Backup ежедневно, trial cleanup сразу при старте и затем каждые 3 часа, sync workers фоном, reminders — каждые 30 минут (`SubscriptionReminderWorker`).
 
 ## Базовый worker set
-- Backup ежедневно, trial cleanup каждый час, sync workers фоном, reminders — каждые 30 минут, subscription traffic — каждые 60 минут.
+- Backup ежедневно, trial cleanup каждые 3 часа, sync workers фоном, reminders — каждые 30 минут, subscription traffic — каждые 60 минут.
 
 ## Структура
 ```text
