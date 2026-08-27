@@ -1387,9 +1387,8 @@ func (m *DatabaseService) ClaimReminder(ctx context.Context, id uint, bit int, e
 	return true, nil
 }
 
-// ReleaseReminder releases a reminder claim after a failed send.
-// GetActiveSubscriptionsWithTrafficLimit falls back to a scan of the in-memory
-// subscriptions joined with their respective plan limits in the shared fake.
+// GetActiveSubscriptionsWithTrafficLimit returns active subscriptions with
+// their respective positive plan traffic limits from the shared fake.
 func (m *DatabaseService) GetActiveSubscriptionsWithTrafficLimit(ctx context.Context) ([]database.SubscriptionTrafficTarget, error) {
 	if m.GetActiveSubscriptionsWithTrafficLimitFunc != nil {
 		return m.GetActiveSubscriptionsWithTrafficLimitFunc(ctx)

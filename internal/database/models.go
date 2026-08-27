@@ -365,6 +365,7 @@ type SubscriptionFull struct {
 // on unlimited plans (traffic_limit = 0) are excluded.
 type SubscriptionTrafficTarget struct {
 	Subscription
+
 	TrafficLimit int64
 }
 
