@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 )
 
@@ -99,7 +100,14 @@ func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, config.MaxResponseSize+1))
+	if err != nil {
+		return fmt.Errorf("read proxman response: %w", err)
+	}
+	if len(respBody) > config.MaxResponseSize {
+		return fmt.Errorf("proxman response exceeds %d bytes", config.MaxResponseSize)
+	}
+
 	bodyStr := string(bytes.TrimSpace(respBody))
 
 	switch resp.StatusCode {

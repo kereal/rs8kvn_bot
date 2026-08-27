@@ -17,9 +17,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// trafficQuotaWarningFraction is the fraction of the plan's traffic limit that
-// triggers the "almost exhausted" warning.
-const trafficQuotaWarningFraction = 0.9
+// trafficQuotaWarningNumerator and trafficQuotaWarningDenominator define the
+// fixed 90% threshold without floating-point rounding at the boundary.
+const (
+	trafficQuotaWarningNumerator   int64 = 9
+	trafficQuotaWarningDenominator int64 = 10
+)
 
 // trafficNode is a concrete live panel client a subscription is provisioned on.
 type trafficNode struct {
@@ -35,11 +38,7 @@ type trafficNode struct {
 func (s *SubscriptionService) trafficNotifyCandidates(ctx context.Context, sub *database.Subscription) ([]trafficNode, error) {
 	subNodes, err := s.db.GetBySubscriptionID(ctx, sub.ID)
 	if err != nil {
-		logger.Warn("traffic notifications: failed to load subscription nodes, falling back to all active nodes",
-			zap.Uint("subscription_id", sub.ID),
-			zap.Error(err))
-
-		subNodes = nil
+		return nil, fmt.Errorf("traffic notifications: load subscription nodes: %w", err)
 	}
 
 	activeSubNodeIDs := make(map[uint]struct{}, len(subNodes))
@@ -53,10 +52,8 @@ func (s *SubscriptionService) trafficNotifyCandidates(ctx context.Context, sub *
 
 	var nodes []trafficNode
 	for _, node := range s.activeNodes() {
-		if len(activeSubNodeIDs) > 0 {
-			if _, ok := activeSubNodeIDs[node.ID]; !ok {
-				continue
-			}
+		if _, ok := activeSubNodeIDs[node.ID]; !ok {
+			continue
 		}
 
 		client, ok := s.xuiClients[node.ID]
@@ -97,41 +94,61 @@ func (s *SubscriptionService) ProcessTrafficNotifications(ctx context.Context, s
 	if plan == nil || plan.TrafficLimit <= 0 {
 		return nil
 	}
-	limit := float64(plan.TrafficLimit)
+	limit := plan.TrafficLimit
 
 	nodes, err := s.trafficNotifyCandidates(ctx, sub)
 	if err != nil {
 		return err
 	}
 
-	var (
-		totalUp, totalDown int64
-		anyEnabled         bool
-		anySuccess         bool
-	)
-
-	for _, n := range nodes {
-		traffic, tErr := n.client.GetClientTraffic(ctx, n.email)
-		if tErr != nil {
-			logger.Debug("traffic notifications: GetClientTraffic failed on source",
-				zap.Uint("node_id", n.nodeID),
-				zap.Error(tErr))
-			continue
-		}
-
-		anySuccess = true
-		totalUp += traffic.Up
-		totalDown += traffic.Down
-		if traffic.Enable {
-			anyEnabled = true
-		}
-	}
-
-	if !anySuccess {
+	if len(nodes) == 0 {
 		return nil
 	}
 
-	used := float64(totalUp + totalDown)
+	snapshots := make([]trafficSnapshot, 0, len(nodes))
+	for _, n := range nodes {
+		traffic, tErr := n.client.GetClientTraffic(ctx, n.email)
+		if tErr != nil {
+			logger.Warn("traffic notifications: GetClientTraffic failed on source",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", n.nodeID),
+				zap.Error(tErr))
+			return nil
+		}
+		if traffic == nil {
+			logger.Warn("traffic notifications: source returned empty traffic snapshot",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", n.nodeID))
+			return nil
+		}
+		if traffic.Up < 0 || traffic.Down < 0 {
+			logger.Warn("traffic notifications: source returned negative traffic",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", n.nodeID),
+				zap.Int64("up", traffic.Up),
+				zap.Int64("down", traffic.Down))
+			return nil
+		}
+		if traffic.Up > maxInt64-traffic.Down {
+			logger.Warn("traffic notifications: source traffic overflows int64",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", n.nodeID))
+			return nil
+		}
+		snapshots = append(snapshots, trafficSnapshot{node: n, traffic: *traffic})
+	}
+
+	var used int64
+	var anyEnabled bool
+	for _, snapshot := range snapshots {
+		if used > maxInt64-(snapshot.traffic.Up+snapshot.traffic.Down) {
+			logger.Warn("traffic notifications: aggregated traffic overflows int64",
+				zap.Uint("subscription_id", sub.ID))
+			return nil
+		}
+		used += snapshot.traffic.Up + snapshot.traffic.Down
+		anyEnabled = anyEnabled || snapshot.traffic.Enable
+	}
 
 	switch {
 	case used >= limit:
@@ -141,8 +158,8 @@ func (s *SubscriptionService) ProcessTrafficNotifications(ctx context.Context, s
 	case !anyEnabled:
 		// Traffic counter was reset (used < limit) but the panel left the client
 		// disabled. Re-enable it and invite the user back.
-		return s.reenableAndNotify(ctx, sub, nodes)
-	case used >= trafficQuotaWarningFraction*limit:
+		return s.reenableAndNotify(ctx, sub, snapshots)
+	case used*trafficQuotaWarningDenominator >= limit*trafficQuotaWarningNumerator:
 		// Still enabled and approaching the cap: warm the user once.
 		return s.notifyNinety(ctx, sub)
 	default:
@@ -153,16 +170,26 @@ func (s *SubscriptionService) ProcessTrafficNotifications(ctx context.Context, s
 
 // reenableAndNotify re-enables disabled clients whose traffic has been reset and
 // sends a single "come back" notification.
-func (s *SubscriptionService) reenableAndNotify(ctx context.Context, sub *database.Subscription, nodes []trafficNode) error {
+type trafficSnapshot struct {
+	node    trafficNode
+	traffic xui.ClientTraffic
+}
+
+const maxInt64 = int64(^uint64(0) >> 1)
+
+func (s *SubscriptionService) reenableAndNotify(ctx context.Context, sub *database.Subscription, snapshots []trafficSnapshot) error {
 	reenabled := false
 
-	for _, n := range nodes {
-		traffic, tErr := n.client.GetClientTraffic(ctx, n.email)
-		if tErr != nil {
-			logger.Debug("traffic notifications: re-enable snapshot failed", zap.Uint("node_id", n.nodeID), zap.Error(tErr))
+	for _, snapshot := range snapshots {
+		n := snapshot.node
+		traffic := snapshot.traffic
+		if traffic.Enable {
 			continue
 		}
-		if traffic.Enable {
+		if traffic.UUID == "" || traffic.ExpiresAt < 0 || traffic.ExpiresAt > 0 && time.UnixMilli(traffic.ExpiresAt).Before(time.Now()) {
+			logger.Warn("traffic notifications: refusing to re-enable invalid or expired client",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", n.nodeID))
 			continue
 		}
 

@@ -50,7 +50,7 @@ func trafficNotifySetup(t *testing.T, traffic *xui.ClientTraffic, planTrafficLim
 			return &database.Plan{ID: planID, TrafficLimit: planTrafficLimit}, nil // bytes; 0 = unlimited
 		},
 		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-			return nil, nil
+			return []database.SubscriptionNode{{NodeID: 1, Status: database.SyncStatusActive}}, nil
 		},
 		ClaimTrafficReminderFunc: func(ctx context.Context, id uint, bit int) (bool, error) {
 			claimedBits = append(claimedBits, uint(bit))
@@ -135,7 +135,7 @@ func TestProcessTrafficNotifications_ResetAndReenable(t *testing.T) {
 	// by the panel -> the worker must re-enable it and invite the user back.
 	used := int64(1) * 1024 * 1024 * 1024
 	var gotEnable *bool
-	traffic := &xui.ClientTraffic{Up: used, Down: 0, Enable: false, Total: 100 * 1024 * 1024 * 1024, ExpiresAt: 0, Reset: 30}
+	traffic := &xui.ClientTraffic{Up: used, Down: 0, Enable: false, Total: 100 * 1024 * 1024 * 1024, ExpiresAt: 0, Reset: 30, UUID: "reset-client"}
 	svc, bot, _, _, _, sentMsgs := trafficNotifySetup(t, traffic, 100*1024*1024*1024, func(ctx context.Context, req xui.ClientRequest) error {
 		gotEnable = req.Enable
 		return nil
@@ -247,6 +247,75 @@ func TestProcessTrafficNotifications_NoNodesRespondNoop(t *testing.T) {
 	sub := &database.Subscription{ID: 13, TelegramID: 123463, Username: "nodown", PlanID: 1}
 	require.NoError(t, svc.ProcessTrafficNotifications(context.Background(), sub))
 	require.Equal(t, 0, bot.SendCount, "must stay silent when no panel node answered")
+}
+
+func TestProcessTrafficNotifications_NodeBindingErrorSkipsWithoutUpdate(t *testing.T) {
+	t.Parallel()
+
+	used := int64(1) * 1024 * 1024 * 1024
+	traffic := &xui.ClientTraffic{Up: used, Enable: false, Total: 100 * 1024 * 1024 * 1024}
+	svc, bot, db, xuiClient, _, _ := trafficNotifySetup(t, traffic, 100*1024*1024*1024, nil)
+	updated := false
+	xuiClient.UpdateClientFunc = func(ctx context.Context, req xui.ClientRequest) error {
+		updated = true
+		return nil
+	}
+	db.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+		return nil, errors.New("database unavailable")
+	}
+
+	sub := &database.Subscription{ID: 15, TelegramID: 123465, Username: "binding-error", PlanID: 1}
+	err := svc.ProcessTrafficNotifications(context.Background(), sub)
+	require.Error(t, err, "binding lookup errors must be surfaced to the worker")
+	require.False(t, updated, "must not update a client when node bindings cannot be loaded")
+	require.Equal(t, 0, bot.SendCount, "must not notify when node bindings cannot be loaded")
+}
+
+func TestProcessTrafficNotifications_PartialNodeFailureSkipsAction(t *testing.T) {
+	t.Parallel()
+
+	used := int64(1) * 1024 * 1024 * 1024
+	traffic := &xui.ClientTraffic{Up: used, Enable: false, Total: 100 * 1024 * 1024 * 1024, UUID: "client"}
+	var updated bool
+	db := &testutil.DatabaseService{
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return &database.Plan{TrafficLimit: 100 * 1024 * 1024 * 1024}, nil
+		},
+		GetBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			return []database.SubscriptionNode{
+				{NodeID: 1, Status: database.SyncStatusActive},
+				{NodeID: 2, Status: database.SyncStatusActive},
+			}, nil
+		},
+	}
+	client1 := &testutil.XUIClient{
+		GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) { return traffic, nil },
+		UpdateClientFunc:     func(context.Context, xui.ClientRequest) error { updated = true; return nil },
+	}
+	client2 := &testutil.XUIClient{
+		GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) { return nil, errors.New("node unavailable") },
+	}
+	bot := testutil.NewBotAPI()
+	svc := NewSubscriptionService(db, map[uint]interfaces.XUIClient{1: client1, 2: client2}, nil, []database.Node{
+		{ID: 1, IsActive: true, Host: "http://node1", InboundIDs: "[1]"},
+		{ID: 2, IsActive: true, Host: "http://node2", InboundIDs: "[2]"},
+	}, &config.Config{})
+	svc.SetBot(bot)
+
+	sub := &database.Subscription{ID: 16, TelegramID: 123466, Username: "partial", PlanID: 1}
+	require.NoError(t, svc.ProcessTrafficNotifications(context.Background(), sub))
+	require.False(t, updated, "must not re-enable on an incomplete node snapshot")
+	require.Equal(t, 0, bot.SendCount, "must not notify on an incomplete node snapshot")
+}
+
+func TestProcessTrafficNotifications_RejectsInvalidTraffic(t *testing.T) {
+	t.Parallel()
+
+	traffic := &xui.ClientTraffic{Up: -1, Down: 0, Enable: true}
+	svc, bot, _, _, _, _ := trafficNotifySetup(t, traffic, 100*1024*1024*1024, nil)
+	sub := &database.Subscription{ID: 17, TelegramID: 123467, Username: "invalid", PlanID: 1}
+	require.NoError(t, svc.ProcessTrafficNotifications(context.Background(), sub))
+	require.Equal(t, 0, bot.SendCount)
 }
 
 func TestProcessTrafficNotifications_ReenableUpdateErrorNoNotification(t *testing.T) {
