@@ -63,6 +63,9 @@ type SubscriptionQueries interface {
 	GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error)
 	GetAllSubscriptions(ctx context.Context) ([]database.Subscription, error)
 	GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+	// GetActiveSubscriptionsWithTrafficLimit returns active subscriptions whose
+	// plan has a non-zero traffic limit, together with that limit (in bytes).
+	GetActiveSubscriptionsWithTrafficLimit(ctx context.Context) ([]database.SubscriptionTrafficTarget, error)
 }
 
 // SubscriptionCounts retrieves subscription statistics.
@@ -111,6 +114,28 @@ type SubscriptionReminderService interface {
 	SendExpiryReminder(ctx context.Context, sub *database.Subscription, window SubscriptionReminderWindow) error
 }
 
+// TrafficReminderRepository provides the atomic claim/release workflow for
+// traffic-based notifications (90% warning, quota exhausted, reset+reenable).
+// Bits are stored in subscriptions.traffic_reminders_sent.
+type TrafficReminderRepository interface {
+	ClaimTrafficReminder(ctx context.Context, id uint, bit int) (bool, error)
+	ReleaseTrafficReminder(ctx context.Context, id uint, bit int) error
+}
+
+// SubscriptionTrafficRepository supplies the traffic worker with the set of
+// active subscriptions that enforce a traffic quota.
+type SubscriptionTrafficRepository interface {
+	GetActiveSubscriptionsWithTrafficLimit(ctx context.Context) ([]database.SubscriptionTrafficTarget, error)
+}
+
+// SubscriptionTrafficService is the narrow contract the traffic worker needs
+// from the subscription service: it inspects a subscription's live traffic on
+// its active nodes, sends notifications, and re-enables clients whose traffic
+// was exhausted but has since been reset.
+type SubscriptionTrafficService interface {
+	ProcessTrafficNotifications(ctx context.Context, sub *database.Subscription) error
+}
+
 // SubscriptionLastRequest updates the last_request timestamp on subscriptions.
 type SubscriptionLastRequest interface {
 	UpdateLastRequest(ctx context.Context, subscriptionID string) error
@@ -129,6 +154,7 @@ type SubscriptionRepository interface {
 	SubscriptionStatus
 	SubscriptionJSONFields
 	SubscriptionReminderRepository
+	TrafficReminderRepository
 	SubscriptionLastRequest
 	SubscriptionLookup
 }

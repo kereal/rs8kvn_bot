@@ -8,9 +8,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 	"github.com/stretchr/testify/assert"
@@ -138,6 +140,19 @@ func TestFetchClient_AllNoOps(t *testing.T) {
 	assert.NoError(t, client.DeleteSubscription(ctx, provision))
 	assert.NoError(t, client.Close())
 }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type errReadCloser struct {
+	err error
+}
+
+func (e errReadCloser) Read([]byte) (int, error) { return 0, e.err }
+func (e errReadCloser) Close() error             { return nil }
 
 type mockXUIClient struct{}
 
@@ -316,6 +331,39 @@ func TestProxmanClient_BadRequest(t *testing.T) {
 	err := client.CreateSubscription(context.Background(), SubscriptionProvision{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bad request")
+}
+
+func TestProxmanClient_ResponseTooLarge(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, err := io.WriteString(w, strings.Repeat("x", config.MaxResponseSize+1))
+		require.NoError(t, err)
+	}))
+	defer srv.Close()
+
+	client := NewProxmanClient(srv.URL, "test-token")
+	err := client.CreateSubscription(context.Background(), SubscriptionProvision{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "response exceeds")
+}
+
+func TestProxmanClient_ResponseReadError(t *testing.T) {
+	t.Parallel()
+
+	client := NewProxmanClient("http://proxman.invalid", "test-token")
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       errReadCloser{err: errors.New("read failed")},
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	err := client.CreateSubscription(context.Background(), SubscriptionProvision{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read proxman response")
 }
 
 func TestProxmanClient_NotImplemented(t *testing.T) {

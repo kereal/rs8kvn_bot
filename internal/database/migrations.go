@@ -98,7 +98,7 @@ func runMigrations(sqlDB *sql.DB) error {
 		}
 		err = forceMigrationVersion(sqlDB, maxEmbeddedVersion)
 		if err != nil {
-			return fmt.Errorf("collapse legacy migration 37 to 36: %w", err)
+			return fmt.Errorf("collapse legacy migration 37 metadata: %w", err)
 		}
 		versionBefore = uint(maxEmbeddedVersion)
 	}

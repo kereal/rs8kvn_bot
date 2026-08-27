@@ -102,6 +102,7 @@ Everything else only changes subscription status (`revoked`, free-plan downgrade
 - **Never** use `panic` for control flow in handlers or services. Panic recovery exists only at the top level (`main.go`, `handleUpdateSafely`).
 - Always wrap errors with `%w` to preserve the chain for `errors.Is` / `errors.As` checks.
 - Sentinel errors (`database.ErrSubscriptionNotFound`, `xui.ErrClientNotFound`) are the preferred way to signal expected "not found" states. Callers must use `errors.Is` to distinguish them from infrastructure errors.
+- **Traffic notifications** (`SubscriptionService.ProcessTrafficNotifications` / `SubscriptionTrafficWorker`): best-effort on traffic-limited plans only (`traffic_limit > 0`). Per-node failures are `Warn`-logged and skipped; per-subscription failures are `Warn`-logged and the scan continues. The worker NEVER re-enables a client whose quota is still exceeded — exhausted is a pure revenue CTA. It re-enables (via `UpdateClient(Enable=true)`) only when the counter was reset below the limit but the client is still disabled. Idempotency via `traffic_reminders_sent` bitmask (migration 038).
 
 ## graphify
 

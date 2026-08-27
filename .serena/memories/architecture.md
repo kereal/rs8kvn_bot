@@ -2,6 +2,19 @@
 
 **Branch:** `dev`
 
+## Subscription traffic notifications (2026-08)
+- **`SubscriptionTrafficWorker`** (`internal/scheduler/subscription_traffic_worker.go`): performs its first scan immediately after application startup and repeats every **60 min**, scans `GetActiveSubscriptionsWithTrafficLimit`, calls `SubscriptionService.ProcessTrafficNotifications` per subscription. Best-effort: `Error` on repo query failure (aborts scan), `Warn` on per-subscription failure (continues). Negative `telegram_id` (trial) targets are skipped.
+- **`SubscriptionService.ProcessTrafficNotifications`** (`internal/service/subscription_traffic_notifications.go`): polls live 3x-ui nodes (`GetClientTraffic` via node bindings, mirrors `GetWithTraffic`), sums up/down, and switches:
+  1. **90%** (`used ≥ 90% limit`, client enabled): sales text «Осталось меньше 10% трафика» + button `buy_premium_list`.
+  2. **Exhausted** (`used ≥ 100% limit`): message «Доступ приостановлен» (traffic spent + VPN disabled) + Premium button. Client is **NOT** re-enabled (buy Premium CTA instead).
+  3. **Reset+reenable** (`used < limit` but client still disabled): re-enables via `UpdateClient(Enable=true)` and sends simple «трафик сброшен» come-back text **without** Premium button.
+  Below 90% it releases the 90% bit so the warning can fire again if usage climbs back.
+- **Idempotency**: `subscriptions.traffic_reminders_sent` bitmask (migration **038**): `TrafficBit90`=1, `TrafficBitExhausted`=2, `TrafficBitReset`=4. Atomic `ClaimTrafficReminder`/`ReleaseTrafficReminder`; on Telegram send failure the claim is released for retry. Only plans with `traffic_limit > 0`; free/premium (unlimited) plans untouched.
+- **xui Enable flag**: `ClientRequest.Enable *bool` wired into `doUpdateClient` so the worker can set enable/disable; `ClientTraffic.Enable` surfaced by `GetClientTraffic`.
+- **Metrics**: `traffic_notifications_total{kind,result}` (kind: `ninety`/`exhausted`/`reset`), `traffic_notification_runs_total`.
+- **Lifecycle wiring**: registered in `cmd/bot/main.go` (`startBackgroundWorkers`, `recoverAndReport("Subscription traffic worker")`).
+- Note: works with clients the panel **disables but keeps listed** (Enable=false). Clients the panel fully removes return not-found and are skipped/logged.
+
 ## Changes since 2026-07-22
 - **Atomic Platega payment confirm** — `ConfirmOrderPaidCAS` now spans order CAS + subscription update + plan reconciliation in ONE DB transaction via the new `ApplyPlanInTxFn` callback; previously `applyPlan` ran *after* the tx, which let notification fire while plan rows were missing.
 - **Platega callback hardening** — `web.PaymentConfig` (503 when missing), `X-MerchantId`/`X-Secret` constant-time auth with empty-credential rejection, `MaxBytesReader(256 KiB)`, `UseNumber`, UUID-formatted payment ID, strict body (single JSON value). See `internal/web/payment_test.go`.
@@ -65,7 +78,7 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - Password encoding in server links via `url.User` / `url.UserPassword`.
 
 ## Schema
-- Schema: embedded migrations are applied automatically at startup; the current repository includes migrations through 036.
+- Schema: embedded migrations are applied automatically at startup; the current repository includes migrations through 038.
 - `subscriptions.reminders_sent` stores reminder bitmask.
 - `subscription_nodes` machine: `active`, `pending_add`, `pending_remove`, `pending_update`.
 - Paid expiry excludes free/trial plans; reminder query excludes free/trial plans.

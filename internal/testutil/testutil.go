@@ -71,6 +71,7 @@ func NewDatabaseService() *DatabaseService {
 	return &DatabaseService{
 		Subscriptions:     make(map[int64]*database.Subscription),
 		SubscriptionsByID: make(map[uint]*database.Subscription),
+		Plans:             make(map[uint]*database.Plan),
 		Broadcasts:        make(map[uint]*database.Broadcast),
 	}
 }
@@ -80,6 +81,7 @@ type DatabaseService struct {
 	Subscriptions     map[int64]*database.Subscription
 	SubscriptionsByID map[uint]*database.Subscription
 	Products          map[uint]*database.Product
+	Plans             map[uint]*database.Plan
 	Orders            map[uint]*database.Order
 	Broadcasts        map[uint]*database.Broadcast
 
@@ -163,9 +165,12 @@ type DatabaseService struct {
 	UpdateIPsFunc                               func(ctx context.Context, id uint, ipsJSON string) error
 	UpdateLastRequestFunc                       func(ctx context.Context, subscriptionID string) error
 
-	GetSubscriptionsExpiringInRangeFunc func(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
-	ClaimReminderFunc                   func(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
-	ReleaseReminderFunc                 func(ctx context.Context, id uint, bit int, expiresAt time.Time) error
+	GetSubscriptionsExpiringInRangeFunc        func(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
+	ClaimReminderFunc                          func(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
+	ReleaseReminderFunc                        func(ctx context.Context, id uint, bit int, expiresAt time.Time) error
+	GetActiveSubscriptionsWithTrafficLimitFunc func(ctx context.Context) ([]database.SubscriptionTrafficTarget, error)
+	ClaimTrafficReminderFunc                   func(ctx context.Context, id uint, bit int) (bool, error)
+	ReleaseTrafficReminderFunc                 func(ctx context.Context, id uint, bit int) error
 
 	CreateBroadcastFunc                  func(ctx context.Context, b *database.Broadcast) error
 	GetBroadcastFunc                     func(ctx context.Context, id uint) (*database.Broadcast, error)
@@ -1382,7 +1387,34 @@ func (m *DatabaseService) ClaimReminder(ctx context.Context, id uint, bit int, e
 	return true, nil
 }
 
-// ReleaseReminder releases a reminder claim after a failed send.
+// GetActiveSubscriptionsWithTrafficLimit returns active subscriptions with
+// their respective positive plan traffic limits from the shared fake.
+func (m *DatabaseService) GetActiveSubscriptionsWithTrafficLimit(ctx context.Context) ([]database.SubscriptionTrafficTarget, error) {
+	if m.GetActiveSubscriptionsWithTrafficLimitFunc != nil {
+		return m.GetActiveSubscriptionsWithTrafficLimitFunc(ctx)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var out []database.SubscriptionTrafficTarget
+	for _, sub := range m.Subscriptions {
+		if sub.Status != string(database.SubscriptionStatusActive) {
+			continue
+		}
+		plan, ok := m.Plans[sub.PlanID]
+		if !ok {
+			plan, _ = m.GetPlanByID(ctx, sub.PlanID)
+		}
+		if plan == nil || plan.TrafficLimit <= 0 {
+			continue
+		}
+		out = append(out, database.SubscriptionTrafficTarget{Subscription: *sub, TrafficLimit: plan.TrafficLimit})
+	}
+
+	return out, nil
+}
+
 func (m *DatabaseService) ReleaseReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) error {
 	if m.ReleaseReminderFunc != nil {
 		return m.ReleaseReminderFunc(ctx, id, bit, expiresAt)
@@ -1404,6 +1436,59 @@ func (m *DatabaseService) ReleaseReminder(ctx context.Context, id uint, bit int,
 	if sub.TelegramID > 0 {
 		if current, exists := m.Subscriptions[sub.TelegramID]; exists {
 			current.RemindersSent = sub.RemindersSent
+		}
+	}
+
+	return nil
+}
+
+// ClaimTrafficReminder atomically claims a traffic-notification bit in the
+// stateful fake.
+func (m *DatabaseService) ClaimTrafficReminder(ctx context.Context, id uint, bit int) (bool, error) {
+	if m.ClaimTrafficReminderFunc != nil {
+		return m.ClaimTrafficReminderFunc(ctx, id, bit)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sub, ok := m.SubscriptionsByID[id]
+	if !ok {
+		return false, gorm.ErrRecordNotFound
+	}
+
+	if sub.TrafficRemindersSent&bit != 0 {
+		return false, nil
+	}
+
+	sub.TrafficRemindersSent |= bit
+	if sub.TelegramID > 0 {
+		if current, exists := m.Subscriptions[sub.TelegramID]; exists {
+			current.TrafficRemindersSent = sub.TrafficRemindersSent
+		}
+	}
+
+	return true, nil
+}
+
+// ReleaseTrafficReminder clears a traffic-notification bit in the stateful fake.
+func (m *DatabaseService) ReleaseTrafficReminder(ctx context.Context, id uint, bit int) error {
+	if m.ReleaseTrafficReminderFunc != nil {
+		return m.ReleaseTrafficReminderFunc(ctx, id, bit)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sub, ok := m.SubscriptionsByID[id]
+	if !ok {
+		return gorm.ErrRecordNotFound
+	}
+
+	sub.TrafficRemindersSent &^= bit
+	if sub.TelegramID > 0 {
+		if current, exists := m.Subscriptions[sub.TelegramID]; exists {
+			current.TrafficRemindersSent = sub.TrafficRemindersSent
 		}
 	}
 

@@ -95,6 +95,9 @@ type Subscription struct {
 	CreatedAt     time.Time  `gorm:"autoCreateTime"`
 	UpdatedAt     time.Time  `gorm:"autoUpdateTime"`
 	RemindersSent int        `gorm:"not null;default:0"` // bitmask: 1<<0=3d, 1<<1=1d, 1<<2=3h
+	// TrafficRemindersSent — битовая маска отправленных уведомлений о трафике:
+	// 1<<0=90% израсходовано, 1<<1=превышен лимит/отключён, 1<<2=сброшен+включён.
+	TrafficRemindersSent int `gorm:"not null;default:0"`
 
 	Plan    *Plan              `gorm:"foreignKey:PlanID"`
 	Product *Product           `gorm:"foreignKey:ProductID"`
@@ -355,6 +358,15 @@ type SubscriptionFull struct {
 	Subscription Subscription
 	Plan         Plan
 	Nodes        []Node
+}
+
+// SubscriptionTrafficTarget pairs an active subscription with its plan's
+// traffic limit in bytes. TrafficLimit is guaranteed to be > 0; subscriptions
+// on unlimited plans (traffic_limit = 0) are excluded.
+type SubscriptionTrafficTarget struct {
+	Subscription
+
+	TrafficLimit int64
 }
 
 // PoolStats contains database connection pool statistics.
