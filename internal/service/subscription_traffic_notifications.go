@@ -197,17 +197,39 @@ func (s *SubscriptionService) reenableAndNotify(ctx context.Context, sub *databa
 			continue
 		}
 
+		// The panel's traffic endpoint does not return the auto-renew profile
+		// (resetDay/resetMax/trafficReset/trafficResetDay) — it lives in the
+		// client's inbound settings. Without it, UpdateClient would overwrite
+		// the profile with "never" and the monthly traffic reset would stop
+		// firing. Read it back best-effort before re-enabling.
+		profile := &xui.ClientConfig{}
+		if len(n.inbound) > 0 {
+			p, pErr := n.client.GetClientByEmail(ctx, n.inbound[0], n.email)
+			if pErr != nil {
+				logger.Warn("traffic notifications: failed to load client auto-renew profile; panel may reset it on update",
+					zap.Uint("subscription_id", sub.ID),
+					zap.String("email", n.email),
+					zap.Error(pErr))
+			} else if p != nil {
+				profile = p
+			}
+		}
+
 		uErr := n.client.UpdateClient(ctx, xui.ClientRequest{
-			InboundIDs:   n.inbound,
-			Email:        n.email,
-			CurrentEmail: n.email,
-			ClientID:     traffic.UUID,
-			SubID:        traffic.SubID,
-			TrafficBytes: traffic.Total,
-			ExpiryTime:   time.UnixMilli(traffic.ExpiresAt),
-			ResetDays:    traffic.Reset,
-			TgID:         sub.TelegramID,
-			Enable:       boolPtr(true),
+			InboundIDs:      n.inbound,
+			Email:           n.email,
+			CurrentEmail:    n.email,
+			ClientID:        traffic.UUID,
+			SubID:           traffic.SubID,
+			TrafficBytes:    traffic.Total,
+			ExpiryTime:      time.UnixMilli(traffic.ExpiresAt),
+			ResetDays:       traffic.Reset,
+			ResetDay:        profile.ResetDay,
+			ResetMax:        profile.ResetMax,
+			TrafficReset:    profile.TrafficReset,
+			TrafficResetDay: profile.TrafficResetDay,
+			TgID:            sub.TelegramID,
+			Enable:          boolPtr(true),
 		})
 		if uErr != nil {
 			logger.Warn("traffic notifications: failed to re-enable client",

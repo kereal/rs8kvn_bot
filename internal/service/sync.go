@@ -590,13 +590,19 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 			provision.ResetDays = 0
 		} else {
 			provision.ResetDays = -1
+			provision.ResetMax = 0
+			provision.TrafficReset = "monthly"
+			provision.TrafficResetDay = 1
 		}
 
 		if sub.ExpiresAt != nil {
 			provision.ExpiryTime = *sub.ExpiresAt
 		} else {
-			provision.ExpiryTime = time.Now().Truncate(time.Minute).AddDate(0, 0, config.SubscriptionResetDay)
+			provision.ExpiryTime = time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, config.SubscriptionResetDay)
 		}
+		// NB: recovery of an already-expired free client (move expiry to the
+		// next cycle) happens in the xui layer (doUpdateClient), guarded by
+		// resetDays > 0 so trials are never extended here.
 	}
 
 	logger.Debug("updating VPN subscription",
@@ -668,13 +674,18 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 			provision.ResetDays = 0
 		} else {
 			provision.ResetDays = -1
+			provision.ResetMax = 0
+			provision.TrafficReset = "monthly"
+			provision.TrafficResetDay = 1
 		}
 
 		if sub.ExpiresAt != nil {
 			provision.ExpiryTime = *sub.ExpiresAt
 		} else {
-			provision.ExpiryTime = time.Now().Truncate(time.Minute).AddDate(0, 0, config.SubscriptionResetDay)
+			provision.ExpiryTime = time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, config.SubscriptionResetDay)
 		}
+		// Recovery of an already-expired free client is the xui layer's job
+		// (doUpdateClient, resetDays > 0 only); trials must keep their expiry.
 	}
 
 	logger.Debug("creating VPN subscription",

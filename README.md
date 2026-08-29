@@ -129,8 +129,13 @@ Serves merged subscriptions from all active nodes (3x-ui, proxman, fetch) with a
 
 ## Traffic and Expiry
 
-- **Auto-reset**: Every 30 days from creation date — 3x-ui resets traffic to 0 and extends `expiresAt` by 30 days automatically when `expiresAt` > 0
-- **Source**: [3x-ui inbound.go - autoRenewClients()](https://github.com/mhsanaei/3x-ui/blob/main/web/service/inbound.go#L888-L912)
+- Free subscriptions on 3x-ui use the v3.7.0-compatible rolling configuration: `reset=30`, `resetDay=0`, `resetMax=0`, `trafficReset=monthly`, `trafficResetDay=1`.
+- `reset=30` extends the expiry by 30 days; `resetDay=0` deliberately keeps rolling renewal rather than calendar-day renewal.
+- `resetMax=0` means unlimited renewals. `trafficReset=monthly` with `trafficResetDay=1` resets the traffic counter on the first day of each month.
+- Trials explicitly use `reset=0` and do not auto-renew.
+- The bot also repairs an already expired free-client expiry during synchronization; this is a recovery fallback, not a replacement for the panel's scheduled renewal.
+- Existing clients do not need to be recreated. Save the above values once for legacy clients, then let the bot preserve them on subsequent add/update requests.
+- **Source**: [3x-ui inbound_traffic.go - autoRenewClients()](https://github.com/mhsanaei/3x-ui/blob/main/internal/web/service/inbound_traffic.go)
 
 ### Payment Callback (`/payment/callback`)
 

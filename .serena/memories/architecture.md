@@ -2,6 +2,14 @@
 
 **Branch:** `dev`
 
+## 3x-ui v3.7.0 auto-renew (2026-08-29)
+- Free clients are provisioned/updated with `reset=30`, `resetDay=0`, `resetMax=0`, `trafficReset=monthly`, `trafficResetDay=1`, matching the panel payload supplied by the operator.
+- `resetDay=0` intentionally preserves rolling 30-day renewal; calendar renewal is not enabled. `resetMax=0` is unlimited. Trials use `reset=0`.
+- **Verified against 3x-ui sources (main, ~v3.7.0)**: `model.Client` validates `trafficReset ∈ {never,hourly,daily,weekly,monthly}` (`omitempty` → `""` accepted and normalized to `never`), `resetDay ∈ [0,31]` (0 = interval/rolling), `resetMax ≥ 0` (0 = unlimited). `autoRenewClients` (`internal/web/service/inbound_traffic.go`) selects clients by `(reset > 0 or reset_day > 0) and expiry_time <= now` + `reset_max <= 0 or reset_count < reset_max`, renews rolling by `reset*86400000`, resets up/down on renew, and `depletedClientsClause` excludes renew-enabled clients from the operator's purge.
+- The auto-renew profile fields are sent **conditionally**: only when `TrafficReset != ""` (set by the caller in `xui.ClientRequest`). Zero/empty values are never sent, so trials and unlimited plans cannot accidentally overwrite panel settings. **Important**: the panel does NOT merge — an update without `trafficReset` writes `never` into the client (normalizeClientTrafficReset on Create/Update), so every bot update of a limit-plan client must carry the full profile.
+- The panel's `/clients/traffic/{email}` response does NOT include `trafficReset/trafficResetDay` (absent from its `xray.ClientTraffic`), so `reenableAndNotify` reads the profile back via `xui.Client.GetClientByEmail` (inbound settings) before re-enabling; best-effort — on failure it warns and proceeds without the profile.
+- Recovery fallback lives **only in `xui.doUpdateClient`**: an expired client with `resetDays > 0` gets its expiry moved to now + 30 days. Trials (`resetDays == 0`) are never extended; the sync layer (`internal/service/sync.go`) does NOT move expiries itself.
+
 ## Subscription traffic notifications (2026-08)
 - **`SubscriptionTrafficWorker`** (`internal/scheduler/subscription_traffic_worker.go`): performs its first scan immediately after application startup and repeats every **60 min**, scans `GetActiveSubscriptionsWithTrafficLimit`, calls `SubscriptionService.ProcessTrafficNotifications` per subscription. Best-effort: `Error` on repo query failure (aborts scan), `Warn` on per-subscription failure (continues). Negative `telegram_id` (trial) targets are skipped.
 - **`SubscriptionService.ProcessTrafficNotifications`** (`internal/service/subscription_traffic_notifications.go`): polls live 3x-ui nodes (`GetClientTraffic` via node bindings, mirrors `GetWithTraffic`), sums up/down, and switches:

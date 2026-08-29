@@ -12,6 +12,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -141,11 +142,20 @@ func TestProcessTrafficNotifications_ResetAndReenable(t *testing.T) {
 	// by the panel -> the worker must re-enable it and invite the user back.
 	used := int64(1) * 1024 * 1024 * 1024
 	var gotEnable *bool
+	var gotRequest xui.ClientRequest
 	traffic := &xui.ClientTraffic{Up: used, Down: 0, Enable: false, Total: 100 * 1024 * 1024 * 1024, ExpiresAt: 0, Reset: 30, UUID: "reset-client"}
-	svc, bot, db, _, _, sentMsgs := trafficNotifySetup(t, traffic, 100*1024*1024*1024, func(ctx context.Context, req xui.ClientRequest) error {
+	svc, bot, db, xuiClient, _, sentMsgs := trafficNotifySetup(t, traffic, 100*1024*1024*1024, func(ctx context.Context, req xui.ClientRequest) error {
 		gotEnable = req.Enable
+		gotRequest = req
 		return nil
 	})
+	// The panel's traffic endpoint does not return the auto-renew profile, so
+	// the worker must read it back from the client's inbound settings and
+	// forward it, otherwise the re-enable update resets trafficReset to never.
+	xuiClient.GetClientByEmailFunc = func(ctx context.Context, inboundID int, email string) (*xui.ClientConfig, error) {
+		assert.Equal(t, 1, inboundID)
+		return &xui.ClientConfig{Email: email, Reset: 30, ResetDay: 0, ResetMax: 0, TrafficReset: "monthly", TrafficResetDay: 1}, nil
+	}
 	db.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
 		return &database.Subscription{TrafficRemindersSent: database.TrafficBitExhausted}, nil
 	}
@@ -158,6 +168,14 @@ func TestProcessTrafficNotifications_ResetAndReenable(t *testing.T) {
 	require.True(t, *gotEnable)
 	require.GreaterOrEqual(t, bot.SendCount, 1, "reset/come-back notification must be sent")
 	require.False(t, hasPremiumButton(*sentMsgs), "reset/come-back must NOT include a Premium sales button")
+
+	// Re-enabling a free client must preserve its v3.7.0 auto-renew profile,
+	// otherwise the panel would receive zero/empty values and overwrite it.
+	assert.Equal(t, 30, gotRequest.ResetDays)
+	assert.Equal(t, 0, gotRequest.ResetDay)
+	assert.Equal(t, 0, gotRequest.ResetMax)
+	assert.Equal(t, "monthly", gotRequest.TrafficReset)
+	assert.Equal(t, 1, gotRequest.TrafficResetDay)
 }
 
 func TestProcessTrafficNotifications_SkippedWhenBelow90(t *testing.T) {
