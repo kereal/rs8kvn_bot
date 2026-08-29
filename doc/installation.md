@@ -239,6 +239,16 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | `DONATE_ENABLED` | Show "☕ Донат" button in main menu | `true` | ❌ | `true` / `false`; when false the "💎 Premium" button is lifted directly under "📋 Подписка" |
 
 
+### 3x-ui v3.7.0 free-subscription settings
+
+For free clients, the bot sends and preserves the following panel fields:
+
+```json
+{"reset":30,"resetDay":0,"resetMax":0,"trafficReset":"monthly","trafficResetDay":1}
+```
+
+This keeps renewal rolling every 30 days (`resetDay=0`), allows unlimited renewals (`resetMax=0`), and resets traffic on the first day of each month. Trials are sent with `reset=0` and are not renewed. Existing clients do not need to be recreated; update their settings once in the panel. The bot retains a fallback that repairs an expired free-client expiry during synchronization.
+
 ### Adding Nodes via SQL
 
 Nodes are managed through the `nodes` table. To add a new node, insert a row and link it to a plan:

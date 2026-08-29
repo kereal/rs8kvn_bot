@@ -41,16 +41,20 @@ type APIResponse struct {
 
 // ClientConfig — DTO клиента, используемое при создании/обновлении в панели.
 type ClientConfig struct {
-	ID        string `json:"id"`
-	Email     string `json:"email"`
-	LimitIP   int    `json:"limitIp"`
-	TotalGB   int64  `json:"totalGB"`
-	ExpiresAt int64  `json:"expiryTime"`
-	Enable    bool   `json:"enable"`
-	TgID      int64  `json:"tgId"`
-	SubID     string `json:"subId"`
-	Flow      string `json:"flow,omitempty"`
-	Reset     int    `json:"reset,omitempty"`
+	ID              string `json:"id"`
+	Email           string `json:"email"`
+	LimitIP         int    `json:"limitIp"`
+	TotalGB         int64  `json:"totalGB"`
+	ExpiresAt       int64  `json:"expiryTime"`
+	Enable          bool   `json:"enable"`
+	TgID            int64  `json:"tgId"`
+	SubID           string `json:"subId"`
+	Flow            string `json:"flow,omitempty"`
+	Reset           int    `json:"reset,omitempty"`
+	ResetDay        int    `json:"resetDay,omitempty"`
+	ResetMax        int    `json:"resetMax,omitempty"`
+	TrafficReset    string `json:"trafficReset,omitempty"`
+	TrafficResetDay int    `json:"trafficResetDay,omitempty"`
 
 	UUID  string `json:"uuid"`
 	Group string `json:"group"`
@@ -63,16 +67,20 @@ type ClientConfig struct {
 // Using a struct instead of positional parameters prevents identifier-swap bugs
 // (currentEmail vs email vs clientID vs subID are all strings).
 type ClientRequest struct {
-	InboundIDs   []int
-	Email        string    // desired email after the operation
-	CurrentEmail string    // existing email (update only); empty for create
-	ClientID     string    // 3x-ui client UUID
-	SubID        string    // subscription ID surfaced in /sub/{subID}
-	TrafficBytes int64     // totalGB limit in bytes
-	ExpiryTime   time.Time // zero = no expiry
-	ResetDays    int       // traffic reset period; negative = use default
-	TgID         int64     // Telegram user id for panel binding (0 = none)
-	Comment      string    // free-form comment stored in the panel
+	InboundIDs      []int
+	Email           string    // desired email after the operation
+	CurrentEmail    string    // existing email (update only); empty for create
+	ClientID        string    // 3x-ui client UUID
+	SubID           string    // subscription ID surfaced in /sub/{subID}
+	TrafficBytes    int64     // totalGB limit in bytes
+	ExpiryTime      time.Time // zero = no expiry
+	ResetDays       int       // legacy auto-renew interval; negative = use default
+	ResetDay        int       // calendar day for the monthly traffic reset
+	ResetMax        int       // maximum renewals; 0 = unlimited
+	TrafficReset    string    // v3.7.0 traffic reset mode, e.g. "monthly"
+	TrafficResetDay int       // v3.7.0 monthly reset day
+	TgID            int64     // Telegram user id for panel binding (0 = none)
+	Comment         string    // free-form comment stored in the panel
 	// Enable optionally overrides the client enabled flag on update.
 	// nil keeps the backward-compatible default (true). Primarily used to
 	// re-enable a client that the panel disabled after its traffic quota was
@@ -82,19 +90,23 @@ type ClientRequest struct {
 
 // ClientTraffic — DTO трафика клиента, возвращаемого панелью.
 type ClientTraffic struct {
-	ID         int    `json:"id"`
-	InboundID  int    `json:"inboundId"`
-	Enable     bool   `json:"enable"`
-	Email      string `json:"email"`
-	UUID       string `json:"uuid"`
-	SubID      string `json:"subId"`
-	Up         int64  `json:"up"`
-	Down       int64  `json:"down"`
-	AllTime    int64  `json:"allTime"`
-	ExpiresAt  int64  `json:"expiryTime"`
-	Total      int64  `json:"total"`
-	Reset      int    `json:"reset"`
-	LastOnline int64  `json:"lastOnline"`
+	ID              int    `json:"id"`
+	InboundID       int    `json:"inboundId"`
+	Enable          bool   `json:"enable"`
+	Email           string `json:"email"`
+	UUID            string `json:"uuid"`
+	SubID           string `json:"subId"`
+	Up              int64  `json:"up"`
+	Down            int64  `json:"down"`
+	AllTime         int64  `json:"allTime"`
+	ExpiresAt       int64  `json:"expiryTime"`
+	Total           int64  `json:"total"`
+	Reset           int    `json:"reset"`
+	ResetDay        int    `json:"resetDay"`
+	ResetMax        int    `json:"resetMax"`
+	TrafficReset    string `json:"trafficReset"`
+	TrafficResetDay int    `json:"trafficResetDay"`
+	LastOnline      int64  `json:"lastOnline"`
 }
 
 // Inbound — DTO inbound-записи из панели 3x-ui.
@@ -440,6 +452,17 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, req Cl
 		"reset":      req.ResetDays,
 		"tgId":       tgID,
 	}
+	// 3x-ui v3.7.0 auto-renew profile (resetDay/resetMax/trafficReset/
+	// trafficResetDay) is sent only when the caller configured it
+	// (TrafficReset != ""). Sending zero/empty values unconditionally would
+	// overwrite panel settings of clients provisioned without this profile
+	// (trials, unlimited plans) and risks an invalid empty trafficReset.
+	if req.TrafficReset != "" {
+		clientObj["resetDay"] = req.ResetDay
+		clientObj["resetMax"] = req.ResetMax
+		clientObj["trafficReset"] = req.TrafficReset
+		clientObj["trafficResetDay"] = req.TrafficResetDay
+	}
 
 	addURL := fmt.Sprintf("%s/panel/api/clients/add", c.host)
 
@@ -570,6 +593,15 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, req Clien
 		resetDays = config.SubscriptionResetDay
 	}
 
+	// 3x-ui v3.7.0 no longer treats a regular client update as an auto-renew
+	// operation. The panel's reset job is keyed by reset + a non-zero expiry;
+	// send the renewal interval explicitly and move expiry to the next cycle.
+	// This is the single recovery fallback for expired free clients: trials
+	// (resetDays == 0) are intentionally left untouched.
+	if resetDays > 0 && !req.ExpiryTime.IsZero() && req.ExpiryTime.Before(time.Now().UTC()) {
+		req.ExpiryTime = time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, resetDays)
+	}
+
 	clientObj := map[string]any{
 		"id":         req.ClientID,
 		"email":      req.Email,
@@ -582,6 +614,13 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, req Clien
 		"reset":      resetDays,
 		"tgId":       req.TgID,
 		"comment":    req.Comment,
+	}
+	// Auto-renew profile fields are sent only when configured (see doAddClientWithID).
+	if req.TrafficReset != "" {
+		clientObj["resetDay"] = req.ResetDay
+		clientObj["resetMax"] = req.ResetMax
+		clientObj["trafficReset"] = req.TrafficReset
+		clientObj["trafficResetDay"] = req.TrafficResetDay
 	}
 
 	if req.Enable != nil {
@@ -665,6 +704,60 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 	}
 
 	return &traffic, nil
+}
+
+// GetClientByEmail возвращает конфигурацию клиента по email, ища его в
+// settings указанного inbound. /panel/api/clients/traffic не отдаёт
+// auto-renew профиль (resetDay/resetMax/trafficReset/trafficResetDay),
+// поэтому единственный способ прочитать эти поля — inbound settings.
+// Возвращает ErrClientNotFound, если клиент не найден.
+func (c *Client) GetClientByEmail(ctx context.Context, inboundID int, email string) (*ClientConfig, error) {
+	var result *ClientConfig
+
+	err := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+		var innerErr error
+
+		result, innerErr = c.doGetClientByEmail(ctx, inboundID, email)
+
+		return innerErr
+	})
+
+	return result, err
+}
+
+// doGetClientByEmail выполняет поиск клиента в settings инбаунда.
+func (c *Client) doGetClientByEmail(ctx context.Context, inboundID int, email string) (*ClientConfig, error) {
+	inbound, err := c.doGetInbound(ctx, inboundID)
+	if err != nil {
+		return nil, fmt.Errorf("get client %s on inbound %d: %w", email, inboundID, err)
+	}
+
+	var settings struct {
+		Clients []ClientConfig `json:"clients"`
+	}
+	// Try modern format: settings is already a JSON object.
+	err = json.Unmarshal(inbound.Settings, &settings)
+	if err != nil {
+		// Fallback for old format: settings is a JSON-encoded string (legacy panel).
+		var rawStr string
+		uErr := json.Unmarshal(inbound.Settings, &rawStr)
+		if uErr != nil {
+			return nil, fmt.Errorf("parse inbound settings for client %s on inbound %d: %w", email, inboundID, uErr)
+		}
+		cleaned := strings.ReplaceAll(rawStr, "\\n", "\n")
+		uErr = json.Unmarshal([]byte(cleaned), &settings)
+		if uErr != nil {
+			return nil, fmt.Errorf("parse inbound settings for client %s on inbound %d: %w", email, inboundID, uErr)
+		}
+	}
+
+	for i := range settings.Clients {
+		if strings.EqualFold(settings.Clients[i].Email, email) {
+			return &settings.Clients[i], nil
+		}
+	}
+
+	return nil, fmt.Errorf("search client %s in inbound %d: %w", email, inboundID, ErrClientNotFound)
 }
 
 // GetInbound запрашивает данные inbound по его ID у панели.
