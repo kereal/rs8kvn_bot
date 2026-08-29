@@ -530,6 +530,77 @@ func TestSyncService_SyncSubscription_PendingAdd_UnlimitedPlan(t *testing.T) {
 	assert.True(t, mockVPN.createProvision.ExpiryTime.IsZero(), "ExpiryTime must be zero for unlimited plan")
 }
 
+func TestSyncService_SyncPendingAdd_KeepsExpiredExpiry(t *testing.T) {
+	t.Parallel()
+
+	// The sync layer must NOT move an already-expired expiry by itself: trials
+	// must never be extended, and free-client recovery is the xui layer's job
+	// (doUpdateClient, guarded by resetDays > 0).
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	node1 := &database.Node{Name: "sync-expired-node", IsActive: true, Host: "http://se", APIToken: "te", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+
+	expired := testutil.PtrTime(time.Now().Add(-time.Hour))
+
+	t.Run("free_plan", func(t *testing.T) {
+		plan := &database.Plan{Name: "test-plan-sync-expired-free", DevicesLimit: 1, TrafficLimit: 1024}
+		require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+		require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+		sub := &database.Subscription{
+			TelegramID:     9101,
+			Username:       "expiredfree",
+			ClientID:       "c-expiredfree",
+			SubscriptionID: "s-expiredfree",
+			Status:         "active",
+			PlanID:         plan.ID,
+			ExpiresAt:      expired,
+		}
+		require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+		require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
+
+		mockVPN := &mockVPNClient{}
+		svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+
+		require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+		assert.True(t, mockVPN.createCalled)
+		assert.True(t, mockVPN.createProvision.ExpiryTime.Equal(*expired), "sync must not extend an expired free client; recovery happens in the xui update layer")
+		assert.Equal(t, "monthly", mockVPN.createProvision.TrafficReset)
+	})
+
+	t.Run("trial_plan", func(t *testing.T) {
+		// The trial plan is seeded by database.NewService; reuse it instead of
+		// creating a duplicate (plans.name is unique).
+		plan, err := db.GetPlanByName(ctx, database.TrialPlanName)
+		require.NoError(t, err)
+		require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+		sub := &database.Subscription{
+			TelegramID:     9102,
+			Username:       "expiredtrial",
+			ClientID:       "c-expiredtrial",
+			SubscriptionID: "s-expiredtrial",
+			Status:         "active",
+			PlanID:         plan.ID,
+			ExpiresAt:      expired,
+		}
+		require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+		require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
+
+		mockVPN := &mockVPNClient{}
+		svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+
+		require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+		assert.True(t, mockVPN.createCalled)
+		assert.True(t, mockVPN.createProvision.ExpiryTime.Equal(*expired), "sync must never extend an expired trial")
+		assert.Equal(t, 0, mockVPN.createProvision.ResetDays, "trials must keep reset=0")
+	})
+}
+
 func TestSyncService_SyncSubscription_PendingRemove(t *testing.T) {
 	t.Parallel()
 

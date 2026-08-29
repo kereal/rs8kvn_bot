@@ -164,6 +164,10 @@ func (m *mockXUIClient) GetClientTraffic(ctx context.Context, email string) (*xu
 	return nil, nil
 }
 
+func (m *mockXUIClient) GetClientByEmail(ctx context.Context, inboundID int, email string) (*xui.ClientConfig, error) {
+	return nil, nil
+}
+
 func (m *mockXUIClient) AddClient(ctx context.Context, inboundIDs []int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error) {
 	return nil, nil
 }

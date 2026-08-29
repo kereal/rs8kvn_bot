@@ -197,17 +197,57 @@ func (s *SubscriptionService) reenableAndNotify(ctx context.Context, sub *databa
 			continue
 		}
 
+		// The panel's traffic endpoint does not return the auto-renew profile
+		// (resetDay/resetMax/trafficReset/trafficResetDay) — it lives in the
+		// client's inbound settings. Without it, UpdateClient would overwrite
+		// the profile with "never" and the monthly traffic reset would stop
+		// firing. Read it back best-effort before re-enabling.
+		//
+		// Distinguish ErrClientNotFound (client truly gone — safe to treat as
+		// "no profile" and pass empty values) from infrastructure errors
+		// (network/parse — must skip UpdateClient so the next retry can read
+		// the profile again). A nil response without an error is treated like
+		// a transient miss: skip UpdateClient rather than risk overwriting the
+		// panel profile with zeroes.
+		profile := &xui.ClientConfig{}
+		if len(n.inbound) > 0 {
+			p, pErr := n.client.GetClientByEmail(ctx, n.inbound[0], n.email)
+			switch {
+			case errors.Is(pErr, xui.ErrClientNotFound):
+				// Client fully removed on the panel — keep empty profile.
+			case pErr != nil:
+				logger.Warn("traffic notifications: failed to load client auto-renew profile; skipping update to retry later",
+					zap.Uint("subscription_id", sub.ID),
+					zap.Uint("node_id", n.nodeID),
+					zap.String("email", n.email),
+					zap.Error(pErr))
+				continue
+			case p == nil:
+				logger.Warn("traffic notifications: client profile was nil without error; skipping update to retry later",
+					zap.Uint("subscription_id", sub.ID),
+					zap.Uint("node_id", n.nodeID),
+					zap.String("email", n.email))
+				continue
+			default:
+				profile = p
+			}
+		}
+
 		uErr := n.client.UpdateClient(ctx, xui.ClientRequest{
-			InboundIDs:   n.inbound,
-			Email:        n.email,
-			CurrentEmail: n.email,
-			ClientID:     traffic.UUID,
-			SubID:        traffic.SubID,
-			TrafficBytes: traffic.Total,
-			ExpiryTime:   time.UnixMilli(traffic.ExpiresAt),
-			ResetDays:    traffic.Reset,
-			TgID:         sub.TelegramID,
-			Enable:       boolPtr(true),
+			InboundIDs:      n.inbound,
+			Email:           n.email,
+			CurrentEmail:    n.email,
+			ClientID:        traffic.UUID,
+			SubID:           traffic.SubID,
+			TrafficBytes:    traffic.Total,
+			ExpiryTime:      time.UnixMilli(traffic.ExpiresAt),
+			ResetDays:       traffic.Reset,
+			ResetDay:        profile.ResetDay,
+			ResetMax:        profile.ResetMax,
+			TrafficReset:    profile.TrafficReset,
+			TrafficResetDay: profile.TrafficResetDay,
+			TgID:            sub.TelegramID,
+			Enable:          boolPtr(true),
 		})
 		if uErr != nil {
 			logger.Warn("traffic notifications: failed to re-enable client",

@@ -42,7 +42,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Таблица `subscription_nodes` — очередь реальной синхронизации подписки×нода (`active|pending_add|pending_remove|pending_update`)
 - SyncService с state machine, retry logic (exponential backoff), per-subscription locking
 - VPN Client abstraction (`internal/vpn`) — поддержка 3x-ui и proxman нод
-- Авто-продление на 30-й день (через `SubscriptionResetDay` в x-ui)
+- Авто-продление free-подписок через совместимый с 3x-ui v3.7.0 rolling-профиль: `reset=30`, `resetDay=0`, `resetMax=0`, `trafficReset=monthly`, `trafficResetDay=1`; trial использует `reset=0`
 - Реферальная система: in-memory cache + периодический sync
 - Админ-уведомления, heartbeat, health endpoints (`/healthz`, `/readyz`)
 - Hysteria2/Clash port-hopping нормализация: `firstPortFromPorts` берёт первый конкретный порт из `ports`/диапазона
@@ -84,6 +84,16 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Продающие тексты с кнопкой `buy_premium_list` для 90%/исчерпан; у сброса — без продажи.
 - Миграция 038 `subscriptions.traffic_reminders_sent`.
 - Тесты: xui (Enable true/false + декодирование), БД (claim/release/выборка с лимитом), service (4 сценария + кнопка Premium), scheduler (worker: итерация/skip trial/continue-on-error/repo error). До этого был детальный обзор истории, удалён ненужный legacy-коллапс, `totalGB` оставлен как есть.
+
+## 3x-ui v3.7.0 auto-renew (2026-08-29)
+- Уточнён контракт панели по фактическому payload: `reset` — интервал продления, `resetDay=0` — rolling-режим, `resetMax=0` — без лимита, `trafficReset=monthly`, `trafficResetDay=1` — ежемесячный сброс 1-го числа.
+- **Проверено по исходникам панели (main, ~v3.7.0)**: `model.Client` — `trafficReset ∈ {never,hourly,daily,weekly,monthly}` (пустая строка принимается и нормализуется в `never`), `resetDay ∈ [0,31]` (0 = rolling), `resetMax ≥ 0` (0 = безлимит); `autoRenewClients` (`internal/web/service/inbound_traffic.go`) продлевает rolling-клиентов на `reset*86400000`, сбрасывает up/down; клиенты с `reset>0`/`reset_day>0` не удаляются purge'ом (`depletedClientsClause`).
+- `xui.ClientRequest`, `vpn.SubscriptionProvision` и адаптер 3x-ui передают эти поля при add/update; free-подписки получают профиль, trial — `reset=0` без автопродления.
+- Поля профиля отправляются **условно**: только когда задан `TrafficReset != ""`. Панель при update **не мержит** — отсутствующий `trafficReset` пишется как `never` (`normalizeClientTrafficReset`), поэтому каждый update лимитированного плана обязан слать полный профиль.
+- `/clients/traffic/{email}` не отдаёт `trafficReset/trafficResetDay`, поэтому `reenableAndNotify` читает профиль через новый `xui.Client.GetClientByEmail` (inbound settings) — best-effort: при ошибке Warn и продолжение без профиля.
+- Fallback восстановления срока — только в `xui.doUpdateClient` (guard `resetDays > 0`): истёкший free-клиент получает срок now + 30 дней; trial никогда не продлевается; sync-слой срок не двигает.
+- Существующих клиентов пересоздавать не нужно; их достаточно один раз сохранить с указанными параметрами панели.
+- Регрессионные тесты: JSON payload (add/update), условная отправка полей, неизменность неистёкшего срока, восстановление истёкшего, проброс профиля в traffic-воркере через `GetClientByEmail`, тесты самого `GetClientByEmail` (modern/legacy settings), sync не продлевает trial. `go test ./...` проходит (2124).
 
 ## Последние изменения (2026-08-26, ветка feat/broadcast-campaigns)
 - **ResetTraffic при смене тарифа**: `vpn.Client.ResetTraffic` (3x-ui POST `/panel/api/clients/resetTraffic/{email}`; proxman/fetch — no-op). Вызывается в `processPendingUpdate` после update, **best-effort** (Warn при ошибке, не блокирует переход в `active`).
