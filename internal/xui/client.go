@@ -729,7 +729,7 @@ func (c *Client) GetClientByEmail(ctx context.Context, inboundID int, email stri
 func (c *Client) doGetClientByEmail(ctx context.Context, inboundID int, email string) (*ClientConfig, error) {
 	inbound, err := c.doGetInbound(ctx, inboundID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client %s on inbound %d: %w", email, inboundID, err)
 	}
 
 	var settings struct {
@@ -742,12 +742,12 @@ func (c *Client) doGetClientByEmail(ctx context.Context, inboundID int, email st
 		var rawStr string
 		uErr := json.Unmarshal(inbound.Settings, &rawStr)
 		if uErr != nil {
-			return nil, fmt.Errorf("parse inbound settings for client %s: %w", email, uErr)
+			return nil, fmt.Errorf("parse inbound settings for client %s on inbound %d: %w", email, inboundID, uErr)
 		}
 		cleaned := strings.ReplaceAll(rawStr, "\\n", "\n")
 		uErr = json.Unmarshal([]byte(cleaned), &settings)
 		if uErr != nil {
-			return nil, fmt.Errorf("parse inbound settings for client %s: %w", email, uErr)
+			return nil, fmt.Errorf("parse inbound settings for client %s on inbound %d: %w", email, inboundID, uErr)
 		}
 	}
 
@@ -757,7 +757,7 @@ func (c *Client) doGetClientByEmail(ctx context.Context, inboundID int, email st
 		}
 	}
 
-	return nil, ErrClientNotFound
+	return nil, fmt.Errorf("search client %s in inbound %d: %w", email, inboundID, ErrClientNotFound)
 }
 
 // GetInbound запрашивает данные inbound по его ID у панели.

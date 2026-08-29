@@ -154,7 +154,7 @@ func TestProcessTrafficNotifications_ResetAndReenable(t *testing.T) {
 	// forward it, otherwise the re-enable update resets trafficReset to never.
 	xuiClient.GetClientByEmailFunc = func(ctx context.Context, inboundID int, email string) (*xui.ClientConfig, error) {
 		assert.Equal(t, 1, inboundID)
-		return &xui.ClientConfig{Email: email, Reset: 30, ResetDay: 0, ResetMax: 0, TrafficReset: "monthly", TrafficResetDay: 1}, nil
+		return &xui.ClientConfig{Email: email, Reset: 30, ResetDay: 5, ResetMax: 3, TrafficReset: "monthly", TrafficResetDay: 1}, nil
 	}
 	db.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
 		return &database.Subscription{TrafficRemindersSent: database.TrafficBitExhausted}, nil
@@ -172,8 +172,8 @@ func TestProcessTrafficNotifications_ResetAndReenable(t *testing.T) {
 	// Re-enabling a free client must preserve its v3.7.0 auto-renew profile,
 	// otherwise the panel would receive zero/empty values and overwrite it.
 	assert.Equal(t, 30, gotRequest.ResetDays)
-	assert.Equal(t, 0, gotRequest.ResetDay)
-	assert.Equal(t, 0, gotRequest.ResetMax)
+	assert.Equal(t, 5, gotRequest.ResetDay, "ResetDay must be propagated from inbound profile, not zero")
+	assert.Equal(t, 3, gotRequest.ResetMax, "ResetMax must be propagated from inbound profile, not zero")
 	assert.Equal(t, "monthly", gotRequest.TrafficReset)
 	assert.Equal(t, 1, gotRequest.TrafficResetDay)
 }
