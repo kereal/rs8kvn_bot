@@ -81,6 +81,10 @@ func (f *fakeXUIClient) GetClientTraffic(ctx context.Context, email string) (*xu
 	return nil, nil
 }
 
+func (f *fakeXUIClient) GetClientByEmail(ctx context.Context, inboundID int, email string) (*xui.ClientConfig, error) {
+	return nil, nil
+}
+
 func (f *fakeXUIClient) GetSubscriptionLink(host, subID, subPath string) string {
 	return ""
 }

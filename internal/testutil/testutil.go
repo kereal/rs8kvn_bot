@@ -1813,6 +1813,7 @@ type XUIClient struct {
 	UpdateClientFunc        func(ctx context.Context, req xui.ClientRequest) error
 	DeleteClientFunc        func(ctx context.Context, email string) error
 	GetClientTrafficFunc    func(ctx context.Context, email string) (*xui.ClientTraffic, error)
+	GetClientByEmailFunc    func(ctx context.Context, inboundID int, email string) (*xui.ClientConfig, error)
 	GetSubscriptionLinkFunc func(host, subID, subPath string) string
 	GetExternalURLFunc      func(host string) string
 
@@ -1910,6 +1911,14 @@ func (m *XUIClient) GetClientTraffic(ctx context.Context, email string) (*xui.Cl
 		Up:   1024 * 1024 * 100,
 		Down: 1024 * 1024 * 200,
 	}, nil
+}
+
+func (m *XUIClient) GetClientByEmail(ctx context.Context, inboundID int, email string) (*xui.ClientConfig, error) {
+	if m.GetClientByEmailFunc != nil {
+		return m.GetClientByEmailFunc(ctx, inboundID, email)
+	}
+
+	return nil, xui.ErrClientNotFound
 }
 
 func (m *XUIClient) GetSubscriptionLink(host, subID, subPath string) string {

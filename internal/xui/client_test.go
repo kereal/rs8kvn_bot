@@ -648,6 +648,115 @@ func TestAddClientWithID(t *testing.T) {
 		assert.Equal(t, 0, result.Reset, "ResetDays=0 must stay 0")
 	})
 
+	t.Run("expired_update_moves_expiry_to_next_reset_cycle", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/inbounds/get/") {
+				fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
+				return
+			}
+			if r.Method == http.MethodGet || !strings.Contains(r.URL.Path, "/update/") {
+				fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+				return
+			}
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal(body, &payload))
+			assert.Equal(t, float64(config.SubscriptionResetDay), payload["reset"])
+			assert.Equal(t, float64(0), payload["resetDay"])
+			assert.Equal(t, float64(0), payload["resetMax"])
+			assert.Equal(t, "monthly", payload["trafficReset"])
+			assert.Equal(t, float64(1), payload["trafficResetDay"])
+			expiry, ok := payload["expiryTime"].(float64)
+			require.True(t, ok)
+			assert.Greater(t, expiry, float64(time.Now().UnixMilli()))
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(server.URL, testAPIToken)
+		require.NoError(t, err)
+		defer client.Close()
+
+		err = client.UpdateClient(context.Background(), ClientRequest{
+			InboundIDs: []int{1}, CurrentEmail: "expired@example.com", Email: "expired@example.com",
+			ClientID: "expired-uuid", SubID: "expired-sub", TrafficBytes: 1 << 30,
+			ExpiryTime: time.Now().Add(-time.Hour), ResetDays: -1, TrafficReset: "monthly", TrafficResetDay: 1,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("add_free_profile_sends_auto_renew_fields", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "get/") {
+				fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
+				return
+			}
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			var wrapper struct {
+				Client map[string]any `json:"client"`
+			}
+			require.NoError(t, json.Unmarshal(body, &wrapper))
+			assert.Equal(t, float64(config.SubscriptionResetDay), wrapper.Client["reset"])
+			assert.Equal(t, float64(0), wrapper.Client["resetDay"])
+			assert.Equal(t, float64(0), wrapper.Client["resetMax"])
+			assert.Equal(t, "monthly", wrapper.Client["trafficReset"])
+			assert.Equal(t, float64(1), wrapper.Client["trafficResetDay"])
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(server.URL, testAPIToken)
+		require.NoError(t, err)
+		defer client.Close()
+
+		_, err = client.AddClientWithID(context.Background(), ClientRequest{
+			InboundIDs: []int{1}, Email: "free@example.com", ClientID: "free-uuid", SubID: "free-sub",
+			TrafficBytes: 1 << 30, ExpiryTime: time.Now().Add(24 * time.Hour),
+			ResetDays: -1, ResetDay: 0, ResetMax: 0, TrafficReset: "monthly", TrafficResetDay: 1,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("add_without_profile_omits_auto_renew_fields", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "get/") {
+				fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
+				return
+			}
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			var wrapper struct {
+				Client map[string]any `json:"client"`
+			}
+			require.NoError(t, json.Unmarshal(body, &wrapper))
+			_, hasResetDay := wrapper.Client["resetDay"]
+			_, hasResetMax := wrapper.Client["resetMax"]
+			_, hasTrafficReset := wrapper.Client["trafficReset"]
+			_, hasTrafficResetDay := wrapper.Client["trafficResetDay"]
+			assert.False(t, hasResetDay, "resetDay must be omitted without an auto-renew profile")
+			assert.False(t, hasResetMax, "resetMax must be omitted without an auto-renew profile")
+			assert.False(t, hasTrafficReset, "trafficReset must be omitted without an auto-renew profile")
+			assert.False(t, hasTrafficResetDay, "trafficResetDay must be omitted without an auto-renew profile")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(server.URL, testAPIToken)
+		require.NoError(t, err)
+		defer client.Close()
+
+		_, err = client.AddClientWithID(context.Background(), ClientRequest{
+			InboundIDs: []int{1}, Email: "plain@example.com", ClientID: "plain-uuid", SubID: "plain-sub",
+			TrafficBytes: 1 << 30, ExpiryTime: time.Now().Add(24 * time.Hour), ResetDays: -1,
+		})
+		require.NoError(t, err)
+	})
+
 	t.Run("reset_days_negative_normalized", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.Contains(r.URL.Path, "get/") {
@@ -795,6 +904,74 @@ func TestUpdateClient(t *testing.T) {
 		err = client.UpdateClient(context.Background(), ClientRequest{InboundIDs: []int{1}, CurrentEmail: "current-email", ClientID: "test-uuid", Email: "email", SubID: "sub", TrafficBytes: 0, ExpiryTime: time.Time{}, ResetDays: -1, TgID: 0, Comment: ""})
 		assert.Error(t, err)
 	})
+
+	t.Run("non_expired_update_keeps_expiry", func(t *testing.T) {
+		// A client whose expiry is still in the future must keep it: the
+		// recovery fallback only moves already-expired free clients.
+		future := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Millisecond)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "get/") {
+				fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
+				return
+			}
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal(body, &payload))
+			expiry, ok := payload["expiryTime"].(float64)
+			require.True(t, ok)
+			assert.Equal(t, float64(future.UnixMilli()), expiry, "non-expired expiry must not be moved")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(server.URL, testAPIToken)
+		require.NoError(t, err)
+		defer client.Close()
+
+		err = client.UpdateClient(context.Background(), ClientRequest{
+			InboundIDs: []int{1}, CurrentEmail: "future@example.com", Email: "future@example.com",
+			ClientID: "future-uuid", SubID: "future-sub", TrafficBytes: 1 << 30,
+			ExpiryTime: future, ResetDays: -1, TrafficReset: "monthly", TrafficResetDay: 1,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("update_without_profile_omits_auto_renew_fields", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "get/") {
+				fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
+				return
+			}
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal(body, &payload))
+			_, hasResetDay := payload["resetDay"]
+			_, hasResetMax := payload["resetMax"]
+			_, hasTrafficReset := payload["trafficReset"]
+			_, hasTrafficResetDay := payload["trafficResetDay"]
+			assert.False(t, hasResetDay, "resetDay must be omitted without an auto-renew profile")
+			assert.False(t, hasResetMax, "resetMax must be omitted without an auto-renew profile")
+			assert.False(t, hasTrafficReset, "trafficReset must be omitted without an auto-renew profile")
+			assert.False(t, hasTrafficResetDay, "trafficResetDay must be omitted without an auto-renew profile")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(server.URL, testAPIToken)
+		require.NoError(t, err)
+		defer client.Close()
+
+		err = client.UpdateClient(context.Background(), ClientRequest{
+			InboundIDs: []int{1}, CurrentEmail: "plain@example.com", Email: "plain@example.com",
+			ClientID: "plain-uuid", SubID: "plain-sub", TrafficBytes: 1 << 30,
+			ExpiryTime: time.Now().Add(24 * time.Hour), ResetDays: -1,
+		})
+		require.NoError(t, err)
+	})
 }
 
 func TestGetClientTraffic(t *testing.T) {
@@ -858,6 +1035,91 @@ func TestGetClientTraffic(t *testing.T) {
 
 		_, err = client.GetClientTraffic(context.Background(), "test@example.com")
 		assert.Error(t, err)
+	})
+}
+
+func TestGetClientByEmail(t *testing.T) {
+	t.Parallel()
+
+	if testing.Short() {
+		t.Skip("Skipping slow test in short mode")
+	}
+
+	const settingsJSON = `{"clients":[{"id":"uuid-1","email":"alpha@example.com","enable":true,"totalGB":1073741824,"expiryTime":0,"reset":30,"resetDay":0,"resetMax":0,"trafficReset":"monthly","trafficResetDay":1},{"id":"uuid-2","email":"beta@example.com","enable":false,"totalGB":0,"expiryTime":0,"reset":0}]}`
+
+	t.Run("success", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/panel/api/inbounds/get/1", r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"settings":%s}}`, settingsJSON)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(server.URL, testAPIToken)
+		require.NoError(t, err)
+		defer client.Close()
+
+		cfg, err := client.GetClientByEmail(context.Background(), 1, "alpha@example.com")
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		assert.Equal(t, "uuid-1", cfg.ID)
+		assert.Equal(t, 30, cfg.Reset)
+		assert.Equal(t, 0, cfg.ResetDay)
+		assert.Equal(t, 0, cfg.ResetMax)
+		assert.Equal(t, "monthly", cfg.TrafficReset)
+		assert.Equal(t, 1, cfg.TrafficResetDay)
+	})
+
+	t.Run("legacy escaped settings string", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"settings":%q}}`, settingsJSON)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(server.URL, testAPIToken)
+		require.NoError(t, err)
+		defer client.Close()
+
+		cfg, err := client.GetClientByEmail(context.Background(), 1, "alpha@example.com")
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		assert.Equal(t, "monthly", cfg.TrafficReset)
+	})
+
+	t.Run("email match is case-insensitive", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"settings":%s}}`, settingsJSON)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(server.URL, testAPIToken)
+		require.NoError(t, err)
+		defer client.Close()
+
+		cfg, err := client.GetClientByEmail(context.Background(), 1, "ALPHA@example.com")
+		require.NoError(t, err)
+		assert.Equal(t, "alpha@example.com", cfg.Email)
+	})
+
+	t.Run("client not found", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"settings":%s}}`, settingsJSON)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(server.URL, testAPIToken)
+		require.NoError(t, err)
+		defer client.Close()
+
+		_, err = client.GetClientByEmail(context.Background(), 1, "ghost@example.com")
+		assert.ErrorIs(t, err, ErrClientNotFound)
 	})
 }
 

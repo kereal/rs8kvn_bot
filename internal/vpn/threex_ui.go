@@ -24,15 +24,19 @@ func NewThreeXUIClient(client interfaces.XUIClient, inboundIDs []int) *ThreeXUIC
 // CreateSubscription adds a client on the 3x-ui panel.
 func (c *ThreeXUIClient) CreateSubscription(ctx context.Context, provision SubscriptionProvision) error {
 	_, err := c.client.AddClientWithID(ctx, xui.ClientRequest{
-		InboundIDs:   c.inboundIDs,
-		Email:        provision.Username,
-		ClientID:     provision.ClientID,
-		SubID:        provision.SubID,
-		TrafficBytes: provision.TrafficBytes,
-		ExpiryTime:   provision.ExpiryTime,
-		ResetDays:    provision.ResetDays,
-		TgID:         provision.TgID,
-		Comment:      provision.Comment,
+		InboundIDs:      c.inboundIDs,
+		Email:           provision.Username,
+		ClientID:        provision.ClientID,
+		SubID:           provision.SubID,
+		TrafficBytes:    provision.TrafficBytes,
+		ExpiryTime:      provision.ExpiryTime,
+		ResetDays:       provision.ResetDays,
+		ResetDay:        provision.ResetDay,
+		ResetMax:        provision.ResetMax,
+		TrafficReset:    provision.TrafficReset,
+		TrafficResetDay: provision.TrafficResetDay,
+		TgID:            provision.TgID,
+		Comment:         provision.Comment,
 	})
 	if err != nil {
 		return fmt.Errorf("3x-ui create subscription: %w", classifyCreateSubscriptionError(err))
@@ -44,16 +48,20 @@ func (c *ThreeXUIClient) CreateSubscription(ctx context.Context, provision Subsc
 // UpdateSubscription updates an existing client on the 3x-ui panel.
 func (c *ThreeXUIClient) UpdateSubscription(ctx context.Context, provision SubscriptionProvision) error {
 	err := c.client.UpdateClient(ctx, xui.ClientRequest{
-		InboundIDs:   c.inboundIDs,
-		CurrentEmail: provision.CurrentEmail,
-		ClientID:     provision.ClientID,
-		Email:        provision.Username,
-		SubID:        provision.SubID,
-		TrafficBytes: provision.TrafficBytes,
-		ExpiryTime:   provision.ExpiryTime,
-		ResetDays:    provision.ResetDays,
-		TgID:         provision.TgID,
-		Comment:      provision.Comment,
+		InboundIDs:      c.inboundIDs,
+		CurrentEmail:    provision.CurrentEmail,
+		ClientID:        provision.ClientID,
+		Email:           provision.Username,
+		SubID:           provision.SubID,
+		TrafficBytes:    provision.TrafficBytes,
+		ExpiryTime:      provision.ExpiryTime,
+		ResetDays:       provision.ResetDays,
+		ResetDay:        provision.ResetDay,
+		ResetMax:        provision.ResetMax,
+		TrafficReset:    provision.TrafficReset,
+		TrafficResetDay: provision.TrafficResetDay,
+		TgID:            provision.TgID,
+		Comment:         provision.Comment,
 	})
 	if err != nil {
 		return fmt.Errorf("3x-ui update subscription: %w", classifyCreateSubscriptionError(err))
