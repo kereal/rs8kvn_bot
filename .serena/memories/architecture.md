@@ -86,7 +86,15 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - Password encoding in server links via `url.User` / `url.UserPassword`.
 
 ## Schema
-- Schema: embedded migrations are applied automatically at startup; the current repository includes migrations through 038.
+- Schema: embedded migrations are applied automatically at startup; the current repository includes migrations through 039.
+
+### Audit Log (2026-09-25, migration 039)
+- Universal append-only audit journal: table `audit_log` (`internal/database/audit_log.go` + `audit_log_repo.go`). Entity-addressed: `entity_type` (subscription/order/broadcast/plan/node/product/system) + `entity_id` (TEXT, survives physical deletion — no FK). Actor: `actor_type` (user/admin/worker/payment_provider/system) + `actor_id` (e.g. admin telegram_id via `service.WithAuditAdmin(ctx, id)` context key).
+- Event registry: constants `AuditEvent*` + constructors (`AuditSubscriptionCreated`, `AuditPaymentConfirmed`, `AuditChargebackReceived`, ...) live ONLY in `internal/database/audit_log.go`; no CHECK constraints on event/entity_type — new event = one constant, no migration.
+- Write contract: best-effort via service `logAudit` wrappers (Warn on failure, never breaks business flow); EXCEPTION: payment transactions (`ConfirmOrderPaidCAS`, `CancelPaidOrderAndDowngradeCAS`) write via `InsertAuditLogInTx(tx, ...)` — atomic with the order/subscription transition, rolled back together.
+- Read API: `GetAuditLogByEntity` / `GetAuditLogByEvent` / `GetRecentAuditLog`.
+- NOT logged: /sub touches (devices/ips/last_request), per-item worker Warn retries, no-op traffic scans. Technical events are per-run aggregates only (`sync_run_degraded`, `orphaned_clients_revoked`).
+- Testutil fake records into `DatabaseService.AuditLogs` with helper `AuditLogsByEvent(event)`.
 - `subscriptions.reminders_sent` stores reminder bitmask.
 - `subscription_nodes` machine: `active`, `pending_add`, `pending_remove`, `pending_update`.
 - Paid expiry excludes free/trial plans; reminder query excludes free/trial plans.
