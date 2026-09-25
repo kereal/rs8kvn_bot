@@ -19,6 +19,18 @@ import (
 	"gorm.io/gorm"
 )
 
+// AuditAdminIDKey — ключ контекста с Telegram-ID администратора, выполнившего
+// команду. Устанавливается bot-слоем в HandleDelete/HandleSetPlan; сервисный
+// слой читает его для actor_id событий аудита.
+type auditAdminIDKeyType struct{}
+
+var AuditAdminIDKey = auditAdminIDKeyType{}
+
+// WithAuditAdmin возвращает контекст с Telegram-ID админа для аудита.
+func WithAuditAdmin(ctx context.Context, telegramID int64) context.Context {
+	return context.WithValue(ctx, AuditAdminIDKey, telegramID)
+}
+
 // SubscriptionService coordinates subscription persistence, VPN provisioning,
 // cache invalidation, metrics, and referral/trial lifecycle operations.
 type SubscriptionService struct {
@@ -33,6 +45,21 @@ type SubscriptionService struct {
 	invalidateBySubID func(subID string)
 	syncService       *SyncService
 	bot               interfaces.BotAPI
+}
+
+// logAudit записывает событие аудита best-effort: ошибка журнала логируется
+// и не влияет на бизнес-операцию (см. Error Handling Conventions в AGENTS.md).
+func (s *SubscriptionService) logAudit(ctx context.Context, e *database.AuditLog) {
+	if e == nil {
+		return
+	}
+
+	err := s.db.InsertAuditLog(ctx, e)
+	if err != nil {
+		logger.Warn("audit log write failed",
+			zap.String("event", e.Event),
+			zap.Error(err))
+	}
 }
 
 // CreateResult contains the subscription and referral information produced by
@@ -195,6 +222,8 @@ func (s *SubscriptionService) Create(ctx context.Context, telegramID int64, user
 		return nil, fmt.Errorf("ensure subscription nodes: %w", err)
 	}
 
+	s.logAudit(ctx, database.AuditSubscriptionCreated(sub, inviteCode))
+
 	referrerID := int64(0)
 	if sub.ReferredBy != nil {
 		referrerID = *sub.ReferredBy
@@ -274,6 +303,8 @@ func (s *SubscriptionService) reanimateRevokedSubscription(ctx context.Context, 
 		return nil, fmt.Errorf("ensure subscription nodes: %w", err)
 	}
 
+	s.logAudit(ctx, database.AuditSubscriptionReanimated(sub))
+
 	metrics.SubscriptionCreatesTotal.Inc()
 
 	s.RefreshActiveSubscriptionsMetric(ctx)
@@ -313,6 +344,8 @@ func (s *SubscriptionService) DowngradeToFreePlan(ctx context.Context, sub *data
 	if err != nil {
 		return nil, fmt.Errorf("downgrade: update subscription: %w", err)
 	}
+
+	s.logAudit(ctx, database.AuditDowngradedToFree(sub, "chargeback"))
 
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
 		s.invalidateBySubID(sub.SubscriptionID)
@@ -413,6 +446,10 @@ func (s *SubscriptionService) revokeAndDeprovisionThenDelete(ctx context.Context
 		return nil, fmt.Errorf("db delete: %w", err)
 	}
 
+	// История удалённой подписки остаётся в audit_log (FK нет) — это единственное
+	// место, где строка subscriptions физически исчезает.
+	s.logAudit(ctx, database.AuditSubscriptionDeleted(sub, adminTelegramIDFromCtx(ctx)))
+
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
 		s.InvalidateBySubID(ctx, sub.SubscriptionID)
 	}
@@ -471,6 +508,9 @@ func (s *SubscriptionService) AdminSetPlan(ctx context.Context, subscriptionID, 
 		return nil, fmt.Errorf("admin set plan: load plan: %w", err)
 	}
 
+	// Снапшот «до» для аудита снимается до любых мутаций полей.
+	before := database.SubscriptionAuditState(sub)
+
 	now := time.Now().UTC()
 	if plan.Name == database.FreePlanName {
 		// Free plan: clear expiry and paid state, mirroring DowngradeToFreePlan.
@@ -509,6 +549,8 @@ func (s *SubscriptionService) AdminSetPlan(ctx context.Context, subscriptionID, 
 	if err != nil {
 		return nil, fmt.Errorf("admin set plan: update subscription: %w", err)
 	}
+
+	s.logAudit(ctx, database.AuditPlanChanged(sub, before, days, adminTelegramIDFromCtx(ctx)))
 
 	// DB-setup phase: structural prerequisites for the background worker. These
 	// must fail loudly — the row is already committed and ApplyPlanToSubscription
@@ -575,6 +617,17 @@ func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, prov
 	}
 
 	return nil
+}
+
+// adminTelegramIDFromCtx извлекает Telegram-ID администратора из контекста.
+// Ключ задаётся bot-слоем при обработке команды (AuditAdminIDKey); 0 = автор
+// неизвестен (тесты, не-бот вызовы).
+func adminTelegramIDFromCtx(ctx context.Context) int64 {
+	if v, ok := ctx.Value(AuditAdminIDKey).(int64); ok {
+		return v
+	}
+
+	return 0
 }
 
 // TrialCreateResult holds the outcome of a trial creation, including the
@@ -653,6 +706,8 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 
 		return nil, fmt.Errorf("create trial subscription: %w", err)
 	}
+
+	s.logAudit(ctx, database.AuditTrialCreated(sub))
 
 	subURL := s.cfg.SubURL(subID)
 	result := &TrialCreateResult{
@@ -773,6 +828,7 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	if s.invalidateBySubID != nil {
 		s.invalidateBySubID(subscriptionID)
 	}
+	s.logAudit(ctx, database.AuditTrialBound(sub))
 	s.RefreshActiveSubscriptionsMetric(ctx)
 
 	return sub, nil
@@ -976,6 +1032,8 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 				zap.String("subscription_id", sub.SubscriptionID))
 		} else {
 			revoked++
+
+			s.logAudit(ctx, database.AuditSubscriptionRevoked(&sub, "orphaned: no live node bindings"))
 
 			logger.Info("revoked orphaned subscription (no live node bindings)",
 				zap.Uint("id", sub.ID),
@@ -1207,6 +1265,9 @@ func (s *SubscriptionService) ExpireSubscription(ctx context.Context, subscripti
 			return fmt.Errorf("expire subscription: %w", err)
 		}
 	}
+
+	s.logAudit(ctx, database.AuditSubscriptionExpired(sub))
+	s.logAudit(ctx, database.AuditDowngradedToFree(sub, "expiry"))
 
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
 		s.invalidateBySubID(sub.SubscriptionID)

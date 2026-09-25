@@ -121,6 +121,9 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 		return nil
 	}
 
+	// Telegram-ID админа попадёт в actor_id события audit_log.
+	ctx = service.WithAuditAdmin(ctx, chatID)
+
 	// Parse the command arguments
 	args := update.Message.CommandArguments()
 	if args == "" {
@@ -212,6 +215,9 @@ func (h *Handler) HandleSetPlan(ctx context.Context, update tgbotapi.Update) err
 		logger.Warn("Non-admin user attempted to access /setplan", zap.Int64("chat_id", chatID))
 		return nil
 	}
+
+	// Telegram-ID админа попадёт в actor_id события audit_log.
+	ctx = service.WithAuditAdmin(ctx, chatID)
 
 	// Parse the command arguments
 	fields := strings.Fields(update.Message.CommandArguments())

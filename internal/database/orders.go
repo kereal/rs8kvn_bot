@@ -294,6 +294,17 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 		// path documented above. The service layer checks the grace deadline;
 		// keeping both statuses in the same conditional update preserves the
 		// pending/expired -> paid transition as one atomic compare-and-swap.
+		var order Order
+
+		err = tx.First(&order, orderID).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("load order for payment: %w", ErrOrderNotFound)
+			}
+
+			return fmt.Errorf("load order for payment: %w", err)
+		}
+
 		result := tx.Model(&Order{}).Where("id = ? AND status IN ?", orderID, []OrderStatus{OrderStatusPending, OrderStatusExpired}).Updates(map[string]any{
 			"status":                OrderStatusPaid,
 			"paid_at":               paidAt,
@@ -320,6 +331,14 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 
 		if result.RowsAffected == 0 {
 			return fmt.Errorf("update subscription after payment: %w", ErrSubscriptionNotFound)
+		}
+
+		// Аудит пишется в той же транзакции: событие не может потеряться при
+		// сбое между изменением подписки и записью журнала. Откат транзакции
+		// откатывает и событие — журнал отражает только зафиксированные факты.
+		err = InsertAuditLogInTx(tx, AuditPaymentConfirmed(&order, sub, product, newExpiry))
+		if err != nil {
+			return fmt.Errorf("audit payment confirmation: %w", err)
 		}
 
 		sub.PlanID = product.PlanID
@@ -439,6 +458,12 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 
 		result.Transitioned = true
 
+		// Аудит пишется в той же транзакции, атомарно с отменой заказа.
+		err = InsertAuditLogInTx(tx, AuditOrderCanceled(&order, ActorPaymentProvider))
+		if err != nil {
+			return fmt.Errorf("audit order cancellation: %w", err)
+		}
+
 		order.Status = OrderStatusCanceled
 		if !result.WasPaid {
 			result.Order = &order
@@ -496,6 +521,12 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 			if err != nil {
 				return fmt.Errorf("apply free plan after chargeback: %w", err)
 			}
+		}
+
+		// Чарджбэк с понижением до free — самое важное событие для расследований.
+		err = InsertAuditLogInTx(tx, AuditChargebackReceived(&order, &currentSub, true))
+		if err != nil {
+			return fmt.Errorf("audit chargeback: %w", err)
 		}
 
 		result.Downgraded = true

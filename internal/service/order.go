@@ -658,6 +658,8 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 			o.notifyRequestIssue(ctx, "create_pending_order_failed", err.Error(), "retry after database recovery", telegramID, canonical, nil)
 			return nil, nil, fmt.Errorf("find or create pending payment order: %w", err)
 		}
+
+		o.logAuditOrderCreated(ctx, order)
 	}
 
 	if order.PaymentCreationUncertain {
@@ -810,6 +812,18 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 		zap.String("currency", order.Currency))
 
 	return &PaymentInfo{URL: url, Provider: "platega", PaymentID: providerPaymentID, ExpiresAt: expiresAt}, order, nil
+}
+
+// logAuditOrderCreated пишет событие order_created best-effort: ошибка журнала
+// не влияет на выдачу платёжной ссылки.
+func (o *OrderService) logAuditOrderCreated(ctx context.Context, order *database.Order) {
+	err := o.db.InsertAuditLog(ctx, database.AuditOrderCreated(order))
+	if err != nil {
+		logger.Warn("audit log write failed",
+			zap.String("event", database.AuditEventOrderCreated),
+			zap.Uint("order_id", order.ID),
+			zap.Error(err))
+	}
 }
 
 // ConfirmPayment validates a provider callback and atomically applies the paid
