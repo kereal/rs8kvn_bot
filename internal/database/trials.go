@@ -308,6 +308,14 @@ func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int) ([]Subscr
 		return nil, fmt.Errorf("failed to cleanup expired trials: %w", result.Error)
 	}
 
+	// trial_deleted — единственное физическое удаление помимо admin /del,
+	// поэтому каждая удалённая строка обязана остаться в журнале. Best-effort:
+	// сбой журнала не отменяет уже выполненное удаление.
+	for _, sub := range subs {
+		auditSub := sub
+		_ = s.insertAuditLogBestEffort(ctx, AuditTrialDeleted(&auditSub))
+	}
+
 	rateLimitCutoff := time.Now().Add(-1*time.Hour + 1*time.Second)
 
 	err = s.db.WithContext(ctx).

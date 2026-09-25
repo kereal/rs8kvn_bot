@@ -137,6 +137,171 @@ func TestCancelPaidOrderAndDowngradeCAS_WritesChargebackAudit(t *testing.T) {
 	assert.Equal(t, float64(900), details["amount_cents"])
 }
 
+// TestConfirmOrderPaidCAS_WritesSubscriptionRenewed verifies that payment
+// confirmation also records subscription_renewed in the subscription's own
+// timeline (payment_confirmed addresses the order; the subscription timeline
+// must show the extension too).
+func TestConfirmOrderPaidCAS_WritesSubscriptionRenewed(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	sub := createTestSubscription(t, svc, 994011, "audit-renewed", "audit-renewed-client")
+	plan := &Plan{Name: "audit-renewed-plan", IsActive: true}
+	require.NoError(t, svc.db.Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "Renew 30", DurationDays: 30, PriceCents: 700, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+
+	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 700, Currency: "RUB", PaymentProvider: "platega", CreatedAt: time.Now().UTC()}
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+
+	activatedAt := time.Now().UTC()
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, activatedAt, activatedAt, sub, product, nil, 700)
+	require.NoError(t, err)
+	assert.True(t, activated)
+
+	events, err := svc.GetAuditLogByEntity(ctx, EntitySubscription, formatSubID(sub), 10)
+	require.NoError(t, err)
+
+	var renewed bool
+	for _, e := range events {
+		if e.Event == AuditEventSubscriptionRenewed {
+			renewed = true
+			assert.Equal(t, ActorPaymentProvider, e.ActorType)
+			require.NotNil(t, e.NewState)
+
+			var newState map[string]any
+			require.NoError(t, json.Unmarshal([]byte(*e.NewState), &newState))
+			assert.Contains(t, newState, "expires_at")
+		}
+	}
+	assert.True(t, renewed, "payment confirmation must record subscription_renewed in the subscription timeline")
+}
+
+// TestCancelOrderCAS_WritesOrderCanceledAudit verifies the non-chargeback
+// cancellation path (CANCELED callback on a pending order) records an event.
+// The chargeback path has its own in-tx audit covered separately.
+func TestCancelOrderCAS_WritesOrderCanceledAudit(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	sub := createTestSubscription(t, svc, 994012, "audit-cancel", "audit-cancel-client")
+	plan := &Plan{Name: "audit-cancel-plan", IsActive: true}
+	require.NoError(t, svc.db.Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "Cancel 30", DurationDays: 30, PriceCents: 500, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+
+	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 500, Currency: "RUB", PaymentProvider: "platega", CreatedAt: time.Now().UTC()}
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+	require.NoError(t, svc.db.WithContext(ctx).Model(order).Update("provider_payment_id", "550e8400-e29b-41d4-a716-446655440312").Error)
+
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440312")
+	transitioned, err := svc.CancelOrderCAS(ctx, "platega", providerID, []OrderStatus{OrderStatusPending})
+	require.NoError(t, err)
+	assert.True(t, transitioned)
+
+	events, err := svc.GetAuditLogByEvent(ctx, AuditEventOrderCanceled, 10)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, EntityOrder, events[0].EntityType)
+	assert.Equal(t, ActorPaymentProvider, events[0].ActorType)
+}
+
+// TestFindPendingPaymentOrder_ExpiredOrderWritesAudit verifies that pending
+// payment intents expiring by deadline are terminalized with an order_expired
+// audit event.
+func TestFindPendingPaymentOrder_ExpiredOrderWritesAudit(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	sub := createTestSubscription(t, svc, 994013, "audit-expired-order", "audit-expired-order-client")
+	plan := &Plan{Name: "audit-expired-order-plan", IsActive: true}
+	require.NoError(t, svc.db.Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "Expire 30", DurationDays: 30, PriceCents: 500, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 500, Currency: "RUB", PaymentProvider: "platega", CreatedAt: time.Now().UTC(), PaymentExpiresAt: &past}
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+
+	got, err := svc.FindPendingPaymentOrder(ctx, sub.ID, 1, time.Now().UTC())
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, OrderStatusExpired, got.Status)
+
+	events, err := svc.GetAuditLogByEvent(ctx, AuditEventOrderExpired, 10)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, ActorWorker, events[0].ActorType)
+	require.NotNil(t, events[0].NewState)
+
+	var newState map[string]any
+	require.NoError(t, json.Unmarshal([]byte(*events[0].NewState), &newState))
+	assert.Equal(t, string(OrderStatusExpired), newState["status"])
+}
+
+// TestMarkPaymentCreationUncertain_WritesAudit verifies the signal event for
+// "provider request outcome unknown, manual reconciliation required".
+func TestMarkPaymentCreationUncertain_WritesAudit(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	sub := createTestSubscription(t, svc, 994014, "audit-uncertain", "audit-uncertain-client")
+	plan := &Plan{Name: "audit-uncertain-plan", IsActive: true}
+	require.NoError(t, svc.db.Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "Uncertain 30", DurationDays: 30, PriceCents: 500, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+
+	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 500, Currency: "RUB", PaymentProvider: "platega", CreatedAt: time.Now().UTC()}
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+
+	claimed, err := svc.MarkPaymentCreationUncertain(ctx, order.ID, true)
+	require.NoError(t, err)
+	assert.True(t, claimed)
+
+	events, err := svc.GetAuditLogByEvent(ctx, AuditEventPaymentCreationUncert, 10)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, ActorSystem, events[0].ActorType)
+}
+
+// TestCleanupExpiredTrials_WritesTrialDeletedAudit verifies the second physical
+// deletion path (admin /del is the first) is journaled per removed trial.
+func TestCleanupExpiredTrials_WritesTrialDeletedAudit(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	// CleanupExpiredTrials резолвит план по имени TrialPlanName ("trial") и
+	// удаляет по telegram_id < 0 + created_at < cutoff. Seed уже создаёт план
+	// "trial" — используем его ID вместо создания дубля.
+	trialPlan, err := svc.GetPlanByName(ctx, TrialPlanName)
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	old := now.Add(-48 * time.Hour)
+	trial := &Subscription{TelegramID: -99001, SubscriptionID: "audit-trial-del", ClientID: "audit-trial-del-client", PlanID: trialPlan.ID, Status: string(SubscriptionStatusExpired), ExpiresAt: &old, CreatedAt: old}
+	require.NoError(t, svc.db.WithContext(ctx).Create(trial).Error)
+
+	subs, err := svc.CleanupExpiredTrials(ctx, 24)
+	require.NoError(t, err)
+	require.Len(t, subs, 1)
+
+	events, err := svc.GetAuditLogByEvent(ctx, AuditEventTrialDeleted, 10)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, ActorWorker, events[0].ActorType)
+	require.NotNil(t, events[0].OldState, "trial_deleted must keep a snapshot of the removed row")
+}
+
 // TestAuditLog_RepositoryRejectsNil verifies the guard against nil entries.
 func TestAuditLog_RepositoryRejectsNil(t *testing.T) {
 	t.Parallel()

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -39,6 +41,21 @@ func InsertAuditLogInTx(tx *gorm.DB, e *AuditLog) error {
 	err := tx.Create(e).Error
 	if err != nil {
 		return fmt.Errorf("insert audit log in tx: %w", err)
+	}
+
+	return nil
+}
+
+// insertAuditLogBestEffort записывает событие аудита, не влияя на бизнес-флоу:
+// ошибка журнала логируется как Warn. Для вызовов из пакета database, где
+// сервисный logAudit-хелпер недоступен (воркеры очистки trial и т.п.).
+func (s *Service) insertAuditLogBestEffort(ctx context.Context, e *AuditLog) error {
+	if err := s.InsertAuditLog(ctx, e); err != nil {
+		logger.Warn("audit log write failed",
+			zap.String("event", string(e.Event)),
+			zap.Error(err))
+
+		return err
 	}
 
 	return nil
