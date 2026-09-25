@@ -87,9 +87,17 @@ Don't read and don't write
   (CHECK-констрейнтов на event/entity_type нет сознательно).
 - **Best-effort по умолчанию**: сервисы пишут через `s.logAudit(ctx, ...)` —
   ошибка журнала логируется `Warn` и не влияет на бизнес-операцию.
+  Внутри пакета database (где сервисного хелпера нет) — `insertAuditLogBestEffort`.
 - **Исключение — платежные tx**: в `ConfirmOrderPaidCAS` и
   `CancelPaidOrderAndDowngradeCAS` аудит пишется через `InsertAuditLogInTx(tx, ...)`
-  в той же транзакции — откат tx откатывает и событие.
+  в той же транзакции — откат tx откатывает и событие. Best-effort INSERT
+  ВНУТРИ tx-замыкания на SQLite дедлочится (write-lock до коммита) —
+  события «по факту коммита» пишите после возврата `Transaction()`
+  (см. `expiredOrder` в `FindOrCreatePendingPaymentOrder`).
+- **Одна мутация = событие в каждой адресуемой сущности**: оплата — это
+  `payment_confirmed` (order) И `subscription_renewed` (subscription).
+- **Сводки за прогон — только при исходе**: `orphaned_clients_revoked`
+  пишется при revoked > 0, нулевые прогоны журнал не засоряют.
 - **Не логировать**: touches при /sub-запросах (devices/ips/last_request),
   per-item Warn-ретраи воркеров, трафик-сканы без исхода. Технические события —
   только сводки за прогон (`sync_run_degraded`, `orphaned_clients_revoked`).

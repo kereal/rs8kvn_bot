@@ -1058,6 +1058,12 @@ func (s *SubscriptionService) ReconcileOrphanedClients(ctx context.Context) (int
 
 	s.RefreshActiveSubscriptionsMetric(ctx)
 
+	// Сводка за прогон — только если были ревокии: нулевое событие каждый
+	// прогон превратило бы журнал в шум (тот же принцип, что у трафик-сканов).
+	if revoked > 0 {
+		s.logAudit(ctx, database.AuditOrphanedClientsRevoked(revoked))
+	}
+
 	metrics.ReconcileOrphanedDuration.Observe(time.Since(start).Seconds())
 
 	return revoked, nil
@@ -1171,6 +1177,10 @@ func (s *SubscriptionService) GetOrCreateSubscription(ctx context.Context, teleg
 	if err != nil {
 		return nil, fmt.Errorf("ensure subscription nodes: %w", err)
 	}
+
+	// Дублирует логику Create — обе точки обязаны писать subscription_created,
+	// чтобы таймлайн не зависел от того, каким из двух путей создана подписка.
+	s.logAudit(ctx, database.AuditSubscriptionCreated(sub, inviteCode))
 
 	metrics.SubscriptionCreatesTotal.Inc()
 
