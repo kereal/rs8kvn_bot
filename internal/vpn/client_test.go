@@ -35,6 +35,20 @@ func TestClassifyCreateSubscriptionError_AlreadyAdded(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSubscriptionAlreadyExists)
 }
 
+// 3x-ui v3.10 panel reports duplicate identifiers as
+// "Something went wrong (subId already in use: <subId>)" /
+// "email already in use: <email>" instead of the older
+// "A client with this email already exists" wording. The classifier must
+// recognize it, otherwise the sync worker treats the duplicate as a
+// non-retryable error and loops forever (the retry_count > 1000 symptom).
+func TestClassifyCreateSubscriptionError_AlreadyInUse(t *testing.T) {
+	err := classifyCreateSubscriptionError(fmt.Errorf("add client failed: Something went wrong (subId already in use: fb9de073cb\n)"))
+	assert.ErrorIs(t, err, ErrSubscriptionAlreadyExists)
+
+	err = classifyCreateSubscriptionError(errors.New("add client failed: Something went wrong (email already in use: omp_probe_1\n)"))
+	assert.ErrorIs(t, err, ErrSubscriptionAlreadyExists)
+}
+
 func TestClassifyCreateSubscriptionError_OtherError(t *testing.T) {
 	original := errors.New("connection refused")
 	err := classifyCreateSubscriptionError(original)

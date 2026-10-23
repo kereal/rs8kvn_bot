@@ -696,6 +696,16 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 		return nil, fmt.Errorf("failed to get client traffic: %s", apiResp.Msg)
 	}
 
+	// 3x-ui v3.10 answers an unknown email with success=true and obj=null
+	// (verified against the live panel: {"success":true,"msg":"","obj":null}).
+	// Parsing that as traffic data yields a misleading "unexpected end of JSON
+	// input", which callers cannot tell apart from an infrastructure failure —
+	// the traffic worker then logs a parse error instead of "client not found"
+	// and silently skips the subscription. Map it to the typed sentinel.
+	if len(apiResp.Obj) == 0 || string(apiResp.Obj) == "null" {
+		return nil, ErrClientNotFound
+	}
+
 	var traffic ClientTraffic
 
 	err = json.Unmarshal(apiResp.Obj, &traffic)
