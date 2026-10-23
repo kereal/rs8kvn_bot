@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Trial invite: /i/{code}",
+    "output": "doc/diagrams/trial-invite.html",
+    "viewBox": [1000, 700],
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "validation", "label": "Проверка", "focus": ["visitor", "web", "db"], "note": "Валидация кода и rate-limit по IP до создания заявки." },
+      { "id": "bind", "label": "Привязка", "focus": ["visitor", "tg", "subs"], "note": "Активация в Telegram привязывает trial к аккаунту race-safe." }
+    ]
+  },
+  "participants": [
+    { "id": "visitor", "type": "external", "label": "Посетитель", "sublabel": "браузер" },
+    { "id": "web", "type": "frontend", "label": "Web :8880", "sublabel": "/i/{code}" },
+    { "id": "subs", "type": "backend", "label": "SubSvc", "sublabel": "trial" },
+    { "id": "db", "type": "database", "label": "SQLite", "sublabel": "trial_requests" },
+    { "id": "tg", "type": "external", "label": "Telegram", "sublabel": "бот" }
+  ],
+  "segments": [
+    { "from": 160, "to": 280, "label": "Лендинг" },
+    { "from": 295, "to": 405, "label": "Trial" },
+    { "from": 420, "to": 560, "label": "Активация" }
+  ],
+  "messages": [
+    { "id": "open", "from": "visitor", "to": "web", "y": 195, "label": "GET /i/{code}", "variant": "emphasis" },
+    { "id": "check", "from": "web", "to": "db", "y": 240, "label": "валидация кода" },
+    { "id": "ratelimit", "from": "web", "to": "db", "y": 285, "label": "rate-limit по IP", "variant": "security", "note": "429 при превышении" },
+    { "id": "request", "from": "web", "to": "subs", "y": 340, "label": "создать заявку trial", "variant": "emphasis" },
+    { "id": "landing", "from": "web", "to": "visitor", "y": 385, "label": "лендинг Happ + deep-link", "variant": "return" },
+    { "id": "activate", "from": "visitor", "to": "tg", "y": 465, "label": "/start в боте", "variant": "emphasis" },
+    { "id": "bind", "from": "tg", "to": "subs", "y": 500, "label": "BindTrialSubscription", "note": "race-safe по telegram_id < 0" },
+    { "id": "ready", "from": "subs", "to": "tg", "y": 545, "label": "подписка привязана", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "web", "from": 195, "to": 390, "type": "frontend" },
+    { "participant": "subs", "from": 335, "to": 550, "type": "backend" },
+    { "participant": "db", "from": 235, "to": 290, "type": "database" },
+    { "participant": "tg", "from": 460, "to": 550, "type": "external" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Лендинг", "items": ["Страница с ссылками Happ и копированием URL", "One-click deep-link импорт в мобильное приложение", "Валидный код обязателен: 404 на неизвестный"] },
+    { "dot": "rose", "title": "Ограничения", "items": ["IP rate-limit защищает от массовой раздачи триалов", "trial_requests хранит заявки до привязки", "Trial использует план Trial с reset=0 и без авто-продления"] },
+    { "dot": "emerald", "title": "Привязка", "items": ["BindTrialSubscription идемпотентен и race-safe", "Привязка инвалидирует кэш рефералов и подписки", "После привязки trial живёт как обычная подписка"] }
+  ]
+}

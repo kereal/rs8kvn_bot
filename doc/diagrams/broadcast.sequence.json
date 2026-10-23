@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Админская рассылка (/broadcast)",
+    "output": "doc/diagrams/broadcast.html",
+    "viewBox": [1000, 760],
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "wizard", "label": "Диалог запуска", "focus": ["admin", "bot", "db"], "note": "Имя → сообщение → фильтры → preview → подтверждение." },
+      { "id": "delivery", "label": "Доставка", "focus": ["worker", "tg"], "note": "Асинхронная рассылка с resume после рестарта и классификацией ошибок." }
+    ]
+  },
+  "participants": [
+    { "id": "admin", "type": "external", "label": "Админ", "sublabel": "Telegram" },
+    { "id": "bot", "type": "backend", "label": "Bot Handler", "sublabel": "wizard" },
+    { "id": "db", "type": "database", "label": "SQLite", "sublabel": "broadcasts" },
+    { "id": "worker", "type": "backend", "label": "Delivery", "sublabel": "worker" },
+    { "id": "tg", "type": "external", "label": "Telegram API", "sublabel": "рассылка" }
+  ],
+  "segments": [
+    { "from": 160, "to": 300, "label": "Wizard" },
+    { "from": 315, "to": 425, "label": "Очередь" },
+    { "from": 440, "to": 660, "label": "Доставка" }
+  ],
+  "messages": [
+    { "id": "start", "from": "admin", "to": "bot", "y": 195, "label": "/broadcast", "variant": "emphasis" },
+    { "id": "collect", "from": "bot", "to": "admin", "y": 230, "label": "имя → текст → фильтры → preview", "variant": "return" },
+    { "id": "confirm", "from": "admin", "to": "bot", "y": 275, "label": "подтверждение (или отложенный запуск)", "variant": "emphasis" },
+    { "id": "persist", "from": "bot", "to": "db", "y": 360, "label": "кампания + аудитория", "variant": "emphasis", "note": "persist → resume без дублей" },
+    { "id": "queued", "from": "db", "to": "worker", "y": 400, "label": "due-кампания", "variant": "return" },
+    { "id": "send-loop", "from": "worker", "to": "tg", "y": 480, "label": "Send получателям", "variant": "emphasis", "note": "MarkdownV2 · retry с backoff" },
+    { "id": "classify", "from": "tg", "to": "worker", "y": 520, "label": "blocked / unreachable / error", "variant": "return" },
+    { "id": "progress", "from": "worker", "to": "db", "y": 560, "label": "статус получателя после каждого шага", "variant": "dashed" },
+    { "id": "report", "from": "worker", "to": "bot", "y": 625, "label": "итоги → /broadcasts", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "bot", "from": 195, "to": 370, "type": "backend" },
+    { "participant": "db", "from": 355, "to": 570, "type": "database" },
+    { "participant": "worker", "from": 395, "to": 630, "type": "backend" },
+    { "participant": "tg", "from": 475, "to": 525, "type": "external" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Wizard", "items": ["Пошаговый сбор: имя, сообщение, фильтры", "Preview показывает итоговый вид перед запуском", "Запуск немедленно или по расписанию в московском времени"] },
+    { "dot": "emerald", "title": "Устойчивость доставки", "items": ["Аудитория и состояние получателя персистентны", "Рестарт продолжает кампанию без дублей", "Транзиентные сбои повторяются с экспоненциальным backoff"] },
+    { "dot": "rose", "title": "Управление", "items": ["/broadcasts показывает детали активных кампаний", "Активную кампанию можно отменить", "Неудачных получателей можно переотправить"] }
+  ]
+}

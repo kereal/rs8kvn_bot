@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Автомат синхронизации subscription_nodes",
+    "output": "doc/diagrams/subscription-nodes-sync.html",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "main-rail", "label": "Основной цикл", "focus": ["created", "active", "pending_update", "removed"], "note": "Создание клиента, активная работа, обновление плана и снятие с ноды." },
+      { "id": "retry-loop", "label": "Retry с backoff", "focus": ["pending_update", "retry", "created"], "note": "Недоступная нода возвращает запись в очередь SyncPendingNodes." }
+    ]
+  },
+  "lanes": [
+    { "id": "main", "label": "Состояния связи подписка-нода" },
+    { "id": "recovery", "label": "Очередь retry" }
+  ],
+  "states": [
+    { "id": "created", "type": "start", "label": "pending_add", "sublabel": "клиент создан в БД", "lane": "main", "col": 0, "step": "01", "tag": "DB-setup" },
+    { "id": "active", "type": "active", "label": "active", "sublabel": "клиент на ноде", "lane": "main", "col": 1, "step": "02", "tag": "рабочее" },
+    { "id": "pending_update", "type": "waiting", "label": "pending_update", "sublabel": "смена плана/лимитов", "lane": "main", "col": 2, "step": "03", "tag": "обновление" },
+    { "id": "removed", "type": "success", "label": "removed", "sublabel": "депровизионировано", "lane": "main", "col": 3, "step": "04", "tag": "чисто" },
+    { "id": "retry", "type": "failure", "label": "Retry с backoff", "sublabel": "RetryCount++ · RetryAt", "lane": "recovery", "col": 1, "tag": "SyncPendingNodes" }
+  ],
+  "transitions": [
+    { "id": "t-add-ok", "from": "created", "to": "active", "label": "CreateSubscription ok", "variant": "emphasis", "route": "straight", "labelDy": -45 },
+    { "id": "t-plan-change", "from": "active", "to": "pending_update", "label": "MarkPendingUpdate", "variant": "default", "route": "straight", "labelDy": -25, "labelDx": -80, "labelSegment": 0 },
+    { "id": "t-update-ok", "from": "pending_update", "to": "active", "label": "UpdateSubscription ok", "variant": "emphasis", "route": "drop", "labelDy": 50, "labelSegment": 1 },
+    { "id": "t-remove", "from": "active", "to": "removed", "label": "pending_remove: DeleteSubscription ok", "variant": "security", "route": "top-channel" },
+    { "id": "t-add-fail", "from": "created", "to": "retry", "label": "нода недоступна", "variant": "security", "route": "drop", "labelDx": 40 },
+    { "id": "t-retry-back", "from": "retry", "to": "pending_update", "label": "экспоненциальный backoff", "variant": "emphasis", "route": "drop" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Основной цикл", "items": ["Структурная фаза (pending_*) пишется в БД синхронно и обязана succeed", "Внешний sync выполняет воркер как best-effort", "Успех переводит связь в active и сбрасывает RetryCount"] },
+    { "dot": "rose", "title": "Отказоустойчивость", "items": ["Недоступная нода не ломает поток — запись ждёт в очереди", "RetryAt задаёт экспоненциальную задержку следующей попытки", "Агрегированный сбой прохода воркер логирует Warn и продолжает"] },
+    { "dot": "cyan", "title": "Депровизионирование", "items": ["pending_remove — единица снятия клиента с ноды", "Успешное удаление делает связь терминальной", "Подписка при этом лишь revoked — строки не удаляются"] }
+  ]
+}

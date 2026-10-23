@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+
+  "mcpServers": {
+    "codebase-memory-mcp": {
+      "enabled": true,
+      "type": "local",
+      "command": [
+        "/home/kereal/.local/bin/codebase-memory-mcp"
+      ]
+    }
+  }
+
+}

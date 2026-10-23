@@ -1,0 +1,5 @@
+{
+  "artifact": "/home/kereal/rs8kvn_bot/doc/diagrams/project-map.html",
+  "note": "Sidecar report from visual-check: Chrome/Chromium is not installed in this environment, so automated browser evidence was skipped. Perceptual review was not performed. Rerun 'node <archify>/bin/archify.mjs visual-check <html> --json' where Chrome is available.",
+  "chrome": { "status": "unavailable" }
+}
