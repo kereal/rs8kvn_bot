@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "rs8kvn_bot — карта проекта",
+    "output": "project-map.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "849bd897c2c931865a209c53202dab6b2686be1e"
+    },
+    "views": [
+      { "id": "main-path", "label": "Основной путь", "focus": ["tg", "bot", "services", "vpn", "nodes"], "note": "От команды Telegram до провизии клиента на ноде через сервисный слой." },
+      { "id": "payments", "label": "Платежи", "focus": ["platega", "web", "services", "db"], "note": "Вебхук Platega с constant-time аутентификацией и атомарным подтверждением заказа." },
+      { "id": "subscription-serving", "label": "Выдача подписки", "focus": ["clients", "web", "subserver", "nodes"], "note": "Агрегация конфигов с активных нод и кэш 240s для /sub/{subID}." }
+    ]
+  },
+  "components": [
+    { "id": "platega", "type": "external", "label": "Platega", "sublabel": "платежи · вебхук", "pos": [570, 40], "size": [170, 64] },
+    { "id": "scheduler", "type": "backend", "label": "Фоновые воркеры", "sublabel": "internal/scheduler", "tag": "6 воркеров", "sources": [{ "path": "internal/scheduler/subscription_sync_worker.go", "label": "workers" }], "pos": [280, 160], "size": [170, 68] },
+    { "id": "db", "type": "database", "label": "SQLite", "sublabel": "internal/database", "tag": "GORM · миграции", "sources": [{ "path": "internal/database/models.go", "label": "schema" }], "pos": [880, 160], "size": [160, 68] },
+    { "id": "tg", "type": "external", "label": "Telegram API", "sublabel": "Bot API · long polling", "pos": [40, 420], "size": [150, 64] },
+    { "id": "bot", "type": "backend", "label": "Bot Handler", "sublabel": "internal/bot", "tag": "bounded concurrency", "sources": [{ "path": "internal/bot/handler.go", "label": "handlers" }], "pos": [280, 420], "size": [160, 68] },
+    { "id": "services", "type": "backend", "label": "Service Layer", "sublabel": "internal/service", "tag": "Subscription · Sync · Order", "sources": [{ "path": "internal/service/subscription.go", "label": "core" }], "pos": [560, 420], "size": [190, 84] },
+    { "id": "vpn", "type": "backend", "label": "VPN-адаптеры", "sublabel": "internal/vpn · xui", "tag": "Client interface", "sources": [{ "path": "internal/vpn/client.go", "label": "seam" }], "pos": [880, 420], "size": [170, 68] },
+    { "id": "nodes", "type": "cloud", "label": "VPN Ноды", "sublabel": "3x-ui · proxman · fetch", "pos": [1160, 420], "size": [160, 64] },
+    { "id": "clients", "type": "external", "label": "VPN-клиенты", "sublabel": "Happ · браузеры", "pos": [40, 660], "size": [150, 64] },
+    { "id": "web", "type": "backend", "label": "Web Server :8880", "sublabel": "internal/web", "tag": "HTTP edge", "sources": [{ "path": "internal/web/web.go", "label": "endpoints" }], "pos": [280, 660], "size": [170, 68] },
+    { "id": "subserver", "type": "backend", "label": "Subserver", "sublabel": "internal/subserver", "tag": "кэш 240s", "sources": [{ "path": "internal/subserver/service.go", "label": "aggregation" }], "pos": [560, 660], "size": [170, 68] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Процесс rs8kvn_bot (Go · Docker)", "wraps": ["bot", "services", "vpn", "web", "subserver", "scheduler", "db"] }
+  ],
+  "connections": [
+    { "id": "tg-to-bot", "from": "tg", "to": "bot", "label": "long polling", "variant": "emphasis" },
+    { "id": "clients-to-web", "from": "clients", "to": "web", "label": "HTTPS", "variant": "emphasis" },
+    { "id": "bot-to-services", "from": "bot", "to": "services", "label": "команды/колбэки" },
+    { "id": "web-to-services", "from": "web", "to": "services", "label": "trial · вебхук оплаты", "fromSide": "top", "toSide": "bottom" },
+    { "id": "web-to-subserver", "from": "web", "to": "subserver", "label": "/sub/{subID}" },
+    { "id": "subserver-to-nodes", "from": "subserver", "to": "nodes", "label": "fetch конфигов", "toSide": "bottom" },
+    { "id": "services-to-vpn", "from": "services", "to": "vpn", "label": "провизия клиентов", "variant": "emphasis" },
+    { "id": "vpn-to-nodes", "from": "vpn", "to": "nodes", "label": "REST API" },
+    { "id": "services-to-platega", "from": "services", "to": "platega", "label": "транзакции", "fromSide": "top", "toSide": "bottom", "labelDy": -100 },
+    { "id": "services-to-db", "from": "services", "to": "db", "label": "GORM", "fromSide": "top", "toSide": "bottom" },
+    { "id": "scheduler-to-services", "from": "scheduler", "to": "services", "label": "sync · expire · traffic", "fromSide": "bottom", "toSide": "top" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Входные точки", "items": ["Telegram long polling с ограниченным параллелизмом (MaxConcurrentHandlers)", "HTTP :8880 — /healthz /readyz /metrics /i/{code} /sub/{subID} /payment/callback"] },
+    { "dot": "emerald", "title": "Ядро", "items": ["Service Layer: SubscriptionService · SyncService · OrderService", "Двухфазная провизия: DB-setup синхронно, внешний sync — best-effort с retry и backoff", "Subserver агрегирует конфиги нод (bounded concurrency) с кэшем 240s"] },
+    { "dot": "violet", "title": "Данные", "items": ["SQLite через GORM, встроенные миграции, каталог data/", "Подписки: active/revoked; ноды: pending_add/update/remove → active", "Ежедневные бэкапы с ротацией (BackupScheduler)"] },
+    { "dot": "amber", "title": "Надёжность", "items": ["Sentinel-ошибки и классификация уже-существует/не-найден за швом vpn.Client", "Retry с экспоненциальным backoff в SyncPendingNodes; graceful shutdown 90s", "Sentry с performance traces; Prometheus /metrics; опциональный heartbeat"] }
+  ]
+}

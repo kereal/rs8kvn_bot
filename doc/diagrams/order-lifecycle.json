@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Жизненный цикл заказа (Order)",
+    "output": "doc/diagrams/order-lifecycle.html",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "confirm-path", "label": "Оплата", "focus": ["pending", "paid"], "note": "CONFIRMED вебхук валидирует сумму и атомарно подтверждает заказ." },
+      { "id": "grace", "label": "Settlement grace", "focus": ["pending", "expired", "paid"], "note": "Просроченный заказ принимает оплату ещё 5 минут после дедлайна ссылки." },
+      { "id": "cancel-paths", "label": "Отмены и chargeback", "focus": ["pending", "canceled", "chargebacked"], "note": "CANCELED отменяет pending-заказ, CHARGEBACKED понижает подписку до free." }
+    ]
+  },
+  "lanes": [
+    { "id": "main", "label": "Оплаченный путь" },
+    { "id": "waiting", "label": "Отложенный исход" },
+    { "id": "terminal", "label": "Терминальные исходы" }
+  ],
+  "states": [
+    { "id": "pending", "type": "start", "label": "pending", "sublabel": "заказ создан", "lane": "main", "col": 0, "step": "01", "tag": "ожидание оплаты" },
+    { "id": "paid", "type": "success", "label": "paid", "sublabel": "ConfirmOrderPaidCAS", "lane": "main", "col": 2, "step": "02", "tag": "order+sub+plan" },
+    { "id": "expired", "type": "waiting", "label": "expired", "sublabel": "PaymentExpiresAt прошло", "lane": "waiting", "col": 1, "tag": "grace 5 мин" },
+    { "id": "canceled", "type": "failure", "label": "canceled", "sublabel": "CancelOrderCAS", "lane": "terminal", "col": 0, "tag": "терминальный" },
+    { "id": "chargebacked", "type": "failure", "label": "chargeback", "sublabel": "downgrade в free план", "lane": "terminal", "col": 2, "tag": "ручной разбор" }
+  ],
+  "transitions": [
+    { "id": "t-confirm", "from": "pending", "to": "paid", "label": "CONFIRMED вебхук · amount ≥ order", "variant": "emphasis", "route": "straight" },
+    { "id": "t-expire", "from": "pending", "to": "expired", "label": "истёк срок ссылки оплаты", "variant": "default", "route": "drop" },
+    { "id": "t-grace", "from": "expired", "to": "paid", "label": "CONFIRMED в grace", "variant": "security", "route": "drop" },
+    { "id": "t-cancel", "from": "pending", "to": "canceled", "label": "CANCELED вебхук", "variant": "security", "route": "drop" },
+    { "id": "t-chargeback", "from": "paid", "to": "chargebacked", "label": "CHARGEBACKED · если нет другого paid-заказа", "variant": "security", "route": "right-channel" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Подтверждение", "items": ["Повторный CONFIRMED для paid — идемпотентный no-op", "Комиссия провайдера в сумме допустима, недоплата отклоняется", "Сбой БД откатывает всё: заказ остаётся pending для retry вебхука"] },
+    { "dot": "amber", "title": "Просрочка", "items": ["Просроченный заказ принимает оплату 5 минут после дедлайна", "Позднее уведомление алертит админа (late_confirmed_callback)", "Ссылка оплаты при этом не продлевается"] },
+    { "dot": "rose", "title": "Отмены", "items": ["CANCELED отменяет только ещё не оплаченный заказ", "CHARGEBACKED на paid понижает подписку атомарно с отменой", "Понижение пропускается, если живёт другой paid-заказ"] }
+  ]
+}

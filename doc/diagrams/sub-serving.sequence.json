@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Выдача подписки /sub/{subID}",
+    "output": "doc/diagrams/sub-serving.html",
+    "viewBox": [1000, 760],
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "cache-hit", "label": "Кэш-hit", "focus": ["client", "web", "subserver", "cache"], "note": "Повторный запрос обслуживается из кэша 240s за один lookup." },
+      { "id": "aggregation", "label": "Агрегация нод", "focus": ["subserver", "nodes", "cache"], "note": "Промах кэша запускает параллельный fetch со всех активных нод." }
+    ]
+  },
+  "participants": [
+    { "id": "client", "type": "external", "label": "Клиент", "sublabel": "Happ · V2Ray" },
+    { "id": "web", "type": "frontend", "label": "Web :8880", "sublabel": "HTTP" },
+    { "id": "subserver", "type": "backend", "label": "Subserver", "sublabel": "агрегатор" },
+    { "id": "cache", "type": "database", "label": "Кэш", "sublabel": "240s TTL" },
+    { "id": "nodes", "type": "cloud", "label": "Ноды", "sublabel": "3 типа" }
+  ],
+  "segments": [
+    { "from": 160, "to": 265, "label": "Запрос" },
+    { "from": 280, "to": 375, "label": "Кэш" },
+    { "from": 390, "to": 530, "label": "Агрегация" },
+    { "from": 545, "to": 660, "label": "Ответ" }
+  ],
+  "messages": [
+    { "id": "get-sub", "from": "client", "to": "web", "y": 195, "label": "GET /sub/{subID}", "variant": "emphasis" },
+    { "id": "dispatch", "from": "web", "to": "subserver", "y": 230, "label": "handleSubscription" },
+    { "id": "cache-lookup", "from": "subserver", "to": "cache", "y": 310, "label": "lookup subID", "note": "singleflight на промахе" },
+    { "id": "cache-verdict", "from": "cache", "to": "subserver", "y": 340, "label": "hit → отдать · miss → собрать", "variant": "return" },
+    { "id": "fetch-nodes", "from": "subserver", "to": "nodes", "y": 420, "label": "fetch конфигов параллельно", "variant": "emphasis", "note": "bounded concurrency" },
+    { "id": "node-configs", "from": "nodes", "to": "subserver", "y": 455, "label": "JSON / Clash / Base64 / Plain", "variant": "return" },
+    { "id": "cache-store", "from": "subserver", "to": "cache", "y": 490, "label": "set · TTL 240s", "variant": "dashed" },
+    { "id": "result", "from": "subserver", "to": "web", "y": 575, "label": "SubscriptionResult", "variant": "return" },
+    { "id": "respond", "from": "web", "to": "client", "y": 615, "label": "200 + subscription-userinfo", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "web", "from": 195, "to": 620, "type": "frontend" },
+    { "participant": "subserver", "from": 230, "to": 580, "type": "backend" },
+    { "participant": "cache", "from": 305, "to": 495, "type": "database" },
+    { "participant": "nodes", "from": 415, "to": 460, "type": "cloud" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Кэш", "items": ["TTL 240s, singleflight гасит лавину одинаковых промахов", "Кэш инвалидируется при смене плана или удалении клиента", "Опциональный access-лог включается SUBSERVER_ACCESS_LOG"] },
+    { "dot": "emerald", "title": "Агрегация", "items": ["Конфиги собираются со всех активных нод параллельно", "Формат детектируется автоматически: JSON, Clash, Base64, Plain", "Трафик и subscription-userinfo суммируются по источникам"] },
+    { "dot": "rose", "title": "Устойчивость", "items": ["Недоступная нода не валит ответ — её источник просто пропускается", "Неизвестный subID отдаёт 404 без раскрытия деталей", "502 сигнализирует о сбое всех источников"] }
+  ]
+}
