@@ -10,8 +10,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 )
-
 // CallbackHandler processes callback queries from inline keyboards.
 type CallbackHandler struct {
 	h *Handler
@@ -305,8 +305,51 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 
 			return nil
 		}
-
 		c.h.sendBroadcastDetails(ctx, chatID, uint(id64))
+	case strings.HasPrefix(data, "broadcast_deactivate_prompt_"):
+		if !c.h.isAdmin(chatID) {
+			logger.Warn("Non-admin user attempted to access broadcast deactivation prompt", zap.Int64("chat_id", chatID))
+			c.answerCallback(update.CallbackQuery.ID)
+			return nil
+		}
+		id, err := parseBroadcastCallbackID(data, "broadcast_deactivate_prompt_")
+		if err != nil {
+			return err
+		}
+		b, err := c.h.db.GetBroadcast(ctx, id)
+		if err != nil {
+			c.h.SendMessage(ctx, chatID, "❌ Рассылка не найдена.")
+			return nil
+		}
+		text := fmt.Sprintf("⚠️ *Деактивация заблокировавших*\n\nРассылка #%d «%s» зафиксировала:\n🚫 Заблокировали: %d\n⚠️ Недоступны: %d\n\nВыключить подписки этих пользователей в базе (статус `revoked`) без удаления? Они больше не будут получать рассылки.", b.ID, b.Name, b.BlockedCount, b.UnreachableCount)
+		kb := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("✅ Да, выключить", fmt.Sprintf("broadcast_deactivate_exec_%d", b.ID)),
+				tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", fmt.Sprintf("broadcast_details_%d", b.ID)),
+			),
+		)
+		msg := tgbotapi.NewMessage(chatID, utils.EscapeMarkdownV2(text))
+		msg.ParseMode = "MarkdownV2"
+		msg.ReplyMarkup = &kb
+		c.h.send(ctx, msg)
+	case strings.HasPrefix(data, "broadcast_deactivate_exec_"):
+		if !c.h.isAdmin(chatID) {
+			logger.Warn("Non-admin user attempted to execute broadcast deactivation", zap.Int64("chat_id", chatID))
+			c.answerCallback(update.CallbackQuery.ID)
+			return nil
+		}
+		id, err := parseBroadcastCallbackID(data, "broadcast_deactivate_exec_")
+		if err != nil {
+			return err
+		}
+		count, err := c.h.subscriptionService.DeactivateBlockedBroadcastRecipients(ctx, id)
+		if err != nil {
+			logger.Error("Failed to deactivate broadcast blocked users", zap.Uint("broadcast_id", id), zap.Error(err))
+			c.h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка при деактивации пользователей рассылки #%d: %v", id, err))
+			return nil
+		}
+		logger.Info("Broadcast blocked users deactivated by admin", zap.Uint("broadcast_id", id), zap.Int("count", count), zap.Int64("chat_id", chatID))
+		c.h.SendMessage(ctx, chatID, fmt.Sprintf("✅ Успешно выключено пользователей (переведены в revoked): %d.", count))
 	default:
 		logger.Warn("Unknown callback data", zap.String("data", data))
 	}

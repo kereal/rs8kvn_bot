@@ -50,6 +50,9 @@ func broadcastControlKeyboard(broadcast *database.Broadcast) *tgbotapi.InlineKey
 		if broadcast.FailedCount > 0 {
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("🔁 Повторить ошибки", fmt.Sprintf("broadcast_retry_%d", broadcast.ID))))
 		}
+		if broadcast.BlockedCount > 0 || broadcast.UnreachableCount > 0 {
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("🧹 Отключить заблокировавших", fmt.Sprintf("broadcast_deactivate_prompt_%d", broadcast.ID))))
+		}
 	}
 	return &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
