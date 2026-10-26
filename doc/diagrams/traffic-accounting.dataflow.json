@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Учёт трафика и уведомления",
+    "output": "doc/diagrams/traffic-accounting.html",
+    "viewBox": [1068, 800],
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "collect", "label": "Сбор", "focus": ["nodes", "fetcher", "usage"], "note": "Статистика с нод попадает в счётчики подписок." },
+      { "id": "decide", "label": "Решения по лимитам", "focus": ["usage", "reminders", "policy"], "note": "Bitmask напоминаний и сравнение с лимитом плана." },
+      { "id": "act", "label": "Действия", "focus": ["policy", "warn", "exhaust", "reenable"], "note": "90% — предупреждение, 100% — выключение, сброс — ре-включение." }
+    ]
+  },
+  "stages": [
+    { "label": "Источники" },
+    { "label": "Сбор" },
+    { "label": "Состояние" },
+    { "label": "Решения" },
+    { "label": "Действия" }
+  ],
+  "nodes": [
+    { "id": "nodes", "type": "cloud", "label": "VPN-ноды", "sublabel": "панели нод", "stage": 0, "row": 0, "tag": "up/down" },
+    { "id": "fetcher", "type": "backend", "label": "Сбор статистики", "sublabel": "по подпискам", "stage": 1, "row": 0, "tag": "hourly" },
+    { "id": "usage", "type": "database", "label": "Счётчики", "sublabel": "на подписках", "stage": 2, "row": 0, "tag": "bytes" },
+    { "id": "reminders", "type": "database", "label": "traffic_reminders_sent", "sublabel": "bitmask", "stage": 2, "row": 1, "tag": "миграция 038", "width": 150 },
+    { "id": "policy", "type": "security", "label": "Политика лимитов", "sublabel": "traffic_limit > 0", "stage": 3, "row": 0, "tag": "решения" },
+    { "id": "warn", "type": "backend", "label": "90% лимита", "sublabel": "CTA Premium", "stage": 4, "row": 0, "tag": "предупреждение" },
+    { "id": "exhaust", "type": "backend", "label": "Исчерпание", "sublabel": "CTA Premium", "stage": 4, "row": 2, "tag": "жёсткое" },
+    { "id": "reenable", "type": "messagebus", "label": "Ре-включение", "sublabel": "UpdateClient Enable=true", "stage": 4, "row": 4, "tag": "авто" }
+  ],
+  "flows": [
+    { "id": "f1", "from": "nodes", "to": "fetcher", "label": "статистика клиентов", "variant": "emphasis" },
+    { "id": "f2", "from": "fetcher", "to": "usage", "label": "up/down байты", "variant": "emphasis" },
+    { "id": "f3", "from": "usage", "to": "policy", "label": "сравнение с лимитом", "variant": "default", "route": "straight" },
+    { "id": "f4", "from": "reminders", "to": "policy", "label": "какие напоминания уже отправлены", "variant": "dashed" },
+    { "id": "f5", "from": "policy", "to": "warn", "label": "≥90%", "variant": "default", "route": "straight", "labelDy": -20 },
+    { "id": "f6", "from": "policy", "to": "exhaust", "label": "≥100% · выключить", "variant": "security", "labelDy": 20, "labelDx": -55 },
+    { "id": "f7", "from": "policy", "to": "reenable", "label": "сброс счётчика", "variant": "dashed", "labelDy": 30 },
+    { "id": "f8", "from": "exhaust", "to": "nodes", "label": "Disable клиента на ноде", "variant": "security", "fromSide": "right", "toSide": "top", "via": [[1085, 385], [1085, 60], [100, 60]] }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Сбор", "items": ["SubscriptionTrafficWorker проходит раз в час по лимитированным планам", "Статистика берётся с нод и суммируется по подписке", "Сбой одной ноды Warn и пропуск"] },
+    { "dot": "emerald", "title": "Идемпотентность", "items": ["Bitmask traffic_reminders_sent не даёт отправить дважды", "Миграция 038 добавила колонку", "Состояние напоминаний живёт в БД, не в памяти"] },
+    { "dot": "rose", "title": "Правила включения", "items": ["Исчерпание — чистый revenue CTA, без авто-включения", "Ре-включение только когда счётчик реально ниже лимита", "Клиент всё ещё disabled — воркер включает через UpdateClient"] }
+  ]
+}

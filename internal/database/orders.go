@@ -71,6 +71,11 @@ func (s *Service) FindPendingPaymentOrder(ctx context.Context, subscriptionID, p
 
 		if result.RowsAffected == 1 {
 			order.Status = OrderStatusExpired
+
+			// order_expired: время жизни платёжной ссылки истекло. Best-effort:
+			// сбой журнала не должен ломать выдачу новой ссылки.
+			_ = s.insertAuditLogBestEffort(ctx, AuditOrderExpired(&order))
+
 			return &order, nil
 		}
 		// Another worker may have confirmed/canceled this order between the
@@ -95,6 +100,11 @@ func (s *Service) FindPendingPaymentOrder(ctx context.Context, subscriptionID, p
 // deadline has passed. The partial unique index is the final concurrency guard.
 func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*Order, error) {
 	var order Order
+	// expiredOrder фиксируется внутри tx, но аудит пишется ПОСЛЕ коммита:
+	// best-effort INSERT из замыкания на SQLite дедлочится на write-lock
+	// незакоммиченной транзакции, а при откате tx истечение отменилось бы —
+	// записывать его в журнал было бы ложью.
+	var expiredOrder *Order
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Where("subscription_id = ? AND product_id = ? AND payment_provider = ? AND status = ?", subscriptionID, productID, "platega", OrderStatusPending).
@@ -111,6 +121,9 @@ func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscript
 					return fmt.Errorf("expire payment order: %w", err)
 				}
 
+				order.Status = OrderStatusExpired
+				expired := order
+				expiredOrder = &expired
 				order = Order{}
 			} else {
 				return nil
@@ -136,6 +149,11 @@ func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscript
 
 		return nil
 	})
+	// Аудит order_expired — после фиксации транзакции (см. expiredOrder выше).
+	if expiredOrder != nil {
+		_ = s.insertAuditLogBestEffort(ctx, AuditOrderExpired(expiredOrder))
+	}
+
 	if err != nil {
 		// A concurrent creator can win the partial unique-index race. The
 		// transaction is rolled back, so read the winner and continue with it.
@@ -170,6 +188,18 @@ func (s *Service) MarkPaymentCreationUncertain(ctx context.Context, orderID uint
 	result := query.Update("payment_creation_uncertain", uncertain)
 	if result.Error != nil {
 		return false, fmt.Errorf("mark payment creation uncertainty: %w", result.Error)
+	}
+
+	if claimed := result.RowsAffected == 1; claimed {
+		if uncertain {
+			// payment_creation_uncertain: исход запроса к провайдеру неизвестен,
+			// требуется ручная сверка. Сигнальное событие для расследований.
+			var order Order
+
+			if err := s.db.WithContext(ctx).First(&order, orderID).Error; err == nil {
+				_ = s.insertAuditLogBestEffort(ctx, AuditPaymentCreationUncertain(&order))
+			}
+		}
 	}
 
 	return result.RowsAffected == 1, nil
@@ -294,6 +324,17 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 		// path documented above. The service layer checks the grace deadline;
 		// keeping both statuses in the same conditional update preserves the
 		// pending/expired -> paid transition as one atomic compare-and-swap.
+		var order Order
+
+		err = tx.First(&order, orderID).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("load order for payment: %w", ErrOrderNotFound)
+			}
+
+			return fmt.Errorf("load order for payment: %w", err)
+		}
+
 		result := tx.Model(&Order{}).Where("id = ? AND status IN ?", orderID, []OrderStatus{OrderStatusPending, OrderStatusExpired}).Updates(map[string]any{
 			"status":                OrderStatusPaid,
 			"paid_at":               paidAt,
@@ -320,6 +361,21 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 
 		if result.RowsAffected == 0 {
 			return fmt.Errorf("update subscription after payment: %w", ErrSubscriptionNotFound)
+		}
+
+		// Аудит пишется в той же транзакции: событие не может потеряться при
+		// сбое между изменением подписки и записью журнала. Откат транзакции
+		// откатывает и событие — журнал отражает только зафиксированные факты.
+		err = InsertAuditLogInTx(tx, AuditPaymentConfirmed(&order, sub, product, newExpiry))
+		if err != nil {
+			return fmt.Errorf("audit payment confirmation: %w", err)
+		}
+
+		// Событие в таймлайне самой подписки: payment_confirmed адресован заказу,
+		// а subscription_renewed показывает продление/активацию в истории подписки.
+		err = InsertAuditLogInTx(tx, AuditSubscriptionRenewed(&currentSub, product, currentSub.ExpiresAt))
+		if err != nil {
+			return fmt.Errorf("audit subscription renewal: %w", err)
 		}
 
 		sub.PlanID = product.PlanID
@@ -439,6 +495,12 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 
 		result.Transitioned = true
 
+		// Аудит пишется в той же транзакции, атомарно с отменой заказа.
+		err = InsertAuditLogInTx(tx, AuditOrderCanceled(&order, ActorPaymentProvider))
+		if err != nil {
+			return fmt.Errorf("audit order cancellation: %w", err)
+		}
+
 		order.Status = OrderStatusCanceled
 		if !result.WasPaid {
 			result.Order = &order
@@ -498,6 +560,12 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 			}
 		}
 
+		// Чарджбэк с понижением до free — самое важное событие для расследований.
+		err = InsertAuditLogInTx(tx, AuditChargebackReceived(&order, &currentSub, true))
+		if err != nil {
+			return fmt.Errorf("audit chargeback: %w", err)
+		}
+
 		result.Downgraded = true
 		result.Order = &order
 
@@ -520,6 +588,14 @@ func (s *Service) CancelOrderCAS(ctx context.Context, provider string, providerP
 	result := s.db.WithContext(ctx).Model(&Order{}).Where("payment_provider = ? AND provider_payment_id = ? AND status IN ?", provider, providerPaymentID.String(), fromStatuses).Update("status", OrderStatusCanceled)
 	if result.Error != nil {
 		return false, fmt.Errorf("cancel order: %w", result.Error)
+	}
+
+	if result.RowsAffected > 0 {
+		// order_canceled (не-чарджбэк ветка: провайдер отменил оплату до/после
+		// попытки). Чарджбэк-ветка пишет свой аудит в tx CancelPaidOrderAndDowngradeCAS.
+		if order, err := s.GetOrderByProviderPaymentID(ctx, provider, providerPaymentID); err == nil {
+			_ = s.insertAuditLogBestEffort(ctx, AuditOrderCanceled(order, ActorPaymentProvider))
+		}
 	}
 
 	return result.RowsAffected > 0, nil

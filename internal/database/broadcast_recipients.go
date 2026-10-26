@@ -5,6 +5,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -74,37 +75,82 @@ func setBroadcastRecipientState(b *Broadcast, state broadcastRecipientState) err
 	return nil
 }
 
+// updateBroadcastRecipientState loads the broadcast's recipient-state JSON,
+// applies mutate, and persists the result atomically. It is the single writer
+// for snapshot, claim, finish, and progress mutations.
+//
+// The whole read-modify-write must serialize against concurrent recipient
+// writers (a batch finalization calls FinishBroadcastRecipient for many
+// recipients at once from up to broadcastConcurrency goroutines). GORM's
+// implicit transaction is a deferred BEGIN: it only takes the write lock on
+// the first UPDATE, after the read. In WAL mode such a transaction fails with
+// SQLITE_BUSY_SNAPSHOT when another writer commits between its read and its
+// write, and the busy handler (DSN _busy_timeout) is never invoked for that
+// extended code, so the mutation surfaces as "database is locked" instead of
+// committing. To keep this path error-free, the mutation runs on a single
+// pinned connection and takes the write reservation up front with BEGIN
+// IMMEDIATE: concurrent writers then serialize inside the existing busy
+// timeout instead of racing a read snapshot against a newer commit. Atomicity
+// and the lease guard semantics are unchanged.
 func updateBroadcastRecipientState(ctx context.Context, s *Service, broadcastID uint, mutate func(*Broadcast, *broadcastRecipientState) error) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var broadcast Broadcast
-		err := tx.First(&broadcast, broadcastID).Error
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrBroadcastNotFound
-			}
-			return fmt.Errorf("load broadcast state: %w", err)
+	// GORM's default transaction is deferred and fails with SQLITE_BUSY_SNAPSHOT
+	// when a concurrent recipient update commits between our read and write.
+	// Reserve SQLite's single writer up front with BEGIN IMMEDIATE on one pinned
+	// connection; concurrent writers then serialize inside the DSN busy timeout.
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return fmt.Errorf("resolve database handle: %w", err)
+	}
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("pin database connection: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return fmt.Errorf("begin immediate transaction: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
 		}
-		state, err := parseBroadcastRecipientState(&broadcast)
-		if err != nil {
-			return err
-		}
-		err = mutate(&broadcast, &state)
-		if err != nil {
-			return err
-		}
-		err = setBroadcastRecipientState(&broadcast, state)
-		if err != nil {
-			return err
-		}
-		result := tx.Model(&Broadcast{}).Where("id = ?", broadcastID).Update("recipients_state", broadcast.RecipientsState)
-		if result.Error != nil {
-			return fmt.Errorf("save broadcast recipient state: %w", result.Error)
-		}
-		if result.RowsAffected == 0 {
+	}()
+
+	var status, recipientsState string
+	if err := conn.QueryRowContext(ctx, "SELECT status, recipients_state FROM broadcasts WHERE id = ?", broadcastID).Scan(&status, &recipientsState); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			return ErrBroadcastNotFound
 		}
-		return nil
-	})
+		return fmt.Errorf("load broadcast state: %w", err)
+	}
+	broadcast := &Broadcast{ID: broadcastID, Status: status, RecipientsState: recipientsState}
+	state, err := parseBroadcastRecipientState(broadcast)
+	if err != nil {
+		return err
+	}
+	if err := mutate(broadcast, &state); err != nil {
+		return err
+	}
+	if err := setBroadcastRecipientState(broadcast, state); err != nil {
+		return err
+	}
+	result, err := conn.ExecContext(ctx, "UPDATE broadcasts SET recipients_state = ? WHERE id = ?", broadcast.RecipientsState, broadcastID)
+	if err != nil {
+		return fmt.Errorf("save broadcast recipient state: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("save broadcast recipient state: %w", err)
+	}
+	if affected == 0 {
+		return ErrBroadcastNotFound
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("commit broadcast recipient state: %w", err)
+	}
+	committed = true
+	return nil
 }
 
 // SnapshotBroadcastRecipients materializes an immutable audience in broadcasts.

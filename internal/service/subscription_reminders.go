@@ -8,10 +8,12 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
+	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.uber.org/zap"
 )
 
 const (
@@ -94,6 +96,15 @@ func (s *SubscriptionService) SendExpiryReminder(ctx context.Context, sub *datab
 	}
 
 	metrics.SubscriptionRemindersTotal.WithLabelValues(window.Name, "success").Inc()
+
+	// Аудит уведомления best-effort: напоминание уже отправлено, журнал не
+	// должен повлиять на результат операции.
+	if auditErr := s.db.InsertAuditLog(ctx, database.AuditReminderSent(sub, window.Name)); auditErr != nil {
+		logger.Warn("audit log write failed",
+			zap.String("event", database.AuditEventReminderSent),
+			zap.Uint("subscription_id", sub.ID),
+			zap.Error(auditErr))
+	}
 
 	return nil
 }

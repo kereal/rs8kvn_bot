@@ -75,6 +75,38 @@ Don't read and don't write
   * task-bot-integration.md
 
 
+## Audit Log (таблица audit_log, миграция 039)
+
+Универсальный append-only журнал аудита системы: `entity_type` + `entity_id`
+адресуют любую сущность (subscription/order/broadcast/plan/node/product/system),
+`actor_type` + `actor_id` — кто инициировал (user/admin/worker/payment_provider/system).
+
+- **Константы событий** (`AuditEvent*`) и **конструкторы** (`AuditSubscriptionCreated`,
+  `AuditPaymentConfirmed`, ...) — только в `internal/database/audit_log.go`.
+  Новое событие = одна константа + один конструктор там; БЕЗ миграции
+  (CHECK-констрейнтов на event/entity_type нет сознательно).
+- **Best-effort по умолчанию**: сервисы пишут через `s.logAudit(ctx, ...)` —
+  ошибка журнала логируется `Warn` и не влияет на бизнес-операцию.
+  Внутри пакета database (где сервисного хелпера нет) — `insertAuditLogBestEffort`.
+- **Исключение — платежные tx**: в `ConfirmOrderPaidCAS` и
+  `CancelPaidOrderAndDowngradeCAS` аудит пишется через `InsertAuditLogInTx(tx, ...)`
+  в той же транзакции — откат tx откатывает и событие. Best-effort INSERT
+  ВНУТРИ tx-замыкания на SQLite дедлочится (write-lock до коммита) —
+  события «по факту коммита» пишите после возврата `Transaction()`
+  (см. `expiredOrder` в `FindOrCreatePendingPaymentOrder`).
+- **Одна мутация = событие в каждой адресуемой сущности**: оплата — это
+  `payment_confirmed` (order) И `subscription_renewed` (subscription).
+- **Сводки за прогон — только при исходе**: `orphaned_clients_revoked`
+  пишется при revoked > 0, нулевые прогоны журнал не засоряют.
+- **Не логировать**: touches при /sub-запросах (devices/ips/last_request),
+  per-item Warn-ретраи воркеров, трафик-сканы без исхода. Технические события —
+  только сводки за прогон (`sync_run_degraded`, `orphaned_clients_revoked`).
+- **FK нет**: история сущности переживает физическое удаление (admin /del).
+- actor_id админа передаётся через context: `service.WithAuditAdmin(ctx, chatID)`
+  в HandleDel/HandleSetPlan, читается `adminTelegramIDFromCtx(ctx)`.
+- Чтение: `GetAuditLogByEntity` / `GetAuditLogByEvent` / `GetRecentAuditLog`.
+
+
 ## Back-button navigation (CRITICAL — was broken once)
 
 Screens with content in a SEPARATE message (QR photo, invite QR) + Back button:
