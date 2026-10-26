@@ -1,7 +1,7 @@
 # Handover Summary — rs8kvn_bot
 
 **Repo:** https://github.com/kereal/rs8kvn_bot
-**Module:** `rs8kvn_bot` (Go 1.25+)
+**Module:** `rs8kvn_bot` (Go 1.26+)
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration, feature branches from dev or `plans_and_pricing`)
 
 ---
@@ -182,7 +182,7 @@ Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
 
 | Component | Library/DB | Version |
 |-----------|------------|---------|
-| Go | `go` | 1.25+ |
+| Go | `go` | 1.26+ |
 | Telegram API | `go-telegram-bot-api/telegram-bot-api/v5` | v5.5.1 |
 | ORM | `gorm.io/gorm` + `gorm.io/driver/sqlite` | v1.31.2 |
 | DB engine | SQLite (mattn/go-sqlite3, CGO) | `./data/rs8kvn.db` |
@@ -437,7 +437,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **`/readyz`:** Simple flag — set to true only after all services initialized → 200 or 503
 
 ### Docker
-- **Base:** Alpine 3.21 (runtime, with procps), golang:1.25-alpine (builder)
+- **Base:** Alpine 3.21 (runtime, with procps), golang:1.26-alpine (builder)
 - **Binary:** UPX compressed (-9) — ~30–40% smaller
 - **Migrations:** Embedded via `COPY internal/database/migrations`
 - **Data volume:** `./data:/app/data` (persistent)

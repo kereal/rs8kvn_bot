@@ -106,7 +106,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - **Документация**: добавлен краткий README по флоу рассылок — `doc/broadcast.md` (флоу админа, воркер доставки, управление, указатели на код); ссылка добавлена в «Project Documentation» корневого README.md.
 
 ## Стек
-- **Go 1.25** (go.mod)
+- **Go 1.26** (go.mod)
 - **Bot**: telegram-bot-api/v5
 - **DB**: SQLite + GORM + golang-migrate (embedded, current schema migrations are applied at startup)
 - **Logging**: Zap (с ротацией)
