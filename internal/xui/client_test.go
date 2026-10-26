@@ -16,7 +16,9 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -70,6 +72,30 @@ func TestNewClient(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "http://localhost:2053", client.host)
 	})
+}
+
+func TestClient_SetNode(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewClient("http://localhost:2053", testAPIToken)
+	require.NoError(t, err)
+	client.SetNode("primary-eu")
+	assert.Equal(t, "primary-eu", client.node)
+}
+
+func TestClient_RequestMetricsUseConfiguredNode(t *testing.T) {
+	t.Parallel()
+
+	server, client := setupTestServer(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer server.Close()
+	defer client.Close()
+
+	client.SetNode("metrics-test-node")
+	before := promtestutil.ToFloat64(metrics.XUIRequestsTotal.WithLabelValues("server", "success", "metrics-test-node"))
+	require.NoError(t, client.Ping(context.Background()))
+	require.Equal(t, before+1, promtestutil.ToFloat64(metrics.XUIRequestsTotal.WithLabelValues("server", "success", "metrics-test-node")))
 }
 
 func TestPing(t *testing.T) {

@@ -305,7 +305,7 @@ func (s *SubscriptionService) reanimateRevokedSubscription(ctx context.Context, 
 
 	s.logAudit(ctx, database.AuditSubscriptionReanimated(sub))
 
-	metrics.SubscriptionCreatesTotal.Inc()
+	metrics.SubscriptionReanimationsTotal.Inc()
 
 	s.RefreshActiveSubscriptionsMetric(ctx)
 
