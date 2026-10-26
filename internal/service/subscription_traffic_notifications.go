@@ -353,6 +353,14 @@ func (s *SubscriptionService) sendOnce(ctx context.Context, sub *database.Subscr
 
 	metrics.TrafficNotificationsTotal.WithLabelValues(kind, "success").Inc()
 
+	// Аудит уведомления best-effort.
+	if auditErr := s.db.InsertAuditLog(ctx, database.AuditTrafficNotified(sub, kind)); auditErr != nil {
+		logger.Warn("audit log write failed",
+			zap.String("event", database.AuditEventTrafficNotified),
+			zap.Uint("subscription_id", sub.ID),
+			zap.Error(auditErr))
+	}
+
 	logger.Info("traffic notification sent",
 		zap.String("kind", kind),
 		zap.Uint("subscription_id", sub.ID),

@@ -484,8 +484,14 @@ func TestE2E_BroadcastCommand_SomeFailures(t *testing.T) {
 		},
 	})
 
-	// Шаг 2: установить ошибку и запустить рассылку.
-	env.botAPI.SendError = fmt.Errorf("send failed")
+	// Fail recipient deliveries but allow the final admin report to be sent.
+	env.botAPI.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+		msg, ok := c.(tgbotapi.MessageConfig)
+		if ok && msg.ChatID != adminID {
+			return tgbotapi.Message{}, fmt.Errorf("send failed")
+		}
+		return tgbotapi.Message{MessageID: 1}, nil
+	}
 	env.handler.HandleCallback(ctx, tgbotapi.Update{
 		CallbackQuery: &tgbotapi.CallbackQuery{
 			From: &tgbotapi.User{ID: adminID, UserName: "admin"},

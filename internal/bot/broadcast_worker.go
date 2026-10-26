@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -128,6 +129,7 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 			return nil
 		}
 		logger.Info("Broadcast campaign started", zap.Uint("broadcast_id", campaign.ID))
+		w.auditLog(ctx, database.AuditBroadcastStarted(campaign))
 	}
 
 	// Snapshot is idempotent and also covers a crash between claim and snapshot.
@@ -385,6 +387,7 @@ func (w *BroadcastWorker) markCampaignFailed(ctx context.Context, id uint, cause
 	if err != nil {
 		return fmt.Errorf("mark campaign failed: %w", err)
 	}
+	w.auditLog(ctx, database.AuditBroadcastFailed(broadcast, cause.Error()))
 	logger.Warn("Broadcast marked failed", zap.Uint("broadcast_id", id), zap.Error(cause))
 	return nil
 }
@@ -421,7 +424,46 @@ func (w *BroadcastWorker) finishCampaign(ctx context.Context, campaign *database
 	if err != nil {
 		return fmt.Errorf("finish campaign: %w", err)
 	}
+
+	switch status {
+	case database.BroadcastStatusCompleted:
+		w.auditLog(ctx, database.AuditBroadcastCompleted(b))
+	case database.BroadcastStatusCanceled:
+		w.auditLog(ctx, database.AuditBroadcastCanceled(b, w.h.cfg.TelegramAdminID))
+	}
+
 	return incompleteErr
+}
+
+// auditLog пишет событие аудита best-effort: ошибка журнала логируется,
+// но не влияет на обработку рассылки.
+func (w *BroadcastWorker) auditLog(ctx context.Context, e *database.AuditLog) {
+	if e == nil {
+		return
+	}
+
+	err := w.h.db.InsertAuditLog(ctx, e)
+	if err != nil {
+		logger.Warn("audit log write failed",
+			zap.String("event", e.Event),
+			zap.Uint("broadcast_id", campaignIDFromEntity(e.EntityID)),
+			zap.Error(err))
+	}
+}
+
+// campaignIDFromEntity извлекает ID рассылки из entity_id события аудита.
+func campaignIDFromEntity(entityID *string) uint {
+	if entityID == nil {
+		return 0
+	}
+
+	id, parseErr := strconv.ParseUint(*entityID, 10, 64)
+	if parseErr != nil {
+		return 0
+	}
+
+	// #nosec G115 -- ParseUint с битностью 64 укладывается в uint
+	return uint(id)
 }
 
 // scheduleRetry stores an exponential delay for infrastructure or persistence

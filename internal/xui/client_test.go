@@ -16,7 +16,9 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -70,6 +72,30 @@ func TestNewClient(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "http://localhost:2053", client.host)
 	})
+}
+
+func TestClient_SetNode(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewClient("http://localhost:2053", testAPIToken)
+	require.NoError(t, err)
+	client.SetNode("primary-eu")
+	assert.Equal(t, "primary-eu", client.node)
+}
+
+func TestClient_RequestMetricsUseConfiguredNode(t *testing.T) {
+	t.Parallel()
+
+	server, client := setupTestServer(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer server.Close()
+	defer client.Close()
+
+	client.SetNode("metrics-test-node")
+	before := promtestutil.ToFloat64(metrics.XUIRequestsTotal.WithLabelValues("server", "success", "metrics-test-node"))
+	require.NoError(t, client.Ping(context.Background()))
+	require.Equal(t, before+1, promtestutil.ToFloat64(metrics.XUIRequestsTotal.WithLabelValues("server", "success", "metrics-test-node")))
 }
 
 func TestPing(t *testing.T) {
@@ -1017,7 +1043,28 @@ func TestGetClientTraffic(t *testing.T) {
 		defer client.Close()
 
 		_, err = client.GetClientTraffic(context.Background(), "nonexistent@example.com")
-		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrClientNotFound)
+	})
+
+	// 3x-ui v3.10 answers an unknown email with success=true and obj=null.
+	// Treating it as parseable data produced "failed to parse traffic data",
+	// which the traffic-notification worker reports as an infrastructure error
+	// instead of a missing client.
+	t.Run("client not found (v3.10 null obj)", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"success":true,"msg":"","obj":null}`)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(server.URL, testAPIToken)
+		require.NoError(t, err)
+
+		defer client.Close()
+
+		_, err = client.GetClientTraffic(context.Background(), "ghost@example.com")
+		assert.ErrorIs(t, err, ErrClientNotFound)
 	})
 
 	t.Run("invalid JSON response", func(t *testing.T) {

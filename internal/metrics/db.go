@@ -93,15 +93,13 @@ func recordDBMetric(tx *gorm.DB, startTimeKey, operation string) {
 }
 
 // CollectDBPoolMetrics collects database connection pool statistics.
-func CollectDBPoolMetrics(ctx context.Context, db *gorm.DB) {
+func CollectDBPoolMetrics(_ context.Context, db *gorm.DB) {
 	sqlDB, err := db.DB()
 	if err != nil {
 		return
 	}
 
 	stats := sqlDB.Stats()
-	_ = stats.OpenConnections
-	_ = stats.InUse
-	_ = stats.Idle
 	DBPoolWait.Set(float64(stats.WaitCount))
+	DBPoolWaitDurationSeconds.Set(stats.WaitDuration.Seconds())
 }

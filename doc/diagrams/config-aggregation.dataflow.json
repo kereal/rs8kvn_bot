@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Агрегация конфигов подписки",
+    "output": "doc/diagrams/config-aggregation.html",
+    "viewBox": [1068, 800],
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "sources", "label": "Источники", "focus": ["xui", "proxman", "fetchnodes"], "note": "Три типа нод: две панели и read-only fetch." },
+      { "id": "pipeline", "label": "Конвейер", "focus": ["fetcher", "detect", "merge"], "note": "Параллельный fetch, детект формата, объединение по subID." },
+      { "id": "serve", "label": "Выдача", "focus": ["merge", "cache", "client"], "note": "Кэш 240s отдаёт готовую подписку клиенту." }
+    ]
+  },
+  "stages": [
+    { "label": "Источники" },
+    { "label": "Fetch" },
+    { "label": "Нормализация" },
+    { "label": "Merge" },
+    { "label": "Выдача" }
+  ],
+  "nodes": [
+    { "id": "xui", "type": "cloud", "label": "3x-ui", "sublabel": "панель", "stage": 0, "row": 0 },
+    { "id": "proxman", "type": "cloud", "label": "proxman", "sublabel": "панель", "stage": 0, "row": 1 },
+    { "id": "fetchnodes", "type": "cloud", "label": "fetch-ноды", "sublabel": "read-only URL", "stage": 0, "row": 2 },
+    { "id": "fetcher", "type": "backend", "label": "Параллельный fetch", "sublabel": "bounded concurrency", "stage": 1, "row": 1, "width": 120, "tag": "subserver" },
+    { "id": "detect", "type": "backend", "label": "Детект формата", "sublabel": "4 формата", "stage": 2, "row": 1, "width": 120 },
+    { "id": "traffic", "type": "messagebus", "label": "Сумма трафика", "sublabel": "subscription-userinfo", "stage": 2, "row": 3, "width": 120, "tag": "заголовок" },
+    { "id": "merge", "type": "backend", "label": "Объединение", "sublabel": "единый список", "stage": 3, "row": 1, "tag": "по subID" },
+    { "id": "cache", "type": "database", "label": "Кэш 240s", "sublabel": "TTL + singleflight", "stage": 3, "row": 3 },
+    { "id": "client", "type": "external", "label": "Клиент", "sublabel": "Happ · V2Ray", "stage": 4, "row": 1, "tag": "200 ответ" }
+  ],
+  "flows": [
+    { "id": "f1", "from": "xui", "to": "fetcher", "label": "API панели", "variant": "emphasis", "labelDx": -55, "labelDy": -26, "labelSegment": 0 },
+    { "id": "f2", "from": "proxman", "to": "fetcher", "label": "API", "variant": "emphasis", "route": "straight", "labelDx": -30, "labelDy": 20 },
+    { "id": "f3", "from": "fetchnodes", "to": "fetcher", "label": "HTTP GET", "variant": "default", "labelDy": 30 },
+    { "id": "f4", "from": "fetcher", "to": "detect", "label": "сырые ответы", "variant": "emphasis", "route": "straight", "labelDy": -25 },
+    { "id": "f5", "from": "detect", "to": "traffic", "label": "usage", "variant": "dashed", "labelDx": 45, "labelDy": 24 },
+    { "id": "f6", "from": "detect", "to": "merge", "label": "конфиги", "variant": "emphasis", "route": "straight", "labelDy": -25 },
+    { "id": "f7", "from": "traffic", "to": "merge", "label": "userinfo-заголовок", "variant": "dashed", "labelDx": 45 },
+    { "id": "f8", "from": "merge", "to": "cache", "label": "результат", "variant": "default", "labelDx": 45, "labelDy": 24 },
+    { "id": "f9", "from": "cache", "to": "client", "label": "готовая подписка", "variant": "emphasis", "labelDy": 30 }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Три типа нод", "items": ["3x-ui и proxman дают конфиги через API панелей", "fetch-ноды — простой read-only URL", "Все активные ноды опрашиваются параллельно"] },
+    { "dot": "cyan", "title": "Нормализация", "items": ["Формат детектируется автоматически: JSON, Clash, Base64, Plain", "Трафик суммируется в subscription-userinfo", "Ответ всегда в едином формате для клиента"] },
+    { "dot": "amber", "title": "Кэш", "items": ["TTL 240s и singleflight против лавины", "Инвалидация при смене плана и депровизионировании", "Access-лог опционален через SUBSERVER_ACCESS_LOG"] }
+  ]
+}

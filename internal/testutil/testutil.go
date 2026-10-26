@@ -172,6 +172,9 @@ type DatabaseService struct {
 	ClaimTrafficReminderFunc                   func(ctx context.Context, id uint, bit int) (bool, error)
 	ReleaseTrafficReminderFunc                 func(ctx context.Context, id uint, bit int) error
 
+	AuditLogs        []database.AuditLog
+	InsertAuditLogFunc func(ctx context.Context, e *database.AuditLog) error
+
 	CreateBroadcastFunc                  func(ctx context.Context, b *database.Broadcast) error
 	GetBroadcastFunc                     func(ctx context.Context, id uint) (*database.Broadcast, error)
 	ListBroadcastsFunc                   func(ctx context.Context, limit int) ([]database.Broadcast, error)
@@ -194,6 +197,43 @@ func (m *DatabaseService) Ping(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// InsertAuditLog records an audit event in the in-memory fake. Tests assert on
+// m.AuditLogs to verify which events a flow produced.
+func (m *DatabaseService) InsertAuditLog(ctx context.Context, e *database.AuditLog) error {
+	if m.InsertAuditLogFunc != nil {
+		return m.InsertAuditLogFunc(ctx, e)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if e == nil {
+		return nil
+	}
+
+	// #nosec G115 -- в тестовом фейке ID всегда положительный
+	stored := *e
+	stored.ID = uint(len(m.AuditLogs) + 1)
+	m.AuditLogs = append(m.AuditLogs, stored)
+
+	return nil
+}
+
+// AuditLogsByEvent возвращает записанные события заданного типа.
+func (m *DatabaseService) AuditLogsByEvent(event string) []database.AuditLog {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var out []database.AuditLog
+	for _, e := range m.AuditLogs {
+		if e.Event == event {
+			out = append(out, e)
+		}
+	}
+
+	return out
 }
 
 func (m *DatabaseService) Transaction(ctx context.Context, fn func(*gorm.DB) error) error {
