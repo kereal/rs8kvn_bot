@@ -105,20 +105,25 @@ func updateBroadcastRecipientState(ctx context.Context, s *Service, broadcastID 
 	if err != nil {
 		return fmt.Errorf("pin database connection: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
-	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+	_, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE")
+	if err != nil {
 		return fmt.Errorf("begin immediate transaction: %w", err)
 	}
 	committed := false
-	defer func() {
+	// The rollback must run even when ctx is already cancelled: a pinned
+	// connection returned to the pool with an open transaction would poison it.
+	defer func(ctx context.Context) {
 		if !committed {
-			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
 		}
-	}()
+	}(ctx)
+
 
 	var status, recipientsState string
-	if err := conn.QueryRowContext(ctx, "SELECT status, recipients_state FROM broadcasts WHERE id = ?", broadcastID).Scan(&status, &recipientsState); err != nil {
+	err = conn.QueryRowContext(ctx, "SELECT status, recipients_state FROM broadcasts WHERE id = ?", broadcastID).Scan(&status, &recipientsState)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrBroadcastNotFound
 		}
@@ -129,10 +134,12 @@ func updateBroadcastRecipientState(ctx context.Context, s *Service, broadcastID 
 	if err != nil {
 		return err
 	}
-	if err := mutate(broadcast, &state); err != nil {
+	err = mutate(broadcast, &state)
+	if err != nil {
 		return err
 	}
-	if err := setBroadcastRecipientState(broadcast, state); err != nil {
+	err = setBroadcastRecipientState(broadcast, state)
+	if err != nil {
 		return err
 	}
 	result, err := conn.ExecContext(ctx, "UPDATE broadcasts SET recipients_state = ? WHERE id = ?", broadcast.RecipientsState, broadcastID)
@@ -146,7 +153,8 @@ func updateBroadcastRecipientState(ctx context.Context, s *Service, broadcastID 
 	if affected == 0 {
 		return ErrBroadcastNotFound
 	}
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+	_, err = conn.ExecContext(ctx, "COMMIT")
+	if err != nil {
 		return fmt.Errorf("commit broadcast recipient state: %w", err)
 	}
 	committed = true

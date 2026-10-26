@@ -12,6 +12,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 )
+
 // CallbackHandler processes callback queries from inline keyboards.
 type CallbackHandler struct {
 	h *Handler
@@ -319,7 +320,8 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		b, err := c.h.db.GetBroadcast(ctx, id)
 		if err != nil {
 			c.h.SendMessage(ctx, chatID, "❌ Рассылка не найдена.")
-			return nil
+
+			return nil //nolint:nilerr // load failure is reported to the user as "not found"; nothing to retry
 		}
 		text := fmt.Sprintf("⚠️ *Деактивация заблокировавших*\n\nРассылка #%d «%s» зафиксировала:\n🚫 Заблокировали: %d\n⚠️ Недоступны: %d\n\nВыключить подписки этих пользователей в базе (статус `revoked`) без удаления? Они больше не будут получать рассылки.", b.ID, b.Name, b.BlockedCount, b.UnreachableCount)
 		kb := tgbotapi.NewInlineKeyboardMarkup(

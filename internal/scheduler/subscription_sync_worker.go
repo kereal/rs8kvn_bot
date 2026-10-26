@@ -71,7 +71,8 @@ func (w *SubscriptionSyncWorker) process(ctx context.Context) {
 		// Сводное событие аудита за прогон (не per-item): деградация воркера
 		// должна быть видна в журнале для последующих расследований. Best-effort.
 		if w.db != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			if auditErr := w.db.InsertAuditLog(ctx, database.AuditSyncRunDegraded(0, err)); auditErr != nil {
+			auditErr := w.db.InsertAuditLog(ctx, database.AuditSyncRunDegraded(0, err))
+			if auditErr != nil {
 				logger.Warn("audit log write failed",
 					zap.String("event", database.AuditEventSyncRunDegraded),
 					zap.Error(auditErr))
