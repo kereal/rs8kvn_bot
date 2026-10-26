@@ -9,8 +9,7 @@
 - Docker container метрики (CPU, memory, network, disk I/O)
 - Host infrastructure метрики (CPU, RAM, disk, network, uptime)
 - Query patterns для counters/gauges/histograms/money
-- Структура 7 дашбордов Better Stack
-- Multi-server support patterns
+- Инвентарь и query patterns: `doc/betterstack-metrics-reference.md`; 7 telemetry dashboards плюс `Bot Activity`.
 
 ## Ключевые точки
 

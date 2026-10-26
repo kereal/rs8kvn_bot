@@ -62,55 +62,59 @@ go run ./cmd/bot
 
 ### 2.1 Docker (recommended)
 
-**Zero-downtime upgrade:**
+**Release status: READY** после фикса `3f6b173` (BEGIN IMMEDIATE) — конкурентные recipient-state writes сериализуются, `go test ./...` зелёный.
+
+Перед обновлением сохраните текущий image tag/digest и убедитесь, что каталог `data/` находится на постоянном диске. Текущий compose-файл использует `latest`; сохраните копию compose и замените `image` на конкретный опубликованный SemVer или commit SHA до `docker compose pull`.
 
 ```bash
-# 1. Pull new image
-docker pull ghcr.io/kereal/rs8kvn_bot:latest
+# 1. Сохранить текущую версию и compose для отката
+docker inspect rs8kvn_bot --format '{{.Config.Image}}'
+cp docker-compose.yml docker-compose.yml.before-release
 
-# 2. Stop old container
-docker stop rs8kvn_bot
+# 2. Убедиться, что последний штатный backup свежий; если нет — сделать offline backup.
+# См. раздел 3.2. Не копировать DB-файл на работающем сервисе.
+ls -lt ./data/rs8kvn.db.backup.*
 
-# 3. Remove old container
-docker rm rs8kvn_bot
+# 3. Установить в docker-compose.yml конкретный SemVer или commit SHA вместо latest
+${EDITOR:-vi} docker-compose.yml
+docker compose pull
+docker compose up -d --no-deps rs8kvn_bot
 
-# 4. Start new container (same command as installation)
-docker run -d \
-  --name rs8kvn_bot \
-  --restart unless-stopped \
-  -v $(pwd)/.env:/app/.env:ro \
-  -v $(pwd)/data:/app/data \
-  -p 127.0.0.1:8880:8880 \
-  ghcr.io/kereal/rs8kvn_bot:latest
+# 4. Проверить health, readiness, метрики и логи
+docker inspect rs8kvn_bot --format '{{.State.Health.Status}}'
+curl -fsS http://127.0.0.1:8880/healthz
+curl -fsS http://127.0.0.1:8880/readyz
+curl -fsS http://127.0.0.1:8880/metrics | grep -E 'db_pool_wait(_duration_seconds)?|subscription_(renewals|reanimations)_total|xui_requests_total'
+docker logs --since 10m rs8kvn_bot
 ```
 
-**Using Docker Compose:**
+### Проверка метрик после rollout
 
-```bash
-docker-compose pull
-docker-compose up -d
-```
+`/metrics` должен отдавать HTTP 200. После запуска проверьте наличие `db_pool_wait`, `db_pool_wait_duration_seconds`, `subscription_renewals_total`, `subscription_reanimations_total` и XUI-метрик с label `node`. Counter series могут появляться только после соответствующего события; отсутствие конкретной серии сразу после рестарта не является доказательством ошибки.
 
-**Rollback:** If something goes wrong, specify previous tag:
-```bash
-docker run ... ghcr.io/kereal/rs8kvn_bot:v2.2.0
-```
+`db_pool_wait` и `db_pool_wait_duration_seconds` — накопительные значения с момента старта процесса. Для оценки нагрузки сравнивайте изменение между scrape, а не абсолютное значение. Метрики подписок и платежей process-local, сбрасываются при рестарте и не заменяют базу данных/audit log.
+
+Проверьте Better Stack после первого scrape и убедитесь, что новый XUI label идентифицирует VPN-ноду. Он не идентифицирует экземпляр приложения; агрегация нескольких bot hosts требует отдельного стабильного host/source label на стороне collector.
+
+База SQLite хранит состояние. Перед релизом проверьте свежесть штатного backup в `data/`; если копии нет — остановите сервис и сделайте offline backup по разделу 3.2. Не копируйте только `rs8kvn.db` во время работы: committed data может находиться в WAL. Commit `4f14de5` не содержит schema migration; запуск включает WAL mode.
+
+**Откат:** верните сохранённый `docker-compose.yml` с предыдущим image tag и выполните `docker compose pull && docker compose up -d --no-deps rs8kvn_bot`. Не восстанавливайте старую БД без необходимости: этот релиз не меняет схему. Повторно проверьте health и readiness.
+
+Это перезапуск одного экземпляра, не zero-downtime rollout. Не запускайте одновременно два процесса бота с одной SQLite БД или Telegram token.
+
+Для commit `4f14de5`: отправить изменения в `main`, дождаться зелёного CI (tests/race, `go vet`, build, lint; для tag — gosec), затем создать `vX.Y.Z` tag. GitHub Actions публикует production image только по `v*` tags. Не деплоить `dev` или локальный образ напрямую.
+
+На production-хосте убедиться, что каталог `data/` доступен на запись UID контейнера `1000`; WAL создаёт рядом с БД файлы `-wal`/`-shm`. Ручная миграция схемы для этого релиза не требуется.
 
 ### 2.2 Binary (manual build)
 
 ```bash
-# 1. Pull latest code
-git pull origin dev
+# 1. Получить опубликованный тег из Git
+git fetch --tags origin
+git checkout vX.Y.Z
 
-# 2. Build
+# 2. Собрать бинарный файл
 go build -ldflags="-s -w -X main.version=$(git describe --tags --abbrev=0) -X main.commit=$(git rev-parse --short HEAD) -X main.buildTime=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o rs8kvn_bot ./cmd/bot
-
-# 3. Stop old process (find PID)
-pkill -f rs8kvn_bot
-# or systemctl stop rs8kvn_bot
-
-# 4. Start new
-./rs8kvn_bot &
 ```
 
 ### 2.3 Database Migrations
@@ -607,9 +611,10 @@ curl http://localhost:8880/debug/pprof/goroutine?debug=1  # if enabled
 **Cause:** SQLite allows only 1 writer. Concurrent writes queue.
 
 **Solutions:**
-1. **Tune connection pool:** Already set `MaxOpenConns=1`. Check if other processes accessing DB.
-2. **Reduce write frequency:** Trial cleanup runs every 3 hours, backup daily — OK.
-3. **Consider PostgreSQL** if >10k writes/day.
+1. **Пул соединений**: `MaxOpenConns=4`, `MaxIdleConnsDB=4`; SQLite использует WAL с busy timeout 5s. Не увеличивайте пул вслепую: SQLite допускает одного writer, а больше соединений не ускоряет конкурентные записи.
+2. **Сначала измерить**: `db_pool_wait` и `db_pool_wait_duration_seconds` — накопительные значения ожидания с начала процесса, не размер очереди. Сравнивайте прирост между scrape/рестартами и сопоставляйте с DB latency и логами `database is locked`.
+3. **Снизить конкурирующие записи** только по подтверждённой причине; trial cleanup каждые 3 часа, backup ежедневно.
+4. Рассматривать PostgreSQL при доказанной write contention/нагрузке, а не по одному высокому cumulative wait count.
 
 **Check locking:**
 ```bash
