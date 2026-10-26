@@ -120,7 +120,6 @@ func updateBroadcastRecipientState(ctx context.Context, s *Service, broadcastID 
 		}
 	}(ctx)
 
-
 	var status, recipientsState string
 	err = conn.QueryRowContext(ctx, "SELECT status, recipients_state FROM broadcasts WHERE id = ?", broadcastID).Scan(&status, &recipientsState)
 	if err != nil {
