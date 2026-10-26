@@ -50,9 +50,10 @@ func InsertAuditLogInTx(tx *gorm.DB, e *AuditLog) error {
 // ошибка журнала логируется как Warn. Для вызовов из пакета database, где
 // сервисный logAudit-хелпер недоступен (воркеры очистки trial и т.п.).
 func (s *Service) insertAuditLogBestEffort(ctx context.Context, e *AuditLog) error {
-	if err := s.InsertAuditLog(ctx, e); err != nil {
+	err := s.InsertAuditLog(ctx, e)
+	if err != nil {
 		logger.Warn("audit log write failed",
-			zap.String("event", string(e.Event)),
+			zap.String("event", e.Event),
 			zap.Error(err))
 
 		return err

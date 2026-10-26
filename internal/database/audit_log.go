@@ -38,23 +38,26 @@ const (
 // Имена в lower_snake_case, прошедшее время — past tense.
 const (
 	// Жизненный цикл подписки.
-	AuditEventSubscriptionCreated      = "subscription_created"
-	AuditEventTrialCreated             = "trial_created"
-	AuditEventTrialBound               = "trial_bound"
-	AuditEventSubscriptionReanimated   = "subscription_reanimated"
-	AuditEventSubscriptionRenewed      = "subscription_renewed"
-	AuditEventPlanChanged              = "plan_changed"
-	AuditEventSubscriptionExpired      = "subscription_expired"
-	AuditEventDowngradedToFree         = "downgraded_to_free"
-	AuditEventSubscriptionRevoked      = "subscription_revoked"
-	AuditEventSubscriptionDeleted      = "subscription_deleted"
-	AuditEventTrialDeleted             = "trial_deleted"
+
+	AuditEventSubscriptionCreated    = "subscription_created"
+	AuditEventTrialCreated           = "trial_created"
+	AuditEventTrialBound             = "trial_bound"
+	AuditEventSubscriptionReanimated = "subscription_reanimated"
+	AuditEventSubscriptionRenewed    = "subscription_renewed"
+	AuditEventPlanChanged            = "plan_changed"
+	AuditEventSubscriptionExpired    = "subscription_expired"
+	AuditEventDowngradedToFree       = "downgraded_to_free"
+	AuditEventSubscriptionRevoked    = "subscription_revoked"
+	AuditEventSubscriptionDeleted    = "subscription_deleted"
+	AuditEventTrialDeleted           = "trial_deleted"
 
 	// Уведомления.
+
 	AuditEventReminderSent    = "reminder_sent"
 	AuditEventTrafficNotified = "traffic_notified"
 
 	// Оплата и заказы.
+
 	AuditEventOrderCreated          = "order_created"
 	AuditEventPaymentConfirmed      = "payment_confirmed"
 	AuditEventOrderExpired          = "order_expired"
@@ -63,12 +66,14 @@ const (
 	AuditEventPaymentCreationUncert = "payment_creation_uncertain"
 
 	// Рассылки.
+
 	AuditEventBroadcastStarted   = "broadcast_started"
 	AuditEventBroadcastCompleted = "broadcast_completed"
 	AuditEventBroadcastFailed    = "broadcast_failed"
 	AuditEventBroadcastCanceled  = "broadcast_canceled"
 
 	// Технические агрегаты (сводки за прогон воркеров, не per-item шум).
+
 	AuditEventSyncRunDegraded        = "sync_run_degraded"
 	AuditEventOrphanedClientsRevoked = "orphaned_clients_revoked"
 )
@@ -81,10 +86,10 @@ type AuditLog struct {
 	ID         uint       `gorm:"primaryKey"`
 	EntityType EntityType `gorm:"type:text;not null;column:entity_type"`
 	// EntityID — строковое представление ID сущности; nil для системных событий.
-	EntityID  *string    `gorm:"column:entity_id"`
-	Event     string     `gorm:"type:text;not null;column:event"`
-	ActorType ActorType  `gorm:"type:text;not null;column:actor_type"`
-	ActorID   *string    `gorm:"column:actor_id"`
+	EntityID  *string   `gorm:"column:entity_id"`
+	Event     string    `gorm:"type:text;not null;column:event"`
+	ActorType ActorType `gorm:"type:text;not null;column:actor_type"`
+	ActorID   *string   `gorm:"column:actor_id"`
 	// OldState/NewState — JSON-снапшот изменившихся полей до/после.
 	OldState *string `gorm:"column:old_state"`
 	// NewState — JSON; для created-событий содержит начальное состояние.
@@ -142,23 +147,6 @@ func auditSubDetails(sub *Subscription) map[string]any {
 	}
 
 	return d
-}
-
-// mergeDetails объединяет базовый контекст с событийно-специфичным.
-func mergeDetails(base, extra map[string]any) map[string]any {
-	if len(extra) == 0 {
-		return base
-	}
-
-	merged := make(map[string]any, len(base)+len(extra))
-	for k, v := range base {
-		merged[k] = v
-	}
-	for k, v := range extra {
-		merged[k] = v
-	}
-
-	return merged
 }
 
 // NewAuditLog — универсальный конструктор для событий, которым не нужен
@@ -640,7 +628,7 @@ func AuditBroadcastStarted(b *Broadcast) *AuditLog {
 		ActorType:  ActorSystem,
 		NewState:   marshalAuditJSON(map[string]any{"status": string(BroadcastStatusRunning)}),
 		Details: marshalAuditDetails(map[string]any{
-			"name": b.Name,
+			"name":             b.Name,
 			"recipients_total": b.RecipientsTotal,
 		}),
 	}
