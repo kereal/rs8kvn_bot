@@ -20,9 +20,9 @@ func TestMain(m *testing.M) {
 
 	os.Exit(m.Run())
 }
-func ptrTime(t time.Time) *time.Time { return &t }
+func ptrTime(t time.Time) *time.Time { return new(t) }
 
-func ptrInt64(v int64) *int64 { return &v }
+func ptrInt64(v int64) *int64 { return new(v) }
 
 // ==================== Model Method Tests ====================
 
