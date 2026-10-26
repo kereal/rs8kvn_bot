@@ -10,7 +10,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 )
 
 // TestGenerateAndVerifyBlockedBroadcastDemo — исполняемый тест-демогенератор,
@@ -72,25 +71,28 @@ func TestGenerateAndVerifyBlockedBroadcastDemo(t *testing.T) {
 			if sub, ok := subsMap[telegramID]; ok {
 				return sub, nil
 			}
-			return nil, gorm.ErrRecordNotFound
+			return nil, database.ErrSubscriptionNotFound
 		},
 		UpdateSubscriptionFunc: func(ctx context.Context, s *database.Subscription) error {
 			if sub, ok := subsMap[s.TelegramID]; ok {
 				sub.Status = s.Status
 				return nil
 			}
-			return gorm.ErrRecordNotFound
+			return database.ErrSubscriptionNotFound
 		},
 	}
 
 	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
 
 	// 4. Запускаем деактивацию
-	deactivatedCount, err := svc.DeactivateBlockedBroadcastRecipients(ctx, broadcast.ID)
+	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, broadcast.ID)
 	require.NoError(t, err)
+	require.NotNil(t, result)
 
 	// 5. Проверяем результаты
-	assert.Equal(t, 2, deactivatedCount, "должно быть успешно выключено ровно 2 пользователя")
+	assert.Equal(t, 2, result.Revoked, "должно быть успешно выключено ровно 2 пользователя")
+	assert.Equal(t, 2, result.Targets)
+	assert.Zero(t, result.Failed)
 	assert.Equal(t, string(database.SubscriptionStatusRevoked), subsMap[991001].Status)
 	assert.Equal(t, string(database.SubscriptionStatusRevoked), subsMap[991002].Status)
 
@@ -102,5 +104,5 @@ func TestGenerateAndVerifyBlockedBroadcastDemo(t *testing.T) {
 	}
 
 	t.Logf("DEMO SUCCESS: Broadcast #%d analyzed. Deactivated %d blocked users. Audit events generated: %d",
-		broadcast.ID, deactivatedCount, len(m.AuditLogs))
+		broadcast.ID, result.Revoked, len(m.AuditLogs))
 }

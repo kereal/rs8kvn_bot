@@ -393,6 +393,71 @@ func (s *SubscriptionService) DowngradeToFreePlan(ctx context.Context, sub *data
 	return sub, nil
 }
 
+// markRevokedSub durably flips the subscription to revoked. This is the first
+// phase of every revocation: the subserver answers 404 as soon as the row says
+// revoked, independent of whether the VPN clients were already removed.
+func (s *SubscriptionService) markRevokedSub(ctx context.Context, sub *database.Subscription) error {
+	previous := sub.Status
+	sub.Status = string(database.SubscriptionStatusRevoked)
+
+	err := s.db.UpdateSubscription(ctx, sub)
+	if err != nil {
+		// Не оставляем в памяти состояние, которого нет в БД.
+		sub.Status = previous
+
+		return fmt.Errorf("mark revoked: %w", err)
+	}
+
+	return nil
+}
+
+// queueForDeprovision marks every node binding of the subscription
+// pending_remove. This is the structural DB prerequisite of every removal: the
+// rows are the retry queue consumed by SyncPendingNodes, so a failure is
+// returned to the caller.
+func (s *SubscriptionService) queueForDeprovision(ctx context.Context, subscriptionID uint) error {
+	if s.syncService == nil {
+		return nil
+	}
+
+	err := s.syncService.MarkAllForRemoval(ctx, subscriptionID)
+	if err != nil {
+		return fmt.Errorf("deprovision mark failed: %w", err)
+	}
+
+	return nil
+}
+
+// syncDeprovisionNow is the external half of deprovisioning: it asks the panels
+// to delete the clients whose bindings are pending_remove. It is best-effort by
+// contract — a failure leaves the rows for SyncPendingNodes to retry, so the
+// error only gets logged and never surfaces to the caller.
+func (s *SubscriptionService) syncDeprovisionNow(ctx context.Context, subscriptionID uint) {
+	if s.syncService == nil {
+		return
+	}
+
+	err := s.syncService.SyncSubscription(ctx, subscriptionID)
+	if err != nil {
+		logger.Warn("deprovision sync failed; background sync will retry",
+			zap.Uint("subscription_id", subscriptionID),
+			zap.Error(err))
+	}
+}
+
+// deprovisionSub queues the removal and immediately asks the panels to delete
+// the VPN clients. Used by the single-subscription teardown (admin /del).
+func (s *SubscriptionService) deprovisionSub(ctx context.Context, subscriptionID uint) error {
+	err := s.queueForDeprovision(ctx, subscriptionID)
+	if err != nil {
+		return err
+	}
+
+	s.syncDeprovisionNow(ctx, subscriptionID)
+
+	return nil
+}
+
 // revokeAndDeprovisionThenDelete runs the two-phase subscription teardown used by
 // DeleteByID: mark revoked → deprovision VPN access (best-effort; background
 // sync reconciles on failure) → physically delete the DB row + subscription nodes →
@@ -400,26 +465,15 @@ func (s *SubscriptionService) DowngradeToFreePlan(ctx context.Context, sub *data
 // lives in exactly one place. Returns the deleted subscription (nil on error).
 func (s *SubscriptionService) revokeAndDeprovisionThenDelete(ctx context.Context, sub *database.Subscription) (*database.Subscription, error) {
 	// Phase 1: mark revoked before any external effect.
-	sub.Status = string(database.SubscriptionStatusRevoked)
-
-	err := s.db.UpdateSubscription(ctx, sub)
+	err := s.markRevokedSub(ctx, sub)
 	if err != nil {
-		return nil, fmt.Errorf("mark revoked: %w", err)
+		return nil, err
 	}
 
 	// Phase 2: deprovision VPN access (best-effort; background sync reconciles on failure).
-	if s.syncService != nil {
-		err = s.syncService.MarkAllForRemoval(ctx, sub.ID)
-		if err != nil {
-			return nil, fmt.Errorf("deprovision mark failed: %w", err)
-		}
-
-		err = s.syncService.SyncSubscription(ctx, sub.ID)
-		if err != nil {
-			logger.Warn("deprovision sync failed; subscription remains revoked, background sync will retry",
-				zap.Uint("subscription_id", sub.ID),
-				zap.Error(err))
-		}
+	err = s.deprovisionSub(ctx, sub.ID)
+	if err != nil {
+		return nil, err
 	}
 
 	// SyncSubscription intentionally treats external node failures as best-effort
