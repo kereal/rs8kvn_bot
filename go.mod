@@ -3,7 +3,7 @@ module github.com/kereal/rs8kvn_bot
 go 1.25.0
 
 require (
-	github.com/getsentry/sentry-go v0.49.0
+	github.com/getsentry/sentry-go v0.50.0
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/uuid v1.6.0
@@ -37,6 +37,8 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	modernc.org/libc v1.70.0 // indirect
