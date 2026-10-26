@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Subscription intake: от команды до нод",
+    "output": "doc/diagrams/subscription-intake.html",
+    "viewBox": [1000, 760],
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "db-setup", "label": "Структурная фаза", "focus": ["user", "bot", "subs", "db"], "note": "Резолв плана и запись подписки с pending-связями нод — синхронно и обязательно." },
+      { "id": "external-sync", "label": "Внешний sync", "focus": ["subs", "nodes"], "note": "Создание клиентов на нодах best-effort: сбой дообгонит SyncPendingNodes." }
+    ]
+  },
+  "participants": [
+    { "id": "user", "type": "external", "label": "Пользователь", "sublabel": "Telegram" },
+    { "id": "bot", "type": "backend", "label": "Bot Handler", "sublabel": "кнопки" },
+    { "id": "subs", "type": "backend", "label": "SubSvc", "sublabel": "intake" },
+    { "id": "db", "type": "database", "label": "SQLite", "sublabel": "GORM" },
+    { "id": "nodes", "type": "cloud", "label": "VPN-ноды", "sublabel": "адаптеры" }
+  ],
+  "segments": [
+    { "from": 160, "to": 270, "label": "Запрос" },
+    { "from": 285, "to": 405, "label": "Запись" },
+    { "from": 420, "to": 530, "label": "Sync" },
+    { "from": 545, "to": 660, "label": "Ответ" }
+  ],
+  "messages": [
+    { "id": "cmd", "from": "user", "to": "bot", "y": 195, "label": "/start · «Получить подписку»", "variant": "emphasis" },
+    { "id": "create", "from": "bot", "to": "subs", "y": 235, "label": "Create(план)" },
+    { "id": "db-setup", "from": "subs", "to": "db", "y": 320, "label": "INSERT подписка + pending_add", "variant": "emphasis", "note": "DB-setup: синхронно-обязателен, сбой → ошибка пользователю" },
+    { "id": "committed", "from": "db", "to": "subs", "y": 365, "label": "записи созданы", "variant": "return" },
+    { "id": "sync", "from": "subs", "to": "nodes", "y": 455, "label": "SyncSubscription", "variant": "dashed" },
+    { "id": "sync-outcome", "from": "nodes", "to": "subs", "y": 490, "label": "клиенты созданы / сбой", "variant": "return", "note": "сбой — retry воркером с backoff" },
+    { "id": "sub-url", "from": "subs", "to": "bot", "y": 560, "label": "ссылка /sub/{subID}", "variant": "return" },
+    { "id": "menu", "from": "bot", "to": "user", "y": 600, "label": "меню · QR-код", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "bot", "from": 195, "to": 605, "type": "backend" },
+    { "participant": "subs", "from": 235, "to": 565, "type": "backend" },
+    { "participant": "db", "from": 315, "to": 370, "type": "database" },
+    { "participant": "nodes", "from": 450, "to": 495, "type": "cloud" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Двухфазная провизия", "items": ["DB-setup пишется в транзакции и обязан succeed", "Внешний sync — best-effort с экспоненциальным backoff", "Пользователь получает ответ до полной провизии нод"] },
+    { "dot": "cyan", "title": "Планы", "items": ["Plan резолвится по имени, без хардкода ID", "Free-подписка использует rolling-конфиг reset=30", "Trial привязывается позже через BindTrialSubscription"] },
+    { "dot": "amber", "title": "Ответ пользователю", "items": ["Sub URL валиден сразу: subserver отдаст конфиг после провизии", "Сбой sync не портит ответ — статус active уже записан", "Повторные попытки видны в subscription_nodes.retry_count"] }
+  ]
+}

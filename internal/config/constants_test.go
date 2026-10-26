@@ -38,8 +38,8 @@ func TestConstants_Database(t *testing.T) {
 	assert.Equal(t, "./data/rs8kvn.db", DefaultDatabasePath)
 	assert.Equal(t, 5*time.Minute, ConnMaxLifetime)
 	assert.Equal(t, 2*time.Minute, ConnMaxIdleTime)
-	assert.Equal(t, 1, MaxOpenConns, "SQLite should use 1 connection")
-	assert.Equal(t, 1, MaxIdleConnsDB)
+	assert.Equal(t, 4, MaxOpenConns, "WAL mode supports concurrent readers")
+	assert.Equal(t, 4, MaxIdleConnsDB)
 }
 
 func TestConstants_Heartbeat(t *testing.T) {

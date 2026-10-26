@@ -160,18 +160,30 @@ func waitForBroadcastFinished(t *testing.T, env *e2eTestEnv) database.Broadcast 
 	t.Helper()
 
 	var finished database.Broadcast
-	require.Eventually(t, func() bool {
+	deadline := time.Now().Add(5 * time.Second)
+	complete := false
+	for time.Now().Before(deadline) && !complete {
 		broadcasts, err := env.db.ListBroadcasts(context.Background(), 1)
-		if err != nil || len(broadcasts) == 0 {
-			return false
+		if err == nil && len(broadcasts) > 0 {
+			status := broadcasts[0].Status
+			if status != string(database.BroadcastStatusScheduled) && status != string(database.BroadcastStatusRunning) {
+				for _, msg := range env.botAPI.GetAllSentMessages() {
+					if strings.Contains(msg.Text, "Рассылка завершена") || strings.Contains(msg.Text, "Рассылка отменена") {
+						finished = broadcasts[0]
+						complete = true
+						break
+					}
+				}
+			}
 		}
-		status := broadcasts[0].Status
-		if status == string(database.BroadcastStatusScheduled) || status == string(database.BroadcastStatusRunning) {
-			return false
+		if !complete {
+			time.Sleep(10 * time.Millisecond)
 		}
-		finished = broadcasts[0]
-		return strings.Contains(env.botAPI.LastSentTextSafe(), "Рассылка завершена")
-	}, 5*time.Second, 10*time.Millisecond)
+	}
+	if !complete {
+		broadcasts, err := env.db.ListBroadcasts(context.Background(), 10)
+		t.Fatalf("broadcast did not finish: broadcasts=%+v err=%v messages=%+v", broadcasts, err, env.botAPI.GetAllSentMessages())
+	}
 
 	return finished
 }

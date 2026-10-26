@@ -64,7 +64,7 @@ func TestGetPlanByID_AfterCreate(t *testing.T) {
 	plan := &Plan{
 		Name:         "pro",
 		DevicesLimit: 3,
-		TrafficLimit: 50 * 1024 * 1024 * 1024,
+		TrafficLimit: 20 * 1024 * 1024 * 1024,
 	}
 	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
 	require.NotZero(t, plan.ID)
@@ -107,6 +107,7 @@ func TestGetPlanByName_DefaultFreePlan(t *testing.T) {
 	got, err := svc.GetPlanByName(context.Background(), FreePlanName)
 	require.NoError(t, err)
 	assert.Equal(t, FreePlanName, got.Name)
+	assert.Equal(t, FreePlanTrafficBytes, got.TrafficLimit, "free plan must seed with the 20 GiB quota")
 }
 
 // ==================== GetNodesByPlanName Tests ====================
