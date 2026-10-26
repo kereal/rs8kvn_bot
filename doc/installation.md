@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- **Docker & Docker Compose** (recommended) OR **Go 1.25+**
+- **Docker & Docker Compose** (recommended) OR **Go 1.26+**
 - **3x-ui panel** (https://github.com/MHSanaei/3x-ui) — up and running
 - **Telegram Bot Token** from @BotFather
 - **Minimum resources:** 1 CPU core, 128MB RAM, 1GB disk (for up to 10k users)
