@@ -102,10 +102,12 @@ type PaymentInfo struct {
 
 // PaymentConfirmation describes the result of a callback transition. Activated
 // is true only for the callback that changed an order from pending to paid; repeat
-// callbacks return the existing order with Activated=false.
+// callbacks return the existing order with Activated=false. IsRenewal records
+// whether the paid subscription already had a paid product before activation.
 type PaymentConfirmation struct {
 	Order     *database.Order
 	Activated bool
+	IsRenewal bool
 }
 
 // PaymentIssue contains the operational context of a payment integration problem.
@@ -658,6 +660,8 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 			o.notifyRequestIssue(ctx, "create_pending_order_failed", err.Error(), "retry after database recovery", telegramID, canonical, nil)
 			return nil, nil, fmt.Errorf("find or create pending payment order: %w", err)
 		}
+
+		o.logAuditOrderCreated(ctx, order)
 	}
 
 	if order.PaymentCreationUncertain {
@@ -812,6 +816,18 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 	return &PaymentInfo{URL: url, Provider: "platega", PaymentID: providerPaymentID, ExpiresAt: expiresAt}, order, nil
 }
 
+// logAuditOrderCreated пишет событие order_created best-effort: ошибка журнала
+// не влияет на выдачу платёжной ссылки.
+func (o *OrderService) logAuditOrderCreated(ctx context.Context, order *database.Order) {
+	err := o.db.InsertAuditLog(ctx, database.AuditOrderCreated(order))
+	if err != nil {
+		logger.Warn("audit log write failed",
+			zap.String("event", database.AuditEventOrderCreated),
+			zap.Uint("order_id", order.ID),
+			zap.Error(err))
+	}
+}
+
 // ConfirmPayment validates a provider callback and atomically applies the paid
 // transition plus subscription plan changes. Only the successful pending-to-paid
 // CAS caller performs post-commit synchronization and reports Activated=true.
@@ -829,6 +845,9 @@ func (o *OrderService) ConfirmPayment(ctx context.Context, providerPaymentID uui
 
 	if err == nil && confirmation != nil && confirmation.Activated && confirmation.Order != nil {
 		recordPaymentAmount("confirmed", confirmation.Order.AmountCents, confirmation.Order.Currency)
+		if confirmation.IsRenewal {
+			metrics.SubscriptionRenewalsTotal.Inc()
+		}
 	}
 
 	return confirmation, err
@@ -1019,7 +1038,7 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 		}
 	}
 
-	return &PaymentConfirmation{Order: order, Activated: activated}, nil
+	return &PaymentConfirmation{Order: order, Activated: activated, IsRenewal: isRenewal}, nil
 }
 
 // SyncProviderFees retries best-effort provider fee lookups for paid orders.

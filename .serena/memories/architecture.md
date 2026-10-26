@@ -86,7 +86,18 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - Password encoding in server links via `url.User` / `url.UserPassword`.
 
 ## Schema
-- Schema: embedded migrations are applied automatically at startup; the current repository includes migrations through 038.
+- Schema: embedded migrations are applied automatically at startup; the current repository includes migrations through 039.
+
+### Audit Log (2026-09-25, migration 039)
+- Universal append-only audit journal: table `audit_log` (`internal/database/audit_log.go` + `audit_log_repo.go`). Entity-addressed: `entity_type` (subscription/order/broadcast/plan/node/product/system) + `entity_id` (TEXT, survives physical deletion — no FK). Actor: `actor_type` (user/admin/worker/payment_provider/system) + `actor_id` (e.g. admin telegram_id via `service.WithAuditAdmin(ctx, id)` context key).
+- Event registry: constants `AuditEvent*` + constructors (`AuditSubscriptionCreated`, `AuditPaymentConfirmed`, `AuditChargebackReceived`, ...) live ONLY in `internal/database/audit_log.go`; no CHECK constraints on event/entity_type — new event = one constant, no migration.
+- Write contract: best-effort via service `logAudit` wrappers (Warn on failure, never breaks business flow); inside the database package use `insertAuditLogBestEffort`. EXCEPTION: payment transactions (`ConfirmOrderPaidCAS`, `CancelPaidOrderAndDowngradeCAS`) write via `InsertAuditLogInTx(tx, ...)` — atomic with the order/subscription transition, rolled back together.
+- **SQLite deadlock rule**: never do a best-effort `InsertAuditLog` INSIDE a tx closure — it deadlocks on the write lock (held until commit, which happens after the closure returns). Capture event data in a variable inside the closure and write AFTER `Transaction()` returns (see `expiredOrder` in `FindOrCreatePendingPaymentOrder`).
+- One mutation = one event per addressed entity: payment confirmation writes `payment_confirmed` (order) AND `subscription_renewed` (subscription, added 2026-09-25). Full coverage also includes: `order_expired` (both `FindPendingPaymentOrder` and `FindOrCreatePendingPaymentOrder`), `payment_creation_uncertain` (`MarkPaymentCreationUncertain`), `trial_deleted` (`CleanupExpiredTrials`), `order_canceled` in `CancelOrderCAS` (non-chargeback branch), `subscription_created` in `GetOrCreateSubscription` (second create path).
+- Read API: `GetAuditLogByEntity` / `GetAuditLogByEvent` / `GetRecentAuditLog`.
+- NOT logged: /sub touches (devices/ips/last_request), per-item worker Warn retries, no-op traffic scans. Technical events are per-run aggregates only (`sync_run_degraded`, `orphaned_clients_revoked` — written only when revoked > 0, zero runs stay silent).
+- Coverage tests: `internal/database/audit_payment_test.go` (6 db-level), `internal/service/subscription_audit_test.go` (11 service-level, incl. best-effort failure tolerance and admin actor propagation).
+- Testutil fake records into `DatabaseService.AuditLogs` with helper `AuditLogsByEvent(event)`.
 - `subscriptions.reminders_sent` stores reminder bitmask.
 - `subscription_nodes` machine: `active`, `pending_add`, `pending_remove`, `pending_update`.
 - Paid expiry excludes free/trial plans; reminder query excludes free/trial plans.

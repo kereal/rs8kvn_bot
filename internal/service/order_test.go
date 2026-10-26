@@ -584,6 +584,7 @@ func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
 }
 
 func TestConfirmPayment_NotifiesAdminOnActivation(t *testing.T) {
+	beforeRenewals := promtestutil.ToFloat64(metrics.SubscriptionRenewalsTotal)
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440125")
 	sub := &database.Subscription{ID: 85, TelegramID: 55, Username: "alice", ExpiresAt: testutil.PtrTime(time.Now().Add(30 * 24 * time.Hour))}
 	product := &database.Product{ID: 66, PlanID: 2, Name: "Premium 1 месяц", PriceCents: 230000, Currency: "RUB"}
@@ -609,6 +610,7 @@ func TestConfirmPayment_NotifiesAdminOnActivation(t *testing.T) {
 	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("2300.00"), "RUB")
 	require.NoError(t, err)
 	require.True(t, confirmation.Activated)
+	assert.Equal(t, float64(0), promtestutil.ToFloat64(metrics.SubscriptionRenewalsTotal)-beforeRenewals, "first activation must not be counted as a renewal")
 
 	messages := adminBot.GetAllSentMessages()
 	require.Len(t, messages, 1, "activated payment must produce exactly one admin notification")
@@ -632,6 +634,7 @@ func TestConfirmPayment_NotifiesAdminOnActivation(t *testing.T) {
 }
 
 func TestConfirmPayment_NotifiesAdminOnRenewal(t *testing.T) {
+	beforeRenewals := promtestutil.ToFloat64(metrics.SubscriptionRenewalsTotal)
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440130")
 	productID := uint(67)
 	sub := &database.Subscription{ID: 87, TelegramID: 56, Username: "bob", PlanID: 2, ProductID: &productID, PricePaidCents: 230000, ExpiresAt: testutil.PtrTime(time.Now().Add(10 * 24 * time.Hour))}
@@ -658,6 +661,7 @@ func TestConfirmPayment_NotifiesAdminOnRenewal(t *testing.T) {
 	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("2300.00"), "RUB")
 	require.NoError(t, err)
 	require.True(t, confirmation.Activated)
+	assert.Equal(t, float64(1), promtestutil.ToFloat64(metrics.SubscriptionRenewalsTotal)-beforeRenewals)
 
 	messages := adminBot.GetAllSentMessages()
 	require.Len(t, messages, 1, "renewed payment must produce exactly one admin notification")

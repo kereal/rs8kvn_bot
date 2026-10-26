@@ -188,6 +188,7 @@ go build -ldflags="-s -w" -o rs8kvn_bot ./cmd/bot
 
 ### Project Documentation
 
+- **[Diagrams](doc/diagrams/README.md)** — Interactive HTML diagrams: project map, sequences, state machines, CI/release workflows, data flows
 - **[Installation & Configuration](doc/installation.md)** — All setup methods, env vars, and 3x-ui instructions
 - **[Architecture](doc/architecture.md)** — System architecture, data model, component deep dives, sync pipeline
 - **[Handover](doc/handover.md)** — Architecture overview, stack, current state, nuances
@@ -195,5 +196,6 @@ go build -ldflags="-s -w" -o rs8kvn_bot ./cmd/bot
 - **[API Reference](doc/api.md)** — HTTP endpoints, error codes, rate limits
 - **[Operations Guide](doc/operations.md)** — Monitoring, troubleshooting, scaling, backup/restore
 - **[Broadcast](doc/broadcast.md)** — Admin broadcast flow, filters, delivery worker
+- **[Audit log](doc/audit-log.md)** — Universal append-only audit journal: schema, event catalog, write/read contracts
 - **[Traffic notifications](doc/architecture.md)** — `SubscriptionTrafficWorker`: 90%/exhausted warnings with Premium CTA and auto-re-enable after traffic reset
 - **[.serena/instructions.md](.serena/instructions.md)** — AI assistant workflow and memory structure

@@ -1,0 +1,44 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "CI-конвейер rs8kvn_bot",
+    "output": "doc/diagrams/ci-pipeline.html",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "main", "label": "Зелёный путь", "focus": ["push", "checkout", "build", "gates", "docker", "ghcr"], "note": "От пуша до публикации образа в ghcr.io через все гейты." },
+      { "id": "quality", "label": "Гейты качества", "focus": ["checkout", "build", "gates"], "note": "Тесты, go vet, golangci-lint и gosec блокируют продвижение." },
+      { "id": "red", "label": "Красный CI", "focus": ["gates", "red"], "note": "Провал любого гейта останавливает конвейер до исправления." }
+    ]
+  },
+  "lanes": [
+    { "id": "trigger", "label": "Запуск" },
+    { "id": "checks", "label": "Проверки", "variant": "exception" },
+    { "id": "gates", "label": "Качество" },
+    { "id": "publish", "label": "Публикация" },
+    { "id": "stop", "label": "Стоп", "variant": "exception" }
+  ],
+  "mainPath": ["push", "checkout", "build", "gates", "docker", "ghcr"],
+  "nodes": [
+    { "id": "push", "lane": "trigger", "col": 0, "type": "frontend", "label": "Push / Tag", "sublabel": "main · PR" },
+    { "id": "checkout", "lane": "checks", "col": 1, "type": "backend", "label": "Checkout", "sublabel": "actions/checkout" },
+    { "id": "build", "lane": "checks", "col": 2, "type": "backend", "label": "go build", "sublabel": "ldflags -s -w" },
+    { "id": "gates", "lane": "gates", "col": 3, "width": 124, "type": "security", "label": "Качество", "sublabel": "go vet · golangci-lint · gosec", "tag": "blocking" },
+    { "id": "docker", "lane": "publish", "col": 4, "type": "cloud", "label": "Docker Build", "sublabel": "UPX · non-root" },
+    { "id": "ghcr", "lane": "publish", "col": 5, "type": "cloud", "label": "ghcr.io", "sublabel": "latest · SemVer · SHA" },
+    { "id": "red", "lane": "stop", "col": 3, "type": "security", "label": "Red CI", "sublabel": "PR блокирован" }
+  ],
+  "edges": [
+    { "from": "push", "to": "checkout", "variant": "emphasis", "route": "drop" },
+    { "from": "checkout", "to": "build", "label": "go test ./...", "variant": "emphasis" },
+    { "from": "build", "to": "gates", "variant": "emphasis", "route": "drop" },
+    { "from": "gates", "to": "docker", "label": "зелёный", "variant": "emphasis" },
+    { "from": "docker", "to": "ghcr", "label": "push", "variant": "emphasis" },
+    { "from": "gates", "to": "red", "label": "красный", "variant": "security", "role": "error" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Гейты", "items": ["go test race-safe с 66% покрытием", "go vet и golangci-lint по конфигу .golangci.yml", "gosec сканирует безопасность кода"] },
+    { "dot": "cyan", "title": "Сборка", "items": ["Dockerfile: multi-stage, non-root user", "UPX сжимает бинарник, health-check встроен", "Кэш модулей ускоряет пересборки"] },
+    { "dot": "rose", "title": "Красный CI", "items": ["Любой блокирующий гейт останавливает продвижение", "PR не мержится без зелёных проверок", "Результаты проверок видны в GitHub Checks"] }
+  ]
+}

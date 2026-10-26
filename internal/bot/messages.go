@@ -84,7 +84,7 @@ var messages = map[MessageKey]string{
 	MsgSubNoActive:        "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.",
 	MsgSubTempError:       "❌ Временная ошибка. Попробуйте позже.",
 	MsgSubCreateError:     "❌ Ошибка при создании подписки.",
-	MsgSubCreatedSuccess:  "✅ Ваша подписка\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка\n`%s`",
+	MsgSubCreatedSuccess:  "✅ Ваша подписка\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка (для Happ)\n`%s`",
 	MsgPremiumOffer:       "💎 *Бесплатный апгрейд*\n\nСейчас у вас тариф *%s*.\n\nВы можете получить *%s* сразу после подтверждения.\nСтоимость сейчас: *%s*.\n\nПосле подтверждения тариф сменится автоматически.",
 	MsgPremiumBenefits:    "✨ *Преимущества Premium*\n\n" + service.PremiumBenefitsText + "\n\nВыберите тариф",
 	MsgPremiumBadge:       "Вы — 💎 Premium",

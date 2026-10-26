@@ -30,6 +30,13 @@ const (
 	FreePlanName  = "free"
 )
 
+// Plan traffic quotas in bytes used when seeding a fresh database.
+// Both are GiB: 1 GiB for the 3-hour trial, 20 GiB for the free plan.
+const (
+	TrialPlanTrafficBytes int64 = 1 << 30  // 1073741824 = 1 GiB
+	FreePlanTrafficBytes  int64 = 20 << 30 // 21474836480 = 20 GiB
+)
+
 type NodeType string
 
 const (

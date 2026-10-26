@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Жизненный цикл подписки (Subscription)",
+    "output": "doc/diagrams/subscription-lifecycle.html",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "main-path", "label": "Создание и работа", "focus": ["created", "active"], "note": "Подписка создаётся через план, клиенты провизируются на нодах." },
+      { "id": "renew-loop", "label": "Продление", "focus": ["active", "expired"], "note": "ExpireWorker помечает истёкшие, оплата/продление реанимирует подписку." },
+      { "id": "revocation", "label": "Отзыв", "focus": ["active", "expired", "revoked"], "note": "Двухфазное удаление: revoke → депровизионировать; физическое удаление — редкие исключения." }
+    ]
+  },
+  "lanes": [
+    { "id": "main", "label": "Состояния подписки" },
+    { "id": "terminal", "label": "Отзыв" }
+  ],
+  "states": [
+    { "id": "created", "type": "start", "label": "создана", "sublabel": "free / trial / платный план", "lane": "main", "col": 0, "step": "01", "tag": "intake" },
+    { "id": "active", "type": "active", "label": "active", "sublabel": "клиенты на нодах", "lane": "main", "col": 1, "step": "02", "tag": "рабочее" },
+    { "id": "expired", "type": "waiting", "label": "expired", "sublabel": "ExpiresAt прошло", "lane": "main", "col": 2, "step": "03", "tag": "ExpireWorker" },
+    { "id": "revoked", "type": "failure", "label": "revoked", "sublabel": "subserver отдаёт 404", "lane": "terminal", "col": 0, "tag": "не удаляется" }
+  ],
+  "transitions": [
+    { "id": "t-provision", "from": "created", "to": "active", "label": "Sync: pending_add → active", "variant": "emphasis", "route": "straight", "labelDy": 55 },
+    { "id": "t-expire", "from": "active", "to": "expired", "label": "ExpireWorker", "variant": "default", "route": "straight", "labelDy": -25, "labelSegment": 0 },
+    { "id": "t-renew", "from": "expired", "to": "active", "label": "оплата / Renew", "variant": "emphasis", "route": "drop", "labelDy": 90, "labelDx": -70, "labelSegment": 1 },
+    { "id": "t-revoke", "from": "active", "to": "revoked", "label": "revoke → депровизия", "variant": "security", "route": "drop", "labelDx": -30 },
+    { "id": "t-trial-cleanup", "from": "expired", "to": "revoked", "label": "CleanupExpiredTrials", "variant": "security", "route": "drop", "labelDy": 40, "labelDx": 45 }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Рабочее состояние", "items": ["Активная подписка агрегируется subserver'ом в /sub/{subID}", "Смена плана идёт через reconcile нод, без смены состояния", "Кэш подписки инвалидируется при каждом изменении"] },
+    { "dot": "amber", "title": "Продление", "items": ["Истечение не удаляет доступ мгновенно — состояние waiting", "Оплата возвращает expired → active с новым ExpiresAt", "Free-план с reset=30 продлевается панелью 3x-ui"] },
+    { "dot": "rose", "title": "Отзыв без удаления", "items": ["Подписки никогда не удаляются физически по расписанию", "revoked → subserver 404, депровизионирование в фоне", "Физическое удаление: только admin /del и очистка истёкших триалов"] }
+  ]
+}

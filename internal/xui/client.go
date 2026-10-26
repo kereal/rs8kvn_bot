@@ -28,6 +28,7 @@ var operationRegex = regexp.MustCompile(`/panel/api/([^/]+)(?:/[^/]+)*`)
 type Client struct {
 	host       string
 	apiToken   string
+	node       string
 	httpClient *http.Client
 	transport  *http.Transport
 }
@@ -241,6 +242,11 @@ func NewClient(host, apiToken string) (*Client, error) {
 	}, nil
 }
 
+// SetNode sets the low-cardinality node label used by XUI request metrics.
+func (c *Client) SetNode(name string) {
+	c.node = name
+}
+
 // Ping проверяет доступность панели через /panel/api/server/status.
 func (c *Client) Ping(ctx context.Context) error {
 	statusURL := fmt.Sprintf("%s/panel/api/server/status", c.host)
@@ -257,8 +263,8 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 	// Single deferred handler records both metrics on every return path.
 	result := "success"
 	defer func() {
-		metrics.XUIRequestsTotal.WithLabelValues(operation, result).Inc()
-		metrics.XUIRequestDuration.WithLabelValues(operation).Observe(time.Since(start).Seconds())
+		metrics.XUIRequestsTotal.WithLabelValues(operation, result, c.node).Inc()
+		metrics.XUIRequestDuration.WithLabelValues(operation, c.node).Observe(time.Since(start).Seconds())
 	}()
 
 	var body io.Reader
@@ -694,6 +700,16 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 		}
 
 		return nil, fmt.Errorf("failed to get client traffic: %s", apiResp.Msg)
+	}
+
+	// 3x-ui v3.10 answers an unknown email with success=true and obj=null
+	// (verified against the live panel: {"success":true,"msg":"","obj":null}).
+	// Parsing that as traffic data yields a misleading "unexpected end of JSON
+	// input", which callers cannot tell apart from an infrastructure failure —
+	// the traffic worker then logs a parse error instead of "client not found"
+	// and silently skips the subscription. Map it to the typed sentinel.
+	if len(apiResp.Obj) == 0 || string(apiResp.Obj) == "null" {
+		return nil, ErrClientNotFound
 	}
 
 	var traffic ClientTraffic

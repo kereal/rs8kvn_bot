@@ -56,24 +56,28 @@ var (
 		[]string{"command"},
 	)
 
-	// XUIRequestsTotal is a counter of requests to 3x-ui panel with labels: operation, result.
+	// XUIRequestsTotal is a counter of requests to 3x-ui panel with labels:
+	// operation, result, node. The node label carries database.Node.Name so a
+	// multi-server deployment can break panels down per host; an empty node
+	// label means the client was built without node context (tests).
 	// result values: success, error
 	XUIRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "xui_requests_total",
 			Help: "Total number of requests to 3x-ui panel",
 		},
-		[]string{"operation", "result"},
+		[]string{"operation", "result", "node"},
 	)
 
-	// XUIRequestDuration is a histogram of XUI request duration in seconds with label: operation.
+	// XUIRequestDuration is a histogram of XUI request duration in seconds with
+	// labels: operation, node.
 	XUIRequestDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "xui_request_duration_seconds",
 			Help:    "XUI request duration in seconds",
 			Buckets: []float64{0.01, 0.05, 0.1, 0.3, 0.6, 1, 2, 5},
 		},
-		[]string{"operation"},
+		[]string{"operation", "node"},
 	)
 
 	// TelegramAPICallsTotal is a counter of Telegram Bot API calls with labels: method, result.
@@ -114,17 +118,26 @@ var (
 		[]string{"operation"},
 	)
 
-	// DBPoolWait is a gauge reflecting the cumulative number of times a
-	// database connection wait exceeded the pool (sql.DBStats.WaitCount).
+	// DBPoolWait is the cumulative number of waits for a database connection
+	// since process start (sql.DBStats.WaitCount).
 	DBPoolWait = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "db_pool_wait",
-			Help: "Total number of times a database connection wait exceeded the pool",
+			Help: "Cumulative number of waits for a database connection",
+		},
+	)
+
+	// DBPoolWaitDurationSeconds is cumulative time spent waiting for a database
+	// connection, in seconds (sql.DBStats.WaitDuration).
+	DBPoolWaitDurationSeconds = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "db_pool_wait_duration_seconds",
+			Help: "Cumulative time spent waiting for a database connection in seconds",
 		},
 	)
 
 	// CacheHitsTotal is a counter of cache hits with label: cache.
-	// cache values: subscription, referral, subserver
+	// cache values: subscription, subserver
 	CacheHitsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "cache_hits_total",
@@ -174,19 +187,28 @@ var (
 		},
 	)
 
-	// SubscriptionCreatesTotal counts new subscription creations.
+	// SubscriptionCreatesTotal counts first-time subscription creations.
 	SubscriptionCreatesTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "subscription_creates_total",
-			Help: "Total number of subscription creations",
+			Help: "Total number of first-time subscription creations",
 		},
 	)
 
-	// SubscriptionRenewalsTotal counts subscription renewals/activations.
+	// SubscriptionReanimationsTotal counts previously revoked subscriptions
+	// restored to the active free tier.
+	SubscriptionReanimationsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "subscription_reanimations_total",
+			Help: "Total number of previously revoked subscriptions reanimated",
+		},
+	)
+
+	// SubscriptionRenewalsTotal counts confirmed paid subscription renewals.
 	SubscriptionRenewalsTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "subscription_renewals_total",
-			Help: "Total number of subscription renewals or activations",
+			Help: "Total number of confirmed paid subscription renewals",
 		},
 	)
 
