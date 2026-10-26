@@ -59,11 +59,13 @@ const (
 	// ConnMaxIdleTime is the maximum time a connection can be idle
 	ConnMaxIdleTime = 2 * time.Minute
 
-	// MaxOpenConns is the maximum number of open connections (1 for SQLite)
-	MaxOpenConns = 1
+	// MaxOpenConns is the maximum number of open connections. SQLite in WAL
+	// mode multiplexes many concurrent readers over one writer, so a small pool
+	// is safe and avoids connection-pool waits (db_pool_wait) seen with 1.
+	MaxOpenConns = 4
 
 	// MaxIdleConnsDB is the maximum number of idle connections
-	MaxIdleConnsDB = 1
+	MaxIdleConnsDB = 4
 )
 
 // Subscription Constants

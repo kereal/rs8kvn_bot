@@ -79,7 +79,7 @@ func TestBuildRuntimeNodeClients_FiltersInactiveAndInitializes3xUIOnly(t *testin
 	}
 
 	nodes := []database.Node{
-		{ID: 1, Type: database.NodeType3xUI, IsActive: true, Host: "http://active-xui", APIToken: "token-a", InboundIDs: `[1]`},
+		{ID: 1, Name: "primary-eu", Type: database.NodeType3xUI, IsActive: true, Host: "http://active-xui", APIToken: "token-a", InboundIDs: `[1]`},
 		{ID: 2, Type: database.NodeTypeProxman, IsActive: false, Host: "http://inactive-prox", APIToken: "token-b", InboundIDs: `[2]`},
 	}
 

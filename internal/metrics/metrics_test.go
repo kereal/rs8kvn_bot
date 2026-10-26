@@ -81,6 +81,7 @@ func TestNewMetricsInitialized(t *testing.T) {
 	require.NotNil(t, FreeSubscriptions)
 	require.NotNil(t, SubscriptionCreatesTotal)
 	require.NotNil(t, SubscriptionRenewalsTotal)
+	require.NotNil(t, SubscriptionReanimationsTotal)
 	require.NotNil(t, SubscriptionSyncTotal)
 	require.NotNil(t, SubscriptionSyncDuration)
 	require.NotNil(t, SubscriptionExpireTotal)

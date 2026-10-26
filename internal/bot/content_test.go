@@ -272,7 +272,7 @@ func TestGetHelpText_DifferentTrafficLimits(t *testing.T) {
 		name         string
 		trafficLimit int
 	}{
-		{"50 GB", 50},
+		{"20 GB", 20},
 		{"100 GB", 100},
 		{"200 GB", 200},
 	}

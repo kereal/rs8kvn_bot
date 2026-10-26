@@ -395,7 +395,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Migrations:** Auto-applied on startup from `internal/database/migrations/` (embedded via `go:embed`)
 - **Legacy support:** Auto-migration for pre-embedded databases (adds `subscription_id` column, drops `x_ui_host`)
 - **trial_requests cleanup:** 1-hour cutoff (matching rate-limit window) + 1s buffer to avoid boundary race
-- **Connection pool:** `MaxOpenConns=1` (SQLite single-writer), `MaxIdle=1`, `ConnMaxLifetime=5m`
+- **Connection pool:** `MaxOpenConns=4`, `MaxIdleConnsDB=4`; SQLite uses WAL with `_busy_timeout=5000` and `_foreign_keys=on` per connection. WAL permits concurrent readers but SQLite still serializes writers; DB pool wait metrics are cumulative `sql.DBStats`, not queue length.
 - **Orders:** `orders` table tracks payment lifecycle: pending → paid → expired/canceled. Statuses enforced via CHECK constraint (created with the table, migration 017 — effective, unlike the ALTER-based retry CHECK from 025). Payment window is provider-defined by Platega `expiresIn` and stored as absolute `payment_expires_at`; a new `RequestPayment` after that timestamp terminalizes the pending order as `expired`, while a late `CONFIRMED` for an `expired`/`canceled` order never activates it and is handled as manual review.
 - **Nodes:** `nodes` table stores VPN panel sources (host, api_token, inbound_ids, type, subscription_url). Managed via DB only.
 - **Plans:** `plans` table (name, devices_limit, traffic_limit), `plan_nodes` M2M join, `products` (duration, price), `subscription_nodes` (sync state machine: active/pending_add/pending_remove/pending_update)

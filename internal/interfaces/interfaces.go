@@ -237,6 +237,11 @@ type BroadcastRepository interface {
 	GetBroadcastRecipientsStats(ctx context.Context, broadcastID uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error)
 }
 
+// AuditLogRepository provides append-only write access to the system audit log.
+type AuditLogRepository interface {
+	InsertAuditLog(ctx context.Context, e *database.AuditLog) error
+}
+
 // DatabaseService is the composed persistence contract used by application services.
 type DatabaseService interface {
 	SubscriptionNodeRepository
@@ -248,6 +253,7 @@ type DatabaseService interface {
 	ProductRepository
 	OrderRepository
 	BroadcastRepository
+	AuditLogRepository
 	Ping(ctx context.Context) error
 	Close() error
 	GetPoolStats() (*database.PoolStats, error)

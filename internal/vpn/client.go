@@ -68,7 +68,8 @@ func classifyCreateSubscriptionError(err error) error {
 	if strings.Contains(msg, "already exists") ||
 		strings.Contains(msg, "client already exists") ||
 		strings.Contains(msg, "duplicate") ||
-		strings.Contains(msg, "already added") {
+		strings.Contains(msg, "already added") ||
+		strings.Contains(msg, "already in use") {
 		return fmt.Errorf("%w: %w", ErrSubscriptionAlreadyExists, err)
 	}
 
