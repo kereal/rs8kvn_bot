@@ -92,7 +92,7 @@ func NewService(dbPath string) (*Service, error) {
 			planErr := tx.Create(&Plan{
 				Name:         TrialPlanName,
 				DevicesLimit: 1,
-				TrafficLimit: 1073741824,
+				TrafficLimit: TrialPlanTrafficBytes,
 			}).Error
 			if planErr != nil {
 				return fmt.Errorf("failed to seed default trial plan: %w", planErr)
@@ -101,7 +101,7 @@ func NewService(dbPath string) (*Service, error) {
 			planErr = tx.Create(&Plan{
 				Name:         FreePlanName,
 				DevicesLimit: 1,
-				TrafficLimit: 53687091200,
+				TrafficLimit: FreePlanTrafficBytes,
 			}).Error
 			if planErr != nil {
 				return fmt.Errorf("failed to seed default free plan: %w", planErr)
