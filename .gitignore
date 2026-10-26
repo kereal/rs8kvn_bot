@@ -49,3 +49,6 @@ Desktop.ini
 /skills-lock.json
 /graphify-out
 .freebuff/
+
+# Local agent/MCP config: machine-specific paths and API tokens
+mcp.json
