@@ -120,16 +120,18 @@ func NewService(dbPath string) (*Service, error) {
 }
 
 func sqliteBusyTimeoutDSN(path string) string {
+	// _journal_mode=WAL lets SQLite serve concurrent readers alongside a single
+	// writer (no table-level share lock), which pairs with the small pool above.
 	// _foreign_keys=on is a per-connection DSN parameter: mattn/go-sqlite3 keeps
 	// FK enforcement OFF by default, so every pooled connection would ignore the
 	// PRAGMA foreign_keys statements the migrations rely on. Enabling it here
 	// makes FK enforcement consistent for all connections (and the connection
 	// that ran the last PRAGMA foreign_keys = ON migration).
 	if strings.Contains(path, "?") {
-		return path + "&_busy_timeout=5000&_foreign_keys=on"
+		return path + "&_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on"
 	}
 
-	return path + "?_busy_timeout=5000&_foreign_keys=on"
+	return path + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on"
 }
 
 // Close closes the database connection.

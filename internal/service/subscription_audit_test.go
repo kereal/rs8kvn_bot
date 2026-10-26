@@ -8,7 +8,9 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -114,13 +116,14 @@ func TestSubscriptionService_Reanimate_WritesReanimatedAudit(t *testing.T) {
 	}
 
 	svc := auditTestSvc(m)
-	sub, err := svc.reanimateRevokedSubscription(context.Background(), &database.Subscription{
+	beforeReanimations := promtestutil.ToFloat64(metrics.SubscriptionReanimationsTotal)
+	_, err := svc.reanimateRevokedSubscription(context.Background(), &database.Subscription{
 		ID:         7,
 		TelegramID: 123456,
 		Status:     string(database.SubscriptionStatusRevoked),
 	}, "")
 	require.NoError(t, err)
-	require.NotNil(t, sub)
+	assert.Equal(t, float64(1), promtestutil.ToFloat64(metrics.SubscriptionReanimationsTotal)-beforeReanimations)
 
 	events := m.AuditLogsByEvent(database.AuditEventSubscriptionReanimated)
 	require.Len(t, events, 1)

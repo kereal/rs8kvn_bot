@@ -102,10 +102,12 @@ type PaymentInfo struct {
 
 // PaymentConfirmation describes the result of a callback transition. Activated
 // is true only for the callback that changed an order from pending to paid; repeat
-// callbacks return the existing order with Activated=false.
+// callbacks return the existing order with Activated=false. IsRenewal records
+// whether the paid subscription already had a paid product before activation.
 type PaymentConfirmation struct {
 	Order     *database.Order
 	Activated bool
+	IsRenewal bool
 }
 
 // PaymentIssue contains the operational context of a payment integration problem.
@@ -843,6 +845,9 @@ func (o *OrderService) ConfirmPayment(ctx context.Context, providerPaymentID uui
 
 	if err == nil && confirmation != nil && confirmation.Activated && confirmation.Order != nil {
 		recordPaymentAmount("confirmed", confirmation.Order.AmountCents, confirmation.Order.Currency)
+		if confirmation.IsRenewal {
+			metrics.SubscriptionRenewalsTotal.Inc()
+		}
 	}
 
 	return confirmation, err
@@ -1033,7 +1038,7 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 		}
 	}
 
-	return &PaymentConfirmation{Order: order, Activated: activated}, nil
+	return &PaymentConfirmation{Order: order, Activated: activated, IsRenewal: isRenewal}, nil
 }
 
 // SyncProviderFees retries best-effort provider fee lookups for paid orders.

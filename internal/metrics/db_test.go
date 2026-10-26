@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -74,6 +75,19 @@ func TestRegisterDBMetrics_Delete(t *testing.T) {
 	require.NoError(t, db.Create(&TestModel{Val: "a"}).Error)
 
 	require.NoError(t, db.WithContext(context.Background()).Delete(&TestModel{}, 1).Error)
+}
+
+func TestCollectDBPoolMetrics_ExportsWaitStats(t *testing.T) {
+	db := openTestDB(t)
+	defer closeDB(t, db)
+
+	CollectDBPoolMetrics(context.Background(), db)
+
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	stats := sqlDB.Stats()
+	require.Equal(t, float64(stats.WaitCount), testutil.ToFloat64(DBPoolWait))
+	require.Equal(t, stats.WaitDuration.Seconds(), testutil.ToFloat64(DBPoolWaitDurationSeconds))
 }
 
 func openTestDB(t *testing.T) *gorm.DB {
