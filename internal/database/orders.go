@@ -196,7 +196,8 @@ func (s *Service) MarkPaymentCreationUncertain(ctx context.Context, orderID uint
 			// требуется ручная сверка. Сигнальное событие для расследований.
 			var order Order
 
-			if err := s.db.WithContext(ctx).First(&order, orderID).Error; err == nil {
+			loadErr := s.db.WithContext(ctx).First(&order, orderID).Error
+			if loadErr == nil {
 				_ = s.insertAuditLogBestEffort(ctx, AuditPaymentCreationUncertain(&order))
 			}
 		}
@@ -593,7 +594,8 @@ func (s *Service) CancelOrderCAS(ctx context.Context, provider string, providerP
 	if result.RowsAffected > 0 {
 		// order_canceled (не-чарджбэк ветка: провайдер отменил оплату до/после
 		// попытки). Чарджбэк-ветка пишет свой аудит в tx CancelPaidOrderAndDowngradeCAS.
-		if order, err := s.GetOrderByProviderPaymentID(ctx, provider, providerPaymentID); err == nil {
+		order, loadErr := s.GetOrderByProviderPaymentID(ctx, provider, providerPaymentID)
+		if loadErr == nil {
 			_ = s.insertAuditLogBestEffort(ctx, AuditOrderCanceled(order, ActorPaymentProvider))
 		}
 	}

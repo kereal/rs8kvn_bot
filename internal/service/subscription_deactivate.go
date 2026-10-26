@@ -15,7 +15,7 @@ import (
 // переводит их подписки в статус 'revoked' (выключает без удаления)
 // и записывает события в аудит-лог.
 func (s *SubscriptionService) DeactivateBlockedBroadcastRecipients(ctx context.Context, broadcastID uint) (int, error) {
-	_, _, blockedCount, unreachableCount, _, report, err := s.db.GetBroadcastRecipientsStats(ctx, broadcastID)
+	total, sent, blockedCount, unreachableCount, failedCount, report, err := s.db.GetBroadcastRecipientsStats(ctx, broadcastID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get broadcast stats for id %d: %w", broadcastID, err)
 	}
@@ -78,7 +78,11 @@ func (s *SubscriptionService) DeactivateBlockedBroadcastRecipients(ctx context.C
 
 	logger.Info("Broadcast blocked-users deactivation completed",
 		zap.Uint("broadcast_id", broadcastID),
+		zap.Int64("recipients_total", total),
+		zap.Int64("delivered", sent),
 		zap.Int("blocked_total", int(blockedCount+unreachableCount)),
+		zap.Int64("unreachable", unreachableCount),
+		zap.Int64("failed", failedCount),
 		zap.Int("deactivated_count", deactivatedCount),
 	)
 

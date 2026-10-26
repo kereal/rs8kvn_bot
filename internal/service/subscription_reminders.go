@@ -99,7 +99,8 @@ func (s *SubscriptionService) SendExpiryReminder(ctx context.Context, sub *datab
 
 	// Аудит уведомления best-effort: напоминание уже отправлено, журнал не
 	// должен повлиять на результат операции.
-	if auditErr := s.db.InsertAuditLog(ctx, database.AuditReminderSent(sub, window.Name)); auditErr != nil {
+	auditErr := s.db.InsertAuditLog(ctx, database.AuditReminderSent(sub, window.Name))
+	if auditErr != nil {
 		logger.Warn("audit log write failed",
 			zap.String("event", database.AuditEventReminderSent),
 			zap.Uint("subscription_id", sub.ID),

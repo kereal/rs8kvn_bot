@@ -102,7 +102,7 @@ func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]databas
 				return nil, nil, nil, fmt.Errorf("init 3x-ui client for node %d: %w", node.ID, err)
 			}
 
-			if nodeAware, ok := client.(interface{ SetNode(string) }); ok {
+			if nodeAware, ok := client.(interface{ SetNode(name string) }); ok {
 				nodeAware.SetNode(node.Name)
 			}
 
