@@ -14,11 +14,11 @@
 | `bot_update_duration_seconds` | histogram | `bot/handler.go:622` |
 | `cache_hits_total{cache}` | counter | `subserver/cache.go:61`, `bot/cache.go:81` |
 | `cache_misses_total{cache}` | counter | `subserver/cache.go:56`, `bot/cache.go:54,71` |
-| `xui_requests_total{operation,result}` | counter | `xui/client.go` — live XUI request instrumentation |
-| `xui_request_duration_seconds{operation}` | histogram | `xui/client.go` — live XUI request timing |
+| `xui_requests_total{operation,result,node}` | counter | `xui/client.go` — live XUI request instrumentation, node label is configured VPN node name |
+| `xui_request_duration_seconds{operation,node}` | histogram | `xui/client.go` — live XUI request timing |
 | `active_subscriptions` | gauge | `service/subscription.go` — `.Set()` после мутаций |
 | `subscription_creates_total` | counter | `service/subscription.go` — `Create`, `GetOrCreateSubscription` |
-| `subscription_renewals_total` | counter | `service/subscription.go` — `RenewSubscription` |
+| `subscription_renewals_total` | counter | `service/order.go` — activated paid renewal callback
 | `subscription_sync_total` | counter | `scheduler/subscription_sync_worker.go:44` |
 | `subscription_sync_duration_seconds` | histogram | `scheduler/subscription_sync_worker.go:44` |
 | `subscription_expire_total` | counter | `scheduler/subscription_expire_worker.go:45` |
@@ -39,7 +39,9 @@
 | `trial_conversions_total` | Удалена: явного trial→paid флоу нет. |
 | `subserver_partial_sources_total{sub_id}` | Удалена из-за опасной cardinality. |
 
-XUI-метрики не являются мёртвыми: `xui_requests_total{operation,result}` и `xui_request_duration_seconds{operation}` инкрементируются в `internal/xui/client.go`.
+XUI-метрики не являются мёртвыми: `xui_requests_total{operation,result,node}` и `xui_request_duration_seconds{operation,node}` инкрементируются в `internal/xui/client.go`; production-серия node появится после deployment.
+
+Cache labels `subscription` and `subserver` are used; `referral` is not. `subscription_renewals_total` now increments for confirmed paid renewal callbacks; `subscription_reanimations_total` tracks reanimations separately.
 
 ## Ситуация по subserver конкретно
 

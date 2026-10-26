@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Жизненный цикл платежа Platega",
+    "output": "doc/diagrams/platega-payment-lifecycle.html",
+    "viewBox": [1060, 900],
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "guard-chain", "label": "Защита вебхука", "focus": ["platega", "web"], "note": "POST-only → readiness 503 → constant-time заголовки → лимит тела и один JSON." },
+      { "id": "confirm-path", "label": "Подтверждение", "focus": ["platega", "web", "ordersvc", "db"], "note": "Per-order lock, валидация суммы и CAS pending→paid одной транзакцией." },
+      { "id": "post-commit", "label": "Post-commit", "focus": ["ordersvc", "db", "nodes", "tg"], "note": "Кэш подписки, алерт админу, best-effort sync и ответ провайдеру." }
+    ]
+  },
+  "participants": [
+    { "id": "platega", "type": "external", "label": "Platega", "sublabel": "провайдер" },
+    { "id": "web", "type": "frontend", "label": "Web :8880", "sublabel": "HTTP-приём" },
+    { "id": "ordersvc", "type": "backend", "label": "OrderService", "sublabel": "internal/service" },
+    { "id": "db", "type": "database", "label": "SQLite", "sublabel": "GORM" },
+    { "id": "nodes", "type": "cloud", "label": "VPN-ноды", "sublabel": "3x-ui · proxman" },
+    { "id": "tg", "type": "external", "label": "Telegram", "sublabel": "админ · юзер" }
+  ],
+  "segments": [
+    { "from": 160, "to": 300, "label": "Вебхук" },
+    { "from": 315, "to": 510, "label": "Подтверждение" },
+    { "from": 525, "to": 700, "label": "Post-commit действия" },
+    { "from": 715, "to": 815, "label": "Ответ провайдеру" }
+  ],
+  "messages": [
+    { "id": "webhook-post", "from": "platega", "to": "web", "y": 200, "label": "POST /payment/callback", "variant": "emphasis", "note": "guard-chain: POST-only → 503 → X-MerchantId/X-Secret constant-time → ≤256 KiB, один JSON" },
+    { "id": "guard-reject", "from": "web", "to": "platega", "y": 265, "label": "401/400 + алерт админу", "variant": "return" },
+    { "id": "confirm-call", "from": "web", "to": "ordersvc", "y": 350, "label": "ConfirmPayment(id, amount, currency)", "variant": "emphasis", "note": "per-order lock 30s · валюта и amount ≥ order · paid → идемпотентный no-op" },
+    { "id": "load-order", "from": "ordersvc", "to": "db", "y": 405, "label": "GetOrderByProviderPaymentID" },
+    { "id": "order-row", "from": "db", "to": "ordersvc", "y": 450, "label": "order (pending)", "variant": "return" },
+    { "id": "cas-confirm", "from": "ordersvc", "to": "db", "y": 488, "label": "ConfirmOrderPaidCAS: order+sub+plan", "variant": "emphasis", "note": "одна транзакция" },
+    { "id": "cas-ok", "from": "db", "to": "ordersvc", "y": 560, "label": "paid · Activated=true", "variant": "return" },
+    { "id": "invalidate-cache", "from": "ordersvc", "to": "db", "y": 600, "label": "InvalidateBySubID (кэш subserver)", "variant": "dashed" },
+    { "id": "admin-alert", "from": "ordersvc", "to": "tg", "y": 645, "label": "notifyAdminPaid", "variant": "dashed" },
+    { "id": "sync-call", "from": "ordersvc", "to": "nodes", "y": 678, "label": "SyncSubscription · 20s", "variant": "dashed", "note": "best-effort: сбой дообгонит SyncPendingNodes" },
+    { "id": "user-note", "from": "web", "to": "tg", "y": 745, "label": "BuildPaidUserNotification → Send", "variant": "dashed" },
+    { "id": "webhook-ack", "from": "web", "to": "platega", "y": 795, "label": "{ok:true}", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "web", "from": 200, "to": 800, "type": "frontend" },
+    { "participant": "ordersvc", "from": 350, "to": 690, "type": "backend" },
+    { "participant": "db", "from": 400, "to": 610, "type": "database" },
+    { "participant": "nodes", "from": 673, "to": 695, "type": "cloud" },
+    { "participant": "tg", "from": 640, "to": 755, "type": "external" }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Защита вебхука",
+      "items": [
+        "POST-only → readiness 503 → X-MerchantId/X-Secret constant-time → 401",
+        "Тело ≤ 256 KiB, ровно один JSON-объект, UUID id и валидная сумма",
+        "Все отклонения алертят админа через NotifyPaymentIssue"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Идемпотентность",
+      "items": [
+        "Per-order lock сериализует повторные вебхуки одного платежа",
+        "Повторный CONFIRMED для paid-заказа — no-op (Activated=false)",
+        "Просроченный заказ принимается в 5-минутном settlement grace"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Надёжность",
+      "items": [
+        "notifyCtx = context.WithoutCancel: обрыв соединения не теряет оплату",
+        "CAS-транзакция меняет order+subscription+plan атомарно",
+        "Сбой VPN-sync не влияет на 200 — SyncPendingNodes дообгонит"
+      ]
+    }
+  ]
+}

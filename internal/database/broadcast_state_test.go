@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -339,4 +340,82 @@ func TestBroadcastRecipientFinishSucceedsAfterCancel(t *testing.T) {
 	assert.Zero(t, unreachable)
 	assert.Zero(t, failed)
 	assert.Equal(t, []int64{710061}, report.Delivered)
+}
+
+// TestBroadcastRecipientConcurrentFinalizationsAllPersist reproduces the
+// release-blocking failure: a batch of recipients whose terminal outcomes are
+// recorded concurrently (the worker finalizes one recipient per goroutine, up
+// to broadcastConcurrency parallel sends). Every finalization goes through
+// updateBroadcastRecipientState, which used to run as a deferred GORM
+// transaction: with the connection pool (MaxOpenConns=4) several goroutines
+// read the same recipients_state snapshot and then tried to write it, and the
+// read-to-write upgrade of a stale WAL snapshot surfaced as SQLITE_BUSY_SNAPSHOT
+// ("database is locked"), which _busy_timeout does not cover. The losing
+// finalization was dropped, so the campaign stayed running with an unaccounted
+// recipient. All finalizations must persist: terminal states and counts are
+// asserted explicitly, a silent lost write must fail this test.
+func TestBroadcastRecipientConcurrentFinalizationsAllPersist(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newTestService(t)
+	b := createBroadcastForStateTest(t, svc)
+	freePlan := testFreePlanID(t, svc)
+
+	// More recipients than pool connections (config.MaxOpenConns == 4) so
+	// several writer transactions are live at once, matching the worker's
+	// concurrent batch finalization.
+	const recipientsCount = 8
+	for i := range recipientsCount {
+		require.NoError(t, svc.db.Create(&Subscription{
+			TelegramID:     710100 + int64(i),
+			Username:       "finish-race",
+			ClientID:       fmt.Sprintf("finish-client-%02d", i),
+			SubscriptionID: fmt.Sprintf("finish-sub-%02d", i),
+			Status:         string(SubscriptionStatusActive),
+			PlanID:         freePlan,
+		}).Error)
+	}
+
+	claimed, err := svc.ClaimBroadcast(ctx, b.ID, time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, claimed)
+	total, err := svc.SnapshotBroadcastRecipients(ctx, b.ID, BroadcastFilter{})
+	require.NoError(t, err)
+	require.Equal(t, int64(recipientsCount), total)
+	recipients, err := svc.ClaimBroadcastRecipients(ctx, b.ID, time.Now().UTC(), recipientsCount)
+	require.NoError(t, err)
+	require.Len(t, recipients, recipientsCount)
+	for _, r := range recipients {
+		require.Equal(t, BroadcastRecipientSending, r.Status, "every recipient must be claimed exactly once before finishing")
+	}
+
+	// Every recipient is finalized by a distinct goroutine, mirroring the
+	// worker's per-recipient goroutines inside one claim batch.
+	var wg sync.WaitGroup
+	finishErrs := make([]error, recipientsCount)
+	for i := range recipientsCount {
+		wg.Add(1)
+		go func(slot int) {
+			defer wg.Done()
+			r := recipients[slot]
+			finishErrs[slot] = svc.FinishBroadcastRecipient(ctx, b.ID, r.ID, r.Attempts, BroadcastRecipientSent, "", time.Now().UTC())
+		}(i)
+	}
+	wg.Wait()
+	// A lock failure here ("database is locked") is the regression: the
+	// terminal outcome must persist, not surface as an error.
+	require.NoError(t, errors.Join(finishErrs...))
+
+	storedRecipients, err := svc.GetBroadcast(ctx, b.ID)
+	require.NoError(t, err)
+	totalStats, sent, blocked, unreachable, failed, report, err := svc.GetBroadcastRecipientsStats(ctx, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(recipientsCount), totalStats, "every claimed recipient must be finalized exactly once")
+	assert.Equal(t, int64(recipientsCount), sent, "all concurrent finalizations must persist, none lost to a lock error")
+	assert.Zero(t, blocked)
+	assert.Zero(t, unreachable)
+	assert.Zero(t, failed)
+	assert.Empty(t, report.NotProcessed, "no recipient may remain sending or pending")
+	require.Len(t, report.Delivered, recipientsCount)
+	assert.Equal(t, string(BroadcastStatusRunning), storedRecipients.Status, "a DB-only test never runs finishCampaign: the worker transition is asserted through the recipient statistics instead")
 }

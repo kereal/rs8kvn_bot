@@ -37,7 +37,7 @@ func FormatSubscriptionMessage(heading, status string, traffic *TrafficInfo, sub
 	}
 
 	return fmt.Sprintf(
-		"%s\n\n✌️ Статус: *%s*\n💡 Тариф: *%s*\n📊 Трафик: %s%s\n\n📅 Создана: %s\n⏰ Истекает: %s\n🔄 Сброс: %s\n\n🔗 Ссылка\n`%s`",
+		"%s\n\n✌️ Статус: *%s*\n💡 Тариф: *%s*\n📊 Трафик: %s%s\n\n📅 Создана: %s\n⏰ Истекает: %s\n🔄 Сброс: %s\n\n🔗 Ссылка (для Happ)\n`%s`",
 		heading,
 		status,
 		utils.EscapeLegacyMarkdown(traffic.PlanName),
