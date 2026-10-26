@@ -174,6 +174,16 @@ func TestConfirmOrderPaidCAS_WritesSubscriptionRenewed(t *testing.T) {
 			var newState map[string]any
 			require.NoError(t, json.Unmarshal([]byte(*e.NewState), &newState))
 			assert.Contains(t, newState, "expires_at")
+			// new_state must describe the state the payment persisted, not the
+			// pre-payment subscription (plan_id used to be the old/free plan).
+			assert.Equal(t, float64(plan.ID), newState["plan_id"])
+			assert.Equal(t, float64(product.ID), newState["product_id"])
+			assert.Equal(t, string(SubscriptionStatusActive), newState["status"])
+
+			var oldState map[string]any
+			require.NotNil(t, e.OldState)
+			require.NoError(t, json.Unmarshal([]byte(*e.OldState), &oldState))
+			assert.Equal(t, float64(testFreePlanID(t, svc)), oldState["plan_id"])
 		}
 	}
 	assert.True(t, renewed, "payment confirmation must record subscription_renewed in the subscription timeline")

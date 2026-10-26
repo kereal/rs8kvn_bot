@@ -323,7 +323,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 
 			return nil //nolint:nilerr // load failure is reported to the user as "not found"; nothing to retry
 		}
-		text := fmt.Sprintf("⚠️ *Деактивация заблокировавших*\n\nРассылка #%d «%s» зафиксировала:\n🚫 Заблокировали: %d\n⚠️ Недоступны: %d\n\nВыключить подписки этих пользователей в базе (статус `revoked`) без удаления? Они больше не будут получать рассылки.", b.ID, b.Name, b.BlockedCount, b.UnreachableCount)
+		text := fmt.Sprintf("⚠️ *Деактивация заблокировавших*\n\nРассылка #%d «%s» зафиксировала:\n🚫 Заблокировали: %d\n⚠️ Недоступны: %d\n\nВыключить подписки этих пользователей (статус `revoked`) и снять VPN-доступ, не удаляя их из базы? Они больше не будут получать рассылки.", b.ID, b.Name, b.BlockedCount, b.UnreachableCount)
 		kb := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("✅ Да, выключить", fmt.Sprintf("broadcast_deactivate_exec_%d", b.ID)),
@@ -344,14 +344,22 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		if err != nil {
 			return err
 		}
-		count, err := c.h.subscriptionService.DeactivateBlockedBroadcastRecipients(ctx, id)
+		result, err := c.h.subscriptionService.DeactivateBlockedBroadcastRecipients(ctx, id)
 		if err != nil {
 			logger.Error("Failed to deactivate broadcast blocked users", zap.Uint("broadcast_id", id), zap.Error(err))
-			c.h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка при деактивации пользователей рассылки #%d: %v", id, err))
+
+			if result == nil || result.Revoked == 0 {
+				c.h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Ошибка при деактивации пользователей рассылки #%d: %v", id, err))
+
+				return nil
+			}
+
+			c.h.SendMessage(ctx, chatID, fmt.Sprintf("⚠️ Рассылка #%d: выключено %d из %d, ошибок %d: %v", id, result.Revoked, result.Targets, result.Failed, err))
+
 			return nil
 		}
-		logger.Info("Broadcast blocked users deactivated by admin", zap.Uint("broadcast_id", id), zap.Int("count", count), zap.Int64("chat_id", chatID))
-		c.h.SendMessage(ctx, chatID, fmt.Sprintf("✅ Успешно выключено пользователей (переведены в revoked): %d.", count))
+		logger.Info("Broadcast blocked users deactivated by admin", zap.Uint("broadcast_id", id), zap.Int("count", result.Revoked), zap.Int64("chat_id", chatID))
+		c.h.SendMessage(ctx, chatID, fmt.Sprintf("✅ Выключено пользователей: %d (статус revoked, VPN-доступ снят).", result.Revoked))
 	default:
 		logger.Warn("Unknown callback data", zap.String("data", data))
 	}
