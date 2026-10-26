@@ -247,7 +247,7 @@ func (s *SubscriptionService) reenableAndNotify(ctx context.Context, sub *databa
 			TrafficReset:    profile.TrafficReset,
 			TrafficResetDay: profile.TrafficResetDay,
 			TgID:            sub.TelegramID,
-			Enable:          boolPtr(true),
+			Enable:          new(true),
 		})
 		if uErr != nil {
 			logger.Warn("traffic notifications: failed to re-enable client",
@@ -381,5 +381,3 @@ func premiumKeyboard() tgbotapi.InlineKeyboardMarkup {
 		),
 	)
 }
-
-func boolPtr(v bool) *bool { return &v }

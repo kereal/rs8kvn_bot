@@ -23,19 +23,15 @@ import (
 var ErrRecordNotFound = gorm.ErrRecordNotFound
 
 func PtrString(v string) *string {
-	return &v
+	return new(v)
 }
 
 func PtrInt64(v int64) *int64 {
-	return &v
-}
-
-func PtrUint(v uint) *uint {
-	return &v
+	return new(v)
 }
 
 func PtrTime(t time.Time) *time.Time {
-	return &t
+	return new(t)
 }
 
 const (
@@ -172,7 +168,7 @@ type DatabaseService struct {
 	ClaimTrafficReminderFunc                   func(ctx context.Context, id uint, bit int) (bool, error)
 	ReleaseTrafficReminderFunc                 func(ctx context.Context, id uint, bit int) error
 
-	AuditLogs        []database.AuditLog
+	AuditLogs          []database.AuditLog
 	InsertAuditLogFunc func(ctx context.Context, e *database.AuditLog) error
 
 	CreateBroadcastFunc                  func(ctx context.Context, b *database.Broadcast) error
