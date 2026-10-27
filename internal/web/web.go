@@ -1020,7 +1020,7 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 
 	requestHeaders := subserver.FilterHeaders(r.Header)
 
-	result, success, total, err := subserver.HandleSubscription(ctx, s.db, s.subServer, subID, clientIP, requestHeaders)
+	result, success, total, err := subserver.HandleSubscription(ctx, s.db, s.subServer, subID, clientIP, requestHeaders, r.URL.Query().Get("format"))
 	if rec != nil {
 		rec.success = success
 		rec.total = total

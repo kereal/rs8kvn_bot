@@ -25,9 +25,18 @@ import (
 //  3. Track the requesting device and IP for analytics.
 //  4. For each active source, fetch the upstream response and detect its format (fetchAndAggregateSources).
 //  5. Aggregate subscription-userinfo headers and build the final response (buildResponse).
-func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID, clientIP string, requestHeaders map[string]string) (*SubscriptionResult, int, int, error) {
+func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID, clientIP string, requestHeaders map[string]string, formatParam string) (*SubscriptionResult, int, int, error) {
+	outFormat := DetectOutputFormat(formatParam, requestHeaders["user-agent"])
+	cacheKey := subID
+	if outFormat != OutputXray {
+		// Per-format cache entries keep a suffix so a sing-box client never
+		// receives the default Xray body (and vice versa). The Xray key stays
+		// bare for backward compatibility with existing cache entries.
+		cacheKey = subID + ":" + outFormat.String()
+	}
+
 	// 1. Try to serve from cache first.
-	if result, hit, err := serveFromCache(ctx, db, subSvc, subID); hit {
+	if result, hit, err := serveFromCache(ctx, db, subSvc, subID, cacheKey); hit {
 		return result, 0, 0, err
 	}
 
@@ -48,7 +57,7 @@ func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepositor
 		profileTitleSuffix = " Premium"
 	}
 
-	res, err := buildResponse(subSvc, subID, agg, subFull.Plan.TrafficLimit, profileTitleSuffix)
+	res, err := buildResponse(subSvc, cacheKey, agg, subFull.Plan.TrafficLimit, profileTitleSuffix, outFormat)
 
 	return res, success, total, err
 }

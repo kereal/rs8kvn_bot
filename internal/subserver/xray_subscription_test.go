@@ -111,7 +111,7 @@ func TestBuildResponseAlwaysRendersXrayJSON(t *testing.T) {
 				firstExpire:        "1900000000",
 				totalUpload:        12,
 				totalDownload:      34,
-			}, 56, "")
+			}, 56, "", OutputXray)
 			require.NoError(t, err)
 			require.Equal(t, "application/json; charset=utf-8", result.Headers["content-type"])
 
@@ -152,7 +152,7 @@ func TestBuildResponseOneProfilePerNode(t *testing.T) {
 			json.RawMessage(`{"type":"vless","address":"two.example","port":443,"uuid":"id-2","remark":"node-two"}`),
 			json.RawMessage(`{"type":"trojan","address":"three.example","port":443,"password":"secret","remark":"node-three"}`),
 		},
-	}, 0, "")
+	}, 0, "", OutputXray)
 	require.NoError(t, err)
 
 	configs := decodeSubscription(t, result.Body)
@@ -250,7 +250,7 @@ func TestBuildResponseRejectsUnsupportedOnlySources(t *testing.T) {
 	svc := newTestSubSvc(t)
 	_, err := buildResponse(svc, "unsupported", aggregatedSources{
 		jsonConfigs: []json.RawMessage{json.RawMessage(`{"type":"tuic","address":"vpn.example","port":443,"uuid":"id","password":"secret"}`)},
-	}, 0, "")
+	}, 0, "", OutputXray)
 	require.ErrorIs(t, err, ErrNoSubscriptionItems)
 	_, _, cached := svc.GetCache("unsupported")
 	require.False(t, cached)
@@ -338,7 +338,7 @@ func TestParseShareLinkRejectsMalformedOrUnsupported(t *testing.T) {
 func TestBuildResponseConvertsVMessLink(t *testing.T) {
 	t.Parallel()
 	link := "vmess://" + base64.StdEncoding.EncodeToString([]byte(`{"add":"vmess.example","port":"443","id":"id","aid":"0","net":"tcp","ps":"VMess"}`))
-	result, err := buildResponse(newTestSubSvc(t), "vmess", aggregatedSources{items: []string{link}}, 0, "")
+	result, err := buildResponse(newTestSubSvc(t), "vmess", aggregatedSources{items: []string{link}}, 0, "", OutputXray)
 	require.NoError(t, err)
 
 	var configs []struct {
@@ -364,7 +364,7 @@ func TestBuildResponseConvertsVMessLink(t *testing.T) {
 func TestBuildResponseConvertsVMessNumericFields(t *testing.T) {
 	t.Parallel()
 	link := "vmess://" + base64.StdEncoding.EncodeToString([]byte(`{"add":"vmess.example","port":443,"id":"id","aid":2,"net":"tcp"}`))
-	result, err := buildResponse(newTestSubSvc(t), "vmess-numeric", aggregatedSources{items: []string{link}}, 0, "")
+	result, err := buildResponse(newTestSubSvc(t), "vmess-numeric", aggregatedSources{items: []string{link}}, 0, "", OutputXray)
 	require.NoError(t, err)
 	var configs []struct {
 		Outbounds []struct {
@@ -421,7 +421,7 @@ func TestParseVMessItemDispatchesPayloadShape(t *testing.T) {
 func TestBuildResponseConvertsURLStyleVMessLink(t *testing.T) {
 	t.Parallel()
 	link := "vmess://uuid-url@vmess.example:8443?security=tls&sni=front.example&type=ws&path=%2Fws#URLVMess"
-	result, err := buildResponse(newTestSubSvc(t), "vmess-url", aggregatedSources{items: []string{link}}, 0, "")
+	result, err := buildResponse(newTestSubSvc(t), "vmess-url", aggregatedSources{items: []string{link}}, 0, "", OutputXray)
 	require.NoError(t, err)
 
 	var configs []struct {
@@ -488,7 +488,7 @@ func TestParseVMessLinkRejectsCorruptPayloads(t *testing.T) {
 	}
 
 	// End-to-end: a corrupted vmess:// item is dropped, not fatal.
-	_, err := buildResponse(newTestSubSvc(t), "vmess-corrupt", aggregatedSources{items: []string{"vmess://!!!not-base64!!!"}}, 0, "")
+	_, err := buildResponse(newTestSubSvc(t), "vmess-corrupt", aggregatedSources{items: []string{"vmess://!!!not-base64!!!"}}, 0, "", OutputXray)
 	require.ErrorIs(t, err, ErrNoSubscriptionItems, "a subscription with only a corrupt vmess item has nothing to serve")
 }
 
@@ -498,7 +498,7 @@ func TestBuildResponseVMessStringAidFallsBackToZero(t *testing.T) {
 	// "aid":"abc" is a non-numeric string; buildVMessXray's strconv.Atoi fails
 	// and the rendered outbound must fall back to alterId 0 instead of crashing.
 	link := "vmess://" + base64.StdEncoding.EncodeToString([]byte(`{"add":"vmess.example","port":"443","id":"id","aid":"abc","ps":"StringAid"}`))
-	result, err := buildResponse(newTestSubSvc(t), "vmess-str-aid", aggregatedSources{items: []string{link}}, 0, "")
+	result, err := buildResponse(newTestSubSvc(t), "vmess-str-aid", aggregatedSources{items: []string{link}}, 0, "", OutputXray)
 	require.NoError(t, err)
 
 	var configs []struct {
@@ -533,7 +533,7 @@ func TestBuildResponseHysteria2Outbound(t *testing.T) {
 	// normalised and rendered into an Xray "hysteria" v2 outbound carrying the
 	// SALAMANDER UDP obfuscation in finalmask.
 	link := "hysteria2://auth@hy.example:8443?sni=front.example&fp=chrome&obfs=salamander&obfs-password=pass#HY2"
-	result, err := buildResponse(newTestSubSvc(t), "hy2-e2e", aggregatedSources{items: []string{link}}, 0, "")
+	result, err := buildResponse(newTestSubSvc(t), "hy2-e2e", aggregatedSources{items: []string{link}}, 0, "", OutputXray)
 	require.NoError(t, err)
 
 	var configs []struct {
@@ -602,7 +602,7 @@ func TestBuildResponseHysteria2Outbound(t *testing.T) {
 		// obfs-password alone must not enable obfuscation: finalmask only appears
 		// when Type/Obfs is set, so clients do not second-guess the mode.
 		noObfs := "hysteria2://auth@plain.example:8443?sni=front.example&obfs-password=pass#Plain"
-		result, err := buildResponse(newTestSubSvc(t), "hy2-no-obfs", aggregatedSources{items: []string{noObfs}}, 0, "")
+		result, err := buildResponse(newTestSubSvc(t), "hy2-no-obfs", aggregatedSources{items: []string{noObfs}}, 0, "", OutputXray)
 		require.NoError(t, err)
 
 		var configs []struct {
@@ -623,7 +623,7 @@ func TestBuildResponseHysteria2Outbound(t *testing.T) {
 
 func TestXrayTemplateRoutingAndDNS(t *testing.T) {
 	t.Parallel()
-	result, err := buildResponse(newTestSubSvc(t), "template", aggregatedSources{jsonConfigs: []json.RawMessage{json.RawMessage(`{"type":"vless","address":"node.example","port":443,"uuid":"id","remark":"node-one"}`)}}, 0, "")
+	result, err := buildResponse(newTestSubSvc(t), "template", aggregatedSources{jsonConfigs: []json.RawMessage{json.RawMessage(`{"type":"vless","address":"node.example","port":443,"uuid":"id","remark":"node-one"}`)}}, 0, "", OutputXray)
 	require.NoError(t, err)
 
 	configs := decodeSubscription(t, result.Body)
@@ -688,7 +688,7 @@ func TestBuildResponseReservedTagsFallback(t *testing.T) {
 			json.RawMessage(`{"type":"vless","address":"two.example","port":443,"uuid":"id-2","remark":"block"}`),
 			json.RawMessage(`{"type":"vless","address":"three.example","port":443,"uuid":"id-3","remark":"proxy-2"}`),
 		},
-	}, 0, "")
+	}, 0, "", OutputXray)
 	require.NoError(t, err)
 
 	configs := decodeSubscription(t, result.Body)
@@ -784,7 +784,7 @@ func TestBuildResponseShadowsocksOutboundHasMethod(t *testing.T) {
 		"ss://" + base64.RawURLEncoding.EncodeToString([]byte("chacha20-ietf-poly1305:ss-pass")) + "@ss.example:8388#SS-B64",
 		"ss://aes-256-gcm:plain-pass@plain.example:8389#SS-Plain",
 	}
-	result, err := buildResponse(newTestSubSvc(t), "ss-method", aggregatedSources{items: links}, 0, "")
+	result, err := buildResponse(newTestSubSvc(t), "ss-method", aggregatedSources{items: links}, 0, "", OutputXray)
 	require.NoError(t, err)
 
 	var configs []struct {
