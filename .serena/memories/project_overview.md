@@ -129,7 +129,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 
 ## Subserver
 - `/sub/{subID}` рендерит JSON-массив полных Xray-core конфигов (по одному на ноду) из встроенного шаблона (см. «Subserver subscription output» выше).
-- Clash/Mihomo конвертер покрывает VMess, VLESS, Trojan, Hysteria2, TUIC, Shadowsocks SIP002 и питает тот же Xray-путь.
+- Clash/Mihomo конвертер нормализует VMess, VLESS, Trojan, Hysteria2, Shadowsocks SIP002 — они питают тот же Xray-путь. TUIC питает **только legacy share-link конвертер** (`ConvertSingleJSONToLink` → `tuic://`) и в Xray-путь `/sub` не попадает никогда: `tuic://`-ссылка отсекается ещё в `parseShareLink` (белый список схем, до `ConvertJSONConfigsToXray`), а Clash-запись `type: tuic` отбрасывается уже внутри `ConvertJSONConfigsToXray` (`buildXrayOutbound` → `unsupported protocol for xray`, Warn + skip). См. «Неподдерживаемые протоколы» выше.
 - Транспортная нормализация сведена в `normaliseTransportNetwork` + `setPacketEncoding`.
 
 ## Scheduler
