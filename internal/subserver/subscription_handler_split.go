@@ -423,7 +423,8 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 				Fingerprint string          `json:"fp"`
 				Remark      string          `json:"ps"`
 			}
-			if err := json.Unmarshal(decoded, &vmess); err != nil {
+			err := json.Unmarshal(decoded, &vmess)
+			if err != nil {
 				logger.Warn("Skipping invalid vmess JSON payload", zap.Error(err))
 				continue
 			}
@@ -448,7 +449,7 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 			logger.Warn("Skipping unsupported or invalid share link", zap.Error(err))
 			continue
 		}
-		raw, err := json.Marshal(cfg)
+		raw, err := json.Marshal(cfg) //nolint:gosec // G117: password is the client credential this subscription must deliver
 		if err == nil {
 			configs = append(configs, raw)
 		}
@@ -463,7 +464,8 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 		metrics.SubserverNoItemsTotal.Inc()
 		return nil, ErrNoSubscriptionItems
 	}
-	if err := tagProxyOutbounds(outbounds); err != nil {
+	err = tagProxyOutbounds(outbounds)
+	if err != nil {
 		return nil, err
 	}
 	// XTLS Subscription Standards define a subscription as a JSON array of
@@ -515,11 +517,12 @@ func renderXrayConnection(remarks string, outbound json.RawMessage) (json.RawMes
 		return nil, fmt.Errorf("marshal Xray remarks: %w", err)
 	}
 	var rendered strings.Builder
-	if err := xrayTemplate.Execute(&rendered, xrayTemplateData{
+	err = xrayTemplate.Execute(&rendered, xrayTemplateData{
 		RemarksJSON:   string(remarksJSON),
 		OutboundsJSON: string(outboundsJSON),
 		TagJSON:       string(remarksJSON),
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, fmt.Errorf("render Xray template: %w", err)
 	}
 	body := []byte(rendered.String())
@@ -537,7 +540,8 @@ func tagProxyOutbounds(outbounds []json.RawMessage) error {
 	used := make(map[string]struct{}, len(outbounds))
 	for i, raw := range outbounds {
 		var outbound map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &outbound); err != nil {
+		err := json.Unmarshal(raw, &outbound)
+		if err != nil {
 			return fmt.Errorf("decode Xray outbound: %w", err)
 		}
 		tag := outboundTag(raw)
@@ -564,7 +568,8 @@ func outboundTag(raw json.RawMessage) string {
 	var probe struct {
 		Tag string `json:"tag"`
 	}
-	if err := json.Unmarshal(raw, &probe); err != nil {
+	err := json.Unmarshal(raw, &probe)
+	if err != nil {
 		return ""
 	}
 	return probe.Tag
@@ -572,11 +577,13 @@ func outboundTag(raw json.RawMessage) string {
 
 func parseJSONNumber(raw json.RawMessage) (int, error) {
 	var number json.Number
-	if err := json.Unmarshal(raw, &number); err == nil {
+	err := json.Unmarshal(raw, &number)
+	if err == nil {
 		return strconv.Atoi(number.String())
 	}
 	var text string
-	if err := json.Unmarshal(raw, &text); err != nil {
+	err = json.Unmarshal(raw, &text)
+	if err != nil {
 		return 0, err
 	}
 	return strconv.Atoi(text)
@@ -587,11 +594,13 @@ func parseJSONScalar(raw json.RawMessage) (string, error) {
 		return "", nil
 	}
 	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
+	err := json.Unmarshal(raw, &text)
+	if err == nil {
 		return text, nil
 	}
 	var number json.Number
-	if err := json.Unmarshal(raw, &number); err != nil {
+	err = json.Unmarshal(raw, &number)
+	if err != nil {
 		return "", err
 	}
 	return number.String(), nil
@@ -647,8 +656,7 @@ func parseShareLink(link string) (*serverConfig, error) {
 			}
 		}
 	}
-	switch cfg.Type {
-	case "hy2":
+	if cfg.Type == "hy2" {
 		cfg.Type = "hysteria2"
 	}
 	return cfg, nil
