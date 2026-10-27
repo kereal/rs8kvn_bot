@@ -14,7 +14,8 @@ import (
 // Partial failures are reported here in addition to the aggregated error, so the
 // caller can show the admin what actually happened instead of a binary result.
 type DeactivationResult struct {
-	// Targets — подписки в статусе active среди заблокировавших/недоступных.
+	// Targets — active-подписки и revoked-подписки с оставшимися привязками
+	// среди заблокировавших/недоступных.
 	Targets int
 	// Revoked — подписки, переведённые в revoked (VPN-доступ снимается).
 	Revoked int
@@ -28,6 +29,7 @@ type DeactivationResult struct {
 // переводит их подписки в статус 'revoked' (выключает без удаления строки),
 // снимает VPN-доступ через тот же путь депровижининга, что и admin /del,
 // и записывает события в аудит-лог.
+// Повторный запуск также ставит на удаление оставшиеся привязки revoked-подписок.
 //
 // БД-фаза выполняется синхронно для каждого получателя (статус + pending_remove),
 // немедленный sync с панелями — только для первых maxImmediateSyncs подписок:
@@ -81,25 +83,38 @@ func (s *SubscriptionService) DeactivateBlockedBroadcastRecipients(ctx context.C
 			continue
 		}
 
-		if sub.Status != string(database.SubscriptionStatusActive) {
+		if sub.Status == string(database.SubscriptionStatusRevoked) {
+			bindings, loadErr := s.db.GetBySubscriptionID(ctx, sub.ID)
+			if loadErr != nil {
+				result.Failed++
+				errs = append(errs, fmt.Errorf("load bindings for revoked subscription %d (telegram %d): %w", sub.ID, telegramID, loadErr))
+
+				continue
+			}
+			if len(bindings) == 0 {
+				continue
+			}
+		} else if sub.Status != string(database.SubscriptionStatusActive) {
 			continue
 		}
 
 		result.Targets++
 
-		err = s.markRevokedSub(ctx, sub)
-		if err != nil {
-			result.Failed++
-			errs = append(errs, fmt.Errorf("revoke subscription %d (telegram %d): %w", sub.ID, telegramID, err))
+		if sub.Status == string(database.SubscriptionStatusActive) {
+			err = s.markRevokedSub(ctx, sub)
+			if err != nil {
+				result.Failed++
+				errs = append(errs, fmt.Errorf("revoke subscription %d (telegram %d): %w", sub.ID, telegramID, err))
 
-			continue
+				continue
+			}
+
+			result.Revoked++
+
+			// Статус изменён — событие фиксируется сразу, до внешних вызовов:
+			// даже если депровижининг ниже упадёт, отзыв уже состоявшийся факт.
+			s.logAudit(ctx, database.AuditSubscriptionRevoked(sub, reason))
 		}
-
-		result.Revoked++
-
-		// Статус изменён — событие фиксируется сразу, до внешних вызовов:
-		// даже если депровижининг ниже упадёт, отзыв уже состоявшийся факт.
-		s.logAudit(ctx, database.AuditSubscriptionRevoked(sub, reason))
 
 		if sub.SubscriptionID != "" {
 			s.InvalidateBySubID(ctx, sub.SubscriptionID)
@@ -109,7 +124,8 @@ func (s *SubscriptionService) DeactivateBlockedBroadcastRecipients(ctx context.C
 		if err != nil {
 			// Подписка уже revoked (subserver отдаёт 404), но привязки не
 			// помечены pending_remove — фоновой синхронизации нечего повторять,
-			// поэтому сбой возвращается администратору.
+			// поэтому сбой возвращается администратору. Повторный запуск
+			// обработает revoked-подписку с оставшимися привязками снова.
 			result.Failed++
 			errs = append(errs, fmt.Errorf("deprovision subscription %d (telegram %d): %w", sub.ID, telegramID, err))
 

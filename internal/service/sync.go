@@ -136,6 +136,9 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 	if err != nil {
 		return fmt.Errorf("reconcile plan nodes: load subscription: %w", err)
 	}
+	if sub.Status == string(database.SubscriptionStatusRevoked) {
+		return nil
+	}
 
 	targetNodes, err := s.db.GetNodesByPlanID(ctx, sub.PlanID)
 	if err != nil {
