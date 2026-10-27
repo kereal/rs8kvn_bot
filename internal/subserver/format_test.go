@@ -99,10 +99,94 @@ func TestBuildSingboxConfig_AppendsSelector(t *testing.T) {
 
 	obs, ok := doc["outbounds"].([]map[string]any)
 	require.True(t, ok)
-	require.Len(t, obs, 3)
+	require.Len(t, obs, 5, "2 nodes + selector + direct + block")
 	require.Equal(t, "selector", obs[2]["type"])
 	require.Equal(t, "proxy", obs[2]["tag"])
 	require.Equal(t, []string{"node-one", "node-two"}, obs[2]["outbounds"])
+	require.Equal(t, "direct", obs[3]["tag"])
+	require.Equal(t, "block", obs[4]["tag"])
+}
+
+// TestBuildSingboxConfig_ParityWithXray guards sing-box/Xray config parity: the
+// subscription must deliver the same routing policy, DNS setup and local
+// listener the Xray profile carries — not a bare list of servers.
+func TestBuildSingboxConfig_ParityWithXray(t *testing.T) {
+	t.Parallel()
+
+	outbounds := []map[string]any{
+		{"type": "hysteria2", "tag": "🇫🇮 Finland Hysteria 🔥"},
+		{"type": "vless", "tag": "🇩🇪 Germany VLESS"},
+	}
+	doc := BuildSingboxConfig(outbounds)
+
+	// log mirrors the Xray loglevel.
+	log, ok := doc["log"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "warn", log["level"])
+
+	// dns: DoH default + Russian resolver for ru/private domains (skipFallback
+	// semantics: a rule steers ru/private to ru-dns, everything else hits the
+	// first server, the DoH one).
+	dns, ok := doc["dns"].(map[string]any)
+	require.True(t, ok)
+	dnsServers, ok := dns["servers"].([]map[string]any)
+	require.True(t, ok)
+	addresses := make([]string, 0, len(dnsServers))
+	for _, s := range dnsServers {
+		addresses = append(addresses, s["address"].(string))
+	}
+	require.Contains(t, addresses, "https://1.1.1.1/dns-query")
+	require.Contains(t, addresses, "77.88.8.8")
+	dnsRules, ok := dns["rules"].([]map[string]any)
+	require.True(t, ok)
+	require.Len(t, dnsRules, 1, "ru/private domains resolve via ru-dns")
+	require.Equal(t, []string{"category-ru", "private"}, dnsRules[0]["geosite"])
+	require.Equal(t, "ru-dns", dnsRules[0]["server"])
+
+	// inbounds: mixed socks/http listener mirroring Xray 10808/10809.
+	inbounds, ok := doc["inbounds"].([]map[string]any)
+	require.True(t, ok)
+	require.Len(t, inbounds, 1)
+	require.Equal(t, "mixed", inbounds[0]["type"])
+	require.Equal(t, "127.0.0.1", inbounds[0]["listen"])
+	require.Equal(t, 10808, inbounds[0]["listen_port"])
+	require.Equal(t, true, inbounds[0]["sniff"])
+
+	// outbounds: every node + selector + direct + block.
+	obs, ok := doc["outbounds"].([]map[string]any)
+	require.True(t, ok)
+	require.Len(t, obs, 5)
+	sel := obs[2]
+	require.Equal(t, "selector", sel["type"])
+	require.Equal(t, "proxy", sel["tag"])
+	require.Equal(t, []string{"🇫🇮 Finland Hysteria 🔥", "🇩🇪 Germany VLESS"}, sel["outbounds"],
+		"selector must list every node by its remark")
+	require.Equal(t, "direct", obs[3]["tag"])
+	require.Equal(t, "block", obs[4]["tag"])
+
+	// route: same policy as the Xray template, catch-all → selector.
+	route, ok := doc["route"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "proxy", route["final"], "catch-all must target the selector")
+	require.Equal(t, true, route["auto_detect_interface"])
+	rules, ok := route["rules"].([]map[string]any)
+	require.True(t, ok)
+	require.Len(t, rules, 5)
+
+	outs := make([]string, 0, len(rules))
+	for _, r := range rules {
+		outbound, _ := r["outbound"].(string)
+		outs = append(outs, outbound)
+	}
+	require.Equal(t, []string{"direct", "block", "direct", "direct", "direct"}, outs,
+		"rule order must mirror the Xray template: checkip→direct, ads→block, private→direct, geoip-ru→direct, geosite-ru→direct")
+
+	require.Contains(t, rules[0]["domain_suffix"], "checkip.amazonaws.com")
+	require.Contains(t, rules[0]["domain_suffix"], "ifconfig.me")
+	require.Equal(t, []string{"category-ads-all"}, rules[1]["geosite"])
+	require.Equal(t, true, rules[2]["ip_is_private"])
+	require.Equal(t, []string{"ru"}, rules[3]["geoip"])
+	require.Equal(t, []string{"category-ru", "private"}, rules[4]["geosite"])
 }
 
 func TestTagSingboxOutbounds(t *testing.T) {
@@ -204,8 +288,8 @@ func TestHandleSubscription_FormatByUA(t *testing.T) {
 			Outbounds []any `json:"outbounds"`
 		}
 		require.NoError(t, json.Unmarshal(result.Body, &doc))
-		require.Len(t, doc.Outbounds, 2)
-		sel, ok := doc.Outbounds[len(doc.Outbounds)-1].(map[string]any)
+		require.Len(t, doc.Outbounds, 4, "1 node + selector + direct + block")
+		sel, ok := doc.Outbounds[1].(map[string]any)
 		require.True(t, ok)
 		require.Equal(t, "selector", sel["type"])
 		require.Equal(t, "proxy", sel["tag"])
