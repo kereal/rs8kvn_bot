@@ -174,6 +174,81 @@ func TestBuildResponseOneProfilePerNode(t *testing.T) {
 	require.Equal(t, "three.example", proxyAddress(t, result.Body, 2))
 }
 
+// TestTagProxyOutboundsReservesDirectAndBlock guards the reserved tags: a node
+// remarked "direct" or "block" must never keep that tag, otherwise it collides
+// with the freedom/blackhole outbounds renderXrayConnection always adds and the
+// routing rules resolve to the wrong outbound.
+func TestTagProxyOutboundsReservesDirectAndBlock(t *testing.T) {
+	t.Parallel()
+
+	outbounds := []json.RawMessage{
+		json.RawMessage(`{"protocol":"vless","tag":"direct"}`),
+		json.RawMessage(`{"protocol":"vless","tag":"block"}`),
+		json.RawMessage(`{"protocol":"vless","tag":"node-one"}`),
+		json.RawMessage(`{"protocol":"vless","tag":"proxy-2"}`),
+	}
+	require.NoError(t, tagProxyOutbounds(outbounds))
+
+	got := make([]string, 0, len(outbounds))
+	for _, raw := range outbounds {
+		got = append(got, outboundTag(raw))
+	}
+	// proxy-2 is claimed by the second fallback, so the outbound that literally
+	// asks for "proxy-2" afterwards must be pushed further down the sequence.
+	require.Equal(t, []string{"proxy-1", "proxy-2", "node-one", "proxy-4"}, got)
+
+	unique := make(map[string]struct{}, len(got))
+	for _, tag := range got {
+		_, dup := unique[tag]
+		require.False(t, dup, "tag %q assigned twice", tag)
+		unique[tag] = struct{}{}
+	}
+
+	require.NotEqual(t, "direct", got[0], "reserved direct tag must not reach a proxy outbound")
+	require.NotEqual(t, "block", got[1], "reserved block tag must not reach a proxy outbound")
+
+	for _, reserved := range reservedOutboundTags {
+		for i, tag := range got {
+			require.NotEqual(t, reserved, tag, "outbound %d must not use reserved tag %q", i, reserved)
+		}
+	}
+}
+
+// TestBuildResponseRemarksCollidingWithReservedTags checks the rendered profiles
+// end-to-end: nodes named "direct"/"block" get distinct fallback tags, while the
+// direct/block outbounds and their routing rules stay intact.
+func TestBuildResponseRemarksCollidingWithReservedTags(t *testing.T) {
+	t.Parallel()
+
+	result, err := buildResponse(newTestSubSvc(t), "reserved-tags", aggregatedSources{
+		jsonConfigs: []json.RawMessage{
+			json.RawMessage(`{"type":"vless","address":"direct.example","port":443,"uuid":"id-1","remark":"direct"}`),
+			json.RawMessage(`{"type":"vless","address":"block.example","port":443,"uuid":"id-2","remark":"block"}`),
+		},
+	}, 0, "")
+	require.NoError(t, err)
+
+	configs := decodeSubscription(t, result.Body)
+	require.Len(t, configs, 2)
+
+	for i, conn := range configs {
+		require.Len(t, conn.Outbounds, 3)
+		proxyTag := conn.Outbounds[0].Tag
+		require.NotEmpty(t, proxyTag)
+		require.NotEqual(t, "direct", proxyTag, "profile %d: proxy tag collides with the direct outbound", i)
+		require.NotEqual(t, "block", proxyTag, "profile %d: proxy tag collides with the block outbound", i)
+		require.Equal(t, "direct", conn.Outbounds[1].Tag)
+		require.Equal(t, "block", conn.Outbounds[2].Tag)
+		require.Equal(t, conn.Remarks, proxyTag, "profile %d: profile name must match its proxy tag", i)
+		require.Equal(t, proxyTag, conn.Routing.Rules[len(conn.Routing.Rules)-1].OutboundTag,
+			"profile %d: catch-all rule is renamed after the collision", i)
+		require.Equal(t, "block", conn.Routing.Rules[0].OutboundTag)
+	}
+
+	require.NotEqual(t, configs[0].Remarks, configs[1].Remarks, "fallback tags must stay unique")
+	require.NotEqual(t, configs[0].Outbounds[0].Tag, configs[1].Outbounds[0].Tag)
+}
+
 // proxyAddress returns the address of the proxy outbound in profile index.
 func proxyAddress(t *testing.T, body []byte, index int) string {
 	t.Helper()
@@ -328,6 +403,32 @@ func TestBuildResponseConvertsVMessNumericFields(t *testing.T) {
 	require.Equal(t, "vmess", configs[0].Outbounds[0].Protocol)
 	require.Equal(t, 443, configs[0].Outbounds[0].Settings.VNext[0].Port)
 	require.Equal(t, 2, configs[0].Outbounds[0].Settings.VNext[0].Users[0].AlterID)
+}
+
+func TestParseVMessLinkPreservesCase(t *testing.T) {
+	t.Parallel()
+
+	// The Base64 payload and its fields are case-sensitive; lower-casing them
+	// corrupts the UUID, host and remark, and the connection silently breaks.
+	payload := `{"add":"VMess.Example","port":443,"id":"AbCdEf12-3456","aid":0,"net":"ws","host":"MIXED.Example","ps":"Node-DE"}`
+	link := "vmess://" + base64.StdEncoding.EncodeToString([]byte(payload))
+
+	cfg, err := parseVMessLink(link)
+	require.NoError(t, err)
+	require.Equal(t, "VMess.Example", cfg.Address)
+	require.Equal(t, "AbCdEf12-3456", cfg.UUID)
+	require.Equal(t, "MIXED.Example", cfg.Host)
+	require.Equal(t, "Node-DE", cfg.Remark)
+
+	upperScheme, err := parseVMessLink("VMESS://" + base64.StdEncoding.EncodeToString([]byte(payload)))
+	require.NoError(t, err, "the scheme must be matched case-insensitively")
+	require.Equal(t, cfg.UUID, upperScheme.UUID)
+
+	_, err = parseVMessLink("vless://" + base64.StdEncoding.EncodeToString([]byte(payload)))
+	require.Error(t, err, "a non-vmess scheme must be rejected")
+
+	_, err = parseVMessLink("vmess://" + base64.StdEncoding.EncodeToString([]byte(`{"add":"","port":443,"id":"id"}`)))
+	require.Error(t, err, "an empty address must be rejected")
 }
 
 func TestXrayTemplateRoutingAndDNS(t *testing.T) {
