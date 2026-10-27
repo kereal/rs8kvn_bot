@@ -127,6 +127,8 @@ Referral-based trial flow: validates the invite code, applies IP rate limiting, 
 
 Serves merged subscriptions from all active nodes (3x-ui, proxman, fetch) with a 240s singleflight cache. Optional access logging is enabled via `SUBSERVER_ACCESS_LOG`.
 
+The response body is a JSON **array** of complete Xray-core client configs (`application/json; charset=utf-8`), one element per node, following the XTLS Subscription Standards body shape. Each element carries `remarks` (the node name clients display), local socks/http inbounds, one proxy outbound plus `direct`/`block`, DNS settings, and routing whose catch-all rule targets that element's own outbound. Validated with `xray -test -config`.
+
 ## Traffic and Expiry
 
 - Free subscriptions on 3x-ui use the v3.7.0-compatible rolling configuration: `reset=30`, `resetDay=0`, `resetMax=0`, `trafficReset=monthly`, `trafficResetDay=1`.
