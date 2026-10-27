@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -142,7 +143,6 @@ type aggregatedSources struct {
 	firstExpireVal     int64
 	totalUpload        int64
 	totalDownload      int64
-	allJSON            bool
 	firstSourceHeaders map[string]string
 }
 
@@ -164,9 +164,7 @@ type sourceResult struct {
 // others. Results are merged in source order to keep header/expire selection
 // deterministic.
 func fetchAndAggregateSources(ctx context.Context, subID string, nodes []database.Node) (aggregatedSources, int, int) {
-	agg := aggregatedSources{
-		allJSON: true,
-	}
+	agg := aggregatedSources{}
 
 	results := make([]sourceResult, len(nodes))
 	sem := make(chan struct{}, maxSourceConcurrency)
@@ -302,65 +300,43 @@ func buildSourceURL(src database.Node, subID string) string {
 	return srcSubURL + subID
 }
 
-// aggregateFormat parses the upstream body according to its detected format
-// and appends items or JSON configs to the aggregator.
+// aggregateFormat normalises each supported upstream response into server configs or share links.
 func aggregateFormat(agg *aggregatedSources, format Format, body []byte, src database.Node, subID string) {
 	switch format {
 	case FormatJSON:
-		configs, parseErr := ExtractJSONConfigs(body)
-		if parseErr != nil {
-			logger.Error("Failed to parse JSON configs from node",
-				zap.String("sub_id", subID),
-				zap.String("source", src.Name),
-				zap.Error(parseErr))
-
-			agg.allJSON = false
-
+		configs, err := ExtractJSONConfigs(body)
+		if err != nil {
+			logger.Error("Failed to parse JSON configs from node", zap.String("sub_id", subID), zap.String("source", src.Name), zap.Error(err))
 			return
 		}
-
 		agg.jsonConfigs = append(agg.jsonConfigs, configs...)
 	case FormatClash:
-		// Clash is not a pure-JSON source, so force the base64/link output path.
-		agg.allJSON = false
-
-		configs, parseErr := ExtractClashConfigs(body)
-		if parseErr != nil {
-			logger.Error("Failed to parse Clash configs from node",
-				zap.String("sub_id", subID),
-				zap.String("source", src.Name),
-				zap.Error(parseErr))
-
+		configs, err := ExtractClashConfigs(body)
+		if err != nil {
+			logger.Error("Failed to parse Clash configs from node", zap.String("sub_id", subID), zap.String("source", src.Name), zap.Error(err))
 			return
 		}
-
 		agg.jsonConfigs = append(agg.jsonConfigs, configs...)
 	case FormatBase64:
-		agg.allJSON = false
-
 		encoded := strings.TrimSpace(string(body))
-		decoded, decErr := base64.StdEncoding.DecodeString(encoded)
-		if decErr != nil {
-			decoded, decErr = base64.RawStdEncoding.DecodeString(encoded)
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			decoded, err = base64.RawStdEncoding.DecodeString(encoded)
 		}
-		if decErr != nil {
-			agg.items = append(agg.items, encoded)
-		} else {
-			for line := range strings.SplitSeq(string(decoded), "\n") {
-				line = strings.TrimSpace(line)
-				if line != "" {
-					agg.items = append(agg.items, line)
-				}
-			}
+		if err != nil {
+			return
 		}
+		appendShareLinks(agg, string(decoded))
 	case FormatPlain:
-		agg.allJSON = false
+		appendShareLinks(agg, string(body))
+	}
+}
 
-		for line := range strings.SplitSeq(string(body), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" {
-				agg.items = append(agg.items, line)
-			}
+func appendShareLinks(agg *aggregatedSources, body string) {
+	for line := range strings.SplitSeq(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			agg.items = append(agg.items, line)
 		}
 	}
 }
@@ -407,66 +383,245 @@ func parseExpireToInt(userInfo string) (int64, bool) {
 	return exp, true
 }
 
-// buildResponse takes the aggregated source data and constructs the final
-// subscription response body with headers, writing it to cache. When
-// profileTitleSuffix is non-empty it is appended (base64-aware) to the upstream
-// profile-title header before the response is cached.
+// buildResponse converts every supported upstream subscription format to a full Xray-core JSON config.
 func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, trafficLimit int64, profileTitleSuffix string) (*SubscriptionResult, error) {
 	userInfo := BuildUserInfoHeader(agg.totalUpload, agg.totalDownload, trafficLimit, agg.firstExpire)
 
-	// If we are in mixed mode (some sources returned non-JSON),
-	// convert any collected JSON configs to share links and merge into items.
-	if !agg.allJSON && len(agg.jsonConfigs) > 0 {
-		for _, rawConfig := range agg.jsonConfigs {
-			link, convErr := ConvertSingleJSONToLink(rawConfig)
-			if convErr != nil {
-				logger.Error("Failed to convert JSON config to share link",
-					zap.Error(convErr))
-
+	configs := make([]json.RawMessage, 0, len(agg.jsonConfigs)+len(agg.items))
+	configs = append(configs, agg.jsonConfigs...)
+	for _, item := range agg.items {
+		link := strings.TrimSpace(item)
+		if link == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(link), "vmess://") {
+			payload := link[len("vmess://"):]
+			decoded, decodeErr := base64.StdEncoding.DecodeString(payload)
+			if decodeErr != nil {
+				decoded, decodeErr = base64.RawStdEncoding.DecodeString(payload)
+			}
+			if decodeErr != nil {
+				decoded, decodeErr = base64.RawURLEncoding.DecodeString(payload)
+			}
+			if decodeErr != nil {
+				logger.Warn("Skipping invalid vmess share link", zap.Error(decodeErr))
 				continue
 			}
+			var vmess struct {
+				Address     string          `json:"add"`
+				Port        json.RawMessage `json:"port"`
+				UUID        string          `json:"id"`
+				Aid         json.RawMessage `json:"aid"`
+				Scy         string          `json:"scy"`
+				Network     string          `json:"net"`
+				HeaderType  string          `json:"type"`
+				Host        string          `json:"host"`
+				Path        string          `json:"path"`
+				TLS         string          `json:"tls"`
+				SNI         string          `json:"sni"`
+				Alpn        string          `json:"alpn"`
+				Fingerprint string          `json:"fp"`
+				Remark      string          `json:"ps"`
+			}
+			if err := json.Unmarshal(decoded, &vmess); err != nil {
+				logger.Warn("Skipping invalid vmess JSON payload", zap.Error(err))
+				continue
+			}
+			port, err := parseJSONNumber(vmess.Port)
+			if err != nil || port < 1 || port > 65535 {
+				continue
+			}
+			aid, err := parseJSONScalar(vmess.Aid)
+			if err != nil {
+				continue
+			}
+			cfg := map[string]any{"type": "vmess", "address": vmess.Address, "port": port, "uuid": vmess.UUID, "aid": aid, "scy": vmess.Scy, "network": vmess.Network, "headerType": vmess.HeaderType, "host": vmess.Host, "path": vmess.Path, "tls": vmess.TLS, "sni": vmess.SNI, "alpn": vmess.Alpn, "fp": vmess.Fingerprint, "remark": vmess.Remark}
+			raw, err := json.Marshal(cfg)
+			if err == nil {
+				configs = append(configs, raw)
+			}
+			continue
+		}
 
-			agg.items = append(agg.items, link)
+		cfg, err := parseShareLink(link)
+		if err != nil {
+			logger.Warn("Skipping unsupported or invalid share link", zap.Error(err))
+			continue
+		}
+		raw, err := json.Marshal(cfg)
+		if err == nil {
+			configs = append(configs, raw)
 		}
 	}
-
-	// Pure-JSON output: marshal all raw serverConfig objects into a JSON
-	// array response.
-	if agg.allJSON && len(agg.jsonConfigs) > 0 {
-		responseBody, marshalErr := json.Marshal(agg.jsonConfigs)
-		if marshalErr != nil {
-			logger.Error("Failed to marshal JSON response",
-				zap.Error(marshalErr))
-
-			return nil, fmt.Errorf("failed to marshal response: %w", marshalErr)
-		}
-
-		cacheHeaders := ResponseHeaders(agg.firstSourceHeaders, "application/json; charset=utf-8", userInfo)
-		ApplyProfileTitleSuffix(cacheHeaders, profileTitleSuffix)
-		subSvc.SetCache(cacheKey, responseBody, cacheHeaders)
-
-		return &SubscriptionResult{
-			Body:    responseBody,
-			Headers: cacheHeaders,
-		}, nil
-	}
-
-	// No servers collected from any source.
-	if len(agg.items) == 0 {
+	if len(configs) == 0 {
 		metrics.SubserverNoItemsTotal.Inc()
 		return nil, ErrNoSubscriptionItems
 	}
 
-	// Mixed or plain-text output: join all share links and encode to base64.
-	combined := strings.Join(agg.items, "\n")
-	responseBody := []byte(base64.StdEncoding.EncodeToString([]byte(combined)))
-	ct := "text/plain; charset=utf-8; profile=base64"
-	cacheHeaders := ResponseHeaders(agg.firstSourceHeaders, ct, userInfo)
+	outbounds, err := ConvertJSONConfigsToXray(configs)
+	if err != nil {
+		metrics.SubserverNoItemsTotal.Inc()
+		return nil, ErrNoSubscriptionItems
+	}
+	if err := tagProxyOutbounds(outbounds); err != nil {
+		return nil, err
+	}
+	proxyOutbounds := make([]json.RawMessage, 0, len(outbounds)+2)
+	proxyOutbounds = append(proxyOutbounds, outbounds...)
+	proxyOutbounds = append(proxyOutbounds, json.RawMessage(`{"protocol":"freedom","tag":"direct"}`), json.RawMessage(`{"protocol":"blackhole","tag":"block"}`))
+	outboundsJSON, err := json.Marshal(proxyOutbounds)
+	if err != nil {
+		return nil, fmt.Errorf("marshal Xray outbounds: %w", err)
+	}
+	defaultTagJSON, err := json.Marshal(outboundTag(outbounds[0]))
+	if err != nil {
+		return nil, fmt.Errorf("marshal default outbound tag: %w", err)
+	}
+	var rendered strings.Builder
+	if err := xrayTemplate.Execute(&rendered, xrayTemplateData{
+		OutboundsJSON:  string(outboundsJSON),
+		DefaultTagJSON: string(defaultTagJSON),
+	}); err != nil {
+		return nil, fmt.Errorf("render Xray template: %w", err)
+	}
+	responseBody := []byte(rendered.String())
+	if !json.Valid(responseBody) {
+		return nil, fmt.Errorf("rendered Xray config is invalid JSON")
+	}
+	cacheHeaders := ResponseHeaders(agg.firstSourceHeaders, "application/json; charset=utf-8", userInfo)
 	ApplyProfileTitleSuffix(cacheHeaders, profileTitleSuffix)
 	subSvc.SetCache(cacheKey, responseBody, cacheHeaders)
+	return &SubscriptionResult{Body: responseBody, Headers: cacheHeaders}, nil
+}
 
-	return &SubscriptionResult{
-		Body:    responseBody,
-		Headers: cacheHeaders,
-	}, nil
+// xrayTemplateData holds the values injected into templates/xray_client.json.
+// Both fields carry pre-encoded JSON so numeric/string quoting stays correct.
+type xrayTemplateData struct {
+	OutboundsJSON  string
+	DefaultTagJSON string
+}
+
+// tagProxyOutbounds guarantees every proxy outbound has a unique, non-empty tag.
+// The upstream remark (usually a node name with its country) is kept when it is
+// unique, so clients show recognizable names; otherwise the outbound falls back
+// to a positional "proxy-N" tag.
+func tagProxyOutbounds(outbounds []json.RawMessage) error {
+	used := make(map[string]struct{}, len(outbounds))
+	for i, raw := range outbounds {
+		var outbound map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &outbound); err != nil {
+			return fmt.Errorf("decode Xray outbound: %w", err)
+		}
+		tag := outboundTag(raw)
+		if _, dup := used[tag]; tag == "" || dup {
+			tag = fmt.Sprintf("proxy-%d", i+1)
+		}
+		used[tag] = struct{}{}
+		tagJSON, err := json.Marshal(tag)
+		if err != nil {
+			return fmt.Errorf("marshal Xray outbound tag: %w", err)
+		}
+		outbound["tag"] = tagJSON
+		tagged, err := json.Marshal(outbound)
+		if err != nil {
+			return fmt.Errorf("marshal tagged Xray outbound: %w", err)
+		}
+		outbounds[i] = tagged
+	}
+	return nil
+}
+
+// outboundTag returns the "tag" of an encoded outbound, or "" when absent.
+func outboundTag(raw json.RawMessage) string {
+	var probe struct {
+		Tag string `json:"tag"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return ""
+	}
+	return probe.Tag
+}
+
+func parseJSONNumber(raw json.RawMessage) (int, error) {
+	var number json.Number
+	if err := json.Unmarshal(raw, &number); err == nil {
+		return strconv.Atoi(number.String())
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(text)
+}
+
+func parseJSONScalar(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text, nil
+	}
+	var number json.Number
+	if err := json.Unmarshal(raw, &number); err != nil {
+		return "", err
+	}
+	return number.String(), nil
+}
+
+func parseShareLink(link string) (*serverConfig, error) {
+	u, err := url.Parse(link)
+	if err != nil {
+		return nil, fmt.Errorf("parse share link: %w", err)
+	}
+	if u.Hostname() == "" {
+		return nil, fmt.Errorf("share link has no host")
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil || port <= 0 {
+		return nil, fmt.Errorf("share link has invalid port")
+	}
+	q := u.Query()
+	cfg := &serverConfig{Type: strings.ToLower(u.Scheme), Address: u.Hostname(), Port: port, Remark: u.Fragment}
+	switch cfg.Type {
+	case "vless", "vmess", "trojan", "ss", "shadowsocks", "hysteria", "hysteria2", "hy2":
+	default:
+		return nil, fmt.Errorf("unsupported share-link scheme %q", u.Scheme)
+	}
+	if u.User != nil {
+		cfg.UUID = u.User.Username()
+		cfg.Password, _ = u.User.Password()
+	}
+	if cfg.Type == "trojan" || cfg.Type == "hysteria" || cfg.Type == "hysteria2" || cfg.Type == "hy2" {
+		if cfg.Password == "" {
+			cfg.Password = cfg.UUID
+		}
+	}
+	cfg.Security, cfg.TLS = q.Get("security"), q.Get("tls")
+	if cfg.Security == "" {
+		cfg.Security = cfg.TLS
+	}
+	cfg.SNI, cfg.Fingerprint = q.Get("sni"), q.Get("fp")
+	cfg.PublicKey, cfg.ShortID = q.Get("pbk"), q.Get("sid")
+	cfg.Network, cfg.Path = q.Get("type"), q.Get("path")
+	cfg.Host, cfg.Flow = q.Get("host"), q.Get("flow")
+	cfg.Alpn, cfg.Method = q.Get("alpn"), q.Get("method")
+	cfg.Plugin, cfg.PluginOpts = q.Get("plugin"), q.Get("plugin-opts")
+	cfg.Obfs, cfg.ObfsPassword = q.Get("obfs"), q.Get("obfs-password")
+	if cfg.Type == "ss" || cfg.Type == "shadowsocks" {
+		decoded, decodeErr := base64.RawURLEncoding.DecodeString(cfg.UUID)
+		if decodeErr != nil {
+			decoded, decodeErr = base64.StdEncoding.DecodeString(cfg.UUID)
+		}
+		if decodeErr == nil {
+			if method, password, ok := strings.Cut(string(decoded), ":"); ok {
+				cfg.Method, cfg.Password = method, password
+			}
+		}
+	}
+	switch cfg.Type {
+	case "hy2":
+		cfg.Type = "hysteria2"
+	}
+	return cfg, nil
 }

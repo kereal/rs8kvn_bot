@@ -261,3 +261,22 @@ func TestConvertSingleJSONToXray_NoEmptySecurityBlocks(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, strings.Contains(string(x), "tlsSettings"))
 }
+
+func TestConvertSingleJSONToXray_Hysteria2(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"type":"hysteria2","address":"hy2.example","port":443,"password":"secret","sni":"front.example","obfs":"salamander","obfsPassword":"obfs-secret"}`)
+	outbound, err := ConvertSingleJSONToXray(raw)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(outbound, &got))
+	require.Equal(t, "hysteria", got["protocol"])
+	settings := got["settings"].(map[string]any)
+	require.Equal(t, float64(2), settings["version"])
+	transport := got["streamSettings"].(map[string]any)
+	require.Equal(t, "hysteria", transport["method"])
+	hysteriaSettings := transport["hysteriaSettings"].(map[string]any)
+	require.Equal(t, float64(2), hysteriaSettings["version"])
+	require.Equal(t, "secret", hysteriaSettings["auth"])
+	require.Equal(t, "front.example", transport["tlsSettings"].(map[string]any)["serverName"])
+	require.Equal(t, "salamander", hysteriaSettings["obfs"].(map[string]any)["type"])
+}

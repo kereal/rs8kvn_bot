@@ -1,9 +1,16 @@
 package subserver
 
 import (
+	"embed"
 	"sync"
+	"text/template"
 	"time"
 )
+
+//go:embed templates/xray_client.json
+var xrayTemplateFS embed.FS
+
+var xrayTemplate = template.Must(template.ParseFS(xrayTemplateFS, "templates/xray_client.json"))
 
 // Service wraps the subscription response cache.
 // It is a thin adapter that the web layer uses for cache operations.

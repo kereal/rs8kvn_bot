@@ -75,9 +75,9 @@ Trial invitation page. Validates invite code, applies IP rate limit, creates tri
 
 ### `GET /sub/{subID}`
 
-Returns the merged subscription configuration from all active nodes. Responses are cached for 240 seconds; inactive/expired subscriptions return 404.
+Returns a full Xray-core JSON configuration built from supported JSON, Clash, plain share-link, and Base64 share-link sources on all active nodes. Each proxy outbound uses its source remark as its tag when unique, with `proxy-N` as a fallback. The final catch-all routing rule points to the first supported proxy outbound, giving a predictable default node; remaining outbounds are retained for clients that expose individual outbounds. Xray-core JSON has no portable manual selector group, so the endpoint does not guarantee a client UI for switching nodes. `direct` and `block` outbounds and routing rules are included. `Subscription-Userinfo` carries aggregated usage. Responses are cached for 240 seconds; inactive/expired subscriptions return 404. Sources that cannot be converted to supported Xray outbounds are skipped; if none remain, the endpoint returns 404.
 
-**Response 200:** Subscription body and aggregated `Subscription-Userinfo` headers.
+Routing uses `geosite:category-ru` (the built-in Xray category name for Russian domains) and `geoip:ru`. The default catch-all route selects the first supported proxy outbound; remaining proxies remain individually tagged. Xray's JSON schema has no portable manual-selector outbound group, so clients may expose node switching differently.
 
 **Response 404:** Subscription not found, inactive, or expired.
 

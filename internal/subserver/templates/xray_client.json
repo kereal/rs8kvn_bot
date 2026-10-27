@@ -1,0 +1,38 @@
+{
+  "log": {"loglevel": "warning"},
+  "dns": {
+    "servers": [
+      {"address": "77.88.8.8", "domains": ["geosite:category-ru", "geosite:private"], "skipFallback": true},
+      "https://1.1.1.1/dns-query"
+    ],
+    "queryStrategy": "UseIP"
+  },
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "port": 10808,
+      "protocol": "socks",
+      "settings": {"udp": true},
+      "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"], "routeOnly": true}
+    },
+    {
+      "tag": "http-in",
+      "listen": "127.0.0.1",
+      "port": 10809,
+      "protocol": "http",
+      "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"], "routeOnly": true}
+    }
+  ],
+  "outbounds": {{.OutboundsJSON}},
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {"type": "field", "domain": ["domain:api.ipify.org", "domain:checkip.amazonaws.com", "domain:ifconfig.me", "domain:ip.mail.ru", "domain:ipv4-internet.yandex.net", "domain:ipv6-internet.yandex.net"], "outboundTag": "block"},
+      {"type": "field", "domain": ["geosite:category-ads-all"], "outboundTag": "block"},
+      {"type": "field", "ip": ["geoip:private", "geoip:ru"], "outboundTag": "direct"},
+      {"type": "field", "domain": ["geosite:category-ru", "geosite:private"], "outboundTag": "direct"},
+      {"type": "field", "network": "tcp,udp", "outboundTag": {{.DefaultTagJSON}}}
+    ]
+  }
+}
