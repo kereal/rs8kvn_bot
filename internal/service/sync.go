@@ -127,7 +127,9 @@ func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uin
 }
 
 // reconcilePlanNodesLocked is the lock-free body of ReconcilePlanNodes.
-// The caller must hold lockSubscription(subscriptionID).
+// The caller must hold lockSubscription(subscriptionID). Revoked subscriptions
+// are left unchanged. Load errors return immediately; node mutation errors are
+// joined after processing, except cancellation or deadline errors, which abort.
 func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscriptionID uint) error {
 	logger.Debug("reconcile plan nodes",
 		zap.Uint("subscription_id", subscriptionID))
@@ -135,6 +137,9 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 	sub, err := s.db.GetByID(ctx, subscriptionID)
 	if err != nil {
 		return fmt.Errorf("reconcile plan nodes: load subscription: %w", err)
+	}
+	if sub.Status == string(database.SubscriptionStatusRevoked) {
+		return nil
 	}
 
 	targetNodes, err := s.db.GetNodesByPlanID(ctx, sub.PlanID)
@@ -409,6 +414,9 @@ func (s *SyncService) SyncSubscription(ctx context.Context, subscriptionID uint)
 // syncNodes iterates over pending subscription nodes and dispatches add/remove/update operations.
 // Per-node failures are logged and aggregated via errors.Join so background workers can observe
 // degraded runs; processing continues past a failed node. Only ctx cancellation/deadline aborts early.
+// For revoked subscriptions, pending adds and updates are durably queued for
+// removal before any VPN call; a failed queue write skips that node. A nil
+// subscription returns an error.
 func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription, pending []database.SubscriptionNode) error {
 	if sub == nil {
 		return fmt.Errorf("sync subscription: nil subscription")
@@ -426,6 +434,30 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 	var nodeErrs []error
 
 	for _, sn := range pending {
+		// Revocation may have committed before queuing removal failed. Never
+		// provision these stale add/update bindings; persist removal first so
+		// a failed VPN call is retried as a deletion by the background worker.
+		if sub.Status == string(database.SubscriptionStatusRevoked) &&
+			(sn.Status == database.SyncStatusPendingAdd || sn.Status == database.SyncStatusPendingUpdate) {
+			err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
+			if err != nil {
+				err = fmt.Errorf("mark revoked subscription node %d pending_remove: %w", sn.NodeID, err)
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return err
+				}
+
+				s.handleSyncError(ctx, &sn, err)
+				nodeErrs = append(nodeErrs, err)
+
+				continue
+			}
+
+			sn.Status = database.SyncStatusPendingRemove
+			sn.RetryCount = 0
+			sn.RetryAt = nil
+			sn.LastError = nil
+		}
+
 		// pending_remove is dispatched before the runtime node-type check: a
 		// removal binding may reference a node that is now gone or inactive, in
 		// which case the binding is stale and must be dropped instead of being

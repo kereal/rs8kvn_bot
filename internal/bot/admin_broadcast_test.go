@@ -516,9 +516,22 @@ func TestBroadcast_ConfirmCreatesBroadcastAndShowsHeader(t *testing.T) {
 	prepareBroadcastSession(t, handler, mockDB)
 	confirmBroadcast(t, handler, mockDB)
 
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Рассылка завершена")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Рассылка #1")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Тестовая рассылка")
+	// The worker persists completion before sending its report, and the queue
+	// acknowledgement can arrive after that report. Wait for the actual report
+	// in message history instead of assuming it is the latest message.
+	var report string
+	require.Eventually(t, func() bool {
+		for _, msg := range mockBot.GetAllSentMessages() {
+			if msg.ChatID == broadcastTestAdminID && strings.Contains(msg.Text, "Рассылка завершена") {
+				report = msg.Text
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 10*time.Millisecond, "completion report must reach the admin")
+	assert.Contains(t, report, "Рассылка завершена")
+	assert.Contains(t, report, "Рассылка #1")
+	assert.Contains(t, report, "Тестовая рассылка")
 
 	broadcasts, err := mockDB.ListBroadcasts(ctx, 10)
 	require.NoError(t, err)

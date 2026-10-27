@@ -545,6 +545,21 @@ grep "trial" ./data/bot.log | tail -50
 - XUI panel down
 - `subID` invalid/expired
 - Cache corrupted
+- The upstream node answers 404 for that subID (the subscription exists but nothing converts, so the endpoint returns 404 `Subscription not found`)
+
+**Check what the body actually is:**
+```bash
+curl -fsS http://127.0.0.1:8880/sub/<subID> -o sub.json
+jq 'length' sub.json          # number of profiles (one per node)
+jq -c '.[0]' sub.json > one.json
+xray -test -config one.json   # `xray -test` takes ONE object, not the array
+```
+A `404 Subscription not found` in the response means either the subscription row is
+inactive/expired or every upstream source failed to produce a convertible config —
+check the source fetch errors first:
+```bash
+grep "Failed to fetch from node" ./data/bot.log | tail -5
+```
 
 **Fix:**
 ```bash

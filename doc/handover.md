@@ -170,13 +170,26 @@ For each active node:
         │
         ▼
 Merge all sources:
-  • JSON configs → share links if mixed mode
-  • Base64/Plain → decode and join
+  • JSON/Clash configs and decoded share links → normalised serverConfig list
+  • Skip protocols Xray cannot express (e.g. TUIC)
   • Aggregate upload/download/expire across nodes
         │
         ▼
-Cache.Set(240s) → return body with Content-Type + Subscription-Userinfo
+ConvertJSONConfigsToXray + tagProxyOutbounds
+        │
+        ▼
+Render one complete Xray-core client config per node
+(template: templates/xray_client.json, remarks = node name)
+        │
+        ▼
+Cache.Set(240s) → return a JSON ARRAY of configs with
+Content-Type: application/json; charset=utf-8 + Subscription-Userinfo
 ```
+
+The response body is a JSON **array** of complete Xray-core configs (XTLS Subscription
+Standards shape), one element per node, not share links and not base64. This matters:
+v2rayNG imports one profile per array element and, from a single config, keeps only the
+first outbound — a single-object response would show the user one node out of N.
 
 ## Stack
 

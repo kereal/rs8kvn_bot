@@ -322,9 +322,11 @@ func AuditSubscriptionReanimated(sub *Subscription) *AuditLog {
 }
 
 // AuditSubscriptionRenewed фиксирует успешную оплату (продление/активацию).
-// oldExpiry — срок до платежа (nil для первой активации).
-func AuditSubscriptionRenewed(sub *Subscription, product *Product, oldExpiry *time.Time) *AuditLog {
-	details := auditSubDetails(sub)
+// before — состояние подписки до платежа (nil для первой активации),
+// after — состояние, сохранённое транзакцией подтверждения платежа.
+// NewState строится из after, иначе событие показывало бы прежний тариф и срок.
+func AuditSubscriptionRenewed(before, after *Subscription, product *Product) *AuditLog {
+	details := auditSubDetails(after)
 	if product != nil {
 		details["product_id"] = product.ID
 		details["product_name"] = product.Name
@@ -332,22 +334,18 @@ func AuditSubscriptionRenewed(sub *Subscription, product *Product, oldExpiry *ti
 		details["price_cents"] = product.PriceCents
 		details["currency"] = product.Currency
 	}
-	if oldExpiry != nil {
-		details["old_expires_at"] = oldExpiry.UTC().Format(time.RFC3339)
-	}
-
-	newState := subStateSnapshot(sub)
-	if sub.ExpiresAt != nil {
-		newState["expires_at"] = sub.ExpiresAt.UTC().Format(time.RFC3339)
+	if before != nil && before.ExpiresAt != nil {
+		details["old_expires_at"] = before.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 
 	return &AuditLog{
 		EntityType: EntitySubscription,
-		EntityID:   marshalAuditJSONString(formatSubID(sub)),
+		EntityID:   marshalAuditJSONString(formatSubID(after)),
 		Event:      AuditEventSubscriptionRenewed,
 		ActorType:  ActorPaymentProvider,
 		ActorID:    marshalAuditJSONString("platega"),
-		NewState:   marshalAuditJSON(newState),
+		OldState:   marshalAuditJSON(subStateSnapshot(before)),
+		NewState:   marshalAuditJSON(subStateSnapshot(after)),
 		Details:    marshalAuditDetails(details),
 	}
 }

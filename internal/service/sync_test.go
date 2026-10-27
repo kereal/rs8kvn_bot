@@ -1255,6 +1255,53 @@ func TestSyncService_SyncSubscription_PendingRemove_InactiveNodeDropsBinding(t *
 // TestSyncService_SyncSubscription_PendingRemove_InactiveNodeDropsBinding and the
 // retry path by TestSyncService_SyncSubscription_PendingRemove_NoVPNClientKeepsPending.
 
+// A revoked subscription must never have its plan bindings rebuilt: reconcile
+// is the last step of SyncPendingNodes, so recreating pending_add rows there
+// would make the next worker tick re-provision VPN clients and silently restore
+// access for a user whose subscription was revoked (e.g. admin /del or
+// broadcast deactivation beyond the immediate-sync budget). This exercises the
+// full worker path, not just reconcile in isolation — the pending_remove row
+// still deprovisions while reconcile must not re-add plan nodes.
+func TestSyncService_SyncPendingNodes_RevokedSubscriptionNotReprovisioned(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-revoked", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-revoked-node", Type: database.NodeType3xUI, IsActive: true, Host: "http://srev", APIToken: "trev", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     9991,
+		Username:       "syncrevoked",
+		ClientID:       "c-syncrevoked",
+		SubscriptionID: "s-syncrevoked",
+		Status:         string(database.SubscriptionStatusRevoked),
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
+
+	mockVPN := &mockVPNClient{}
+	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+
+	require.NoError(t, svc.SyncPendingNodes(ctx))
+
+	assert.True(t, mockVPN.deleteCalled, "pending_remove must still deprovision the revoked subscription")
+	assert.False(t, mockVPN.createCalled, "a revoked subscription must never be re-provisioned on a node")
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Empty(t, rows, "reconcile must not recreate pending_add bindings for a revoked subscription")
+}
+
 func TestSyncService_SyncPendingNodes_ContinuesAfterNodeFailure(t *testing.T) {
 	t.Parallel()
 
@@ -1463,4 +1510,50 @@ func TestSyncService_lockSubscription_TimeoutWhenAlreadyHeld(t *testing.T) {
 		"waiter should wait up to subscriptionLockTimeout when ctx has no deadline")
 	assert.Less(t, elapsed, svc.lockTimeout+30*time.Second,
 		"waiter must not wait unbounded")
+}
+
+func TestSyncService_ReconcilePlanNodes_RevokedIsUntouched(t *testing.T) {
+	t.Parallel()
+
+	for _, status := range []string{"revoked", "active", "expired"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+
+			planRead := false
+			bindingsRead := false
+			db := &testutil.DatabaseService{
+				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+					return &database.Subscription{ID: 42, PlanID: 1, Status: status}, nil
+				},
+				GetNodesByPlanIDFunc: func(context.Context, uint) ([]database.Node, error) {
+					planRead = true
+					return []database.Node{{ID: 1, IsActive: true}, {ID: 2, IsActive: true}}, nil
+				},
+				GetBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+					bindingsRead = true
+					return []database.SubscriptionNode{{SubscriptionID: 42, NodeID: 1, Status: database.SyncStatusPendingRemove}}, nil
+				},
+			}
+			var reactivated, added bool
+			db.UpdateSubscriptionNodeStatusFunc = func(_ context.Context, _ uint, nodeID uint, state database.SyncStatus) error {
+				require.Equal(t, uint(1), nodeID)
+				require.Equal(t, database.SyncStatusPendingAdd, state)
+				reactivated = true
+				return nil
+			}
+			db.UpsertSubscriptionNodeFunc = func(_ context.Context, sn *database.SubscriptionNode) error {
+				require.Equal(t, uint(2), sn.NodeID)
+				require.Equal(t, database.SyncStatusPendingAdd, sn.Status)
+				added = true
+				return nil
+			}
+
+			require.NoError(t, NewSyncService(db, nil, nil).ReconcilePlanNodes(context.Background(), 42))
+			wantChanges := status != "revoked"
+			require.Equal(t, wantChanges, planRead)
+			require.Equal(t, wantChanges, bindingsRead)
+			require.Equal(t, wantChanges, reactivated)
+			require.Equal(t, wantChanges, added)
+		})
+	}
 }

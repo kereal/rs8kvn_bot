@@ -77,7 +77,22 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - Metrics: `SubscriptionRemindersTotal{window,status}`, `SubscriptionReminderRunsTotal`.
 - Lifecycle wiring: `cmd/bot/main.go` (startBackgroundWorkers).
 
-## Subserver share-link normalization
+## Subserver subscription output (JSON array of Xray configs, 2026-10-27)
+- `/sub/{subID}` ALWAYS returns a **JSON array** of complete Xray-core client configs (`application/json; charset=utf-8`), one object per node — never share links, base64, or a single object.
+- Format follows the XTLS Subscription Standards (discussion 4877): "A subscription is defined as a JSON array of connection objects".
+- WHY the array: v2rayNG (`AngConfigManager.parseCustomConfigServer` → `CustomFmt.parse`) imports ONE profile per array element and, from a single config, keeps only the first proxy outbound — a single object with N outbounds shows the user a single node. v2rayN (`V2rayFmt.ResolveCommon`) also walks a `JsonArray`. Happ accepts both shapes.
+- Each element is a full client config: `remarks` (profile name shown by the client, equal to the node tag), `log`, `dns`, `inbounds` (socks 10808 + http 10809 with sniffing), `outbounds` = [node, `direct`, `block`], and `routing` whose catch-all rule targets that element's OWN tag.
+- Template: `internal/subserver/templates/xray_client.json` (`//go:embed` in `service.go`), rendered per node by `renderXrayConnection`, array assembled in `buildResponse`.
+- Pipeline: source body → `DetectFormat` → `aggregateFormat` (JSON/Clash → `jsonConfigs`; base64/plain → `items`) → `buildResponse` normalises share links into `serverConfig` → `ConvertJSONConfigsToXray` → `tagProxyOutbounds` → per-node render → `json.Marshal`.
+- `vmess://` links are decoded by `parseVMessLink` (port/aid may be string OR number; helpers `parseJSONNumber`/`parseJSONScalar`); empty `add` or a non-vmess scheme is an error the caller skips with a Warn. The scheme is matched with `EqualFold` and the payload is NEVER lower-cased — Base64, UUID, host and remark are case-sensitive. Other schemes go through `parseShareLink`.
+- Tags (`tagProxyOutbounds`): an outbound keeps its source `remark` when unique and not reserved, otherwise falls back to `freeProxyTag`. `reservedOutboundTags = {"direct","block"}` is pre-seeded into the `used` set, because `renderXrayConnection` always emits freedom/blackhole with exactly those tags and Xray routing resolves tags BY NAME — a node remarked `direct` would silently take over the direct route (geoip:ru / geosite:category-ru stopped bypassing the tunnel). `freeProxyTag` scans forward for the first unused `proxy-N`, so the fallback cannot collide with a tag another outbound already claimed either. Profile name and catch-all tag come from the SAME value, so the route always lands on its own node. There is no balancer (a balancer rotates the exit IP per connection).
+- Hysteria2 maps to the modern Xray `hysteria` outbound: `settings{version,address,port}` plus `streamSettings{network:"hysteria", hysteriaSettings{version,auth}, security:"tls", tlsSettings}`. When obfuscation is configured, it is emitted as `streamSettings.finalmask.udp: [{type: obfs, settings: {password: obfsPassword}}]`.
+- CRITICAL: use `geosite:category-ru`, NOT `geosite:ru`. `geosite:ru` is absent from geosite.dat and makes Xray refuse to start ("illegal domain rule"). `geoip:ru` IS valid. Validate every array element with `xray -test -config`.
+- Unsupported protocols (e.g. TUIC) are skipped; if nothing converts, the endpoint returns 404 (`ErrNoSubscriptionItems`).
+- Verified: all 12 profiles from the live fetch node (`pm.kereal.qzz.io:4433/sfetch/all.yaml`) pass `xray -test -config` on Xray 26.10.21.
+- Legacy share-link builders (`ConvertSingleJSONToLink` + `build*ServerLink`) stay for Clash normalization tests but are no longer used by the subscription response path.
+
+## Subserver share-link normalization (Clash → share links, legacy)
 - Supported schemes: VMess, VLESS, Trojan, Hysteria2, TUIC, Shadowsocks SIP002.
 - Transport normalization unified under `normaliseTransportNetwork`.
 - Clash/V2rayN `packetEncoding` support via `setPacketEncoding`.
@@ -112,8 +127,8 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - Daily backup, trial cleanup at startup and every 3h, sync workers, expiry reminders worker.
 
 ## Subserver
-- `/sub/{subID}` serves merged subscription payloads.
-- Clash/Mihomo normalization path for share links.
+- `/sub/{subID}` renders a full Xray-core JSON config from the embedded template (see "Subserver subscription output" above).
+- Clash/Mihomo normalization feeds the same Xray conversion path.
 - Optional async access log.
 
 ## Web

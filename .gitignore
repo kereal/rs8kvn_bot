@@ -47,7 +47,7 @@ Desktop.ini
 .kilocode/
 .agents/
 /skills-lock.json
-/graphify-out
+
 .freebuff/
 
 # Local agent/MCP config: machine-specific paths and API tokens

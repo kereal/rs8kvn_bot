@@ -75,9 +75,9 @@ Trial invitation page. Validates invite code, applies IP rate limit, creates tri
 
 ### `GET /sub/{subID}`
 
-Returns the merged subscription configuration from all active nodes. Responses are cached for 240 seconds; inactive/expired subscriptions return 404.
+Returns a JSON **array** of Xray-core client configurations built from supported JSON, Clash, plain share-link, and Base64 share-link sources on all active nodes, following the XTLS Subscription Standards body shape (`application/json`, one complete config object per node). Every element is a self-contained config with `remarks` (the node name clients show), local `socks`/`http` inbounds, exactly one proxy outbound plus `direct`/`block`, DNS settings, and routing whose catch-all rule targets that element's own proxy outbound — so each node is independently selectable in the client UI. Proxy outbounds use the source remark as their tag when unique, with a free `proxy-N` as a fallback; the reserved `direct`/`block` tags are never handed to a proxy outbound, so a node remarked `direct` or `block` is renamed instead of shadowing the built-in outbounds. `Subscription-Userinfo` carries aggregated usage. Responses are cached for 240 seconds; inactive/expired subscriptions return 404. Sources that cannot be converted to supported Xray outbounds are skipped; if none remain, the endpoint returns 404.
 
-**Response 200:** Subscription body and aggregated `Subscription-Userinfo` headers.
+Routing uses `geosite:category-ru` (the built-in Xray category name for Russian domains) and `geoip:ru`. Each array element carries its own routing table and one proxy outbound; Xray's JSON schema has no portable manual-selector outbound group, so node switching happens through the client's profile list rather than inside a single config.
 
 **Response 404:** Subscription not found, inactive, or expired.
 

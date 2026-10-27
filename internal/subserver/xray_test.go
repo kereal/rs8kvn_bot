@@ -261,3 +261,33 @@ func TestConvertSingleJSONToXray_NoEmptySecurityBlocks(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, strings.Contains(string(x), "tlsSettings"))
 }
+
+func TestConvertSingleJSONToXray_Hysteria2(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"type":"hysteria2","address":"hy2.example","port":443,"password":"secret","sni":"front.example","obfs":"salamander","obfsPassword":"obfs-secret"}`)
+	outbound, err := ConvertSingleJSONToXray(raw)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(outbound, &got))
+	require.Equal(t, "hysteria", got["protocol"])
+	settings := got["settings"].(map[string]any)
+	require.Equal(t, float64(2), settings["version"])
+	transport := got["streamSettings"].(map[string]any)
+	require.Equal(t, "hysteria", transport["network"])
+	hysteriaSettings := transport["hysteriaSettings"].(map[string]any)
+	require.Equal(t, float64(2), hysteriaSettings["version"])
+	require.Equal(t, "secret", hysteriaSettings["auth"])
+	require.Equal(t, "front.example", transport["tlsSettings"].(map[string]any)["serverName"])
+	require.NotContains(t, transport, "method")
+	require.NotContains(t, hysteriaSettings, "obfs")
+	masks := transport["finalmask"].(map[string]any)["udp"].([]any)
+	require.Len(t, masks, 1)
+	mask := masks[0].(map[string]any)
+	require.Equal(t, "salamander", mask["type"])
+	require.Equal(t, "obfs-secret", mask["settings"].(map[string]any)["password"])
+
+	withoutObfs, err := ConvertSingleJSONToXray(json.RawMessage(`{"type":"hysteria2","address":"hy2.example","port":443,"password":"secret","obfsPassword":"unused"}`))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(withoutObfs, &got))
+	require.NotContains(t, got["streamSettings"].(map[string]any), "finalmask")
+}
