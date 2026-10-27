@@ -84,6 +84,12 @@ func buildXrayOutbound(cfg *serverConfig) (map[string]any, error) {
 	case "trojan":
 		outbound = buildTrojanXray(cfg)
 	case "shadowsocks", "ss":
+		// Xray rejects a shadowsocks outbound without a cipher, and the
+		// rendered profile would be unusable, so fail the node here.
+		if cfg.Method == "" {
+			return nil, fmt.Errorf("shadowsocks config has no method")
+		}
+
 		outbound = buildShadowsocksXray(cfg)
 	case "hysteria", "hysteria2", "hy2":
 		outbound = buildHysteria2Xray(cfg)

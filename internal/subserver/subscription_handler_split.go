@@ -404,7 +404,7 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 			continue
 		}
 		if strings.HasPrefix(strings.ToLower(link), "vmess://") {
-			cfg, err := parseVMessLink(link)
+			cfg, err := parseVMessItem(link)
 			if err != nil {
 				logger.Warn("Skipping invalid vmess share link", zap.Error(err))
 				continue
@@ -608,6 +608,21 @@ func parseJSONScalar(raw json.RawMessage) (string, error) {
 	return number.String(), nil
 }
 
+// parseVMessItem dispatches a vmess:// item on its payload shape. URL-style links
+// (vmess://<id>@<host>:<port>?...<#remark>) are valid share URIs and go to
+// parseShareLink; the Base64-encoded JSON form goes to parseVMessLink. The two
+// shapes cannot be confused: the Base64 alphabets used by the JSON form never
+// contain '@', so its presence marks the URL form.
+func parseVMessItem(link string) (*serverConfig, error) {
+	trimmed := strings.TrimSpace(link)
+	if len(trimmed) > len("vmess://") && strings.EqualFold(trimmed[:len("vmess://")], "vmess://") &&
+		strings.Contains(trimmed[len("vmess://"):], "@") {
+		return parseShareLink(trimmed)
+	}
+
+	return parseVMessLink(trimmed)
+}
+
 // parseVMessLink decodes a vmess:// share link into a serverConfig. It runs the
 // Base64 decode, JSON parse, port validation and address check; any failure is
 // returned as an error so the caller decides how to surface it. Links with an
@@ -683,11 +698,14 @@ func parseVMessLink(link string) (*serverConfig, error) {
 }
 
 // parseShareLink normalizes URL-style VLESS, VMess, Trojan, Shadowsocks, and
-// Hysteria links into a server config; hy2 becomes hysteria2. Base64 VMess
-// payloads are handled separately by parseVMessLink. A host and explicit port
+// Hysteria links into a server config; hy2 becomes hysteria2. Base64-encoded
+// VMess JSON payloads are handled separately by parseVMessLink; parseVMessItem
+// routes each incoming vmess:// item to the matching parser. A host and explicit port
 // from 1 through 65535 are required; URL, host, port, and unsupported-scheme
-// errors reach the caller. Undecodable Shadowsocks user info is retained without
-// an error, and credentials are not validated.
+// errors reach the caller. Shadowsocks userinfo is accepted both Base64-encoded
+// (SIP002) and as a plain "method:password" pair; when neither form yields a
+// method the link is kept without one and the Xray outbound builder rejects it,
+// so credentials are not validated here.
 func parseShareLink(link string) (*serverConfig, error) {
 	u, err := url.Parse(link)
 	if err != nil {
@@ -728,18 +746,62 @@ func parseShareLink(link string) (*serverConfig, error) {
 	cfg.Plugin, cfg.PluginOpts = q.Get("plugin"), q.Get("plugin-opts")
 	cfg.Obfs, cfg.ObfsPassword = q.Get("obfs"), q.Get("obfs-password")
 	if cfg.Type == "ss" || cfg.Type == "shadowsocks" {
-		decoded, decodeErr := base64.RawURLEncoding.DecodeString(cfg.UUID)
-		if decodeErr != nil {
-			decoded, decodeErr = base64.StdEncoding.DecodeString(cfg.UUID)
-		}
-		if decodeErr == nil {
-			if method, password, ok := strings.Cut(string(decoded), ":"); ok {
-				cfg.Method, cfg.Password = method, password
-			}
+		if method, password, ok := splitShadowsocksUserInfo(cfg.UUID, cfg.Password); ok {
+			cfg.Method, cfg.Password = method, password
 		}
 	}
 	if cfg.Type == "hy2" {
 		cfg.Type = "hysteria2"
 	}
 	return cfg, nil
+}
+
+// splitShadowsocksUserInfo extracts the SIP002 method/password pair from a
+// Shadowsocks link's userinfo. Two forms occur in the wild:
+//
+//	ss://base64(method:password)@host:port  (the Base64 form; url.Parse leaves
+//	                                         the whole payload as the username)
+//	ss://method:password@host:port          (the plain form; url.Parse already
+//	                                         split it into username and password)
+//
+// ok is false when neither form yields a method, so the caller keeps whatever it
+// already parsed. A malformed password part is not an error: the URL only has to
+// be structurally valid for the subscription to keep serving the node.
+func splitShadowsocksUserInfo(user, password string) (method, pass string, ok bool) {
+	if password != "" {
+		// Plain, unencoded userinfo: the username is the cipher method.
+		if user == "" {
+			return "", "", false
+		}
+		return user, password, true
+	}
+	if user == "" {
+		return "", "", false
+	}
+	decoded := decodeShadowsocksUserInfo(user)
+	if decoded == "" {
+		return "", "", false
+	}
+	method, pass, found := strings.Cut(decoded, ":")
+	if !found || method == "" {
+		return "", "", false
+	}
+	return method, pass, true
+}
+
+// decodeShadowsocksUserInfo decodes the Base64 Shadowsocks userinfo payload.
+// RawURL is tried first (SIP002, unpadded), then the padded standard and raw
+// standard alphabets. Undecodable payloads yield an empty string.
+func decodeShadowsocksUserInfo(encoded string) string {
+	for _, enc := range []*base64.Encoding{
+		base64.RawURLEncoding,
+		base64.StdEncoding,
+		base64.RawStdEncoding,
+	} {
+		decoded, err := enc.DecodeString(encoded)
+		if err == nil {
+			return strings.TrimSpace(string(decoded))
+		}
+	}
+	return ""
 }
