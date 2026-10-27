@@ -170,13 +170,6 @@ func TestSaveOrderPaymentAmounts_UnknownOrder(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestOrderStatusConstants(t *testing.T) {
-	assert.Equal(t, OrderStatus("pending"), OrderStatusPending)
-	assert.Equal(t, OrderStatus("paid"), OrderStatusPaid)
-	assert.Equal(t, OrderStatus("expired"), OrderStatusExpired)
-	assert.Equal(t, OrderStatus("canceled"), OrderStatusCanceled)
-}
-
 func TestCalculatePaymentExpiry_SamePlanExtends(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Minute)
 	oldExpiry := now.Add(10 * 24 * time.Hour)

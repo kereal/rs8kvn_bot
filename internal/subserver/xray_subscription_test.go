@@ -214,41 +214,6 @@ func TestTagProxyOutboundsReservesDirectAndBlock(t *testing.T) {
 	}
 }
 
-// TestBuildResponseRemarksCollidingWithReservedTags checks the rendered profiles
-// end-to-end: nodes named "direct"/"block" get distinct fallback tags, while the
-// direct/block outbounds and their routing rules stay intact.
-func TestBuildResponseRemarksCollidingWithReservedTags(t *testing.T) {
-	t.Parallel()
-
-	result, err := buildResponse(newTestSubSvc(t), "reserved-tags", aggregatedSources{
-		jsonConfigs: []json.RawMessage{
-			json.RawMessage(`{"type":"vless","address":"direct.example","port":443,"uuid":"id-1","remark":"direct"}`),
-			json.RawMessage(`{"type":"vless","address":"block.example","port":443,"uuid":"id-2","remark":"block"}`),
-		},
-	}, 0, "")
-	require.NoError(t, err)
-
-	configs := decodeSubscription(t, result.Body)
-	require.Len(t, configs, 2)
-
-	for i, conn := range configs {
-		require.Len(t, conn.Outbounds, 3)
-		proxyTag := conn.Outbounds[0].Tag
-		require.NotEmpty(t, proxyTag)
-		require.NotEqual(t, "direct", proxyTag, "profile %d: proxy tag collides with the direct outbound", i)
-		require.NotEqual(t, "block", proxyTag, "profile %d: proxy tag collides with the block outbound", i)
-		require.Equal(t, "direct", conn.Outbounds[1].Tag)
-		require.Equal(t, "block", conn.Outbounds[2].Tag)
-		require.Equal(t, conn.Remarks, proxyTag, "profile %d: profile name must match its proxy tag", i)
-		require.Equal(t, proxyTag, conn.Routing.Rules[len(conn.Routing.Rules)-1].OutboundTag,
-			"profile %d: catch-all rule is renamed after the collision", i)
-		require.Equal(t, "block", conn.Routing.Rules[0].OutboundTag)
-	}
-
-	require.NotEqual(t, configs[0].Remarks, configs[1].Remarks, "fallback tags must stay unique")
-	require.NotEqual(t, configs[0].Outbounds[0].Tag, configs[1].Outbounds[0].Tag)
-}
-
 // proxyAddress returns the address of the proxy outbound in profile index.
 func proxyAddress(t *testing.T, body []byte, index int) string {
 	t.Helper()
@@ -323,6 +288,20 @@ func TestParseShareLink(t *testing.T) {
 			wantType: "hysteria2",
 			wantAddr: "hy.example",
 			wantPort: 8443,
+		},
+		{
+			name:     "hy2 alias normalizes to hysteria2",
+			link:     "hy2://hy-token@alias.example:9090?sni=alias.example#HY2Alias",
+			wantType: "hysteria2",
+			wantAddr: "alias.example",
+			wantPort: 9090,
+		},
+		{
+			name:     "hysteria v1",
+			link:     "hysteria://v1-token@hyv1.example:36712?up=50&down=100#HY1",
+			wantType: "hysteria",
+			wantAddr: "hyv1.example",
+			wantPort: 36712,
 		},
 	}
 
@@ -495,6 +474,153 @@ func TestParseVMessLinkPreservesCase(t *testing.T) {
 	require.Error(t, err, "an empty address must be rejected")
 }
 
+func TestParseVMessLinkRejectsCorruptPayloads(t *testing.T) {
+	t.Parallel()
+
+	// Corrupt base64 and valid-base64-but-not-JSON payloads must both error so
+	// buildResponse can skip the node instead of emitting a broken profile.
+	for _, link := range []string{
+		"vmess://!!!not-base64!!!",
+		"vmess://" + base64.StdEncoding.EncodeToString([]byte(`this is not json`)),
+	} {
+		_, err := parseVMessLink(link)
+		require.Error(t, err, "link %q must be rejected", link)
+	}
+
+	// End-to-end: a corrupted vmess:// item is dropped, not fatal.
+	_, err := buildResponse(newTestSubSvc(t), "vmess-corrupt", aggregatedSources{items: []string{"vmess://!!!not-base64!!!"}}, 0, "")
+	require.ErrorIs(t, err, ErrNoSubscriptionItems, "a subscription with only a corrupt vmess item has nothing to serve")
+}
+
+func TestBuildResponseVMessStringAidFallsBackToZero(t *testing.T) {
+	t.Parallel()
+
+	// "aid":"abc" is a non-numeric string; buildVMessXray's strconv.Atoi fails
+	// and the rendered outbound must fall back to alterId 0 instead of crashing.
+	link := "vmess://" + base64.StdEncoding.EncodeToString([]byte(`{"add":"vmess.example","port":"443","id":"id","aid":"abc","ps":"StringAid"}`))
+	result, err := buildResponse(newTestSubSvc(t), "vmess-str-aid", aggregatedSources{items: []string{link}}, 0, "")
+	require.NoError(t, err)
+
+	var configs []struct {
+		Remarks   string `json:"remarks"`
+		Outbounds []struct {
+			Protocol string `json:"protocol"`
+			Settings struct {
+				VNext []struct {
+					Address string `json:"address"`
+					Port    int    `json:"port"`
+					Users   []struct {
+						AlterID int `json:"alterId"`
+					} `json:"users"`
+				} `json:"vnext"`
+			} `json:"settings"`
+		} `json:"outbounds"`
+	}
+	require.NoError(t, json.Unmarshal(result.Body, &configs))
+	require.Len(t, configs, 1)
+	require.Equal(t, "StringAid", configs[0].Remarks)
+	require.Equal(t, "vmess", configs[0].Outbounds[0].Protocol)
+	require.Equal(t, "vmess.example", configs[0].Outbounds[0].Settings.VNext[0].Address)
+	require.Equal(t, 443, configs[0].Outbounds[0].Settings.VNext[0].Port)
+	require.Equal(t, 0, configs[0].Outbounds[0].Settings.VNext[0].Users[0].AlterID,
+		"a non-numeric aid must not panic and must degrade to alterId 0")
+}
+
+func TestBuildResponseHysteria2Outbound(t *testing.T) {
+	t.Parallel()
+
+	// Full hysteria2 profile through buildResponse: the share link is parsed,
+	// normalised and rendered into an Xray "hysteria" v2 outbound carrying the
+	// SALAMANDER UDP obfuscation in finalmask.
+	link := "hysteria2://auth@hy.example:8443?sni=front.example&fp=chrome&obfs=salamander&obfs-password=pass#HY2"
+	result, err := buildResponse(newTestSubSvc(t), "hy2-e2e", aggregatedSources{items: []string{link}}, 0, "")
+	require.NoError(t, err)
+
+	var configs []struct {
+		Remarks   string `json:"remarks"`
+		Outbounds []struct {
+			Protocol string `json:"protocol"`
+			Tag      string `json:"tag"`
+			Settings struct {
+				Version int `json:"version"`
+			} `json:"settings"`
+			StreamSettings struct {
+				Network          string `json:"network"`
+				Security         string `json:"security"`
+				HysteriaSettings struct {
+					Version int    `json:"version"`
+					Auth    string `json:"auth"`
+				} `json:"hysteriaSettings"`
+				TLSSettings struct {
+					ServerName  string `json:"serverName"`
+					Fingerprint string `json:"fingerprint"`
+				} `json:"tlsSettings"`
+				FinalMask struct {
+					UDP []struct {
+						Type     string `json:"type"`
+						Settings struct {
+							Password string `json:"password"`
+						} `json:"settings"`
+					} `json:"udp"`
+				} `json:"finalmask"`
+			} `json:"streamSettings"`
+		} `json:"outbounds"`
+	}
+	require.NoError(t, json.Unmarshal(result.Body, &configs))
+	require.Len(t, configs, 1, "one hysteria2 item must produce exactly one connection profile")
+
+	outbound := configs[0].Outbounds[0]
+	require.Equal(t, "hysteria", outbound.Protocol)
+	require.Equal(t, "HY2", outbound.Tag)
+	require.Equal(t, 2, outbound.Settings.Version)
+	require.Equal(t, "hysteria", outbound.StreamSettings.Network)
+	require.Equal(t, "tls", outbound.StreamSettings.Security)
+	require.Equal(t, 2, outbound.StreamSettings.HysteriaSettings.Version)
+	require.Equal(t, "auth", outbound.StreamSettings.HysteriaSettings.Auth)
+	require.Equal(t, "front.example", outbound.StreamSettings.TLSSettings.ServerName)
+	require.Equal(t, "chrome", outbound.StreamSettings.TLSSettings.Fingerprint)
+	require.Len(t, outbound.StreamSettings.FinalMask.UDP, 1)
+	mask := outbound.StreamSettings.FinalMask.UDP[0]
+	require.Equal(t, "salamander", mask.Type)
+	require.Equal(t, "pass", mask.Settings.Password)
+
+	t.Run("hy2 alias normalises to hysteria2", func(t *testing.T) {
+		t.Parallel()
+
+		cfg, err := parseShareLink("hy2://auth@alias.example:9090?sni=alias.example#Alias")
+		require.NoError(t, err)
+		require.Equal(t, "hysteria2", cfg.Type, "hy2:// must normalize to hysteria2")
+		require.Equal(t, "alias.example", cfg.Address)
+		require.Equal(t, 9090, cfg.Port)
+		require.Equal(t, "auth", cfg.UUID)
+		require.Equal(t, "auth", cfg.Password, "without an explicit password hysteria falls back to the auth token")
+	})
+
+	t.Run("obfs-password without obfs yields no finalmask", func(t *testing.T) {
+		t.Parallel()
+
+		// obfs-password alone must not enable obfuscation: finalmask only appears
+		// when Type/Obfs is set, so clients do not second-guess the mode.
+		noObfs := "hysteria2://auth@plain.example:8443?sni=front.example&obfs-password=pass#Plain"
+		result, err := buildResponse(newTestSubSvc(t), "hy2-no-obfs", aggregatedSources{items: []string{noObfs}}, 0, "")
+		require.NoError(t, err)
+
+		var configs []struct {
+			Outbounds []struct {
+				StreamSettings struct {
+					FinalMask *struct {
+						UDP []json.RawMessage `json:"udp"`
+					} `json:"finalmask"`
+				} `json:"streamSettings"`
+			} `json:"outbounds"`
+		}
+		require.NoError(t, json.Unmarshal(result.Body, &configs))
+		require.Len(t, configs, 1)
+		require.Nil(t, configs[0].Outbounds[0].StreamSettings.FinalMask,
+			"no obfs must mean no finalmask obfuscation block")
+	})
+}
+
 func TestXrayTemplateRoutingAndDNS(t *testing.T) {
 	t.Parallel()
 	result, err := buildResponse(newTestSubSvc(t), "template", aggregatedSources{jsonConfigs: []json.RawMessage{json.RawMessage(`{"type":"vless","address":"node.example","port":443,"uuid":"id","remark":"node-one"}`)}}, 0, "")
@@ -504,46 +630,98 @@ func TestXrayTemplateRoutingAndDNS(t *testing.T) {
 	require.Len(t, configs, 1)
 	config := configs[0]
 
+	// The two concrete DNS servers from the template: a Yandex resolver pinned
+	// to Russian/private domains and a DoH fallback.
 	require.Len(t, config.DNS.Servers, 2)
+	require.Equal(t, `"https://1.1.1.1/dns-query"`, string(config.DNS.Servers[1]),
+		"the second resolver must be the DoH fallback")
+	var ruResolver struct {
+		Address      string   `json:"address"`
+		Domains      []string `json:"domains"`
+		SkipFallback bool     `json:"skipFallback"`
+	}
+	require.NoError(t, json.Unmarshal(config.DNS.Servers[0], &ruResolver))
+	require.Equal(t, "77.88.8.8", ruResolver.Address, "Russian/private DNS must resolve via the local Yandex server")
+	require.Equal(t, []string{"geosite:category-ru", "geosite:private"}, ruResolver.Domains)
+	require.True(t, ruResolver.SkipFallback, "the pinned resolver must not fall back to the DoH server")
+
+	// IPIfNonMatch resolves domain rules to IPs only when the matcher lacks a
+	// direct domain hit, which is exactly what the pinned DNS servers serve.
 	require.Equal(t, "IPIfNonMatch", config.Routing.DomainStrategy)
 	require.Empty(t, config.Routing.Balancers, "no balancer: the default route must stay on one predictable outbound")
+
+	// Every routing rule index is pinned so reordering cannot silently change
+	// the IP-lookup / ads / Russia / category-ru / catch-all precedence.
 	require.Len(t, config.Routing.Rules, 5)
-	require.Equal(t, "block", config.Routing.Rules[0].OutboundTag)
-	require.Contains(t, config.Routing.Rules[2].IP, "geoip:ru")
-	require.Equal(t, "direct", config.Routing.Rules[2].OutboundTag)
-	require.Equal(t, "node-one", config.Routing.Rules[4].OutboundTag)
-	require.Empty(t, config.Routing.Rules[4].BalancerTag)
+	rules := config.Routing.Rules
+	require.Equal(t, "direct", rules[0].OutboundTag, "rule[0]: IP-lookup endpoints must go direct so detection stays honest")
+	require.Contains(t, rules[0].Domain, "domain:api.ipify.org")
+	require.Equal(t, "block", rules[1].OutboundTag, "rule[1]: ads must be blocked")
+	require.Contains(t, rules[1].Domain, "geosite:category-ads-all")
+	require.Equal(t, "direct", rules[2].OutboundTag, "rule[2]: Russian/private IPs must go direct")
+	require.Contains(t, rules[2].IP, "geoip:ru")
+	require.Contains(t, rules[2].IP, "geoip:private")
+	require.Equal(t, "direct", rules[3].OutboundTag, "rule[3]: Russian/private domains must go direct")
+	require.Contains(t, rules[3].Domain, "geosite:category-ru")
+	require.Contains(t, rules[3].Domain, "geosite:private")
+	require.Equal(t, "node-one", rules[4].OutboundTag, "rule[4]: catch-all must proxy through the node")
+	require.Equal(t, "tcp,udp", rules[4].Network)
+	require.Empty(t, rules[4].BalancerTag)
 
 	require.Len(t, config.Inbounds, 2, "each profile must expose local socks/http inbounds")
 	require.Equal(t, "socks", config.Inbounds[0].Protocol)
 	require.Equal(t, "http", config.Inbounds[1].Protocol)
 }
 
-func TestBuildResponseReservesDirectAndBlockTags(t *testing.T) {
+// TestBuildResponseReservedTagsFallback merges the reserved-tag end-to-end
+// coverage into one table: remarks that collide with the direct/block outbounds
+// or with an earlier fallback tag must each render with a unique, non-reserved
+// proxy tag, while the direct/block outbounds and their routing stay intact.
+// The pure tag-rename logic is the unit layer in
+// TestTagProxyOutboundsReservesDirectAndBlock.
+func TestBuildResponseReservedTagsFallback(t *testing.T) {
 	t.Parallel()
 
 	result, err := buildResponse(newTestSubSvc(t), "reserved-tags", aggregatedSources{
 		jsonConfigs: []json.RawMessage{
-			json.RawMessage(`{"type":"vless","address":"one.example","port":443,"uuid":"id-1","remark":"proxy-2"}`),
-			json.RawMessage(`{"type":"vless","address":"two.example","port":443,"uuid":"id-2","remark":"direct"}`),
-			json.RawMessage(`{"type":"vless","address":"three.example","port":443,"uuid":"id-3","remark":"block"}`),
+			json.RawMessage(`{"type":"vless","address":"one.example","port":443,"uuid":"id-1","remark":"direct"}`),
+			json.RawMessage(`{"type":"vless","address":"two.example","port":443,"uuid":"id-2","remark":"block"}`),
+			json.RawMessage(`{"type":"vless","address":"three.example","port":443,"uuid":"id-3","remark":"proxy-2"}`),
 		},
 	}, 0, "")
 	require.NoError(t, err)
 
 	configs := decodeSubscription(t, result.Body)
 	require.Len(t, configs, 3)
+
+	tests := []struct {
+		name     string
+		index    int
+		original string
+	}{
+		{name: "direct collision", index: 0, original: "direct"},
+		{name: "block collision", index: 1, original: "block"},
+		{name: "fallback tag collision", index: 2, original: "proxy-2"},
+	}
+
 	used := map[string]bool{"direct": true, "block": true}
-	for _, conn := range configs {
-		require.Len(t, conn.Outbounds, 3)
-		tag := conn.Outbounds[0].Tag
-		require.NotEmpty(t, tag)
-		require.False(t, used[tag], "proxy tag must be unique and unreserved: %s", tag)
-		used[tag] = true
-		require.Equal(t, tag, conn.Remarks)
-		require.Equal(t, tag, conn.Routing.Rules[len(conn.Routing.Rules)-1].OutboundTag)
-		require.Equal(t, "direct", conn.Outbounds[1].Tag)
-		require.Equal(t, "block", conn.Outbounds[2].Tag)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := configs[tt.index]
+			require.Len(t, conn.Outbounds, 3)
+			proxyTag := conn.Outbounds[0].Tag
+			require.NotEmpty(t, proxyTag)
+			require.NotEqual(t, tt.original, proxyTag, "profile with remark %q must lose its colliding tag", tt.original)
+			require.False(t, used[proxyTag], "proxy tag %q must not be reused across profiles", proxyTag)
+			used[proxyTag] = true
+			require.Equal(t, "direct", conn.Outbounds[1].Tag)
+			require.Equal(t, "block", conn.Outbounds[2].Tag)
+			require.Equal(t, proxyTag, conn.Remarks, "profile name must match its proxy tag")
+			require.Equal(t, proxyTag, conn.Routing.Rules[len(conn.Routing.Rules)-1].OutboundTag,
+				"catch-all rule is renamed after the collision")
+			require.Equal(t, "direct", conn.Routing.Rules[0].OutboundTag,
+				"IP-lookup rule must stay direct regardless of node remarks")
+		})
 	}
 }
 

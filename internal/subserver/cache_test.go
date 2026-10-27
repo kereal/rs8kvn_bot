@@ -52,24 +52,29 @@ func TestCache_SetAndGet(t *testing.T) {
 func TestCache_TTLExpiry(t *testing.T) {
 	t.Parallel()
 
-	cache := NewCache(10 * time.Millisecond)
+	// A deliberately roomy TTL so the "served within TTL" check cannot flake on
+	// a slow CI: the entry must live at least this long, then disappear.
+	const ttl = 250 * time.Millisecond
+	cache := NewCache(ttl)
 	defer cache.Stop()
 
 	cache.Set("key1", []byte("body"), nil)
 
 	_, _, ok := cache.Get("key1")
-	assert.True(t, ok)
+	assert.True(t, ok, "entry must be served within its TTL")
 
 	assert.Eventually(t, func() bool {
 		_, _, ok := cache.Get("key1")
 		return !ok
-	}, 200*time.Millisecond, 5*time.Millisecond, "entry should expire after TTL")
+	}, 10*time.Second, 10*time.Millisecond, "entry should expire after TTL")
 }
 
 func TestCache_Cleanup(t *testing.T) {
 	t.Parallel()
 
-	cache := NewCache(10 * time.Millisecond)
+	// Roomy TTL: the cleanup loop runs every TTL/2, and the Eventually retries
+	// far past that so slow CI schedulers cannot cause false failures.
+	cache := NewCache(250 * time.Millisecond)
 	defer cache.Stop()
 
 	cache.Set("key1", []byte("body1"), nil)
@@ -81,7 +86,7 @@ func TestCache_Cleanup(t *testing.T) {
 		cache.mu.RUnlock()
 
 		return count == 0
-	}, 200*time.Millisecond, 5*time.Millisecond, "all entries should be cleaned up after TTL")
+	}, 10*time.Second, 10*time.Millisecond, "all entries should be cleaned up after TTL")
 }
 
 func TestCache_Isolation(t *testing.T) {

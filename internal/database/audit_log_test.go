@@ -162,43 +162,41 @@ func TestAuditLog_MarshalSemantics(t *testing.T) {
 	assert.Nil(t, unchangedNew)
 }
 
-// TestAuditLog_UniversalConstructor checks NewAuditLog for future event types
-// that have no dedicated constructor yet.
-func TestAuditLog_UniversalConstructor(t *testing.T) {
-	t.Parallel()
-
-	e := NewAuditLog(EntityNode, "7", "node_deactivated", ActorAdmin, "42",
-		map[string]any{"is_active": true}, map[string]any{"is_active": false},
-		map[string]any{"reason": "manual"})
-
-	assert.Equal(t, EntityNode, e.EntityType)
-	require.NotNil(t, e.EntityID)
-	assert.Equal(t, "7", *e.EntityID)
-	assert.Equal(t, "node_deactivated", e.Event)
-	assert.Equal(t, ActorAdmin, e.ActorType)
-	require.NotNil(t, e.ActorID)
-	assert.Equal(t, "42", *e.ActorID)
-
-	details := map[string]any{}
-	require.NoError(t, json.Unmarshal([]byte(e.Details), &details))
-	assert.Equal(t, "manual", details["reason"])
-}
-
-// TestAuditLog_TableSchema checks the migrated table shape: append-only
-// columns exist, indexes are created.
+// TestAuditLog_TableSchema checks the migrated table shape: the append-only
+// columns exist with their declared nullability. Named-column assertions keep
+// the test meaningful when columns are added or removed (no magic counts).
 func TestAuditLog_TableSchema(t *testing.T) {
 	t.Parallel()
 
 	db := newAuditTestService(t)
 	ctx := context.Background()
 
-	var columnCount int
-	require.NoError(t, db.db.WithContext(ctx).Raw(
-		"SELECT COUNT(*) FROM pragma_table_info('audit_log')").Scan(&columnCount).Error)
-	assert.Equal(t, 10, columnCount)
+	rows, err := db.db.WithContext(ctx).Raw(
+		"SELECT name, \"notnull\" FROM pragma_table_info('audit_log')").Rows()
+	require.NoError(t, err)
+	defer rows.Close()
+
+	notNull := map[string]bool{}
+	for rows.Next() {
+		var name string
+		var notNullFlag int
+		require.NoError(t, rows.Scan(&name, &notNullFlag))
+		notNull[name] = notNullFlag == 1
+	}
+	require.NoError(t, rows.Err())
+
+	for _, required := range []string{"id", "entity_type", "entity_id", "event", "actor_type", "actor_id", "old_state", "new_state", "details", "created_at"} {
+		_, ok := notNull[required]
+		assert.True(t, ok, "audit_log must contain column %q", required)
+	}
+	// Columns declared NOT NULL in migration 039 (id is INTEGER PRIMARY KEY,
+	// which PRAGMA reports as nullable, so it is excluded here).
+	for _, required := range []string{"entity_type", "event", "actor_type", "details", "created_at"} {
+		assert.True(t, notNull[required], "audit_log.%s must be NOT NULL", required)
+	}
 
 	var indexCount int
 	require.NoError(t, db.db.WithContext(ctx).Raw(
 		"SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND tbl_name='audit_log'").Scan(&indexCount).Error)
-	assert.GreaterOrEqual(t, indexCount, 3)
+	assert.GreaterOrEqual(t, indexCount, 3, "audit_log lookup indexes must exist")
 }

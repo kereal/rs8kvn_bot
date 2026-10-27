@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 	"time"
 
@@ -25,33 +24,6 @@ func ptrTime(t time.Time) *time.Time { return new(t) }
 func ptrInt64(v int64) *int64 { return new(v) }
 
 // ==================== Model Method Tests ====================
-
-func TestOrder_StatusUsesOrderStatusType(t *testing.T) {
-	t.Parallel()
-
-	orderType := reflect.TypeFor[Order]()
-	statusField, ok := orderType.FieldByName("Status")
-	require.True(t, ok)
-	assert.Equal(t, "database.OrderStatus", statusField.Type.String())
-}
-
-func TestNode_TypeUsesNodeType(t *testing.T) {
-	t.Parallel()
-
-	nodeType := reflect.TypeFor[Node]()
-	typeField, ok := nodeType.FieldByName("Type")
-	require.True(t, ok)
-	assert.Equal(t, "database.NodeType", typeField.Type.String())
-}
-
-func TestSubscriptionNode_StatusUsesSyncStatus(t *testing.T) {
-	t.Parallel()
-
-	subscriptionNodeType := reflect.TypeFor[SubscriptionNode]()
-	statusField, ok := subscriptionNodeType.FieldByName("Status")
-	require.True(t, ok)
-	assert.Equal(t, "database.SyncStatus", statusField.Type.String())
-}
 
 func TestSubscription_IsExpired(t *testing.T) {
 	t.Parallel()
@@ -218,8 +190,10 @@ func TestService_GetPoolStats(t *testing.T) {
 
 	stats, err := svc.GetPoolStats()
 	require.NoError(t, err)
-	assert.NotNil(t, stats)
-	assert.GreaterOrEqual(t, stats.MaxOpen, 0)
+	require.NotNil(t, stats)
+	// Pool must be open and not fully saturated after a single service instance.
+	assert.Greater(t, stats.MaxOpen, 0, "pool max connections must be positive")
+	assert.LessOrEqual(t, stats.Open, stats.MaxOpen, "open connections must not exceed pool limit")
 }
 
 // ==================== Service Subscription CRUD Tests ====================
@@ -251,6 +225,7 @@ func TestService_GetByTelegramID_ReturnsActiveOnly(t *testing.T) {
 	t.Parallel()
 
 	svc := newTestService(t)
+	ctx := context.Background()
 
 	// Create active subscription
 	activeSub := &Subscription{
@@ -260,12 +235,39 @@ func TestService_GetByTelegramID_ReturnsActiveOnly(t *testing.T) {
 		Status:     "active",
 		ExpiresAt:  ptrTime(time.Now().Add(24 * time.Hour)),
 	}
-	require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, activeSub), ""))
+	require.NoError(t, svc.CreateSubscription(ctx, prepareForCreate(t, svc, activeSub), ""))
 
-	retrieved, err := svc.GetByTelegramID(context.Background(), 12345)
+	// Non-active subscriptions must NOT be returned by GetByTelegramID.
+	revokedSub := &Subscription{
+		TelegramID:     12346,
+		Username:       "revoked_user",
+		ClientID:       "client-revoked",
+		SubscriptionID: "sub-revoked",
+		Status:         "revoked",
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, svc.db.WithContext(ctx).Create(prepareForCreate(t, svc, revokedSub)).Error)
+
+	expiredSub := &Subscription{
+		TelegramID:     12347,
+		Username:       "expired_user",
+		ClientID:       "client-expired",
+		SubscriptionID: "sub-expired",
+		Status:         "expired",
+		ExpiresAt:      ptrTime(time.Now().Add(-24 * time.Hour)),
+	}
+	require.NoError(t, svc.db.WithContext(ctx).Create(prepareForCreate(t, svc, expiredSub)).Error)
+
+	retrieved, err := svc.GetByTelegramID(ctx, 12345)
 	require.NoError(t, err)
 	assert.Equal(t, "client-active", retrieved.ClientID)
 	assert.Equal(t, "active", retrieved.Status)
+
+	for _, excludedID := range []int64{12346, 12347} {
+		got, err := svc.GetByTelegramID(ctx, excludedID)
+		assert.ErrorIs(t, err, ErrSubscriptionNotFound, "revoked/expired subscription %d must not be returned", excludedID)
+		assert.Nil(t, got)
+	}
 }
 
 func TestService_GetByTelegramID_MultipleUsers(t *testing.T) {
@@ -1497,7 +1499,7 @@ func TestService_BindTrialSubscription_InviteLookupError(t *testing.T) {
 	assert.Less(t, sub.TelegramID, int64(0), "binding must not continue after invite lookup failure")
 }
 
-func TestService_BindTrialSubscription_Concurrent(t *testing.T) {
+func TestService_BindTrialSubscription_RejectsSecondBind(t *testing.T) {
 	t.Parallel()
 
 	svc := newTestService(t)

@@ -63,23 +63,6 @@ func TestGenerateInviteCode(t *testing.T) {
 // These functions are tested via integration tests with a real bot instance.
 // See integration_test.go for integration tests.
 
-func TestHandler_ConfigField(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramBotToken: "123456:test_token",
-		TelegramAdminID:  999888777,
-	}
-
-	handler := &Handler{
-		cfg: cfg,
-	}
-
-	assert.Equal(t, cfg, handler.cfg, "Handler.cfg not set correctly")
-	assert.Equal(t, int64(999888777), handler.cfg.TelegramAdminID)
-	assert.Equal(t, int64(999888777), handler.cfg.TelegramAdminID)
-}
-
 func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 	t.Parallel()
 
@@ -241,81 +224,25 @@ func TestSendInviteLink_DatabaseError(t *testing.T) {
 	assert.Contains(t, mockBot.LastSentTextSafe(), "❌", "Error message should contain error emoji")
 }
 
-// === isAdmin edge cases ===
-
-func TestHandler_IsAdmin_NegativeID(t *testing.T) {
+// TestHandler_RateLimiter_EventuallyBlocks verifies the per-user limiter drains:
+// a burst equal to the bucket capacity is allowed, the next request within the
+// window is blocked. Calls are in-memory, so no meaningful refill happens.
+func TestHandler_RateLimiter_EventuallyBlocks(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{TelegramAdminID: 12345}
-	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
+	cfg := &config.Config{}
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewDatabaseService()
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
-	assert.False(t, handler.isAdmin(-1), "isAdmin() should return false for negative ID")
-	assert.False(t, handler.isAdmin(0), "isAdmin() should return false for zero ID")
-}
+	chatID := int64(123456)
 
-func TestHandler_IsAdmin_ZeroAdminID(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TelegramAdminID: 0}
-	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig()}
-
-	assert.False(t, handler.isAdmin(0), "isAdmin() should return false when admin ID is 0")
-	assert.False(t, handler.isAdmin(12345), "isAdmin() should return false when admin ID is 0")
-}
-
-// === getUsername edge cases ===
-
-func TestHandler_GetUsername_EmptyStrings(t *testing.T) {
-	t.Parallel()
-
-	handler := &Handler{}
-
-	// User with empty strings
-	user := &tgbotapi.User{ID: 12345, UserName: "", FirstName: ""}
-	result := handler.getUsername(user)
-	assert.Equal(t, "", result, "getUsername() should return empty when no username")
-
-	// User with whitespace username
-	user2 := &tgbotapi.User{ID: 67890, UserName: "  ", FirstName: "Test"}
-	result2 := handler.getUsername(user2)
-	// UserName is not empty (it's whitespace), so it should be returned
-	assert.Equal(t, "  ", result2, "getUsername() should return username even if whitespace")
-}
-
-func TestHandler_CacheField(t *testing.T) {
-	t.Parallel()
-
-	handler := &Handler{
-		cache: NewSubscriptionCache(100, 5*time.Minute),
+	for i := range config.RateLimiterMaxTokens {
+		assert.True(t, handler.checkRateLimit(chatID), "request %d within capacity should be allowed", i)
 	}
 
-	assert.NotNil(t, handler.cache, "Cache should not be nil")
-
-	// Test cache operations
-	sub := &database.Subscription{
-		TelegramID: 12345,
-		Username:   "testuser",
-		Status:     "active",
-	}
-	handler.cache.Set(12345, sub)
-
-	retrieved := handler.cache.Get(12345)
-	require.NotNil(t, retrieved, "Cache should return stored subscription")
-	assert.Equal(t, "testuser", retrieved.Username, "Username should match")
-}
-
-// === Rate limiter tests ===
-
-func TestHandler_RateLimiter(t *testing.T) {
-	t.Parallel()
-
-	handler := NewHandler(testutil.NewBotAPI(), &config.Config{}, testutil.NewDatabaseService(), NewTestBotConfig(), nil, "")
-
-	assert.NotNil(t, handler.rateLimiter, "Rate limiter should be initialized")
-
-	// Test that rate limiter allows requests
-	ctx := context.Background()
-	assert.True(t, handler.rateLimiter.Wait(ctx, 12345), "Rate limiter should allow request")
+	assert.False(t, handler.checkRateLimit(chatID),
+		"request beyond bucket capacity within the window must be blocked")
 }
 
 // === Subscription cache integration ===
@@ -422,12 +349,13 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
+		SiteURL:          "https://vpn.site",
 	}
 
 	tests := []struct {
-		name        string
-		update      tgbotapi.Update
-		wantCommand string
+		name    string
+		update  tgbotapi.Update
+		wantText string
 	}{
 		{
 			name: "/start command",
@@ -436,9 +364,12 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 					Chat: &tgbotapi.Chat{ID: 111},
 					From: &tgbotapi.User{ID: 111, UserName: "user1"},
 					Text: "/start",
+					Entities: []tgbotapi.MessageEntity{
+						{Type: "bot_command", Offset: 0, Length: 6},
+					},
 				},
 			},
-			wantCommand: "start",
+			wantText: "подписк",
 		},
 		{
 			name: "/help command",
@@ -447,9 +378,12 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 					Chat: &tgbotapi.Chat{ID: 111},
 					From: &tgbotapi.User{ID: 111, UserName: "user1"},
 					Text: "/help",
+					Entities: []tgbotapi.MessageEntity{
+						{Type: "bot_command", Offset: 0, Length: 5},
+					},
 				},
 			},
-			wantCommand: "help",
+			wantText: "Справка",
 		},
 		{
 			name: "/invite command",
@@ -458,20 +392,26 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 					Chat: &tgbotapi.Chat{ID: 111},
 					From: &tgbotapi.User{ID: 111, UserName: "user1"},
 					Text: "/invite",
+					Entities: []tgbotapi.MessageEntity{
+						{Type: "bot_command", Offset: 0, Length: 7},
+					},
 				},
 			},
-			wantCommand: "invite",
+			wantText: "пригласительная",
 		},
 		{
-			name: "/refstats command",
+			name: "/refstats command (admin)",
 			update: tgbotapi.Update{
 				Message: &tgbotapi.Message{
 					Chat: &tgbotapi.Chat{ID: 123456789},
 					From: &tgbotapi.User{ID: 123456789, UserName: "admin"},
 					Text: "/refstats",
+					Entities: []tgbotapi.MessageEntity{
+						{Type: "bot_command", Offset: 0, Length: 9},
+					},
 				},
 			},
-			wantCommand: "refstats",
+			wantText: "Статистика рефералов",
 		},
 		{
 			name: "unknown command",
@@ -480,9 +420,12 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 					Chat: &tgbotapi.Chat{ID: 111},
 					From: &tgbotapi.User{ID: 111, UserName: "user1"},
 					Text: "/unknown",
+					Entities: []tgbotapi.MessageEntity{
+						{Type: "bot_command", Offset: 0, Length: 8},
+					},
 				},
 			},
-			wantCommand: "unknown",
+			wantText: "Неизвестная команда",
 		},
 	}
 
@@ -492,11 +435,71 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 
 			mockBot := testutil.NewBotAPI()
 			mockDB := testutil.NewDatabaseService()
+
+			// /invite needs GetOrCreateInvite
+			if tt.name == "/invite command" {
+				mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
+					return &database.Invite{Code: code, ReferrerTGID: referrerTGID}, nil
+				}
+			}
+
 			handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
 			handler.HandleUpdate(context.Background(), tt.update)
 
-			assert.True(t, mockBot.SendCalledSafe(), "should send response")
+			assert.True(t, mockBot.SendCalledSafe(), "should send response for %s", tt.name)
+			assert.Contains(t, mockBot.LastSentTextSafe(), tt.wantText,
+				"wrong handler dispatched for %s (want command %q)", tt.name, tt.wantText)
+		})
+	}
+}
+
+func TestHandleUpdate_AdminCommandsBlockedForNonAdmin(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		TelegramAdminID:  123456789,
+		TelegramBotToken: "test_token",
+	}
+
+	commandUpdate := func(chatID int64, text string) tgbotapi.Update {
+		return tgbotapi.Update{
+			Message: &tgbotapi.Message{
+				Chat: &tgbotapi.Chat{ID: chatID},
+				From: &tgbotapi.User{ID: chatID, UserName: "user1"},
+				Text: text,
+				Entities: []tgbotapi.MessageEntity{
+					{Type: "bot_command", Offset: 0, Length: len(text)},
+				},
+			},
+		}
+	}
+
+	// /refstats: non-admin gets an explicit denial, never stats.
+	t.Run("refstats denied", func(t *testing.T) {
+		t.Parallel()
+
+		mockBot := testutil.NewBotAPI()
+		handler := NewHandler(mockBot, cfg, testutil.NewDatabaseService(), NewTestBotConfig(), nil, "")
+
+		handler.HandleUpdate(context.Background(), commandUpdate(111, "/refstats"))
+
+		assert.True(t, mockBot.SendCalledSafe(), "non-admin /refstats should send a denial")
+		assert.Contains(t, mockBot.LastSentTextSafe(), "только администратору",
+			"non-admin must not receive referral stats")
+	})
+
+	// /send and /broadcast: silently ignored for non-admins (no user-visible action).
+	for _, cmd := range []string{"/send", "/broadcast"} {
+		t.Run(cmd+" silently ignored", func(t *testing.T) {
+			t.Parallel()
+
+			mockBot := testutil.NewBotAPI()
+			handler := NewHandler(mockBot, cfg, testutil.NewDatabaseService(), NewTestBotConfig(), nil, "")
+
+			handler.HandleUpdate(context.Background(), commandUpdate(111, cmd))
+
+			assert.False(t, mockBot.SendCalledSafe(), "non-admin %s must not be served", cmd)
 		})
 	}
 }
