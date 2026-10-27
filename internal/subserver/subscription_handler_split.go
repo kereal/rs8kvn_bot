@@ -409,7 +409,7 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 				logger.Warn("Skipping invalid vmess share link", zap.Error(err))
 				continue
 			}
-			raw, err := json.Marshal(cfg) //nolint:gosec // G117: payload is the client credential this subscription must deliver
+			raw, err := json.Marshal(cfg) // #nosec G117 -- payload is the client credential this subscription must deliver
 			if err == nil {
 				configs = append(configs, raw)
 			}
@@ -421,7 +421,7 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 			logger.Warn("Skipping unsupported or invalid share link", zap.Error(err))
 			continue
 		}
-		raw, err := json.Marshal(cfg) //nolint:gosec // G117: password is the client credential this subscription must deliver
+		raw, err := json.Marshal(cfg) // #nosec G117 -- password is the client credential this subscription must deliver
 		if err == nil {
 			configs = append(configs, raw)
 		}
