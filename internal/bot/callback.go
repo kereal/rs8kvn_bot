@@ -359,7 +359,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 			return nil
 		}
 		logger.Info("Broadcast blocked users deactivated by admin", zap.Uint("broadcast_id", id), zap.Int("count", result.Revoked), zap.Int64("chat_id", chatID))
-		c.h.SendMessage(ctx, chatID, fmt.Sprintf("✅ Выключено пользователей: %d (статус revoked, VPN-доступ снят).", result.Revoked))
+		c.h.SendMessage(ctx, chatID, fmt.Sprintf("✅ Выключено пользователей: %d (статус revoked, удаление VPN-доступа поставлено в очередь).", result.Revoked))
 	default:
 		logger.Warn("Unknown callback data", zap.String("data", data))
 	}
