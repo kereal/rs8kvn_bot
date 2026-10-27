@@ -1,4 +1,5 @@
 {
+  "remarks": {{.RemarksJSON}},
   "log": {"loglevel": "warning"},
   "dns": {
     "servers": [
@@ -32,7 +33,7 @@
       {"type": "field", "domain": ["geosite:category-ads-all"], "outboundTag": "block"},
       {"type": "field", "ip": ["geoip:private", "geoip:ru"], "outboundTag": "direct"},
       {"type": "field", "domain": ["geosite:category-ru", "geosite:private"], "outboundTag": "direct"},
-      {"type": "field", "network": "tcp,udp", "outboundTag": {{.DefaultTagJSON}}}
+      {"type": "field", "network": "tcp,udp", "outboundTag": {{.TagJSON}}}
     ]
   }
 }

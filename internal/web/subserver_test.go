@@ -154,17 +154,20 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 			srv.handleSubscription(w, httptest.NewRequest(http.MethodGet, "/sub/test123", nil))
 			require.Equal(t, http.StatusOK, w.Code)
 			require.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
-			var xray struct {
+			var configs []struct {
+				Remarks   string `json:"remarks"`
 				Outbounds []struct {
 					Protocol string `json:"protocol"`
 					Tag      string `json:"tag"`
 				} `json:"outbounds"`
 			}
-			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &xray))
-			require.Len(t, xray.Outbounds, 3)
-			require.Equal(t, tt.wantTag, xray.Outbounds[0].Tag)
-			require.Equal(t, "direct", xray.Outbounds[1].Tag)
-			require.Equal(t, "block", xray.Outbounds[2].Tag)
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &configs))
+			require.Len(t, configs, 1)
+			require.Equal(t, tt.wantTag, configs[0].Remarks)
+			require.Len(t, configs[0].Outbounds, 3)
+			require.Equal(t, tt.wantTag, configs[0].Outbounds[0].Tag)
+			require.Equal(t, "direct", configs[0].Outbounds[1].Tag)
+			require.Equal(t, "block", configs[0].Outbounds[2].Tag)
 		})
 	}
 }

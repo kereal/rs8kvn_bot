@@ -855,16 +855,19 @@ func TestHandleSubscription_CacheMiss_UpdatesLastRequestAndReturnsXrayJSON(t *te
 	require.NoError(t, err)
 	require.Equal(t, "sub-json", updatedID)
 	require.Equal(t, "application/json; charset=utf-8", result.Headers["content-type"])
-	var config struct {
+	var configs []struct {
+		Remarks   string `json:"remarks"`
 		Outbounds []struct {
 			Protocol string `json:"protocol"`
 			Tag      string `json:"tag"`
 		} `json:"outbounds"`
 	}
-	require.NoError(t, json.Unmarshal(result.Body, &config))
-	require.Len(t, config.Outbounds, 3)
-	require.Equal(t, "vless", config.Outbounds[0].Protocol)
-	require.Equal(t, "Node", config.Outbounds[0].Tag)
+	require.NoError(t, json.Unmarshal(result.Body, &configs))
+	require.Len(t, configs, 1)
+	require.Equal(t, "Node", configs[0].Remarks)
+	require.Len(t, configs[0].Outbounds, 3)
+	require.Equal(t, "vless", configs[0].Outbounds[0].Protocol)
+	require.Equal(t, "Node", configs[0].Outbounds[0].Tag)
 }
 
 // TestUpdateLastRequest_DB проверяет интеграционно, что колонка last_request
