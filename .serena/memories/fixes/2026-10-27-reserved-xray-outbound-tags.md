@@ -44,10 +44,13 @@ func freeProxyTag(start int, used map[string]struct{}) string {
 }
 ```
 
-`reservedOutboundTags` is the single source of truth for the non-proxy tags, so
-the reservation and `renderXrayConnection`'s literals cannot drift apart
-silently (they are still two places; keep them in sync if a third built-in
-outbound is ever added).
+`reservedOutboundTags` centralizes the reservation of the current tags, but it
+is NOT the single source of truth for them — `renderXrayConnection` still
+contains the `"direct"` and `"block"` literals. The second place must be kept in
+sync manually; if a third built-in non-proxy outbound is added, both the slice
+and the literals have to change. (Extracting shared constants would close the
+loop, but the literals sit inside inline JSON strings, so it was not worth the
+churn.)
 
 Because `remarks` and the catch-all `outboundTag` come from the SAME value, a
 renamed node profile stays internally consistent: the client-visible name and
