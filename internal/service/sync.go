@@ -429,6 +429,30 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 	var nodeErrs []error
 
 	for _, sn := range pending {
+		// Revocation may have committed before queuing removal failed. Never
+		// provision these stale add/update bindings; persist removal first so
+		// a failed VPN call is retried as a deletion by the background worker.
+		if sub.Status == string(database.SubscriptionStatusRevoked) &&
+			(sn.Status == database.SyncStatusPendingAdd || sn.Status == database.SyncStatusPendingUpdate) {
+			err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
+			if err != nil {
+				err = fmt.Errorf("mark revoked subscription node %d pending_remove: %w", sn.NodeID, err)
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return err
+				}
+
+				s.handleSyncError(ctx, &sn, err)
+				nodeErrs = append(nodeErrs, err)
+
+				continue
+			}
+
+			sn.Status = database.SyncStatusPendingRemove
+			sn.RetryCount = 0
+			sn.RetryAt = nil
+			sn.LastError = nil
+		}
+
 		// pending_remove is dispatched before the runtime node-type check: a
 		// removal binding may reference a node that is now gone or inactive, in
 		// which case the binding is stale and must be dropped instead of being
