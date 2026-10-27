@@ -1464,3 +1464,49 @@ func TestSyncService_lockSubscription_TimeoutWhenAlreadyHeld(t *testing.T) {
 	assert.Less(t, elapsed, svc.lockTimeout+30*time.Second,
 		"waiter must not wait unbounded")
 }
+
+func TestSyncService_ReconcilePlanNodes_RevokedIsUntouched(t *testing.T) {
+	t.Parallel()
+
+	for _, status := range []string{"revoked", "active", "expired"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+
+			planRead := false
+			bindingsRead := false
+			db := &testutil.DatabaseService{
+				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+					return &database.Subscription{ID: 42, PlanID: 1, Status: status}, nil
+				},
+				GetNodesByPlanIDFunc: func(context.Context, uint) ([]database.Node, error) {
+					planRead = true
+					return []database.Node{{ID: 1, IsActive: true}, {ID: 2, IsActive: true}}, nil
+				},
+				GetBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+					bindingsRead = true
+					return []database.SubscriptionNode{{SubscriptionID: 42, NodeID: 1, Status: database.SyncStatusPendingRemove}}, nil
+				},
+			}
+			var reactivated, added bool
+			db.UpdateSubscriptionNodeStatusFunc = func(_ context.Context, _ uint, nodeID uint, state database.SyncStatus) error {
+				require.Equal(t, uint(1), nodeID)
+				require.Equal(t, database.SyncStatusPendingAdd, state)
+				reactivated = true
+				return nil
+			}
+			db.UpsertSubscriptionNodeFunc = func(_ context.Context, sn *database.SubscriptionNode) error {
+				require.Equal(t, uint(2), sn.NodeID)
+				require.Equal(t, database.SyncStatusPendingAdd, sn.Status)
+				added = true
+				return nil
+			}
+
+			require.NoError(t, NewSyncService(db, nil, nil).ReconcilePlanNodes(context.Background(), 42))
+			wantChanges := status != "revoked"
+			require.Equal(t, wantChanges, planRead)
+			require.Equal(t, wantChanges, bindingsRead)
+			require.Equal(t, wantChanges, reactivated)
+			require.Equal(t, wantChanges, added)
+		})
+	}
+}

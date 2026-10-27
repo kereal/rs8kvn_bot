@@ -11,8 +11,8 @@ import (
 // xrayConnection is one element of the subscription array: a complete Xray-core
 // client config that carries exactly one proxy outbound.
 type xrayConnection struct {
-	Remarks   string `json:"remarks"`
-	Log       struct {
+	Remarks string `json:"remarks"`
+	Log     struct {
 		Loglevel string `json:"loglevel"`
 	} `json:"log"`
 	DNS struct {
@@ -352,4 +352,32 @@ func TestXrayTemplateRoutingAndDNS(t *testing.T) {
 	require.Len(t, config.Inbounds, 2, "each profile must expose local socks/http inbounds")
 	require.Equal(t, "socks", config.Inbounds[0].Protocol)
 	require.Equal(t, "http", config.Inbounds[1].Protocol)
+}
+
+func TestBuildResponseReservesDirectAndBlockTags(t *testing.T) {
+	t.Parallel()
+
+	result, err := buildResponse(newTestSubSvc(t), "reserved-tags", aggregatedSources{
+		jsonConfigs: []json.RawMessage{
+			json.RawMessage(`{"type":"vless","address":"one.example","port":443,"uuid":"id-1","remark":"proxy-2"}`),
+			json.RawMessage(`{"type":"vless","address":"two.example","port":443,"uuid":"id-2","remark":"direct"}`),
+			json.RawMessage(`{"type":"vless","address":"three.example","port":443,"uuid":"id-3","remark":"block"}`),
+		},
+	}, 0, "")
+	require.NoError(t, err)
+
+	configs := decodeSubscription(t, result.Body)
+	require.Len(t, configs, 3)
+	used := map[string]bool{"direct": true, "block": true}
+	for _, conn := range configs {
+		require.Len(t, conn.Outbounds, 3)
+		tag := conn.Outbounds[0].Tag
+		require.NotEmpty(t, tag)
+		require.False(t, used[tag], "proxy tag must be unique and unreserved: %s", tag)
+		used[tag] = true
+		require.Equal(t, tag, conn.Remarks)
+		require.Equal(t, tag, conn.Routing.Rules[len(conn.Routing.Rules)-1].OutboundTag)
+		require.Equal(t, "direct", conn.Outbounds[1].Tag)
+		require.Equal(t, "block", conn.Outbounds[2].Tag)
+	}
 }

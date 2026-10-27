@@ -219,7 +219,7 @@ func buildHysteria2Xray(cfg *serverConfig) map[string]any {
 	}
 	settings := map[string]any{"version": 2, "address": cfg.Address, "port": cfg.Port}
 	streamSettings := map[string]any{
-		"method":           "hysteria",
+		"network":          "hysteria",
 		"hysteriaSettings": map[string]any{"version": 2, "auth": password},
 		"security":         "tls",
 	}
@@ -235,7 +235,11 @@ func buildHysteria2Xray(cfg *serverConfig) map[string]any {
 	}
 	streamSettings["tlsSettings"] = tlsSettings
 	if cfg.Obfs != "" {
-		streamSettings["hysteriaSettings"].(map[string]any)["obfs"] = map[string]any{"type": cfg.Obfs, "password": cfg.ObfsPassword}
+		streamSettings["finalmask"] = map[string]any{
+			"udp": []map[string]any{
+				{"type": cfg.Obfs, "settings": map[string]any{"password": cfg.ObfsPassword}},
+			},
+		}
 	}
 	return map[string]any{"protocol": "hysteria", "settings": settings, "streamSettings": streamSettings}
 }

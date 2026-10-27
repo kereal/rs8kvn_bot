@@ -534,10 +534,10 @@ func renderXrayConnection(remarks string, outbound json.RawMessage) (json.RawMes
 
 // tagProxyOutbounds guarantees every proxy outbound has a unique, non-empty tag.
 // The upstream remark (usually a node name with its country) is kept when it is
-// unique, so clients show recognizable names; otherwise the outbound falls back
-// to a positional "proxy-N" tag.
+// unique and not reserved by direct/block, so clients show recognizable names;
+// otherwise the outbound falls back to an available "proxy-N" tag.
 func tagProxyOutbounds(outbounds []json.RawMessage) error {
-	used := make(map[string]struct{}, len(outbounds))
+	used := map[string]struct{}{"direct": {}, "block": {}}
 	for i, raw := range outbounds {
 		var outbound map[string]json.RawMessage
 		err := json.Unmarshal(raw, &outbound)
@@ -546,7 +546,12 @@ func tagProxyOutbounds(outbounds []json.RawMessage) error {
 		}
 		tag := outboundTag(raw)
 		if _, dup := used[tag]; tag == "" || dup {
-			tag = fmt.Sprintf("proxy-%d", i+1)
+			for suffix := i + 1; ; suffix++ {
+				tag = fmt.Sprintf("proxy-%d", suffix)
+				if _, taken := used[tag]; !taken {
+					break
+				}
+			}
 		}
 		used[tag] = struct{}{}
 		tagJSON, err := json.Marshal(tag)

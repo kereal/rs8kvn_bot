@@ -190,3 +190,66 @@ func TestDeactivateBlockedBroadcastRecipients_ReportsPartialFailure(t *testing.T
 	assert.Equal(t, string(database.SubscriptionStatusActive), brokenSub.Status, "failed write must not mutate the in-memory state")
 	assert.Len(t, m.AuditLogs, 1, "only the actually revoked subscription is audited")
 }
+
+func TestDeactivateBlockedBroadcastRecipients_RetriesFailedDeprovision(t *testing.T) {
+	t.Parallel()
+
+	for _, failOnRead := range []bool{true, false} {
+		t.Run(fmt.Sprintf("failOnRead=%t", failOnRead), func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			sub := &database.Subscription{ID: 10, TelegramID: 123, Status: string(database.SubscriptionStatusActive)}
+			bindings := []database.SubscriptionNode{
+				{SubscriptionID: sub.ID, NodeID: 1, Status: database.SyncStatusActive},
+				{SubscriptionID: sub.ID, NodeID: 2, Status: database.SyncStatusPendingUpdate},
+			}
+			queueErr := errors.New("database is locked")
+			failQueue := true
+			m := newDeactivationDatabase([]int64{sub.TelegramID})
+			m.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
+			statusWrites := 0
+			m.UpdateSubscriptionFunc = func(context.Context, *database.Subscription) error {
+				statusWrites++
+				return nil
+			}
+			m.GetBySubscriptionIDFunc = func(context.Context, uint) ([]database.SubscriptionNode, error) {
+				if failQueue && failOnRead {
+					return nil, queueErr
+				}
+				return bindings, nil
+			}
+			m.UpdateSubscriptionNodeStatusFunc = func(_ context.Context, _ uint, nodeID uint, status database.SyncStatus) error {
+				if failQueue && nodeID == 2 {
+					return queueErr
+				}
+				bindings[nodeID-1].Status = status
+				return nil
+			}
+			// Leave queued removals to the background worker.
+			m.GetPendingBySubscriptionIDFunc = func(context.Context, uint) ([]database.SubscriptionNode, error) { return nil, nil }
+			svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+			svc.SetSyncService(NewSyncService(m, nil, nil))
+
+			result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
+			require.ErrorIs(t, err, queueErr)
+			require.Equal(t, &DeactivationResult{Targets: 1, Revoked: 1, Failed: 1}, result)
+			require.Equal(t, string(database.SubscriptionStatusRevoked), sub.Status)
+
+			failQueue = false
+			result, err = svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
+			require.NoError(t, err)
+			require.Equal(t, &DeactivationResult{Targets: 1}, result)
+			for _, binding := range bindings {
+				require.Equal(t, database.SyncStatusPendingRemove, binding.Status)
+			}
+			require.Equal(t, 1, statusWrites, "retry must not revoke again")
+			require.Len(t, m.AuditLogs, 1, "retry must not duplicate the revocation audit")
+
+			bindings = nil
+			result, err = svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
+			require.NoError(t, err)
+			require.Equal(t, &DeactivationResult{}, result, "completed removals must be skipped")
+		})
+	}
+}
