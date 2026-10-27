@@ -286,7 +286,7 @@ func TestConvertSingleJSONToXray_Hysteria2(t *testing.T) {
 	require.Equal(t, "salamander", mask["type"])
 	require.Equal(t, "obfs-secret", mask["settings"].(map[string]any)["password"])
 
-	withoutObfs, err := ConvertSingleJSONToXray(json.RawMessage(`{"type":"hysteria2","address":"hy2.example","port":443,"password":"secret"}`))
+	withoutObfs, err := ConvertSingleJSONToXray(json.RawMessage(`{"type":"hysteria2","address":"hy2.example","port":443,"password":"secret","obfsPassword":"unused"}`))
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(withoutObfs, &got))
 	require.NotContains(t, got["streamSettings"].(map[string]any), "finalmask")

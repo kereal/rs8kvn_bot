@@ -72,6 +72,11 @@ func (s *SubscriptionService) DeactivateBlockedBroadcastRecipients(ctx context.C
 
 	for telegramID := range targetTelegramIDs {
 		sub, err := s.db.GetByTelegramID(ctx, telegramID)
+		if errors.Is(err, database.ErrSubscriptionNotFound) {
+			// Основной запрос выбирает только active; после частичного сбоя
+			// отзыв уже сохранён и подписку нужно найти независимо от статуса.
+			sub, err = s.db.GetAnyByTelegramID(ctx, telegramID)
+		}
 		if err != nil {
 			if errors.Is(err, database.ErrSubscriptionNotFound) {
 				continue

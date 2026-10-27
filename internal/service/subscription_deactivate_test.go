@@ -207,7 +207,13 @@ func TestDeactivateBlockedBroadcastRecipients_RetriesFailedDeprovision(t *testin
 			queueErr := errors.New("database is locked")
 			failQueue := true
 			m := newDeactivationDatabase([]int64{sub.TelegramID})
-			m.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
+			m.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) {
+				if sub.Status != string(database.SubscriptionStatusActive) {
+					return nil, database.ErrSubscriptionNotFound
+				}
+				return sub, nil
+			}
+			m.GetAnyByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
 			statusWrites := 0
 			m.UpdateSubscriptionFunc = func(context.Context, *database.Subscription) error {
 				statusWrites++
