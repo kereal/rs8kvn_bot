@@ -52,7 +52,17 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Subscription status check в `/sub/{subID}` — revoked/expired → 404
 - Subscription expiration хранится в БД на момент Create
 
-## Subserver share-link conversion
+## Subserver subscription output (Xray JSON, 2026-10-27)
+- `/sub/{subID}` всегда отдаёт полный Xray-core JSON-конфиг (`application/json; charset=utf-8`) — ни share-ссылок, ни base64.
+- Шаблон `internal/subserver/templates/xray_client.json` (`//go:embed` в `service.go`), рендер в `buildResponse`.
+- Пайплайн: тело источника → `DetectFormat` → `aggregateFormat` (JSON/Clash → `jsonConfigs`, base64/plain → `items`) → нормализация share-ссылок в `serverConfig` (`parseShareLink`, плюс отдельная распаковка `vmess://` с `parseJSONNumber`/`parseJSONScalar`) → `ConvertJSONConfigsToXray` → `tagProxyOutbounds` → рендер шаблона.
+- Теги: `remark` источника, если уникален, иначе `proxy-N`. Последнее правило (catch-all) указывает на тег первого outbound — предсказуемая нода по умолчанию; балансировщика нет (он менял бы exit-IP на каждом соединении).
+- Hysteria2 → современный `hysteria` outbound (`settings{version,address,port}` + `streamSettings{method:"hysteria", hysteriaSettings{version,auth,obfs}, security:"tls", tlsSettings}`).
+- **КРИТИЧНО**: `geosite:category-ru`, НЕ `geosite:ru` — последнего нет в `geosite.dat`, Xray отказывается стартовать ("illegal domain rule"). `geoip:ru` валиден. Генерируемые конфиги проверять `xray -test -config`.
+- Ручное переключение нод зависит от клиента: в Xray JSON нет переносимой группы `selector`.
+- Неподдерживаемые протоколы (например TUIC) пропускаются; если не осталось ни одного — 404 (`ErrNoSubscriptionItems`).
+
+## Subserver share-link conversion (legacy, Clash → share links)
 - Поддерживаемые схемы: `vmess://`, `trojan://`, `ss://`, `hysteria://`, `hysteria2://`, `hy2://`, `tuic://`
 - ALPN list→comma string (Clash YAML list → v2rayN share-link param)
 - Shadowsocks SIP002 plugin: `obfs`→`obfs-local` alias + `plugin-opts` serialisation
@@ -115,7 +125,8 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - **Errors**: getsentry/sentry-go
 
 ## Subserver
-- Clash/Mihomo конвертер покрывает VMess, VLESS, Trojan, Hysteria2, TUIC, Shadowsocks SIP002.
+- `/sub/{subID}` рендерит полный Xray-core JSON из встроенного шаблона (см. «Subserver subscription output» выше).
+- Clash/Mihomo конвертер покрывает VMess, VLESS, Trojan, Hysteria2, TUIC, Shadowsocks SIP002 и питает тот же Xray-путь.
 - Транспортная нормализация сведена в `normaliseTransportNetwork` + `setPacketEncoding`.
 
 ## Scheduler

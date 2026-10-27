@@ -55,7 +55,8 @@
 ### P1 — Critical (0% → покрыто)
 - `internal/database/orders_test.go` — 13 тестов: CRUD orders, status transitions, paid/activated updates
 - `internal/database/products_test.go` — 6 тестов: GetActiveByPlanID (active/inactive product/plan), GetProductByID
-- `internal/subserver/subscription_handler_test.go` — 20+ тестов: HandleSubscription (cache hit/miss/invalidated, base64/plain/JSON response, multiple nodes, no URL, fetch error), UpdateDevices, UpdateIPs, helper functions (ParseUserInfoValue, ParseExpireFromUserInfo, BuildUserInfoHeader, FilterHeaders, SkipTransportHeader, ResponseHeaders, DetectFormat, isValidServer)
+- `internal/subserver/subscription_handler_test.go` — HandleSubscription (cache hit/miss/invalidated, Xray JSON response, multiple nodes, no URL, fetch error), UpdateDevices, UpdateIPs, helper functions (ParseUserInfoValue, ParseExpireFromUserInfo, BuildUserInfoHeader, FilterHeaders, SkipTransportHeader, ResponseHeaders, DetectFormat, isValidServer)
+- `internal/subserver/xray_subscription_test.go` — контракт ответа `/sub`: JSON/Clash/share-link/base64 источники → один Xray JSON, теги `remark`/`proxy-N` с дедупликацией, catch-all на первый outbound, DNS + routing правила, отказ при отсутствии конвертируемых источников, `parseShareLink` (VLESS Reality/Trojan/Hysteria2 + malformed), `vmess://` со строковыми и числовыми `port`/`aid`
 
 ## Добавленные тесты (2026-08, Subscription Traffic Worker)
 - `internal/xui/client_enable_test.go` — `TestUpdateClient_EnableTrue`/`TestUpdateClient_EnableFalse` (обновление с `Enable` флагом, mock inbound-flow lookup через `get/`), `TestGetClientTraffic_DecodesEnable` (декодирование `Enable` из ответа панели).

@@ -77,7 +77,19 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - Metrics: `SubscriptionRemindersTotal{window,status}`, `SubscriptionReminderRunsTotal`.
 - Lifecycle wiring: `cmd/bot/main.go` (startBackgroundWorkers).
 
-## Subserver share-link normalization
+## Subserver subscription output (Xray JSON, 2026-10-27)
+- `/sub/{subID}` ALWAYS returns a complete Xray-core client config (`application/json; charset=utf-8`), never share links or base64.
+- Template: `internal/subserver/templates/xray_client.json` (`//go:embed` in `service.go`, executed by `buildResponse`).
+- Pipeline: source body → `DetectFormat` → `aggregateFormat` (JSON/Clash → `jsonConfigs`; base64/plain → `items`) → `buildResponse` normalises share links into `serverConfig` → `ConvertJSONConfigsToXray` → `tagProxyOutbounds` → template render.
+- `vmess://` links are decoded inside `buildResponse` (port/aid may be string OR number; helpers `parseJSONNumber`/`parseJSONScalar`). Other schemes go through `parseShareLink`.
+- Tags: an outbound keeps its source `remark` when unique, otherwise `proxy-N`. The LAST routing rule (catch-all) targets the FIRST outbound's own tag, giving a predictable default node; there is no balancer (a balancer rotates the exit IP per connection).
+- Hysteria2 maps to the modern Xray `hysteria` outbound: `settings{version,address,port}` plus `streamSettings{method:"hysteria", hysteriaSettings{version,auth,obfs}, security:"tls", tlsSettings}`.
+- CRITICAL: use `geosite:category-ru`, NOT `geosite:ru`. `geosite:ru` is absent from geosite.dat and makes Xray refuse to start ("illegal domain rule"). `geoip:ru` IS valid. Always validate generated configs with `xray -test -config`.
+- Xray JSON has no portable manual-selector outbound group; node switching depends on the client.
+- Unsupported protocols (e.g. TUIC) are skipped; if nothing converts, the endpoint returns 404 (`ErrNoSubscriptionItems`).
+- Legacy share-link builders (`ConvertSingleJSONToLink` + `build*ServerLink`) stay for Clash normalization tests but are no longer used by the subscription response path.
+
+## Subserver share-link normalization (Clash → share links, legacy)
 - Supported schemes: VMess, VLESS, Trojan, Hysteria2, TUIC, Shadowsocks SIP002.
 - Transport normalization unified under `normaliseTransportNetwork`.
 - Clash/V2rayN `packetEncoding` support via `setPacketEncoding`.
@@ -112,8 +124,8 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - Daily backup, trial cleanup at startup and every 3h, sync workers, expiry reminders worker.
 
 ## Subserver
-- `/sub/{subID}` serves merged subscription payloads.
-- Clash/Mihomo normalization path for share links.
+- `/sub/{subID}` renders a full Xray-core JSON config from the embedded template (see "Subserver subscription output" above).
+- Clash/Mihomo normalization feeds the same Xray conversion path.
 - Optional async access log.
 
 ## Web
