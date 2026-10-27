@@ -3,7 +3,6 @@ package subserver
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"strconv"
 	"strings"
 
@@ -218,42 +217,30 @@ func buildHysteria2Xray(cfg *serverConfig) map[string]any {
 	if password == "" {
 		password = cfg.UUID
 	}
-
-	server := map[string]any{
-		"address":  net.JoinHostPort(cfg.Address, strconv.Itoa(cfg.Port)),
-		"password": password,
-		"level":    0,
+	settings := map[string]any{"version": 2, "address": cfg.Address, "port": cfg.Port}
+	streamSettings := map[string]any{
+		"method":           "hysteria",
+		"hysteriaSettings": map[string]any{"version": 2, "auth": password},
+		"security":         "tls",
 	}
+	tlsSettings := map[string]any{"allowInsecure": cfg.AllowInsecure}
 	if cfg.SNI != "" {
-		server["sni"] = cfg.SNI
+		tlsSettings["serverName"] = cfg.SNI
 	}
-
+	if cfg.Fingerprint != "" {
+		tlsSettings["fingerprint"] = cfg.Fingerprint
+	}
+	if alpn := splitComma(cfg.Alpn); len(alpn) > 0 {
+		tlsSettings["alpn"] = alpn
+	}
+	streamSettings["tlsSettings"] = tlsSettings
 	if cfg.Obfs != "" {
-		obfs := map[string]any{"type": cfg.Obfs}
-		if cfg.ObfsPassword != "" {
-			obfs["password"] = cfg.ObfsPassword
-		}
-
-		server["obfs"] = obfs
+		streamSettings["hysteriaSettings"].(map[string]any)["obfs"] = map[string]any{"type": cfg.Obfs, "password": cfg.ObfsPassword}
 	}
-
-	if cfg.AllowInsecure {
-		server["allowInsecure"] = true
-	}
-
-	return map[string]any{
-		"protocol": "hysteria2",
-		"settings": map[string]any{
-			"servers": []map[string]any{server},
-		},
-		"streamSettings": map[string]any{"network": "tcp"},
-	}
+	return map[string]any{"protocol": "hysteria", "settings": settings, "streamSettings": streamSettings}
 }
 
-// buildStreamSettings builds the Xray streamSettings object. For VLESS/VMess/Trojan
-// it fully resolves the transport (ws/grpc/xhttp/h2/http/tcp) and security layer
-// (none/tls/reality). For Shadowsocks/Hysteria2 the transport is plain TCP
-// and TLS is handled inside the protocol itself.
+// buildStreamSettings builds the Xray streamSettings object for supported transports.
 func buildStreamSettings(cfg *serverConfig, protocol string) map[string]any {
 	switch protocol {
 	case "shadowsocks", "hysteria", "hysteria2", "hy2":
