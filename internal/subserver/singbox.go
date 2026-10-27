@@ -77,13 +77,24 @@ func buildSingboxOutbound(cfg *serverConfig) (map[string]any, error) {
 	}
 }
 
-func buildVLESSSingbox(cfg *serverConfig) map[string]any {
+// singboxOutboundBase creates the common fields every server outbound carries,
+// including the readable tag from the upstream remark (node name), so clients
+// show recognizable names instead of positional proxy-N tags.
+func singboxOutboundBase(proxyType string, cfg *serverConfig) map[string]any {
 	out := map[string]any{
-		"type":        "vless",
+		"type":        proxyType,
 		"server":      cfg.Address,
 		"server_port": cfg.Port,
-		"uuid":        cfg.UUID,
 	}
+	if cfg.Remark != "" {
+		out["tag"] = cfg.Remark
+	}
+	return out
+}
+
+func buildVLESSSingbox(cfg *serverConfig) map[string]any {
+	out := singboxOutboundBase("vless", cfg)
+	out["uuid"] = cfg.UUID
 	if cfg.Flow != "" {
 		out["flow"] = cfg.Flow
 	}
@@ -104,14 +115,10 @@ func buildVMessSingbox(cfg *serverConfig) map[string]any {
 	if security == "" {
 		security = "auto"
 	}
-	out := map[string]any{
-		"type":        "vmess",
-		"server":      cfg.Address,
-		"server_port": cfg.Port,
-		"uuid":        cfg.UUID,
-		"alter_id":    aid,
-		"security":    security,
-	}
+	out := singboxOutboundBase("vmess", cfg)
+	out["uuid"] = cfg.UUID
+	out["alter_id"] = aid
+	out["security"] = security
 	applySingboxTLS(out, cfg)
 	applySingboxTransport(out, cfg)
 	return out
@@ -122,12 +129,8 @@ func buildTrojanSingbox(cfg *serverConfig) map[string]any {
 	if password == "" {
 		password = cfg.UUID
 	}
-	out := map[string]any{
-		"type":        "trojan",
-		"server":      cfg.Address,
-		"server_port": cfg.Port,
-		"password":    password,
-	}
+	out := singboxOutboundBase("trojan", cfg)
+	out["password"] = password
 	if cfg.Flow != "" {
 		out["flow"] = cfg.Flow
 	}
@@ -137,13 +140,9 @@ func buildTrojanSingbox(cfg *serverConfig) map[string]any {
 }
 
 func buildShadowsocksSingbox(cfg *serverConfig) map[string]any {
-	out := map[string]any{
-		"type":        "shadowsocks",
-		"server":      cfg.Address,
-		"server_port": cfg.Port,
-		"method":      cfg.Method,
-		"password":    cfg.Password,
-	}
+	out := singboxOutboundBase("shadowsocks", cfg)
+	out["method"] = cfg.Method
+	out["password"] = cfg.Password
 	if cfg.Plugin != "" {
 		out["plugin"] = cfg.Plugin
 		out["plugin_opts"] = cfg.PluginOpts
@@ -156,12 +155,8 @@ func buildHysteria2Singbox(cfg *serverConfig) map[string]any {
 	if password == "" {
 		password = cfg.UUID
 	}
-	out := map[string]any{
-		"type":        "hysteria2",
-		"server":      cfg.Address,
-		"server_port": cfg.Port,
-		"password":    password,
-	}
+	out := singboxOutboundBase("hysteria2", cfg)
+	out["password"] = password
 	if cfg.Obfs != "" {
 		obfs := map[string]any{"type": cfg.Obfs}
 		if cfg.ObfsPassword != "" {
@@ -193,14 +188,10 @@ func buildTUICSingbox(cfg *serverConfig) map[string]any {
 	if password == "" {
 		password = cfg.UUID
 	}
-	out := map[string]any{
-		"type":               "tuic",
-		"server":             cfg.Address,
-		"server_port":        cfg.Port,
-		"uuid":               cfg.UUID,
-		"password":           password,
-		"congestion_control": "bbr",
-	}
+	out := singboxOutboundBase("tuic", cfg)
+	out["uuid"] = cfg.UUID
+	out["password"] = password
+	out["congestion_control"] = "bbr"
 	if cfg.Alpn != "" {
 		out["alpn"] = splitComma(cfg.Alpn)
 	}
@@ -291,9 +282,21 @@ func applySingboxTransport(out map[string]any, cfg *serverConfig) {
 	}
 }
 
-// BuildSingboxConfig assembles the full sing-box subscription document: server
-// outbounds for every usable node plus a "proxy" selector group listing them,
-// so clients can switch nodes the same way they switch Xray profiles.
+// checkIPDomains mirrors the Xray template's IP-check blocklist: services that
+// reveal the exit IP are routed direct so users see their real location.
+var checkIPDomains = []string{
+	"api.ipify.org", "checkip.amazonaws.com", "ifconfig.me", "ip.mail.ru",
+	"ipv4-internet.yandex.net", "ipv6-internet.yandex.net", "2ip.ru", "2ip.io",
+	"whoer.net", "ipinfo.io", "ipapi.co", "ip-api.com", "ipify.org", "ifconfig.co",
+}
+
+// BuildSingboxConfig assembles the full sing-box subscription document with
+// parity to the Xray profile template: server outbounds for every usable node,
+// a "proxy" selector group, direct/block outbounds, the shared DNS setup
+// (Russian resolver for ru/private domains, DoH fallback) and routing rules
+// (IP-check domains → direct, ads → block, private/RU → direct, everything
+// else → the proxy selector), plus a mixed socks/http inbound mirroring the
+// Xray 10808/10809 listeners.
 func BuildSingboxConfig(outbounds []map[string]any) map[string]any {
 	tags := make([]string, 0, len(outbounds))
 	for _, ob := range outbounds {
@@ -302,12 +305,49 @@ func BuildSingboxConfig(outbounds []map[string]any) map[string]any {
 		}
 	}
 
+	directOutbound := map[string]any{"type": "direct", "tag": "direct"}
+	blockOutbound := map[string]any{"type": "block", "tag": "block"}
+	selector := map[string]any{
+		"type":      "selector",
+		"tag":       "proxy",
+		"outbounds": tags,
+		"interrupt_exist_connections": false,
+	}
+
 	return map[string]any{
-		"outbounds": append(append([]map[string]any{}, outbounds...), map[string]any{
-			"type":      "selector",
-			"tag":       "proxy",
-			"outbounds": tags,
-		}),
+		"log": map[string]any{"level": "warn"},
+		"dns": map[string]any{
+			"servers": []map[string]any{
+				{"tag": "proxy-dns", "address": "https://1.1.1.1/dns-query", "detour": "proxy"},
+				{"tag": "ru-dns", "address": "77.88.8.8", "detour": "direct"},
+			},
+			"rules": []map[string]any{
+				{"geosite": []string{"category-ru", "private"}, "server": "ru-dns"},
+			},
+			"strategy": "prefer_ipv4",
+		},
+		"inbounds": []map[string]any{
+			{
+				"type":        "mixed",
+				"tag":         "mixed-in",
+				"listen":      "127.0.0.1",
+				"listen_port": 10808,
+				"sniff":       true,
+			},
+		},
+		"outbounds": append(append([]map[string]any{}, outbounds...),
+			selector, directOutbound, blockOutbound),
+		"route": map[string]any{
+			"auto_detect_interface": true,
+			"final":                 "proxy",
+			"rules": []map[string]any{
+				{"domain_suffix": checkIPDomains, "outbound": "direct"},
+				{"geosite": []string{"category-ads-all"}, "outbound": "block"},
+				{"ip_is_private": true, "outbound": "direct"},
+				{"geoip": []string{"ru"}, "outbound": "direct"},
+				{"geosite": []string{"category-ru", "private"}, "outbound": "direct"},
+			},
+		},
 	}
 }
 
