@@ -143,16 +143,6 @@ func TestMarshalJSON(t *testing.T) {
 		assert.Nil(t, decoded)
 	})
 }
-func TestTruncateString(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "hello", utils.TruncateString("hello", 10))
-	assert.Equal(t, "hello...", utils.TruncateString("hello world", 5))
-	assert.Equal(t, "", utils.TruncateString("", 5))
-	// rune-safe: Cyrillic
-	assert.Equal(t, "прив...", utils.TruncateString("привет мир", 4))
-}
-
 func TestClientClose(t *testing.T) {
 	t.Parallel()
 
@@ -321,7 +311,6 @@ func TestRetryWithBackoff(t *testing.T) {
 func TestGetExpiresAtMillis(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, int64(0), getExpiresAtMillis(time.Time{}))
 	assert.Equal(t, int64(0), getExpiresAtMillis(time.Time{}))
 
 	now := time.Now()

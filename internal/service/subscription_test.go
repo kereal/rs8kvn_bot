@@ -65,7 +65,7 @@ func TestSubscriptionService_Create_Success(t *testing.T) {
 	assert.Equal(t, "testuser", result.Subscription.Username)
 }
 
-func TestSubscriptionService_Create_XUIError(t *testing.T) {
+func TestSubscriptionService_Create_NoNodesDBFirst(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
@@ -74,8 +74,15 @@ func TestSubscriptionService_Create_XUIError(t *testing.T) {
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 		},
+		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+			return nil, database.ErrSubscriptionNotFound
+		},
+		GetAnyByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+			return nil, database.ErrSubscriptionNotFound
+		},
 		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
 			sub.ID = 1
+
 			return nil
 		},
 		GetNodesByPlanIDFunc: func(ctx context.Context, planID uint) ([]database.Node, error) {
@@ -91,12 +98,12 @@ func TestSubscriptionService_Create_XUIError(t *testing.T) {
 	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
 	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
-	// DB-first: Create succeeds even if XUI is unavailable
+	// DB-first, no nodes: Create succeeds, and the 3x-ui layer is never touched.
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 }
 
-func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
+func TestSubscriptionService_Create_DBError(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
@@ -115,12 +122,19 @@ func TestSubscriptionService_Create_DBError_RollbackSuccess(t *testing.T) {
 	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
 	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
+	// The very first DB write decides the fate of the whole operation: no VPN
+	// client was created, so there is nothing to roll back.
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "create subscription")
 }
 
-func TestSubscriptionService_Create_DBError_RollbackFailed(t *testing.T) {
+// TestSubscriptionService_Create_DBError_AfterRowCreationNoOrphanClient
+// verifies the DB-first contract: the subscription row is persisted by the
+// transaction, then a DB error while preparing node bindings must surface; and
+// critically no VPN panel client may be created/left orphaned (the sync layer
+// is never reached because node readiness failed).
+func TestSubscriptionService_Create_DBError_AfterRowCreationNoOrphanClient(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
@@ -130,18 +144,36 @@ func TestSubscriptionService_Create_DBError_RollbackFailed(t *testing.T) {
 			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 		},
 		CreateSubscriptionFunc: func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
-			return errors.New("database error")
+			sub.ID = 1
+
+			return nil
+		},
+		GetNodesByPlanIDFunc: func(ctx context.Context, planID uint) ([]database.Node, error) {
+			return []database.Node{{ID: 1, Name: "db-err-node", IsActive: true, InboundIDs: `[1]`, Host: "http://node"}}, nil
+		},
+		GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+			return nil, errors.New("database error")
 		},
 	}
-	sources := []database.Node{}
-	xuiClients := map[uint]interfaces.XUIClient{}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	vpnClient := &mockVPNClient{}
+	nodes := []database.Node{{ID: 1, Name: "db-err-node", IsActive: true, InboundIDs: `[1]`, Host: "http://node"}}
+	vpnClients := map[uint]vpn.Client{1: vpnClient}
+
+	svc := NewSubscriptionService(db, nil, vpnClients, nodes, cfg)
+	svc.SetSyncService(NewSyncService(db, vpnClients, nodes))
+
 	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
+	// The DB write landed, but the node-binding preparation fails afterwards.
+	// The error must surface with a nil result, and — because provisioning never
+	// reached the panel — no VPN client may be created (nothing to roll back, no
+	// orphan client left on the panel).
 	assert.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "create subscription")
+	assert.Contains(t, err.Error(), "load subscription nodes")
+	assert.False(t, vpnClient.createCalled, "no VPN client may be provisioned when the node-binding preparation fails")
+	assert.False(t, vpnClient.deleteCalled, "no rollback delete is needed: the panel was never touched")
 }
 
 func TestSubscriptionService_Create_PropagatesInviteCodeToDB(t *testing.T) {
