@@ -407,6 +407,68 @@ func TestBuildResponseConvertsVMessNumericFields(t *testing.T) {
 	require.Equal(t, 2, configs[0].Outbounds[0].Settings.VNext[0].Users[0].AlterID)
 }
 
+func TestParseVMessItemDispatchesPayloadShape(t *testing.T) {
+	t.Parallel()
+
+	t.Run("url form", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := parseVMessItem("vmess://uuid-1@vmess.example:8443?security=tls&type=ws&path=%2Fws#URL-Node")
+		require.NoError(t, err)
+		require.Equal(t, "vmess", cfg.Type)
+		require.Equal(t, "vmess.example", cfg.Address)
+		require.Equal(t, 8443, cfg.Port)
+		require.Equal(t, "uuid-1", cfg.UUID)
+		require.Equal(t, "URL-Node", cfg.Remark)
+	})
+
+	t.Run("base64 json form", func(t *testing.T) {
+		t.Parallel()
+		link := "vmess://" + base64.StdEncoding.EncodeToString([]byte(`{"add":"vmess.example","port":443,"id":"id","aid":0,"ps":"JSON-Node"}`))
+		cfg, err := parseVMessItem(link)
+		require.NoError(t, err)
+		require.Equal(t, "vmess", cfg.Type)
+		require.Equal(t, "vmess.example", cfg.Address)
+		require.Equal(t, 443, cfg.Port)
+		require.Equal(t, "JSON-Node", cfg.Remark)
+	})
+
+	t.Run("url form without port is rejected", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseVMessItem("vmess://uuid-1@vmess.example#NoPort")
+		require.Error(t, err)
+	})
+}
+
+func TestBuildResponseConvertsURLStyleVMessLink(t *testing.T) {
+	t.Parallel()
+	link := "vmess://uuid-url@vmess.example:8443?security=tls&sni=front.example&type=ws&path=%2Fws#URLVMess"
+	result, err := buildResponse(newTestSubSvc(t), "vmess-url", aggregatedSources{items: []string{link}}, 0, "")
+	require.NoError(t, err)
+
+	var configs []struct {
+		Remarks   string `json:"remarks"`
+		Outbounds []struct {
+			Protocol string `json:"protocol"`
+			Settings struct {
+				VNext []struct {
+					Address string `json:"address"`
+					Port    int    `json:"port"`
+					Users   []struct {
+						ID string `json:"id"`
+					} `json:"users"`
+				} `json:"vnext"`
+			} `json:"settings"`
+		} `json:"outbounds"`
+	}
+	require.NoError(t, json.Unmarshal(result.Body, &configs))
+	require.Len(t, configs, 1)
+	require.Equal(t, "URLVMess", configs[0].Remarks)
+	require.Equal(t, "vmess", configs[0].Outbounds[0].Protocol)
+	require.Equal(t, "vmess.example", configs[0].Outbounds[0].Settings.VNext[0].Address)
+	require.Equal(t, 8443, configs[0].Outbounds[0].Settings.VNext[0].Port)
+	require.Equal(t, "uuid-url", configs[0].Outbounds[0].Settings.VNext[0].Users[0].ID)
+}
+
 func TestParseVMessLinkPreservesCase(t *testing.T) {
 	t.Parallel()
 
@@ -483,4 +545,106 @@ func TestBuildResponseReservesDirectAndBlockTags(t *testing.T) {
 		require.Equal(t, "direct", conn.Outbounds[1].Tag)
 		require.Equal(t, "block", conn.Outbounds[2].Tag)
 	}
+}
+
+func TestParseShareLinkShadowsocksMethodAndPassword(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		link         string
+		wantType     string
+		wantMethod   string
+		wantPassword string
+	}{
+		{
+			name:         "SIP002 base64url userinfo",
+			link:         "ss://" + base64.RawURLEncoding.EncodeToString([]byte("chacha20-ietf-poly1305:ss-pass")) + "@ss.example:8388#SS-Node",
+			wantType:     "ss",
+			wantMethod:   "chacha20-ietf-poly1305",
+			wantPassword: "ss-pass",
+		},
+		{
+			name:         "padded standard base64 userinfo",
+			link:         "ss://" + base64.StdEncoding.EncodeToString([]byte("aes-256-gcm:padded-pass")) + "@ss.example:8388#SS-Node",
+			wantType:     "ss",
+			wantMethod:   "aes-256-gcm",
+			wantPassword: "padded-pass",
+		},
+		{
+			name:         "plain method:password userinfo",
+			link:         "ss://aes-128-gcm:plain-pass@ss.example:8388#SS-Node",
+			wantType:     "ss",
+			wantMethod:   "aes-128-gcm",
+			wantPassword: "plain-pass",
+		},
+		{
+			name:         "shadowsocks scheme alias",
+			link:         "shadowsocks://2022-blake3-aes-128-gcm:alias-pass@ss.example:8388#SS-Node",
+			wantType:     "shadowsocks",
+			wantMethod:   "2022-blake3-aes-128-gcm",
+			wantPassword: "alias-pass",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := parseShareLink(tt.link)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantType, cfg.Type)
+			require.Equal(t, tt.wantMethod, cfg.Method)
+			require.Equal(t, tt.wantPassword, cfg.Password)
+		})
+	}
+}
+
+func TestBuildResponseShadowsocksOutboundHasMethod(t *testing.T) {
+	t.Parallel()
+
+	links := []string{
+		"ss://" + base64.RawURLEncoding.EncodeToString([]byte("chacha20-ietf-poly1305:ss-pass")) + "@ss.example:8388#SS-B64",
+		"ss://aes-256-gcm:plain-pass@plain.example:8389#SS-Plain",
+	}
+	result, err := buildResponse(newTestSubSvc(t), "ss-method", aggregatedSources{items: links}, 0, "")
+	require.NoError(t, err)
+
+	var configs []struct {
+		Outbounds []struct {
+			Protocol string `json:"protocol"`
+			Settings struct {
+				Servers []struct {
+					Address  string `json:"address"`
+					Port     int    `json:"port"`
+					Method   string `json:"method"`
+					Password string `json:"password"`
+				} `json:"servers"`
+			} `json:"settings"`
+		} `json:"outbounds"`
+	}
+	require.NoError(t, json.Unmarshal(result.Body, &configs))
+	require.Len(t, configs, 2)
+
+	for i, want := range []struct {
+		address  string
+		method   string
+		password string
+	}{
+		{"ss.example", "chacha20-ietf-poly1305", "ss-pass"},
+		{"plain.example", "aes-256-gcm", "plain-pass"},
+	} {
+		outbound := configs[i].Outbounds[0]
+		require.Equal(t, "shadowsocks", outbound.Protocol)
+		server := outbound.Settings.Servers[0]
+		require.Equal(t, want.address, server.Address)
+		require.Equal(t, want.method, server.Method)
+		require.Equal(t, want.password, server.Password)
+	}
+}
+
+func TestBuildXrayOutboundRejectsShadowsocksWithoutMethod(t *testing.T) {
+	t.Parallel()
+
+	_, err := buildXrayOutbound(&serverConfig{Type: "ss", Address: "ss.example", Port: 8388, Password: "pass"})
+	require.Error(t, err, "an outbound without a cipher is unusable and must be rejected")
 }
