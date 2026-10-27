@@ -466,27 +466,21 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 	if err := tagProxyOutbounds(outbounds); err != nil {
 		return nil, err
 	}
-	proxyOutbounds := make([]json.RawMessage, 0, len(outbounds)+2)
-	proxyOutbounds = append(proxyOutbounds, outbounds...)
-	proxyOutbounds = append(proxyOutbounds, json.RawMessage(`{"protocol":"freedom","tag":"direct"}`), json.RawMessage(`{"protocol":"blackhole","tag":"block"}`))
-	outboundsJSON, err := json.Marshal(proxyOutbounds)
+	// XTLS Subscription Standards define a subscription as a JSON array of
+	// complete connection objects. Each element carries exactly one proxy
+	// outbound so clients (v2rayNG parses one profile per array element) list
+	// every node as a selectable profile instead of collapsing them into one.
+	connections := make([]json.RawMessage, 0, len(outbounds))
+	for _, outbound := range outbounds {
+		connection, renderErr := renderXrayConnection(outboundTag(outbound), outbound)
+		if renderErr != nil {
+			return nil, renderErr
+		}
+		connections = append(connections, connection)
+	}
+	responseBody, err := json.Marshal(connections)
 	if err != nil {
-		return nil, fmt.Errorf("marshal Xray outbounds: %w", err)
-	}
-	defaultTagJSON, err := json.Marshal(outboundTag(outbounds[0]))
-	if err != nil {
-		return nil, fmt.Errorf("marshal default outbound tag: %w", err)
-	}
-	var rendered strings.Builder
-	if err := xrayTemplate.Execute(&rendered, xrayTemplateData{
-		OutboundsJSON:  string(outboundsJSON),
-		DefaultTagJSON: string(defaultTagJSON),
-	}); err != nil {
-		return nil, fmt.Errorf("render Xray template: %w", err)
-	}
-	responseBody := []byte(rendered.String())
-	if !json.Valid(responseBody) {
-		return nil, fmt.Errorf("rendered Xray config is invalid JSON")
+		return nil, fmt.Errorf("marshal Xray subscription: %w", err)
 	}
 	cacheHeaders := ResponseHeaders(agg.firstSourceHeaders, "application/json; charset=utf-8", userInfo)
 	ApplyProfileTitleSuffix(cacheHeaders, profileTitleSuffix)
@@ -495,10 +489,44 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 }
 
 // xrayTemplateData holds the values injected into templates/xray_client.json.
-// Both fields carry pre-encoded JSON so numeric/string quoting stays correct.
+// All fields carry pre-encoded JSON so quoting (numbers vs strings) stays correct.
 type xrayTemplateData struct {
-	OutboundsJSON  string
-	DefaultTagJSON string
+	RemarksJSON   string
+	OutboundsJSON string
+	TagJSON       string
+}
+
+// renderXrayConnection renders one complete Xray-core client config for a single
+// proxy outbound: the node, a direct and a block outbound, and routing whose
+// catch-all rule targets that node. It is the array element clients import.
+// The profile name and the default-route tag both come from the outbound tag, so
+// the catch-all rule always targets the node this profile carries.
+func renderXrayConnection(remarks string, outbound json.RawMessage) (json.RawMessage, error) {
+	outboundsJSON, err := json.Marshal([]json.RawMessage{
+		outbound,
+		json.RawMessage(`{"protocol":"freedom","tag":"direct"}`),
+		json.RawMessage(`{"protocol":"blackhole","tag":"block"}`),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal Xray outbounds: %w", err)
+	}
+	remarksJSON, err := json.Marshal(remarks)
+	if err != nil {
+		return nil, fmt.Errorf("marshal Xray remarks: %w", err)
+	}
+	var rendered strings.Builder
+	if err := xrayTemplate.Execute(&rendered, xrayTemplateData{
+		RemarksJSON:   string(remarksJSON),
+		OutboundsJSON: string(outboundsJSON),
+		TagJSON:       string(remarksJSON),
+	}); err != nil {
+		return nil, fmt.Errorf("render Xray template: %w", err)
+	}
+	body := []byte(rendered.String())
+	if !json.Valid(body) {
+		return nil, fmt.Errorf("rendered Xray config is invalid JSON")
+	}
+	return body, nil
 }
 
 // tagProxyOutbounds guarantees every proxy outbound has a unique, non-empty tag.
