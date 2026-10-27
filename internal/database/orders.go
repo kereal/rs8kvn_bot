@@ -97,7 +97,11 @@ func (s *Service) FindPendingPaymentOrder(ctx context.Context, subscriptionID, p
 
 // FindOrCreatePendingPaymentOrder returns the single pending payment intent for
 // a subscription/product pair, expiring it first when its local payment-link
-// deadline has passed. The partial unique index is the final concurrency guard.
+// deadline is at or before now. An intent with uncertain provider creation is
+// reused even after that deadline. The partial unique index is the final
+// concurrency guard; a losing creator reloads the winning pending intent.
+// Expiry and replacement are transactional; expiry audit is best-effort after
+// commit. Database errors are returned, including a failed concurrent reload.
 func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*Order, error) {
 	var order Order
 	// expiredOrder фиксируется внутри tx, но аудит пишется ПОСЛЕ коммита:
@@ -149,8 +153,10 @@ func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscript
 
 		return nil
 	})
-	// Аудит order_expired — после фиксации транзакции (см. expiredOrder выше).
-	if expiredOrder != nil {
+	// Аудит order_expired — только после УСПЕШНОЙ фиксации транзакции
+	// (см. expiredOrder выше): при откате tx истечение отменилось, и событие
+	// в журнале было бы ложью.
+	if err == nil && expiredOrder != nil {
 		_ = s.insertAuditLogBestEffort(ctx, AuditOrderExpired(expiredOrder))
 	}
 
@@ -297,9 +303,14 @@ type ApplyPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint,
 // (and cannot pass a stale) expiry value. The OrderService may call this method
 // for an expired order when its provider callback is still inside the short
 // settlement grace period; the service validates that time window before
-// entering this transaction. If applyPlan is non-nil and the CAS succeeds, it
-// is called with the same tx used to write the subscription; on error the whole
-// transaction rolls back.
+// entering this transaction. If applyPlan is non-nil, the CAS succeeds, and the
+// plan changes, it is called with the same tx used to write the subscription.
+// Payment and renewal audit events are written in that transaction as well.
+// Returns true only when the transition commits, or false with no error if the
+// order is no longer pending or expired. Missing rows return wrapped
+// ErrSubscriptionNotFound or ErrOrderNotFound; database, audit, and applyPlan
+// errors roll back the transaction and reach the caller. The supplied sub is
+// updated in place before applyPlan and may remain changed after a rollback.
 func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *Subscription, product *Product, applyPlan ApplyPlanInTxFn, callbackAmountCents int64) (bool, error) {
 	var activated bool
 
@@ -364,27 +375,40 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 			return fmt.Errorf("update subscription after payment: %w", ErrSubscriptionNotFound)
 		}
 
+		// Состояние, фактически сохранённое апдейтом выше: единственный
+		// достоверный источник new_state для аудита. currentSub — состояние ДО.
+		productID := product.ID
+		startedAt := activatedAt
+		expiryCopy := newExpiry
+		currency := product.Currency
+		renewedSub := currentSub
+		renewedSub.PlanID = product.PlanID
+		renewedSub.Status = string(SubscriptionStatusActive)
+		renewedSub.ProductID = &productID
+		renewedSub.ExpiresAt = &expiryCopy
+		renewedSub.StartedAt = &startedAt
+		renewedSub.PricePaidCents = product.PriceCents
+		renewedSub.Currency = &currency
+		renewedSub.RemindersSent = 0
+
 		// Аудит пишется в той же транзакции: событие не может потеряться при
 		// сбое между изменением подписки и записью журнала. Откат транзакции
 		// откатывает и событие — журнал отражает только зафиксированные факты.
-		err = InsertAuditLogInTx(tx, AuditPaymentConfirmed(&order, sub, product, newExpiry))
+		err = InsertAuditLogInTx(tx, AuditPaymentConfirmed(&order, &renewedSub, product, newExpiry))
 		if err != nil {
 			return fmt.Errorf("audit payment confirmation: %w", err)
 		}
 
 		// Событие в таймлайне самой подписки: payment_confirmed адресован заказу,
 		// а subscription_renewed показывает продление/активацию в истории подписки.
-		err = InsertAuditLogInTx(tx, AuditSubscriptionRenewed(&currentSub, product, currentSub.ExpiresAt))
+		err = InsertAuditLogInTx(tx, AuditSubscriptionRenewed(&currentSub, &renewedSub, product))
 		if err != nil {
 			return fmt.Errorf("audit subscription renewal: %w", err)
 		}
 
-		sub.PlanID = product.PlanID
-		sub.Status = string(SubscriptionStatusActive)
-		sub.ProductID = &product.ID
-		expiryCopy := newExpiry
+		// Caller получает то же состояние, что зафиксировано в БД.
+		*sub = renewedSub
 
-		sub.ExpiresAt = &expiryCopy
 		// Plan reconciliation runs only when the purchased plan actually differs
 		// from the subscription's current one. A same-plan renewal extends the
 		// expiry but must NOT recreate pending_update rows: that path re-syncs

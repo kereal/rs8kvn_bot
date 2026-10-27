@@ -38,6 +38,38 @@ func TestFindOrCreatePendingPaymentOrder_ReusesActiveIntent(t *testing.T) {
 	assert.Equal(t, first.ProviderPaymentID, second.ProviderPaymentID)
 }
 
+func TestFindOrCreatePendingPaymentOrder_DoesNotAuditExpiryOnRollback(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	sub := createTestSubscription(t, svc, 992003, "intent-rollback", "intent-client-rollback")
+	plan := &Plan{Name: "intent-rollback-plan", IsActive: true}
+	require.NoError(t, svc.db.Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "Rollback product", DurationDays: 30, PriceCents: 1400, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	old, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, product.PriceCents, product.Currency, now)
+	require.NoError(t, err)
+
+	expires := now.Add(-time.Minute)
+	require.NoError(t, svc.db.Model(&Order{}).Where("id = ?", old.ID).Update("payment_expires_at", expires).Error)
+
+	// A negative amount violates the orders CHECK constraint *after* the expiry
+	// update inside the same transaction, so the transaction rolls back.
+	_, err = svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, -1, product.Currency, now)
+	require.Error(t, err)
+
+	var stored Order
+	require.NoError(t, svc.db.First(&stored, old.ID).Error)
+	assert.Equal(t, OrderStatusPending, stored.Status, "a rolled-back transaction must leave the old order untouched")
+
+	events, err := svc.GetAuditLogByEvent(ctx, AuditEventOrderExpired, 10)
+	require.NoError(t, err)
+	assert.Empty(t, events, "order_expired must not be journaled when the transaction rolled back")
+}
+
 func TestFindOrCreatePendingPaymentOrder_ExpiresAndCreatesReplacement(t *testing.T) {
 	t.Parallel()
 

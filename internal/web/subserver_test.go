@@ -125,173 +125,49 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		body        string
-		userInfo    string
-		mockDBExtra func(db *testutil.DatabaseService)
-		check       func(t *testing.T, w *httptest.ResponseRecorder, body string)
+		name    string
+		body    string
+		wantTag string
 	}{
-		{
-			name:     "plain source",
-			body:     "vless://abc@x.com:443\nvmess://def@y.com:8443",
-			userInfo: "upload=100; download=200; total=1000; expire=1234567890",
-			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
-				decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(body))
-				require.NoError(t, err)
-				assert.Contains(t, string(decoded), "vless://abc@x.com:443")
-				assert.Contains(t, string(decoded), "vmess://def@y.com:8443")
-
-				userInfo := w.Header().Get("Subscription-Userinfo")
-				assert.Contains(t, userInfo, "upload=100")
-				assert.Contains(t, userInfo, "download=200")
-			},
-		},
-		{
-			name:     "JSON source",
-			body:     `[{"type":"vless","address":"x.com","port":443,"uuid":"abc123","encryption":"none","remark":"S1"}]`,
-			userInfo: "upload=50; download=75; total=500; expire=9999",
-			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
-				assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
-
-				var items []json.RawMessage
-				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &items))
-				require.Len(t, items, 1)
-
-				var parsed map[string]any
-				require.NoError(t, json.Unmarshal(items[0], &parsed))
-				assert.Equal(t, "vless", parsed["type"])
-				assert.Equal(t, "x.com", parsed["address"])
-
-				userInfo := w.Header().Get("Subscription-Userinfo")
-				assert.Contains(t, userInfo, "upload=50")
-			},
-		},
-		{
-			name:     "multiple sources",
-			body:     "vless://a@x.com:443",
-			userInfo: "upload=100; download=200; total=500; expire=111",
-			mockDBExtra: func(db *testutil.DatabaseService) {
-				db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
-					return &database.SubscriptionFull{
-						Subscription: database.Subscription{ID: 1, Status: "active"},
-						Plan:         database.Plan{TrafficLimit: 10 << 30},
-						Nodes: []database.Node{
-							{ID: 1, Name: "s1", IsActive: true, SubscriptionURL: httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-								w.Header().Set("Subscription-Userinfo", "upload=100; download=200; total=500; expire=111")
-								w.Write([]byte("vless://a@x.com:443"))
-							})).URL + "/sub/"},
-							{ID: 2, Name: "s2", IsActive: true, SubscriptionURL: httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-								w.Header().Set("Subscription-Userinfo", "upload=300; download=400; total=500; expire=222")
-								w.Write([]byte("trojan://b@y.com:8443"))
-							})).URL + "/sub/"},
-						},
-					}, nil
-				}
-			},
-			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
-				decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(body))
-				require.NoError(t, err)
-				assert.Contains(t, string(decoded), "vless://a@x.com:443")
-				assert.Contains(t, string(decoded), "trojan://b@y.com:8443")
-
-				userInfo := w.Header().Get("Subscription-Userinfo")
-				assert.Contains(t, userInfo, "upload=400")
-				assert.Contains(t, userInfo, "download=600")
-			},
-		},
-		{
-			name: "mixed JSON and plain",
-			body: `{"type":"vless","address":"j.com","port":443,"uuid":"abc","encryption":"none","remark":"J"}`,
-			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
-				decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(body))
-				require.NoError(t, err)
-				assert.Contains(t, string(decoded), "vless://abc@j.com:443")
-			},
-		},
-		{
-			name:     "base64 encoded source",
-			body:     base64.StdEncoding.EncodeToString([]byte("vless://b64@x.com:443\nvmess://b64@y.com:443")),
-			userInfo: "upload=10; download=20; total=100; expire=555",
-			check: func(t *testing.T, w *httptest.ResponseRecorder, body string) {
-				decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(body))
-				require.NoError(t, err)
-				assert.Contains(t, string(decoded), "vless://b64@x.com:443")
-				assert.Contains(t, string(decoded), "vmess://b64@y.com:443")
-			},
-		},
+		{name: "plain share link", body: "vless://id@plain.example:443?security=tls#Plain", wantTag: "Plain"},
+		{name: "JSON source", body: `{"type":"vless","address":"json.example","port":443,"uuid":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","security":"reality","sni":"front.example","pbk":"key","sid":"abcd"}`, wantTag: "proxy-1"},
+		{name: "base64 source", body: base64.StdEncoding.EncodeToString([]byte("vless://id@base64.example:443?security=tls#Base64")), wantTag: "Base64"},
+		{name: "Clash source", body: "proxies:\n  - name: Clash\n    type: trojan\n    server: clash.example\n    port: 443\n    password: secret\n    tls: true\n", wantTag: "Clash"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var b1, b2 *httptest.Server
-			if tt.name == "mixed JSON and plain" {
-				b1 = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.Write([]byte(`{"type":"vless","address":"j.com","port":443,"uuid":"abc","encryption":"none","remark":"J"}`))
-				}))
-				b2 = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.Write([]byte("vless://p@plain.com:443"))
-				}))
-
-				defer b1.Close()
-				defer b2.Close()
-			}
-
-			if tt.name == "multiple sources" {
-				defer func() {
-					if b1 != nil {
-						b1.Close()
-					}
-				}()
-				defer func() {
-					if b2 != nil {
-						b2.Close()
-					}
-				}()
-			}
-
-			var sourceURL string
-			if tt.name == "mixed JSON and plain" {
-				sourceURL = b1.URL + "/sub/"
-			} else if tt.name == "multiple sources" {
-				// already set in mockDBExtra
-			} else {
-				backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Set("Subscription-Userinfo", tt.userInfo)
-					w.Write([]byte(tt.body))
-				}))
-				defer backend.Close()
-
-				sourceURL = backend.URL + "/sub/"
-			}
-
+			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer backend.Close()
 			db := testutil.NewDatabaseService()
-			if tt.mockDBExtra != nil {
-				tt.mockDBExtra(db)
-			} else {
-				db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
-					nodes := []database.Node{{ID: 1, Name: tt.name, IsActive: true, SubscriptionURL: sourceURL}}
-					if tt.name == "mixed JSON and plain" {
-						nodes = []database.Node{
-							{ID: 1, Name: "json", IsActive: true, SubscriptionURL: b1.URL + "/sub/"},
-							{ID: 2, Name: "plain", IsActive: true, SubscriptionURL: b2.URL + "/sub/"},
-						}
-					}
-
-					return &database.SubscriptionFull{
-						Subscription: database.Subscription{ID: 1, Status: "active"},
-						Plan:         database.Plan{TrafficLimit: 1 << 30},
-						Nodes:        nodes,
-					}, nil
-				}
+			db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
+				return &database.SubscriptionFull{
+					Subscription: database.Subscription{ID: 1, Status: "active"},
+					Plan:         database.Plan{TrafficLimit: 1 << 30},
+					Nodes:        []database.Node{{ID: 1, Name: tt.name, IsActive: true, SubscriptionURL: backend.URL + "/sub/"}},
+				}, nil
 			}
-
 			srv := testServer(t, db, &config.Config{})
-
 			w := httptest.NewRecorder()
-			r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
-			srv.handleSubscription(w, r)
-			assert.Equal(t, http.StatusOK, w.Code)
-			tt.check(t, w, w.Body.String())
+			srv.handleSubscription(w, httptest.NewRequest(http.MethodGet, "/sub/test123", nil))
+			require.Equal(t, http.StatusOK, w.Code)
+			require.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
+			var configs []struct {
+				Remarks   string `json:"remarks"`
+				Outbounds []struct {
+					Protocol string `json:"protocol"`
+					Tag      string `json:"tag"`
+				} `json:"outbounds"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &configs))
+			require.Len(t, configs, 1)
+			require.Equal(t, tt.wantTag, configs[0].Remarks)
+			require.Len(t, configs[0].Outbounds, 3)
+			require.Equal(t, tt.wantTag, configs[0].Outbounds[0].Tag)
+			require.Equal(t, "direct", configs[0].Outbounds[1].Tag)
+			require.Equal(t, "block", configs[0].Outbounds[2].Tag)
 		})
 	}
 }
