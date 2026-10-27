@@ -43,8 +43,6 @@
 	"domain:ipapi.co",
 	"domain:ip-api.com",
 	"domain:ipify.org",
-	"domain:ifcinfig.me",
-	"domain:ifconfig.co",
 	"domain:ifconfig.co"], "outboundTag": "direct"},
       {"type": "field", "domain": ["geosite:category-ads-all"], "outboundTag": "block"},
       {"type": "field", "ip": ["geoip:private", "geoip:ru"], "outboundTag": "direct"},
