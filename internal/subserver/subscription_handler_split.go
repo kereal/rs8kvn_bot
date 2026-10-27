@@ -672,7 +672,7 @@ func parseShareLink(link string) (*serverConfig, error) {
 		return nil, fmt.Errorf("share link has no host")
 	}
 	port, err := strconv.Atoi(u.Port())
-	if err != nil || port <= 0 {
+	if err != nil || port < 1 || port > 65535 {
 		return nil, fmt.Errorf("share link has invalid port")
 	}
 	q := u.Query()

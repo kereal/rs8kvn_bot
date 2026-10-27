@@ -348,6 +348,8 @@ func TestParseShareLinkRejectsMalformedOrUnsupported(t *testing.T) {
 		"://not-a-url",
 		"tuic://uuid@vpn.example:443?congestion_control=bbr#TUIC",
 		"vless://@:0#Broken",
+		"vless://uuid@vpn.example:65536#TooBig",
+		"trojan://secret@trojan.example:99999999#TooBig",
 	} {
 		_, err := parseShareLink(link)
 		require.Error(t, err, "link %q must be rejected", link)
