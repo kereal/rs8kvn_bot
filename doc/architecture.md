@@ -141,10 +141,13 @@ internal/
 │   ├── web.go               # Server struct, routes, health, getClientIP
 │   ├── middleware.go        # Access-log response recording
 │   └── templates/           # trial.html, error.html
-├── subserver/         # Subscription server (aggregation + proxy)
+├── subserver/         # Subscription server (aggregation + Xray JSON rendering)
 │   ├── service.go           # Thin cache adapter over SubscriptionCache (Get/Set/Invalidate)
 │   ├── fetch.go             # Fetch from upstream nodes + format detection (JSON/Clash/Base64/Plain)
-│   └── servers.go           # Subscription format helpers and server-config conversion
+│   ├── xray.go              # serverConfig → Xray-core outbound conversion (VLESS/VMess/Trojan/SS/Hysteria2)
+│   ├── subscription_handler_split.go # Handler pipeline; buildResponse renders one full config per node
+│   ├── servers.go           # Subscription format helpers and server-config conversion
+│   └── templates/xray_client.json # Embedded per-profile client template (remarks, inbounds, dns, routing)
 ├── service/          # Business logic
 │   ├── subscription.go      # Use cases: Create, Delete, DeleteByID, Renew; unified two-phase teardown (revokeAndDeprovisionThenDelete)
 │   ├── subscription_reminders.go # Reminder window model and Telegram delivery
@@ -904,6 +907,7 @@ The bot exposes a `/metrics` endpoint (via `promhttp.Handler()`) on the HTTP ser
 | 2026-06 | Subscription sync pipeline | 4-state sync machine (subscription_nodes) with per-sub locking |
 | 2026-06 | Prometheus metrics | `/metrics` endpoint with HTTP, bot, XUI, DB, cache metrics |
 | 2026-07 | Security hardening (S2/S3/A1) | X-Forwarded-For rightmost IP, URL scheme allowlist, web→bot dependency break |
+| 2026-10 | `/sub/{subID}` returns a JSON array of Xray configs | XTLS Subscription Standards body shape; clients (v2rayNG) import one profile per array element, so a single object collapses N nodes into one |
 
 ---
 
