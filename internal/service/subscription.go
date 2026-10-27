@@ -414,7 +414,8 @@ func (s *SubscriptionService) markRevokedSub(ctx context.Context, sub *database.
 // queueForDeprovision marks every node binding of the subscription
 // pending_remove. This is the structural DB prerequisite of every removal: the
 // rows are the retry queue consumed by SyncPendingNodes, so a failure is
-// returned to the caller.
+// returned to the caller. Without a configured sync service it returns nil
+// without changing any bindings.
 func (s *SubscriptionService) queueForDeprovision(ctx context.Context, subscriptionID uint) error {
 	if s.syncService == nil {
 		return nil
@@ -431,7 +432,8 @@ func (s *SubscriptionService) queueForDeprovision(ctx context.Context, subscript
 // syncDeprovisionNow is the external half of deprovisioning: it asks the panels
 // to delete the clients whose bindings are pending_remove. It is best-effort by
 // contract — a failure leaves the rows for SyncPendingNodes to retry, so the
-// error only gets logged and never surfaces to the caller.
+// error only gets logged and never surfaces to the caller. Without a configured
+// sync service it does nothing.
 func (s *SubscriptionService) syncDeprovisionNow(ctx context.Context, subscriptionID uint) {
 	if s.syncService == nil {
 		return
@@ -447,6 +449,8 @@ func (s *SubscriptionService) syncDeprovisionNow(ctx context.Context, subscripti
 
 // deprovisionSub queues the removal and immediately asks the panels to delete
 // the VPN clients. Used by the single-subscription teardown (admin /del).
+// Queueing errors reach the caller; immediate sync failures are left for retry.
+// Without a configured sync service it returns nil without removing clients.
 func (s *SubscriptionService) deprovisionSub(ctx context.Context, subscriptionID uint) error {
 	err := s.queueForDeprovision(ctx, subscriptionID)
 	if err != nil {
@@ -459,10 +463,11 @@ func (s *SubscriptionService) deprovisionSub(ctx context.Context, subscriptionID
 }
 
 // revokeAndDeprovisionThenDelete runs the two-phase subscription teardown used by
-// DeleteByID: mark revoked → deprovision VPN access (best-effort; background
-// sync reconciles on failure) → physically delete the DB row + subscription nodes →
-// invalidate the cache. The resolved sub is the single input, so the lifecycle contract
-// lives in exactly one place. Returns the deleted subscription (nil on error).
+// DeleteByID: mark revoked, queue and attempt VPN removal, then physically delete
+// the DB row and invalidate its cache. Remaining node bindings prevent deletion
+// and return an error, preserving the revoked row and removal queue for retry.
+// Database and queueing errors also reach the caller; successful earlier steps
+// are not rolled back. Returns the deleted subscription, or nil on error.
 func (s *SubscriptionService) revokeAndDeprovisionThenDelete(ctx context.Context, sub *database.Subscription) (*database.Subscription, error) {
 	// Phase 1: mark revoked before any external effect.
 	err := s.markRevokedSub(ctx, sub)

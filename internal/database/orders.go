@@ -97,7 +97,11 @@ func (s *Service) FindPendingPaymentOrder(ctx context.Context, subscriptionID, p
 
 // FindOrCreatePendingPaymentOrder returns the single pending payment intent for
 // a subscription/product pair, expiring it first when its local payment-link
-// deadline has passed. The partial unique index is the final concurrency guard.
+// deadline is at or before now. An intent with uncertain provider creation is
+// reused even after that deadline. The partial unique index is the final
+// concurrency guard; a losing creator reloads the winning pending intent.
+// Expiry and replacement are transactional; expiry audit is best-effort after
+// commit. Database errors are returned, including a failed concurrent reload.
 func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*Order, error) {
 	var order Order
 	// expiredOrder фиксируется внутри tx, но аудит пишется ПОСЛЕ коммита:
@@ -299,9 +303,14 @@ type ApplyPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint,
 // (and cannot pass a stale) expiry value. The OrderService may call this method
 // for an expired order when its provider callback is still inside the short
 // settlement grace period; the service validates that time window before
-// entering this transaction. If applyPlan is non-nil and the CAS succeeds, it
-// is called with the same tx used to write the subscription; on error the whole
-// transaction rolls back.
+// entering this transaction. If applyPlan is non-nil, the CAS succeeds, and the
+// plan changes, it is called with the same tx used to write the subscription.
+// Payment and renewal audit events are written in that transaction as well.
+// Returns true only when the transition commits, or false with no error if the
+// order is no longer pending or expired. Missing rows return wrapped
+// ErrSubscriptionNotFound or ErrOrderNotFound; database, audit, and applyPlan
+// errors roll back the transaction and reach the caller. The supplied sub is
+// updated in place before applyPlan and may remain changed after a rollback.
 func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *Subscription, product *Product, applyPlan ApplyPlanInTxFn, callbackAmountCents int64) (bool, error) {
 	var activated bool
 

@@ -212,6 +212,9 @@ func buildShadowsocksXray(cfg *serverConfig) map[string]any {
 	}
 }
 
+// buildHysteria2Xray builds an Xray "hysteria" version 2 outbound using TLS.
+// An empty password falls back to UUID. UDP obfuscation is included only when
+// Obfs is set; connection fields are not validated here.
 func buildHysteria2Xray(cfg *serverConfig) map[string]any {
 	password := cfg.Password
 	if password == "" {

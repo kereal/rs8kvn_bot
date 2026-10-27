@@ -127,7 +127,9 @@ func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uin
 }
 
 // reconcilePlanNodesLocked is the lock-free body of ReconcilePlanNodes.
-// The caller must hold lockSubscription(subscriptionID).
+// The caller must hold lockSubscription(subscriptionID). Revoked subscriptions
+// are left unchanged. Load errors return immediately; node mutation errors are
+// joined after processing, except cancellation or deadline errors, which abort.
 func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscriptionID uint) error {
 	logger.Debug("reconcile plan nodes",
 		zap.Uint("subscription_id", subscriptionID))
@@ -412,6 +414,9 @@ func (s *SyncService) SyncSubscription(ctx context.Context, subscriptionID uint)
 // syncNodes iterates over pending subscription nodes and dispatches add/remove/update operations.
 // Per-node failures are logged and aggregated via errors.Join so background workers can observe
 // degraded runs; processing continues past a failed node. Only ctx cancellation/deadline aborts early.
+// For revoked subscriptions, pending adds and updates are durably queued for
+// removal before any VPN call; a failed queue write skips that node. A nil
+// subscription returns an error.
 func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription, pending []database.SubscriptionNode) error {
 	if sub == nil {
 		return fmt.Errorf("sync subscription: nil subscription")
