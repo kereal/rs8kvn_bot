@@ -102,7 +102,7 @@ func runMigrations(sqlDB *sql.DB) error {
 		}
 		versionBefore = uint(maxEmbeddedVersion)
 	}
-	if versionBefore > uint(maxEmbeddedVersion) {
+	if versionBefore > uint(maxEmbeddedVersion) { // #nosec G115 -- same positive version, no sign loss
 		return fmt.Errorf("database migration version %d is newer than the latest embedded migration %d; restore the missing migration files or perform a reviewed schema recovery before starting", versionBefore, maxEmbeddedVersion)
 	}
 
@@ -167,11 +167,11 @@ func applyMigrations(sqlDB *sql.DB, maxVersion int) error {
 		if dirty {
 			return fmt.Errorf("migration state became dirty at version %d; schema recovery is required before retrying", version)
 		}
-		if version >= uint(maxVersion) {
+		if version >= uint(maxVersion) { // #nosec G115 -- maxVersion is the latest embedded migration number, always positive
 			return nil
 		}
 
-		currentVersion := int(version)
+		currentVersion := int(version) // #nosec G115 -- version is bounded by the embedded migration count above
 		nextPragmaVersion, err := nextForeignKeysMigration(currentVersion, maxVersion)
 		if err != nil {
 			return fmt.Errorf("failed to classify migrations: %w", err)
@@ -210,7 +210,7 @@ func migrateTo(sqlDB *sql.DB, targetVersion int, noTxWrap bool) error {
 	if err != nil {
 		return err
 	}
-	err = m.Migrate(uint(targetVersion))
+	err = m.Migrate(uint(targetVersion)) // #nosec G115 -- targetVersion is an embedded migration index, never negative
 	if errors.Is(err, migrate.ErrNoChange) {
 		return nil
 	}
