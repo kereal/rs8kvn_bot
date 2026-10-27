@@ -77,16 +77,19 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - Metrics: `SubscriptionRemindersTotal{window,status}`, `SubscriptionReminderRunsTotal`.
 - Lifecycle wiring: `cmd/bot/main.go` (startBackgroundWorkers).
 
-## Subserver subscription output (Xray JSON, 2026-10-27)
-- `/sub/{subID}` ALWAYS returns a complete Xray-core client config (`application/json; charset=utf-8`), never share links or base64.
-- Template: `internal/subserver/templates/xray_client.json` (`//go:embed` in `service.go`, executed by `buildResponse`).
-- Pipeline: source body → `DetectFormat` → `aggregateFormat` (JSON/Clash → `jsonConfigs`; base64/plain → `items`) → `buildResponse` normalises share links into `serverConfig` → `ConvertJSONConfigsToXray` → `tagProxyOutbounds` → template render.
+## Subserver subscription output (JSON array of Xray configs, 2026-10-27)
+- `/sub/{subID}` ALWAYS returns a **JSON array** of complete Xray-core client configs (`application/json; charset=utf-8`), one object per node — never share links, base64, or a single object.
+- Format follows the XTLS Subscription Standards (discussion 4877): "A subscription is defined as a JSON array of connection objects".
+- WHY the array: v2rayNG (`AngConfigManager.parseCustomConfigServer` → `CustomFmt.parse`) imports ONE profile per array element and, from a single config, keeps only the first proxy outbound — a single object with N outbounds shows the user a single node. v2rayN (`V2rayFmt.ResolveCommon`) also walks a `JsonArray`. Happ accepts both shapes.
+- Each element is a full client config: `remarks` (profile name shown by the client, equal to the node tag), `log`, `dns`, `inbounds` (socks 10808 + http 10809 with sniffing), `outbounds` = [node, `direct`, `block`], and `routing` whose catch-all rule targets that element's OWN tag.
+- Template: `internal/subserver/templates/xray_client.json` (`//go:embed` in `service.go`), rendered per node by `renderXrayConnection`, array assembled in `buildResponse`.
+- Pipeline: source body → `DetectFormat` → `aggregateFormat` (JSON/Clash → `jsonConfigs`; base64/plain → `items`) → `buildResponse` normalises share links into `serverConfig` → `ConvertJSONConfigsToXray` → `tagProxyOutbounds` → per-node render → `json.Marshal`.
 - `vmess://` links are decoded inside `buildResponse` (port/aid may be string OR number; helpers `parseJSONNumber`/`parseJSONScalar`). Other schemes go through `parseShareLink`.
-- Tags: an outbound keeps its source `remark` when unique, otherwise `proxy-N`. The LAST routing rule (catch-all) targets the FIRST outbound's own tag, giving a predictable default node; there is no balancer (a balancer rotates the exit IP per connection).
+- Tags: an outbound keeps its source `remark` when unique, otherwise `proxy-N`. Profile name and catch-all tag come from the SAME value, so the route always lands on its own node. There is no balancer (a balancer rotates the exit IP per connection).
 - Hysteria2 maps to the modern Xray `hysteria` outbound: `settings{version,address,port}` plus `streamSettings{method:"hysteria", hysteriaSettings{version,auth,obfs}, security:"tls", tlsSettings}`.
-- CRITICAL: use `geosite:category-ru`, NOT `geosite:ru`. `geosite:ru` is absent from geosite.dat and makes Xray refuse to start ("illegal domain rule"). `geoip:ru` IS valid. Always validate generated configs with `xray -test -config`.
-- Xray JSON has no portable manual-selector outbound group; node switching depends on the client.
+- CRITICAL: use `geosite:category-ru`, NOT `geosite:ru`. `geosite:ru` is absent from geosite.dat and makes Xray refuse to start ("illegal domain rule"). `geoip:ru` IS valid. Validate every array element with `xray -test -config`.
 - Unsupported protocols (e.g. TUIC) are skipped; if nothing converts, the endpoint returns 404 (`ErrNoSubscriptionItems`).
+- Verified: all 12 profiles from the live fetch node (`pm.kereal.qzz.io:4433/sfetch/all.yaml`) pass `xray -test -config` on Xray 26.10.21.
 - Legacy share-link builders (`ConvertSingleJSONToLink` + `build*ServerLink`) stay for Clash normalization tests but are no longer used by the subscription response path.
 
 ## Subserver share-link normalization (Clash → share links, legacy)

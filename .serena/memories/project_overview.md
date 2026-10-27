@@ -52,15 +52,18 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Subscription status check в `/sub/{subID}` — revoked/expired → 404
 - Subscription expiration хранится в БД на момент Create
 
-## Subserver subscription output (Xray JSON, 2026-10-27)
-- `/sub/{subID}` всегда отдаёт полный Xray-core JSON-конфиг (`application/json; charset=utf-8`) — ни share-ссылок, ни base64.
-- Шаблон `internal/subserver/templates/xray_client.json` (`//go:embed` в `service.go`), рендер в `buildResponse`.
-- Пайплайн: тело источника → `DetectFormat` → `aggregateFormat` (JSON/Clash → `jsonConfigs`, base64/plain → `items`) → нормализация share-ссылок в `serverConfig` (`parseShareLink`, плюс отдельная распаковка `vmess://` с `parseJSONNumber`/`parseJSONScalar`) → `ConvertJSONConfigsToXray` → `tagProxyOutbounds` → рендер шаблона.
-- Теги: `remark` источника, если уникален, иначе `proxy-N`. Последнее правило (catch-all) указывает на тег первого outbound — предсказуемая нода по умолчанию; балансировщика нет (он менял бы exit-IP на каждом соединении).
+## Subserver subscription output (Xray JSON array, 2026-10-27)
+- `/sub/{subID}` отдаёт **JSON-МАССИВ** полных Xray-core конфигов (`application/json; charset=utf-8`) — по одному object'у на ноду. Ни share-ссылок, ни base64, ни одиночного объекта.
+- Формат — XTLS Subscription Standards (discussion 4877): «A subscription is defined as a JSON array of connection objects».
+- **Почему массив, а не объект**: v2rayNG (`AngConfigManager.parseCustomConfigServer` → `CustomFmt.parse`) импортирует ОДИН профиль на элемент массива и из одиночного конфига берёт только первый proxy-outbound. Одиночный объект с N outbounds → пользователь видит 1 ноду. v2rayN (`V2rayFmt.ResolveCommon`) тоже обходит `JsonArray`. Happ принимает и массив, и объект.
+- Элемент массива = полный клиентский конфиг: `remarks` (имя профиля в клиенте, = тег ноды), `log`, `dns`, `inbounds` (socks 10808 + http 10809 со sniffing), `outbounds` = [нода, `direct`, `block`], `routing` с catch-all на **тег этой же ноды**.
+- Шаблон `internal/subserver/templates/xray_client.json` (`//go:embed` в `service.go`), рендер per-node в `renderXrayConnection`, сборка массива в `buildResponse`.
+- Пайплайн: тело источника → `DetectFormat` → `aggregateFormat` (JSON/Clash → `jsonConfigs`, base64/plain → `items`) → нормализация share-ссылок в `serverConfig` (`parseShareLink`, отдельная распаковка `vmess://` с `parseJSONNumber`/`parseJSONScalar`) → `ConvertJSONConfigsToXray` → `tagProxyOutbounds` → рендер каждого профиля → `json.Marshal([]RawMessage)`.
+- Теги: `remark` источника, если уникален, иначе `proxy-N`. Имя профиля и тег catch-all берутся из одного значения, поэтому правило всегда попадает в свою ноду. Балансировщика нет (он менял бы exit-IP на каждом соединении).
 - Hysteria2 → современный `hysteria` outbound (`settings{version,address,port}` + `streamSettings{method:"hysteria", hysteriaSettings{version,auth,obfs}, security:"tls", tlsSettings}`).
-- **КРИТИЧНО**: `geosite:category-ru`, НЕ `geosite:ru` — последнего нет в `geosite.dat`, Xray отказывается стартовать ("illegal domain rule"). `geoip:ru` валиден. Генерируемые конфиги проверять `xray -test -config`.
-- Ручное переключение нод зависит от клиента: в Xray JSON нет переносимой группы `selector`.
+- **КРИТИЧНО**: `geosite:category-ru`, НЕ `geosite:ru` — последнего нет в `geosite.dat`, Xray отказывается стартовать ("illegal domain rule"). `geoip:ru` валиден. Каждый элемент массива проверять `xray -test -config`.
 - Неподдерживаемые протоколы (например TUIC) пропускаются; если не осталось ни одного — 404 (`ErrNoSubscriptionItems`).
+- Проверено: 12 профилей из живого fetch-источника (`pm.kereal.qzz.io:4433/sfetch/all.yaml`) проходят `xray -test -config` на Xray 26.10.21.
 
 ## Subserver share-link conversion (legacy, Clash → share links)
 - Поддерживаемые схемы: `vmess://`, `trojan://`, `ss://`, `hysteria://`, `hysteria2://`, `hy2://`, `tuic://`
@@ -125,7 +128,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - **Errors**: getsentry/sentry-go
 
 ## Subserver
-- `/sub/{subID}` рендерит полный Xray-core JSON из встроенного шаблона (см. «Subserver subscription output» выше).
+- `/sub/{subID}` рендерит JSON-массив полных Xray-core конфигов (по одному на ноду) из встроенного шаблона (см. «Subserver subscription output» выше).
 - Clash/Mihomo конвертер покрывает VMess, VLESS, Trojan, Hysteria2, TUIC, Shadowsocks SIP002 и питает тот же Xray-путь.
 - Транспортная нормализация сведена в `normaliseTransportNetwork` + `setPacketEncoding`.
 
