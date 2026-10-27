@@ -395,49 +395,12 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 			continue
 		}
 		if strings.HasPrefix(strings.ToLower(link), "vmess://") {
-			payload := link[len("vmess://"):]
-			decoded, decodeErr := base64.StdEncoding.DecodeString(payload)
-			if decodeErr != nil {
-				decoded, decodeErr = base64.RawStdEncoding.DecodeString(payload)
-			}
-			if decodeErr != nil {
-				decoded, decodeErr = base64.RawURLEncoding.DecodeString(payload)
-			}
-			if decodeErr != nil {
-				logger.Warn("Skipping invalid vmess share link", zap.Error(decodeErr))
-				continue
-			}
-			var vmess struct {
-				Address     string          `json:"add"`
-				Port        json.RawMessage `json:"port"`
-				UUID        string          `json:"id"`
-				Aid         json.RawMessage `json:"aid"`
-				Scy         string          `json:"scy"`
-				Network     string          `json:"net"`
-				HeaderType  string          `json:"type"`
-				Host        string          `json:"host"`
-				Path        string          `json:"path"`
-				TLS         string          `json:"tls"`
-				SNI         string          `json:"sni"`
-				Alpn        string          `json:"alpn"`
-				Fingerprint string          `json:"fp"`
-				Remark      string          `json:"ps"`
-			}
-			err := json.Unmarshal(decoded, &vmess)
+			cfg, err := parseVMessLink(link)
 			if err != nil {
-				logger.Warn("Skipping invalid vmess JSON payload", zap.Error(err))
+				logger.Warn("Skipping invalid vmess share link", zap.Error(err))
 				continue
 			}
-			port, err := parseJSONNumber(vmess.Port)
-			if err != nil || port < 1 || port > 65535 {
-				continue
-			}
-			aid, err := parseJSONScalar(vmess.Aid)
-			if err != nil {
-				continue
-			}
-			cfg := map[string]any{"type": "vmess", "address": vmess.Address, "port": port, "uuid": vmess.UUID, "aid": aid, "scy": vmess.Scy, "network": vmess.Network, "headerType": vmess.HeaderType, "host": vmess.Host, "path": vmess.Path, "tls": vmess.TLS, "sni": vmess.SNI, "alpn": vmess.Alpn, "fp": vmess.Fingerprint, "remark": vmess.Remark}
-			raw, err := json.Marshal(cfg)
+			raw, err := json.Marshal(cfg) //nolint:gosec // G117: payload is the client credential this subscription must deliver
 			if err == nil {
 				configs = append(configs, raw)
 			}
@@ -532,12 +495,22 @@ func renderXrayConnection(remarks string, outbound json.RawMessage) (json.RawMes
 	return body, nil
 }
 
-// tagProxyOutbounds guarantees every proxy outbound has a unique, non-empty tag.
-// The upstream remark (usually a node name with its country) is kept when it is
-// unique and not reserved by direct/block, so clients show recognizable names;
-// otherwise the outbound falls back to an available "proxy-N" tag.
+// reservedOutboundTags are the tags renderXrayConnection always assigns to the
+// non-proxy outbounds of every rendered connection. A proxy outbound must never
+// take one of them: routing resolves tags by name, so a node remarked "direct"
+// would silently steal the direct route.
+var reservedOutboundTags = []string{"direct", "block"}
+
+// tagProxyOutbounds guarantees every proxy outbound has a unique, non-empty tag
+// that does not collide with the reserved direct/block tags. The upstream remark
+// (usually a node name with its country) is kept when it is unique, so clients
+// show recognizable names; otherwise the outbound falls back to a free
+// positional "proxy-N" tag.
 func tagProxyOutbounds(outbounds []json.RawMessage) error {
-	used := map[string]struct{}{"direct": {}, "block": {}}
+	used := make(map[string]struct{}, len(outbounds)+len(reservedOutboundTags))
+	for _, reserved := range reservedOutboundTags {
+		used[reserved] = struct{}{}
+	}
 	for i, raw := range outbounds {
 		var outbound map[string]json.RawMessage
 		err := json.Unmarshal(raw, &outbound)
@@ -546,12 +519,7 @@ func tagProxyOutbounds(outbounds []json.RawMessage) error {
 		}
 		tag := outboundTag(raw)
 		if _, dup := used[tag]; tag == "" || dup {
-			for suffix := i + 1; ; suffix++ {
-				tag = fmt.Sprintf("proxy-%d", suffix)
-				if _, taken := used[tag]; !taken {
-					break
-				}
-			}
+			tag = freeProxyTag(i+1, used)
 		}
 		used[tag] = struct{}{}
 		tagJSON, err := json.Marshal(tag)
@@ -566,6 +534,18 @@ func tagProxyOutbounds(outbounds []json.RawMessage) error {
 		outbounds[i] = tagged
 	}
 	return nil
+}
+
+// freeProxyTag returns the first unused "proxy-N" tag at or after start, so a
+// fallback never reuses a tag already claimed by another outbound or reserved
+// by the rendered direct/block outbounds.
+func freeProxyTag(start int, used map[string]struct{}) string {
+	for n := start; ; n++ {
+		candidate := "proxy-" + strconv.Itoa(n)
+		if _, taken := used[candidate]; !taken {
+			return candidate
+		}
+	}
 }
 
 // outboundTag returns the "tag" of an encoded outbound, or "" when absent.
@@ -609,6 +589,78 @@ func parseJSONScalar(raw json.RawMessage) (string, error) {
 		return "", err
 	}
 	return number.String(), nil
+}
+
+// parseVMessLink decodes a vmess:// share link into a serverConfig. It runs the
+// Base64 decode, JSON parse, port validation and address check; any failure is
+// returned as an error so the caller decides how to surface it. Links with an
+// empty vmess.Address are rejected.
+func parseVMessLink(link string) (*serverConfig, error) {
+	trimmed := strings.TrimSpace(link)
+	// Lower-case only the scheme comparison: the Base64 payload is
+	// case-sensitive, and lower-casing it corrupts the credentials and host.
+	if len(trimmed) < len("vmess://") || !strings.EqualFold(trimmed[:len("vmess://")], "vmess://") {
+		return nil, fmt.Errorf("vmess link has no vmess:// scheme")
+	}
+	payload := strings.TrimSpace(trimmed[len("vmess://"):])
+	decoded, decodeErr := base64.StdEncoding.DecodeString(payload)
+	if decodeErr != nil {
+		decoded, decodeErr = base64.RawStdEncoding.DecodeString(payload)
+	}
+	if decodeErr != nil {
+		decoded, decodeErr = base64.RawURLEncoding.DecodeString(payload)
+	}
+	if decodeErr != nil {
+		return nil, fmt.Errorf("vmess payload is not valid base64: %w", decodeErr)
+	}
+	var vmess struct {
+		Address     string          `json:"add"`
+		Port        json.RawMessage `json:"port"`
+		UUID        string          `json:"id"`
+		Aid         json.RawMessage `json:"aid"`
+		Scy         string          `json:"scy"`
+		Network     string          `json:"net"`
+		HeaderType  string          `json:"type"`
+		Host        string          `json:"host"`
+		Path        string          `json:"path"`
+		TLS         string          `json:"tls"`
+		SNI         string          `json:"sni"`
+		Alpn        string          `json:"alpn"`
+		Fingerprint string          `json:"fp"`
+		Remark      string          `json:"ps"`
+	}
+	err := json.Unmarshal(decoded, &vmess)
+	if err != nil {
+		return nil, fmt.Errorf("vmess payload is not valid JSON: %w", err)
+	}
+	if vmess.Address == "" {
+		return nil, fmt.Errorf("vmess link has empty address")
+	}
+	port, err := parseJSONNumber(vmess.Port)
+	if err != nil || port < 1 || port > 65535 {
+		return nil, fmt.Errorf("vmess link has invalid port")
+	}
+	aid, err := parseJSONScalar(vmess.Aid)
+	if err != nil {
+		return nil, fmt.Errorf("vmess link has invalid aid: %w", err)
+	}
+	return &serverConfig{
+		Type:        "vmess",
+		Address:     vmess.Address,
+		Port:        port,
+		UUID:        vmess.UUID,
+		Aid:         aid,
+		Scy:         vmess.Scy,
+		Network:     vmess.Network,
+		HeaderType:  vmess.HeaderType,
+		Host:        vmess.Host,
+		Path:        vmess.Path,
+		TLS:         vmess.TLS,
+		SNI:         vmess.SNI,
+		Alpn:        vmess.Alpn,
+		Fingerprint: vmess.Fingerprint,
+		Remark:      vmess.Remark,
+	}, nil
 }
 
 func parseShareLink(link string) (*serverConfig, error) {
