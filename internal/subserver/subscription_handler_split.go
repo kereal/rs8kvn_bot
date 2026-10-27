@@ -300,7 +300,9 @@ func buildSourceURL(src database.Node, subID string) string {
 	return srcSubURL + subID
 }
 
-// aggregateFormat normalises each supported upstream response into server configs or share links.
+// aggregateFormat normalizes each supported upstream response into server configs
+// or share links appended to agg. JSON/Clash parse failures, invalid Base64, and
+// unrecognized formats contribute no items; errors are not returned.
 func aggregateFormat(agg *aggregatedSources, format Format, body []byte, src database.Node, subID string) {
 	switch format {
 	case FormatJSON:
@@ -332,6 +334,7 @@ func aggregateFormat(agg *aggregatedSources, format Format, body []byte, src dat
 	}
 }
 
+// appendShareLinks appends trimmed, nonempty lines to agg without validating links.
 func appendShareLinks(agg *aggregatedSources, body string) {
 	for line := range strings.SplitSeq(body, "\n") {
 		line = strings.TrimSpace(line)
@@ -383,7 +386,13 @@ func parseExpireToInt(userInfo string) (int64, bool) {
 	return exp, true
 }
 
-// buildResponse converts every supported upstream subscription format to a full Xray-core JSON config.
+// buildResponse returns and caches a JSON array of complete Xray client profiles,
+// one per converted outbound, together with response headers. Invalid or
+// unsupported items are skipped; no usable outbounds yields ErrNoSubscriptionItems.
+// Tagging, rendering, and final JSON encoding errors reach the caller without
+// caching a response. trafficLimit is the total quota in bytes used in the
+// user-info header. A nonempty profileTitleSuffix is appended to the upstream
+// profile-title header, preserving its Base64 encoding when present.
 func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, trafficLimit int64, profileTitleSuffix string) (*SubscriptionResult, error) {
 	userInfo := BuildUserInfoHeader(agg.totalUpload, agg.totalDownload, trafficLimit, agg.firstExpire)
 
@@ -464,8 +473,9 @@ type xrayTemplateData struct {
 // renderXrayConnection renders one complete Xray-core client config for a single
 // proxy outbound: the node, a direct and a block outbound, and routing whose
 // catch-all rule targets that node. It is the array element clients import.
-// The profile name and the default-route tag both come from the outbound tag, so
-// the catch-all rule always targets the node this profile carries.
+// remarks supplies both the profile name and the default-route tag and must
+// match the proxy outbound's tag. JSON encoding and template execution errors
+// are wrapped and returned; invalid rendered JSON also returns an error.
 func renderXrayConnection(remarks string, outbound json.RawMessage) (json.RawMessage, error) {
 	outboundsJSON, err := json.Marshal([]json.RawMessage{
 		outbound,
@@ -505,7 +515,8 @@ var reservedOutboundTags = []string{"direct", "block"}
 // that does not collide with the reserved direct/block tags. The upstream remark
 // (usually a node name with its country) is kept when it is unique, so clients
 // show recognizable names; otherwise the outbound falls back to a free
-// positional "proxy-N" tag.
+// positional "proxy-N" tag. It replaces entries in the supplied slice in place.
+// JSON errors are returned; entries processed before an error remain changed.
 func tagProxyOutbounds(outbounds []json.RawMessage) error {
 	used := make(map[string]struct{}, len(outbounds)+len(reservedOutboundTags))
 	for _, reserved := range reservedOutboundTags {
@@ -548,7 +559,8 @@ func freeProxyTag(start int, used map[string]struct{}) string {
 	}
 }
 
-// outboundTag returns the "tag" of an encoded outbound, or "" when absent.
+// outboundTag returns the "tag" of an encoded outbound, or "" when absent or
+// when the JSON cannot be decoded with a string tag.
 func outboundTag(raw json.RawMessage) string {
 	var probe struct {
 		Tag string `json:"tag"`
@@ -560,6 +572,8 @@ func outboundTag(raw json.RawMessage) string {
 	return probe.Tag
 }
 
+// parseJSONNumber accepts a JSON number or string containing a base-10 integer.
+// Invalid JSON, non-integer values, and values outside the int range return errors.
 func parseJSONNumber(raw json.RawMessage) (int, error) {
 	var number json.Number
 	err := json.Unmarshal(raw, &number)
@@ -574,6 +588,9 @@ func parseJSONNumber(raw json.RawMessage) (int, error) {
 	return strconv.Atoi(text)
 }
 
+// parseJSONScalar returns a JSON string's contents or a number's text.
+// Missing or null values yield an empty string; other JSON kinds and malformed
+// JSON return errors.
 func parseJSONScalar(raw json.RawMessage) (string, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return "", nil
@@ -594,7 +611,9 @@ func parseJSONScalar(raw json.RawMessage) (string, error) {
 // parseVMessLink decodes a vmess:// share link into a serverConfig. It runs the
 // Base64 decode, JSON parse, port validation and address check; any failure is
 // returned as an error so the caller decides how to surface it. Links with an
-// empty vmess.Address are rejected.
+// empty vmess.Address are rejected. Ports must be integers from 1 through 65535;
+// port and aid accept JSON numbers or strings, and missing/null aid is empty.
+// The scheme is case-insensitive; payload fields retain their case.
 func parseVMessLink(link string) (*serverConfig, error) {
 	trimmed := strings.TrimSpace(link)
 	// Lower-case only the scheme comparison: the Base64 payload is
@@ -663,6 +682,12 @@ func parseVMessLink(link string) (*serverConfig, error) {
 	}, nil
 }
 
+// parseShareLink normalizes URL-style VLESS, VMess, Trojan, Shadowsocks, and
+// Hysteria links into a server config; hy2 becomes hysteria2. Base64 VMess
+// payloads are handled separately by parseVMessLink. A host and explicit port
+// from 1 through 65535 are required; URL, host, port, and unsupported-scheme
+// errors reach the caller. Undecodable Shadowsocks user info is retained without
+// an error, and credentials are not validated.
 func parseShareLink(link string) (*serverConfig, error) {
 	u, err := url.Parse(link)
 	if err != nil {
