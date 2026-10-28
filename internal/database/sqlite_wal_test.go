@@ -49,8 +49,10 @@ func TestNewServiceUsesWALAndMultipleConnections(t *testing.T) {
 
 	// Behavioral checks: the pool is configured and usable, WAL is active.
 	// Exact MaxOpenConnections is intentionally not pinned — it is config that
-	// can change without affecting WAL behaviour.
-	assert.Greater(t, sqlDB.Stats().MaxOpenConnections, 0, "pool must allow connections")
+	// can change without affecting WAL behaviour. The lower bound is > 1: the
+	// point of WAL here is concurrent readers over one writer, which a
+	// single-connection pool (the old config) cannot serve.
+	assert.Greater(t, sqlDB.Stats().MaxOpenConnections, 1, "pool must allow multiple concurrent connections")
 	assert.True(t, sqlDB.Stats().OpenConnections <= sqlDB.Stats().MaxOpenConnections, "open connections must never exceed pool limit")
 	require.NoError(t, sqlDB.Ping(), "pool must accept a connection")
 
