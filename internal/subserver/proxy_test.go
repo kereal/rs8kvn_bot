@@ -90,9 +90,11 @@ func TestDetectFormat_Empty(t *testing.T) {
 func TestBase64StdEncode(t *testing.T) {
 	t.Parallel()
 
-	input := []byte("hello world")
-	expected := base64.StdEncoding.EncodeToString(input)
-	assert.Equal(t, expected, base64StdEncode(input))
+	// Fixed golden values: base64StdEncode is a thin wrapper over the stdlib, so
+	// pin known encodings instead of recomputing expectations with the same
+	// function (which would make the test a tautology).
+	assert.Equal(t, "YWI=", base64StdEncode([]byte("ab")))
+	assert.Equal(t, "", base64StdEncode(nil))
 }
 
 func TestAggregateFormat_RawBase64(t *testing.T) {

@@ -29,7 +29,21 @@
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
-      {"type": "field", "domain": ["domain:api.ipify.org", "domain:checkip.amazonaws.com", "domain:ifconfig.me", "domain:ip.mail.ru", "domain:ipv4-internet.yandex.net", "domain:ipv6-internet.yandex.net"], "outboundTag": "block"},
+      {"type": "field", "domain": [
+	"domain:api.ipify.org",
+	"domain:checkip.amazonaws.com",
+	"domain:ifconfig.me",
+	"domain:ip.mail.ru",
+	"domain:ipv4-internet.yandex.net",
+	"domain:ipv6-internet.yandex.net",
+	"domain:2ip.ru",
+	"domain:2ip.io",
+	"domain:whoer.net",
+	"domain:ipinfo.io",
+	"domain:ipapi.co",
+	"domain:ip-api.com",
+	"domain:ipify.org",
+	"domain:ifconfig.co"], "outboundTag": "direct"},
       {"type": "field", "domain": ["geosite:category-ads-all"], "outboundTag": "block"},
       {"type": "field", "ip": ["geoip:private", "geoip:ru"], "outboundTag": "direct"},
       {"type": "field", "domain": ["geosite:category-ru", "geosite:private"], "outboundTag": "direct"},

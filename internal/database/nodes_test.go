@@ -3,7 +3,6 @@ package database
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -160,36 +159,6 @@ func TestGetNodesByPlanName_FilterByName(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, freeNodes, 1)
 	assert.Equal(t, "default", freeNodes[0].Name)
-}
-
-// ==================== Subscription Active Check (model) ====================
-
-func TestSubscription_IsActive_StatusCases(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now()
-	future := now.Add(24 * time.Hour)
-	past := now.Add(-24 * time.Hour)
-
-	tests := []struct {
-		name       string
-		status     string
-		expiryTime *time.Time
-		want       bool
-	}{
-		{"active + future expiry", "active", ptrTime(future), true},
-		{"active + past expiry", "active", ptrTime(past), false},
-		{"active + nil expiry", "active", nil, true},
-		{"revoked + future expiry", "revoked", ptrTime(future), false},
-		{"expired + future expiry", "expired", ptrTime(future), false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sub := &Subscription{Status: tt.status, ExpiresAt: tt.expiryTime}
-			assert.Equal(t, tt.want, sub.IsActive())
-		})
-	}
 }
 
 // ==================== Node Repository Tests ====================

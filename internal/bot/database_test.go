@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestHandleStart_WithDatabase(t *testing.T) {
+func TestDB_GetByTelegramID_RoundTrip(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -31,7 +31,7 @@ func TestHandleStart_WithDatabase(t *testing.T) {
 	assert.Equal(t, "active", got.Status)
 }
 
-func TestHandleStart_NoDatabase(t *testing.T) {
+func TestDB_GetByTelegramID_NotFound(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -43,37 +43,7 @@ func TestHandleStart_NoDatabase(t *testing.T) {
 	assert.Error(t, err, "Expected error for non-existent user")
 }
 
-func TestHandleMySubscription_NoSubscription(t *testing.T) {
-	t.Parallel()
-
-	db, err := testutil.NewTestDatabaseService(t)
-	require.NoError(t, err, "Failed to create test database service")
-
-	ctx := context.Background()
-
-	_, err = db.GetByTelegramID(ctx, 999999999)
-	assert.Error(t, err, "Expected error for non-existent user")
-}
-
-func TestHandleMySubscription_WithSubscription(t *testing.T) {
-	t.Parallel()
-
-	db, err := testutil.NewTestDatabaseService(t)
-	require.NoError(t, err, "Failed to create test database service")
-
-	ctx := context.Background()
-
-	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", testutil.PtrTime(time.Now().Add(24*time.Hour)))
-	require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
-
-	got, err := db.GetByTelegramID(ctx, 123456789)
-	require.NoError(t, err, "GetByTelegramID() error")
-
-	assert.Equal(t, sub.TelegramID, got.TelegramID)
-	assert.Equal(t, "active", got.Status)
-}
-
-func TestHandleMySubscription_ExpiredSubscription(t *testing.T) {
+func TestDB_GetByTelegramID_ExpiredSubscription(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -91,7 +61,7 @@ func TestHandleMySubscription_ExpiredSubscription(t *testing.T) {
 	assert.True(t, time.Now().After(*got.ExpiresAt), "Expected subscription to be expired")
 }
 
-func TestHandleAdminStats(t *testing.T) {
+func TestDB_CountAllSubscriptions(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -109,7 +79,7 @@ func TestHandleAdminStats(t *testing.T) {
 	assert.Equal(t, int64(5), count)
 }
 
-func TestHandleDel_GetSubscriptionByID(t *testing.T) {
+func TestDB_GetByID(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -125,7 +95,7 @@ func TestHandleDel_GetSubscriptionByID(t *testing.T) {
 	assert.Equal(t, sub.ID, got.ID)
 }
 
-func TestHandleDel_DeleteSubscriptionByID(t *testing.T) {
+func TestDB_DeleteSubscriptionByID(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -146,7 +116,7 @@ func TestHandleDel_DeleteSubscriptionByID(t *testing.T) {
 	assert.Error(t, err, "GetByID() should return error after deletion")
 }
 
-func TestHandleDel_SubscriptionNotFound(t *testing.T) {
+func TestDB_GetByID_NotFound(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -158,7 +128,7 @@ func TestHandleDel_SubscriptionNotFound(t *testing.T) {
 	assert.Error(t, err, "GetByID() should return error for non-existent ID")
 }
 
-func TestHandleBroadcast_DatabaseFunction(t *testing.T) {
+func TestDB_GetTelegramIDsBatch(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -182,23 +152,7 @@ func TestHandleBroadcast_DatabaseFunction(t *testing.T) {
 	assert.Len(t, ids, 2)
 }
 
-func TestHandleSend_ByTelegramID(t *testing.T) {
-	t.Parallel()
-
-	db, err := testutil.NewTestDatabaseService(t)
-	require.NoError(t, err, "Failed to create test database service")
-
-	ctx := context.Background()
-
-	sub := testutil.CreateTestSubscription(123456789, "testuser", "active", testutil.PtrTime(time.Now().Add(24*time.Hour)))
-	require.NoError(t, db.CreateSubscription(ctx, sub, ""), "Failed to create subscription")
-
-	got, err := db.GetByTelegramID(ctx, 123456789)
-	require.NoError(t, err, "GetByTelegramID() error")
-	assert.Equal(t, int64(123456789), got.TelegramID)
-}
-
-func TestHandleSend_ByUsername(t *testing.T) {
+func TestDB_GetTelegramIDByUsername(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -214,7 +168,7 @@ func TestHandleSend_ByUsername(t *testing.T) {
 	assert.Equal(t, int64(123456789), id)
 }
 
-func TestHandleSend_UserNotFound(t *testing.T) {
+func TestDB_GetTelegramIDByUsername_NotFound(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)

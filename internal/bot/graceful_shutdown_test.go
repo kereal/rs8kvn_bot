@@ -2,7 +2,6 @@ package bot
 
 import (
 	"context"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -10,7 +9,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,23 +29,21 @@ func TestBot_GracefulShutdown(t *testing.T) {
 	handler.StartCacheCleanup(ctx, 20*time.Millisecond)
 	handler.StartRateLimiterCleanup(ctx, 20*time.Millisecond, 100*time.Millisecond)
 
-	runtime.GC()
-
-	var memStatsBefore runtime.MemStats
-	runtime.ReadMemStats(&memStatsBefore)
-
 	cancel()
-	runtime.Gosched()
-	runtime.GC()
-	runtime.Gosched()
-	runtime.GC()
 
-	var memStatsAfter runtime.MemStats
-	runtime.ReadMemStats(&memStatsAfter)
+	done := make(chan struct{})
 
-	t.Logf("Memory before: %d KB, after: %d KB", memStatsBefore.Alloc/1024, memStatsAfter.Alloc/1024)
+	go func() {
+		handler.WaitForBackgroundGoroutines()
+		close(done)
+	}()
 
-	assert.LessOrEqual(t, memStatsAfter.Alloc, memStatsBefore.Alloc+5*1024*1024, "Memory should not leak significantly")
+	select {
+	case <-done:
+		t.Log("Background goroutines stopped after cancel")
+	case <-time.After(2 * time.Second):
+		t.Error("Shutdown timeout - background goroutines did not stop after cancel")
+	}
 }
 
 func TestServer_GracefulShutdown(t *testing.T) {
@@ -95,58 +91,7 @@ func TestServer_GracefulShutdown(t *testing.T) {
 	}
 }
 
-func TestHeartbeat_StopOnContextCancel(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping in short mode")
-	}
-
-	t.Parallel()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	require.Equal(t, context.Canceled, ctx.Err())
-}
-
-func TestGoroutineLeak(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping in short mode")
-	}
-	// Do NOT use t.Parallel() — runtime.NumGoroutine() is unreliable
-	// when other parallel tests spawn/cleanup goroutines concurrently.
-	// This test must run sequentially to get accurate goroutine counts.
-
-	// Give the runtime time to settle any leftover goroutines from prior tests
-	runtime.GC()
-	runtime.Gosched()
-
-	initialGoroutines := runtime.NumGoroutine()
-
-	var wg sync.WaitGroup
-
-	for range 10 {
-		wg.Go(func() {
-			time.Sleep(2 * time.Millisecond)
-		})
-	}
-
-	wg.Wait()
-
-	// Allow spawned goroutines to fully exit and be reaped
-	runtime.Gosched()
-	runtime.GC()
-	runtime.Gosched()
-
-	finalGoroutines := runtime.NumGoroutine()
-
-	t.Logf("Goroutines: initial=%d, final=%d, delta=%d", initialGoroutines, finalGoroutines, finalGoroutines-initialGoroutines)
-
-	// Tolerance of +15: -race builds have more internal goroutines and
-	// CI runners can have background activity that briefly inflates counts.
-	assert.LessOrEqual(t, finalGoroutines, initialGoroutines+15, "Should not leak goroutines (tolerance for CI/race detector)")
-}
-
-func TestGracefulShutdown_WithActiveUpdates(t *testing.T) {
+func TestGracefulShutdown_StopsAllBackgroundLoops(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
@@ -166,7 +111,19 @@ func TestGracefulShutdown_WithActiveUpdates(t *testing.T) {
 
 	cancel()
 
-	t.Log("Shutdown with active updates completed")
+	done := make(chan struct{})
+
+	go func() {
+		handler.WaitForBackgroundGoroutines()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Log("All background loops stopped after cancel")
+	case <-time.After(2 * time.Second):
+		t.Error("Shutdown timeout - background goroutines leaked after cancel")
+	}
 }
 
 func TestGracefulShutdown_DatabaseClose(t *testing.T) {
@@ -193,11 +150,27 @@ func TestGracefulShutdown_RateLimiterCleanup(t *testing.T) {
 	mockDB := testutil.NewDatabaseService()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "test")
 
+	// Exercise the limiter so a bucket exists before cleanup.
+	if !handler.checkRateLimit(123456) {
+		t.Error("rate limiter should allow first request")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	handler.StartRateLimiterCleanup(ctx, 10*time.Millisecond, 50*time.Millisecond)
-
 	cancel()
 
-	t.Log("Rate limiter cleanup completed gracefully")
+	done := make(chan struct{})
+
+	go func() {
+		handler.WaitForBackgroundGoroutines()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Log("Rate limiter cleanup loop stopped after cancel")
+	case <-time.After(2 * time.Second):
+		t.Error("Shutdown timeout - rate limiter cleanup goroutine leaked")
+	}
 }

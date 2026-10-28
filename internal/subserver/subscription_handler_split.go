@@ -18,15 +18,18 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 )
 
 // serveFromCache attempts to serve a subscription response from cache.
 // On a hit, it revalidates the subscription status in the DB and invalidates
 // stale entries. Returns (result, hit, err): when hit is false, the caller
 // should proceed to a cache-miss path.
-func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID string) (*SubscriptionResult, bool, error) {
-	cacheKey := subID
-
+// cacheKey identifies the format-specific response; subID identifies the DB row.
+// A missing, inactive, or expired subscription returns ErrSubscriptionNotFound
+// with hit true. Other status lookup errors propagate with hit true and retain
+// the cache entry. A valid hit updates last_request on a best-effort basis.
+func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID, cacheKey string) (*SubscriptionResult, bool, error) {
 	cachedBody, cachedHeaders, ok := subSvc.GetCache(cacheKey)
 	if !ok {
 		return nil, false, nil
@@ -386,16 +389,134 @@ func parseExpireToInt(userInfo string) (int64, bool) {
 	return exp, true
 }
 
-// buildResponse returns and caches a JSON array of complete Xray client profiles,
-// one per converted outbound, together with response headers. Invalid or
-// unsupported items are skipped; no usable outbounds yields ErrNoSubscriptionItems.
-// Tagging, rendering, and final JSON encoding errors reach the caller without
-// caching a response. trafficLimit is the total quota in bytes used in the
-// user-info header. A nonempty profileTitleSuffix is appended to the upstream
+// buildResponse returns and caches the rendered subscription and response headers
+// under cacheKey. format selects a sing-box JSON config, a Clash/Mihomo YAML
+// profile, or an Xray JSON profile array for any other value. Invalid or unsupported
+// items are skipped; no usable nodes yields ErrNoSubscriptionItems. All sing-box
+// and Clash rendering errors also become ErrNoSubscriptionItems; other Xray
+// rendering errors propagate. Errors do not cache a response.
+// trafficLimit is the total quota in bytes used in the user-info header.
+// A nonempty profileTitleSuffix is appended to the upstream
 // profile-title header, preserving its Base64 encoding when present.
-func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, trafficLimit int64, profileTitleSuffix string) (*SubscriptionResult, error) {
+func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, trafficLimit int64, profileTitleSuffix string, format OutputFormat) (*SubscriptionResult, error) {
 	userInfo := BuildUserInfoHeader(agg.totalUpload, agg.totalDownload, trafficLimit, agg.firstExpire)
 
+	configs := aggregateConfigs(agg)
+	if len(configs) == 0 {
+		metrics.SubserverNoItemsTotal.Inc()
+		return nil, ErrNoSubscriptionItems
+	}
+
+	var responseBody []byte
+	var err error
+
+	switch format {
+	case OutputSingbox:
+		responseBody, err = renderSingboxSubscription(configs)
+		if err != nil {
+			metrics.SubserverNoItemsTotal.Inc()
+			return nil, ErrNoSubscriptionItems
+		}
+	case OutputClash:
+		responseBody, err = renderClashSubscription(configs)
+		if err != nil {
+			metrics.SubserverNoItemsTotal.Inc()
+			return nil, ErrNoSubscriptionItems
+		}
+	default:
+		responseBody, err = renderXraySubscription(configs)
+		if err != nil {
+			if errors.Is(err, errNoUsableOutbounds) {
+				metrics.SubserverNoItemsTotal.Inc()
+				return nil, ErrNoSubscriptionItems
+			}
+			return nil, err
+		}
+	}
+
+	cacheHeaders := ResponseHeaders(agg.firstSourceHeaders, format.ContentType(), userInfo)
+	ApplyProfileTitleSuffix(cacheHeaders, profileTitleSuffix)
+	subSvc.SetCache(cacheKey, responseBody, cacheHeaders)
+	return &SubscriptionResult{Body: responseBody, Headers: cacheHeaders}, nil
+}
+
+// errNoUsableOutbounds marks the Xray path's "no valid configs" outcome so the
+// caller can surface it as ErrNoSubscriptionItems without conflating it with
+// tagging or rendering failures.
+var errNoUsableOutbounds = errors.New("no usable outbounds")
+
+// renderXraySubscription converts configs into the XTLS-standard JSON array of
+// self-contained client profiles (one per node) — the historical output shape.
+// Invalid or unsupported configs are skipped; none remaining yields
+// errNoUsableOutbounds. Tagging, template, and JSON encoding errors propagate.
+func renderXraySubscription(configs []json.RawMessage) ([]byte, error) {
+	outbounds, err := ConvertJSONConfigsToXray(configs)
+	if err != nil {
+		return nil, errNoUsableOutbounds
+	}
+	err = tagProxyOutbounds(outbounds)
+	if err != nil {
+		return nil, err
+	}
+	// XTLS Subscription Standards define a subscription as a JSON array of
+	// complete connection objects. Each element carries exactly one proxy
+	// outbound so clients (v2rayNG parses one profile per array element) list
+	// every node as a selectable profile instead of collapsing them into one.
+	connections := make([]json.RawMessage, 0, len(outbounds))
+	for _, outbound := range outbounds {
+		connection, renderErr := renderXrayConnection(outboundTag(outbound), outbound)
+		if renderErr != nil {
+			return nil, renderErr
+		}
+		connections = append(connections, connection)
+	}
+	responseBody, err := json.Marshal(connections)
+	if err != nil {
+		return nil, fmt.Errorf("marshal Xray subscription: %w", err)
+	}
+	return responseBody, nil
+}
+
+// renderSingboxSubscription converts configs into a single sing-box config whose
+// outbounds array holds one server outbound per node plus a "proxy" selector group.
+// Invalid or unsupported configs are skipped; none remaining yields
+// ErrNoSubscriptionItems. JSON encoding errors are wrapped and returned.
+func renderSingboxSubscription(configs []json.RawMessage) ([]byte, error) {
+	outbounds, err := ConvertJSONConfigsToSingbox(configs)
+	if err != nil {
+		return nil, ErrNoSubscriptionItems
+	}
+	tagSingboxOutbounds(outbounds)
+	doc := BuildSingboxConfig(outbounds)
+	responseBody, err := json.Marshal(doc)
+	if err != nil {
+		return nil, fmt.Errorf("marshal sing-box subscription: %w", err)
+	}
+	return responseBody, nil
+}
+
+// renderClashSubscription converts configs into a complete Clash/Mihomo YAML profile.
+// Invalid or unsupported configs are skipped; none remaining yields
+// ErrNoSubscriptionItems. YAML encoding errors are wrapped and returned.
+func renderClashSubscription(configs []json.RawMessage) ([]byte, error) {
+	proxies, err := ConvertJSONConfigsToClash(configs)
+	if err != nil {
+		return nil, ErrNoSubscriptionItems
+	}
+	tagClashProxies(proxies)
+	doc := buildClashConfig(proxies)
+	responseBody, err := yaml.Marshal(doc)
+	if err != nil {
+		return nil, fmt.Errorf("marshal clash subscription: %w", err)
+	}
+	return responseBody, nil
+}
+
+// aggregateConfigs normalizes every aggregated source (raw JSON configs and share
+// links) into the canonical []json.RawMessage list consumed by all renderers.
+// Raw JSON configs are retained unchanged. Empty, invalid, or unsupported share
+// links and links that cannot be encoded as JSON are skipped.
+func aggregateConfigs(agg aggregatedSources) []json.RawMessage {
 	configs := make([]json.RawMessage, 0, len(agg.jsonConfigs)+len(agg.items))
 	configs = append(configs, agg.jsonConfigs...)
 	for _, item := range agg.items {
@@ -426,40 +547,7 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 			configs = append(configs, raw)
 		}
 	}
-	if len(configs) == 0 {
-		metrics.SubserverNoItemsTotal.Inc()
-		return nil, ErrNoSubscriptionItems
-	}
-
-	outbounds, err := ConvertJSONConfigsToXray(configs)
-	if err != nil {
-		metrics.SubserverNoItemsTotal.Inc()
-		return nil, ErrNoSubscriptionItems
-	}
-	err = tagProxyOutbounds(outbounds)
-	if err != nil {
-		return nil, err
-	}
-	// XTLS Subscription Standards define a subscription as a JSON array of
-	// complete connection objects. Each element carries exactly one proxy
-	// outbound so clients (v2rayNG parses one profile per array element) list
-	// every node as a selectable profile instead of collapsing them into one.
-	connections := make([]json.RawMessage, 0, len(outbounds))
-	for _, outbound := range outbounds {
-		connection, renderErr := renderXrayConnection(outboundTag(outbound), outbound)
-		if renderErr != nil {
-			return nil, renderErr
-		}
-		connections = append(connections, connection)
-	}
-	responseBody, err := json.Marshal(connections)
-	if err != nil {
-		return nil, fmt.Errorf("marshal Xray subscription: %w", err)
-	}
-	cacheHeaders := ResponseHeaders(agg.firstSourceHeaders, "application/json; charset=utf-8", userInfo)
-	ApplyProfileTitleSuffix(cacheHeaders, profileTitleSuffix)
-	subSvc.SetCache(cacheKey, responseBody, cacheHeaders)
-	return &SubscriptionResult{Body: responseBody, Headers: cacheHeaders}, nil
+	return configs
 }
 
 // xrayTemplateData holds the values injected into templates/xray_client.json.
