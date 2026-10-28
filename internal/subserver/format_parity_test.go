@@ -126,6 +126,7 @@ func TestHandleSubscription_SingboxParity_MultiNode(t *testing.T) {
 	// private, geoip-ru, geosite-ru/private), final → selector.
 	route := doc.Route
 	require.Equal(t, "proxy", route["final"])
+	require.Equal(t, "ru-dns", route["default_domain_resolver"], "node domains resolve direct (core requirement with 2+ DNS servers since 1.14)")
 	rsAny, ok := route["rule_set"].([]any)
 	require.True(t, ok)
 	require.Len(t, rsAny, 4, "ads-all, geosite-ru, geosite-private, geoip-ru")
@@ -139,15 +140,15 @@ func TestHandleSubscription_SingboxParity_MultiNode(t *testing.T) {
 	ruGeosite, _ := rulesAny[5].(map[string]any)
 	require.Equal(t, []any{"geosite-ru", "geosite-private"}, ruGeosite["rule_set"])
 
-	// Modern DNS: URI-form addresses; ru/private rules via rule_set.
+	// Modern DNS: typed type/server; ru/private rules via rule_set.
 	dnsServersAny, ok := doc.DNS["servers"].([]any)
 	require.True(t, ok)
 	addresses := make([]string, 0, len(dnsServersAny))
 	for _, s := range dnsServersAny {
-		addresses = append(addresses, s.(map[string]any)["address"].(string))
+		addresses = append(addresses, s.(map[string]any)["server"].(string))
 	}
-	require.Contains(t, addresses, "https://1.1.1.1/dns-query")
-	require.Contains(t, addresses, "udp://77.88.8.8")
+	require.Contains(t, addresses, "1.1.1.1")
+	require.Contains(t, addresses, "77.88.8.8")
 
 	require.Len(t, doc.Inbounds, 1)
 	require.Equal(t, "mixed", doc.Inbounds[0]["type"])

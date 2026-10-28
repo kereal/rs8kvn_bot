@@ -33,6 +33,7 @@ func TestDetectOutputFormat(t *testing.T) {
 		{"singbox UA", "singbox/1.0.0", "", OutputSingbox},
 		{"clash UA", "clash-verge/v1.3.8", "", OutputClash},
 		{"mihomo UA", "Mihomo/1.18.0", "", OutputClash},
+		{"stash UA", "Stash/2.4.5", "", OutputClash},
 		{"explicit singbox wins over any UA", "clash-verge/v1.3.8", "singbox", OutputSingbox},
 		{"explicit clash wins over sing-box UA", "sing-box/1.10.0", "clash", OutputClash},
 		{"explicit format is case-insensitive", "v2rayNG/1.8.5", "SING-BOX", OutputSingbox},
@@ -131,10 +132,10 @@ func TestBuildSingboxConfig_ParityWithXray(t *testing.T) {
 	require.True(t, ok)
 	addresses := make([]string, 0, len(dnsServers))
 	for _, s := range dnsServers {
-		addresses = append(addresses, s["address"].(string))
+		addresses = append(addresses, s["server"].(string))
 	}
-	require.Contains(t, addresses, "https://1.1.1.1/dns-query")
-	require.Contains(t, addresses, "udp://77.88.8.8", "ru-dns must use modern URI form (removed bare IP in 1.14)")
+	require.Contains(t, addresses, "1.1.1.1", "proxy-dns must be the typed https server")
+	require.Contains(t, addresses, "77.88.8.8", "ru-dns must be the typed udp server")
 
 	// ru/private domains steer to ru-dns via rule_set (modern replacement of geosite field).
 	dnsRules, ok := dns["rules"].([]map[string]any)
@@ -169,6 +170,7 @@ func TestBuildSingboxConfig_ParityWithXray(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "proxy", route["final"])
 	require.Equal(t, true, route["auto_detect_interface"])
+	require.Equal(t, "ru-dns", route["default_domain_resolver"], "node domains resolve direct, required since 1.14 with 2+ DNS servers")
 
 	// rule_set definitions are loaded (4 sets covering ads, ru, private, ru-ips).
 	rsDefs, ok := route["rule_set"].([]map[string]any)
