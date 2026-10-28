@@ -423,7 +423,7 @@ func BuildSingboxConfig(outbounds []map[string]any) map[string]any {
 // remark is kept when unique; otherwise a free positional "proxy-N" tag is used.
 // It mutates the supplied outbounds in place.
 func tagSingboxOutbounds(outbounds []map[string]any) {
-	used := map[string]struct{}{"proxy": {}}
+	used := map[string]struct{}{"proxy": {}, "direct": {}}
 	for i := range outbounds {
 		tag, _ := outbounds[i]["tag"].(string)
 		if tag == "" {
