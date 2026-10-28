@@ -277,8 +277,15 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 // а также синхронизацию и истечение подписок. Возвращает WaitGroup для ожидания
 // завершения при штатном выключении.
 func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subService *service.SubscriptionService, syncSvc *service.SyncService, orderSvc *service.OrderService, dbService *database.Service, cfg *config.Config) *sync.WaitGroup {
+	workers := 9
+	if !cfg.NotificationsEnabled {
+		// The reminder and traffic workers are the only ones that message
+		// users; everything else keeps running.
+		workers -= 2
+	}
+
 	var wg sync.WaitGroup
-	wg.Add(9)
+	wg.Add(workers)
 
 	// The services are wired before any background goroutine starts. Reuse the
 	// same SyncService instance that was injected into payment/subscription
@@ -385,21 +392,29 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 		expireWorker.Run(ctx)
 	}()
 
-	go func() {
-		defer recoverAndReport("Subscription reminder worker")
-		defer wg.Done()
+	if cfg.NotificationsEnabled {
+		go func() {
+			defer recoverAndReport("Subscription reminder worker")
+			defer wg.Done()
 
-		reminderWorker := scheduler.NewSubscriptionReminderWorker(dbService, subService)
-		reminderWorker.Run(ctx)
-	}()
+			reminderWorker := scheduler.NewSubscriptionReminderWorker(dbService, subService)
+			reminderWorker.Run(ctx)
+		}()
+	}
 
-	go func() {
-		defer recoverAndReport("Subscription traffic worker")
-		defer wg.Done()
+	if cfg.NotificationsEnabled {
+		go func() {
+			defer recoverAndReport("Subscription traffic worker")
+			defer wg.Done()
 
-		trafficWorker := scheduler.NewSubscriptionTrafficWorker(dbService, subService)
-		trafficWorker.Run(ctx)
-	}()
+			trafficWorker := scheduler.NewSubscriptionTrafficWorker(dbService, subService)
+			trafficWorker.Run(ctx)
+		}()
+	}
+
+	if !cfg.NotificationsEnabled {
+		logger.Warn("User notifications disabled by config (NOTIFICATIONS_ENABLED=false); reminder and traffic workers not started")
+	}
 
 	return &wg
 }

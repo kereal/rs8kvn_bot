@@ -100,8 +100,8 @@ func TestConstants_Donate(t *testing.T) {
 	assert.Equal(t, "", DonateCardNumber)
 	assert.Equal(t, "", DonateURL)
 	assert.Equal(t, "", ContactUsername)
-	assert.Equal(t, "", ContactUsername)
 	assert.True(t, DefaultDonateEnabled, "DefaultDonateEnabled should be true to preserve historical behaviour")
+	assert.True(t, DefaultNotificationsEnabled, "DefaultNotificationsEnabled should be true to preserve production behaviour")
 }
 
 func TestConstants_Backup(t *testing.T) {

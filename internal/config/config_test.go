@@ -60,6 +60,26 @@ func TestLoad_DefaultValues(t *testing.T) {
 	assert.Equal(t, "123456789:ABCdefGHIjklMNOpqrsTUVwxyz", cfg.TelegramBotToken, "TelegramBotToken")
 	assert.Equal(t, int64(123456), cfg.TelegramAdminID, "TelegramAdminID")
 	assert.Empty(t, cfg.SubServerAccessLogPath, "SubServerAccessLogPath")
+	assert.True(t, cfg.NotificationsEnabled, "NotificationsEnabled should default to true")
+}
+
+func TestLoad_NotificationsDisabled(t *testing.T) {
+	require.NoError(t, os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"))
+	require.NoError(t, os.Setenv("TELEGRAM_ADMIN_ID", "123456"))
+	require.NoError(t, os.Setenv("LOG_LEVEL", "info"))
+	require.NoError(t, os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/"))
+	require.NoError(t, os.Setenv("NOTIFICATIONS_ENABLED", "false"))
+
+	defer func() {
+		os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		os.Unsetenv("TELEGRAM_ADMIN_ID")
+		os.Unsetenv("GLOBAL_SUB_URL")
+		os.Unsetenv("NOTIFICATIONS_ENABLED")
+	}()
+
+	cfg, err := Load()
+	require.NoError(t, err, "Load() error")
+	assert.False(t, cfg.NotificationsEnabled, "NOTIFICATIONS_ENABLED=false must disable notification workers")
 }
 
 func TestLoad_CustomValues(t *testing.T) {
