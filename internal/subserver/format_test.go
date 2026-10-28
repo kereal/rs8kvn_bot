@@ -369,6 +369,62 @@ func TestRenderSingboxSubscriptionReservedTags(t *testing.T) {
 
 // ==================== Clash serializer ====================
 
+func TestBuildClashProxyXHTTP(t *testing.T) {
+	t.Parallel()
+
+	for _, protocol := range []string{"vless", "vmess", "trojan"} {
+		for _, network := range []string{"xhttp", "splithttp"} {
+			for _, fields := range []struct {
+				name string
+				path string
+				host string
+			}{
+				{name: "both", path: "/x", host: "cdn.example"},
+				{name: "path only", path: "/x"},
+				{name: "host only", host: "cdn.example"},
+				{name: "empty"},
+			} {
+				t.Run(protocol+"/"+network+"/"+fields.name, func(t *testing.T) {
+					proxy, err := buildClashProxy(&serverConfig{
+						Type: protocol, Network: network, Path: fields.path, Host: fields.host,
+					})
+					require.NoError(t, err)
+					require.Equal(t, "xhttp", proxy["network"])
+					opts, ok := proxy["xhttp-opts"].(map[string]any)
+					require.True(t, ok)
+					if fields.path == "" {
+						assert.NotContains(t, opts, "path")
+					} else {
+						assert.Equal(t, fields.path, opts["path"])
+					}
+					if fields.host == "" {
+						assert.NotContains(t, opts, "host")
+					} else {
+						assert.Equal(t, fields.host, opts["host"])
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestBuildClashProxyOtherNetworks(t *testing.T) {
+	t.Parallel()
+
+	for _, network := range []string{"h2", "http", "tcp", "raw"} {
+		t.Run(network, func(t *testing.T) {
+			proxy, err := buildClashProxy(&serverConfig{
+				Type: "vless", Network: network, Path: "/x", Host: "cdn.example",
+			})
+			require.NoError(t, err)
+			assert.Equal(t, map[string]any{
+				"name": "proxy-", "type": "vless", "server": "", "port": 0, "udp": true,
+				"network": network,
+			}, proxy)
+		})
+	}
+}
+
 func TestConvertJSONConfigsToClash(t *testing.T) {
 	t.Parallel()
 
