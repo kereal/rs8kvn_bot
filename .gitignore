@@ -14,6 +14,7 @@ data/
 logs/
 
 # Binary
+/bin/
 /tgvpn_bot
 /rs8kvn_bot
 /bot
