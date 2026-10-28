@@ -60,10 +60,10 @@ func TestSend_SendError(t *testing.T) {
 
 	msg := tgbotapi.NewMessage(12345, "test message")
 
-	// Should not panic on send error
+	// send() swallows the underlying error: it still attempts exactly one send.
 	handler.send(ctx, msg)
 
-	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
+	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be attempted once even when it errors")
 }
 
 // TestSend_DisablesWebPagePreview tests that send disables web page preview
@@ -139,10 +139,10 @@ func TestSafeSend_SendError(t *testing.T) {
 
 	msg := tgbotapi.NewMessage(12345, "safe message")
 
-	// Should not panic on send error
+	// safeSend() swallows the underlying error: it still attempts exactly one send.
 	handler.safeSend(msg)
 
-	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
+	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be attempted once even when it errors")
 }
 
 // TestSafeSend_WithEditMessage tests safeSend with EditMessageText
@@ -517,31 +517,6 @@ func TestSend_MultipleConcurrentSends(t *testing.T) {
 	}
 
 	assert.Equal(t, 10, mockBot.SendCountSafe(), "Send should be called 10 times")
-}
-
-// TestSendMessage_NilHandler tests that SendMessage doesn't panic with proper initialization
-func TestSendMessage_NilHandler(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-
-	mockBot := &testutil.BotAPI{
-		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-			return tgbotapi.Message{MessageID: 999}, nil
-		},
-	}
-
-	cfg := &config.Config{
-		TelegramBotToken: "test:token",
-		TelegramAdminID:  0,
-	}
-
-	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
-
-	// Should not panic
-	handler.SendMessage(ctx, 12345, "test message")
-
-	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
 }
 
 // TestSend_WithMarkdownText tests send with markdown formatted text

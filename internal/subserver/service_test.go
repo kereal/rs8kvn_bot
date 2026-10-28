@@ -13,41 +13,32 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/config"
 )
 
-func TestService_CacheThroughService(t *testing.T) {
+// TestService_CacheIntegration confirms the Service cache adapter routes Set,
+// Get and Invalidate to the underlying cache in one pass instead of three
+// per-method clones of the cache_test.go coverage. The behavior itself (TTL,
+// isolation, copies) is exercised directly in cache_test.go.
+func TestService_CacheIntegration(t *testing.T) {
 	t.Parallel()
 
 	svc := NewService(config.SubServerCacheTTL)
 	defer svc.Stop()
 
+	// Set then Get round-trips through the Service.
 	svc.SetCache("key1", []byte("hello"), nil)
-	body, _, ok := svc.GetCache("key1")
-	assert.True(t, ok)
-	assert.Equal(t, []byte("hello"), body)
-}
+	body, headers, ok := svc.GetCache("key1")
+	require.True(t, ok)
+	require.Equal(t, []byte("hello"), body)
+	require.Nil(t, headers)
 
-func TestService_CacheMiss(t *testing.T) {
-	t.Parallel()
+	// An unknown key is a miss.
+	missBody, _, miss := svc.GetCache("nonexistent")
+	require.False(t, miss)
+	require.Nil(t, missBody)
 
-	svc := NewService(config.SubServerCacheTTL)
-	defer svc.Stop()
-
-	body, _, ok := svc.GetCache("nonexistent")
-	assert.False(t, ok)
-	assert.Nil(t, body)
-}
-
-func TestService_InvalidateCache(t *testing.T) {
-	t.Parallel()
-
-	svc := NewService(config.SubServerCacheTTL)
-	defer svc.Stop()
-
-	svc.SetCache("key1", []byte("data"), nil)
+	// Invalidate removes the entry so the next Get misses again.
 	svc.InvalidateCache("key1")
-
-	body, _, ok := svc.GetCache("key1")
-	assert.False(t, ok)
-	assert.Nil(t, body)
+	_, _, gone := svc.GetCache("key1")
+	require.False(t, gone)
 }
 
 func TestAccessLogger_CloseWithContextCanceled(t *testing.T) {

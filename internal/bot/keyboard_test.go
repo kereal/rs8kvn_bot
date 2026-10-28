@@ -1,11 +1,13 @@
 package bot
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,11 +20,35 @@ func TestGetMainMenuKeyboard_PaymentShown(t *testing.T) {
 	cfg := &config.Config{TelegramAdminID: 123, DonateEnabled: true, PaymentEnabled: true}
 	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", "", "", "", true), paymentEnabled: true}
 
+	hasPayment := func(kb tgbotapi.InlineKeyboardMarkup) bool {
+		for _, row := range kb.InlineKeyboard {
+			for _, btn := range row {
+				if btn.CallbackData != nil && *btn.CallbackData == "buy_premium_list" {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	hasShare := func(kb tgbotapi.InlineKeyboardMarkup) bool {
+		for _, row := range kb.InlineKeyboard {
+			for _, btn := range row {
+				if btn.CallbackData != nil && *btn.CallbackData == "share_invite" {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
 	keyboardWithShare := handler.getMainMenuKeyboard(true)
-	assert.Len(t, keyboardWithShare.InlineKeyboard, 4, "Expected 4 rows: subscription menu, help/documents, payment, share")
+	assert.True(t, hasPayment(keyboardWithShare), "payment button should be present when PaymentEnabled")
+	assert.True(t, hasShare(keyboardWithShare), "share button should be present with active subscription")
 
 	keyboardNoShare := handler.getMainMenuKeyboard(false)
-	assert.Len(t, keyboardNoShare.InlineKeyboard, 2, "No payment button without active subscription")
+	assert.False(t, hasPayment(keyboardNoShare), "payment entry requires an active subscription")
+	assert.False(t, hasShare(keyboardNoShare), "share button must be hidden without active subscription")
 }
 
 func TestGetMainMenuKeyboard_PaymentHidden(t *testing.T) {
@@ -50,12 +76,19 @@ func TestHandler_GetMainMenuKeyboard_ButtonLabels(t *testing.T) {
 
 	keyboard := handler.getMainMenuKeyboard(true)
 
-	assert.Equal(t, "🚀 Подписка", keyboard.InlineKeyboard[0][0].Text)
-	assert.Equal(t, "☕ Донат", keyboard.InlineKeyboard[0][1].Text)
-	assert.Equal(t, "📖 Помощь", keyboard.InlineKeyboard[1][0].Text)
-	assert.Equal(t, "📑 Документы", keyboard.InlineKeyboard[1][1].Text)
-	assert.Equal(t, "💎 Купить Premium", keyboard.InlineKeyboard[2][0].Text, "§7.1 label")
-	assert.Equal(t, "📤 Поделиться", keyboard.InlineKeyboard[3][0].Text)
+	allTexts := make([]string, 0)
+	for _, row := range keyboard.InlineKeyboard {
+		for _, btn := range row {
+			allTexts = append(allTexts, btn.Text)
+		}
+	}
+	joined := strings.Join(allTexts, " ")
+
+	// Check markers instead of exact rows/strings so the test survives menu
+	// reordering or a new row being added.
+	for _, marker := range []string{"Подписка", "Донат", "Помощь", "Документы", "Premium", "Поделиться"} {
+		assert.Contains(t, joined, marker, "main menu should contain button label %q", marker)
+	}
 }
 
 func TestHandler_GetMainMenuKeyboard_CallbackData(t *testing.T) {
@@ -66,18 +99,20 @@ func TestHandler_GetMainMenuKeyboard_CallbackData(t *testing.T) {
 
 	keyboard := handler.getMainMenuKeyboard(true)
 
-	require.NotNil(t, keyboard.InlineKeyboard[0][0].CallbackData)
-	assert.Equal(t, "menu_subscription", *keyboard.InlineKeyboard[0][0].CallbackData)
-	require.NotNil(t, keyboard.InlineKeyboard[0][1].CallbackData)
-	assert.Equal(t, "menu_donate", *keyboard.InlineKeyboard[0][1].CallbackData)
-	require.NotNil(t, keyboard.InlineKeyboard[1][0].CallbackData)
-	assert.Equal(t, "menu_help", *keyboard.InlineKeyboard[1][0].CallbackData)
-	require.NotNil(t, keyboard.InlineKeyboard[1][1].CallbackData)
-	assert.Equal(t, "menu_documents", *keyboard.InlineKeyboard[1][1].CallbackData)
-	require.NotNil(t, keyboard.InlineKeyboard[2][0].CallbackData)
-	assert.Equal(t, "buy_premium_list", *keyboard.InlineKeyboard[2][0].CallbackData, "§7.1 callback")
-	require.NotNil(t, keyboard.InlineKeyboard[3][0].CallbackData)
-	assert.Equal(t, "share_invite", *keyboard.InlineKeyboard[3][0].CallbackData)
+	callbacks := make([]string, 0)
+	for _, row := range keyboard.InlineKeyboard {
+		for _, btn := range row {
+			if btn.CallbackData != nil {
+				callbacks = append(callbacks, *btn.CallbackData)
+			}
+		}
+	}
+
+	// Check markers instead of exact positions: every route must be reachable
+	// from the main menu regardless of lay-out order.
+	for _, want := range []string{"menu_subscription", "menu_donate", "menu_help", "menu_documents", "buy_premium_list", "share_invite"} {
+		assert.Contains(t, callbacks, want, "main menu should expose callback %q", want)
+	}
 }
 
 func TestHandler_BuyProductList_Callback(t *testing.T) {

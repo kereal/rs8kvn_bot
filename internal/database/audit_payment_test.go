@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -42,7 +43,7 @@ func TestConfirmOrderPaidCAS_WritesAuditEventInTx(t *testing.T) {
 	e := events[0]
 	assert.Equal(t, EntityOrder, e.EntityType)
 	require.NotNil(t, e.EntityID)
-	assert.Equal(t, "1", *e.EntityID) // first order in the fresh DB
+	assert.Equal(t, strconv.FormatUint(uint64(order.ID), 10), *e.EntityID)
 	assert.Equal(t, ActorPaymentProvider, e.ActorType)
 
 	details := map[string]any{}

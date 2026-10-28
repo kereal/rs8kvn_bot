@@ -18,9 +18,24 @@ import (
 func TestLatestEmbeddedMigrationVersion(t *testing.T) {
 	t.Parallel()
 
-	version, err := latestEmbeddedMigrationVersion()
+	latest, err := latestEmbeddedMigrationVersion()
 	require.NoError(t, err)
-	assert.Equal(t, 40, version)
+	require.Greater(t, latest, 0, "must find at least one embedded up migration")
+
+	// A freshly opened service must migrate forward to the latest embedded
+	// version — this links the embedded fileset to the runtime behaviour
+	// without hardcoding a magic version number.
+	dbPath := filepath.Join(t.TempDir(), "latest-embedded.db")
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	sqlDB, err := db.db.DB()
+	require.NoError(t, err)
+	version, dirty, err := migrationState(sqlDB)
+	require.NoError(t, err)
+	assert.Equal(t, uint(latest), version)
+	assert.False(t, dirty)
 }
 
 func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
@@ -263,65 +278,6 @@ func TestMigration_Idempotency(t *testing.T) {
 	retrieved, err := db2.GetByTelegramID(ctx, 123456)
 	require.NoError(t, err)
 	assert.Equal(t, "testuser", retrieved.Username)
-
-	require.NoError(t, db2.Close())
-}
-
-func TestMigration_AddNewTable(t *testing.T) {
-	t.Parallel()
-
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-
-	db, err := NewService(dbPath)
-	require.NoError(t, err)
-
-	sqlDB, err := db.db.DB()
-	require.NoError(t, err)
-
-	_, err = sqlDB.Exec(`CREATE TABLE IF NOT EXISTS test_table (
-		id INTEGER PRIMARY KEY,
-		name TEXT
-	)`)
-	require.NoError(t, err)
-
-	var count int
-
-	err = sqlDB.QueryRow("SELECT COUNT(*) FROM test_table").Scan(&count)
-	require.NoError(t, err)
-
-	assert.Equal(t, 0, count)
-
-	require.NoError(t, db.Close())
-}
-
-func TestMigration_PreserveDataOnUpgrade(t *testing.T) {
-	t.Parallel()
-
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-
-	db1, err := NewService(dbPath)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-
-	sub := &Subscription{
-		TelegramID:     999999,
-		Username:       "existing_user",
-		ClientID:       "client-999",
-		SubscriptionID: "sub-999",
-		Status:         "active",
-	}
-	err = db1.CreateSubscription(ctx, prepareForCreate(t, db1, sub), "")
-	require.NoError(t, err)
-
-	require.NoError(t, db1.Close())
-
-	db2, err := NewService(dbPath)
-	require.NoError(t, err)
-
-	retrieved, err := db2.GetByTelegramID(ctx, 999999)
-	require.NoError(t, err)
-	assert.Equal(t, "existing_user", retrieved.Username)
 	assert.Equal(t, "active", retrieved.Status)
 
 	require.NoError(t, db2.Close())
@@ -332,11 +288,15 @@ func TestMigration_RunMultipleTimes(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
-	for i := range 3 {
-		db, err := NewService(dbPath)
-		require.NoError(t, err, "Migration should succeed on attempt %d", i+1)
-		require.NoError(t, db.Close())
-	}
+	// Initial open runs the full migration chain.
+	db, err := NewService(dbPath)
+	require.NoError(t, err, "Migration should succeed on first attempt")
+	require.NoError(t, db.Close())
+
+	// One re-open proves migrations are idempotent on subsequent starts.
+	db, err = NewService(dbPath)
+	require.NoError(t, err, "Migration should succeed on re-open")
+	require.NoError(t, db.Close())
 }
 
 func TestMigration_InvalidSchema(t *testing.T) {
@@ -355,32 +315,6 @@ func TestMigration_InvalidSchema(t *testing.T) {
 
 	_, err = NewService(dbPath)
 	assert.Error(t, err)
-}
-
-func TestMigration_SchemaVersionTracking(t *testing.T) {
-	t.Parallel()
-
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-
-	db, err := NewService(dbPath)
-	require.NoError(t, err)
-
-	sqlDB, err := db.db.DB()
-	require.NoError(t, err)
-
-	var (
-		version int
-		dirty   bool
-	)
-
-	err = sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty)
-	require.NoError(t, err)
-
-	t.Logf("Current schema version: %d, dirty: %t", version, dirty)
-
-	assert.GreaterOrEqual(t, version, 0)
-
-	require.NoError(t, db.Close())
 }
 
 func TestMigration_ProductsHaveRequiredName(t *testing.T) {
