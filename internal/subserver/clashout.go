@@ -88,8 +88,8 @@ func baseClashNode(cfg *serverConfig, proxyType string, name string) map[string]
 }
 
 // applyClashNetwork sets transport fields in p. Path is the WebSocket path or
-// gRPC service name; Host supplies the WebSocket Host header. Unknown networks
-// leave p unchanged.
+// gRPC service name, or XHTTP path; Host supplies the WebSocket Host header or
+// XHTTP host. Unknown networks leave p unchanged.
 func applyClashNetwork(p map[string]any, cfg *serverConfig) {
 	switch cfg.Network {
 	case "ws":
@@ -109,7 +109,17 @@ func applyClashNetwork(p map[string]any, cfg *serverConfig) {
 		}
 		p["network"] = "grpc"
 		p["grpc-opts"] = g
-	case "xhttp", "h2", "http", "splithttp", "tcp", "raw":
+	case "xhttp", "splithttp":
+		x := map[string]any{}
+		if cfg.Path != "" {
+			x["path"] = cfg.Path
+		}
+		if cfg.Host != "" {
+			x["host"] = cfg.Host
+		}
+		p["network"] = "xhttp"
+		p["xhttp-opts"] = x
+	case "h2", "http", "tcp", "raw":
 		p["network"] = cfg.Network
 	}
 }
