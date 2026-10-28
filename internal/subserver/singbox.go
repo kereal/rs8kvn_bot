@@ -419,8 +419,9 @@ func BuildSingboxConfig(outbounds []map[string]any) map[string]any {
 }
 
 // tagSingboxOutbounds guarantees every server outbound has a unique non-empty
-// tag that does not collide with the reserved "proxy" selector tag. The upstream
-// remark is kept when unique; otherwise a free positional "proxy-N" tag is used.
+// tag that does not collide with the reserved "proxy" selector tag or the
+// built-in "direct" outbound. The upstream remark is kept when it is unique
+// and not reserved; otherwise a free positional "proxy-N" tag is used.
 // It mutates the supplied outbounds in place.
 func tagSingboxOutbounds(outbounds []map[string]any) {
 	used := map[string]struct{}{"proxy": {}, "direct": {}}

@@ -230,11 +230,60 @@ func TestTagSingboxOutbounds(t *testing.T) {
 		{"tag": "node"},
 	}
 	tagSingboxOutbounds(outbounds)
-	require.Equal(t, "direct", outbounds[0]["tag"], "non-reserved tag kept as-is")
+	require.Equal(t, "proxy-1", outbounds[0]["tag"], "reserved direct tag renamed")
 	require.NotEmpty(t, outbounds[1]["tag"])
 	require.NotEqual(t, "proxy", outbounds[1]["tag"], "server outbound must not take the selector tag")
-	require.Equal(t, "proxy-2", outbounds[2]["tag"], "proxy-1 was taken by the empty-tag fallback")
-	require.Equal(t, "node", outbounds[3]["tag"])
+	require.Equal(t, "proxy-2", outbounds[1]["tag"], "empty tag takes the first free proxy-N")
+	require.NotEqual(t, "direct", outbounds[1]["tag"], "server outbound must not take the built-in direct tag")
+	require.Equal(t, "proxy-3", outbounds[2]["tag"], "proxy-1 was taken by the direct-tag fallback")
+	require.Equal(t, "node", outbounds[3]["tag"], "non-reserved tag kept as-is")
+}
+
+// TestRenderSingboxSubscriptionReservedTags is the sing-box counterpart of
+// TestBuildResponseReservedTagsFallback: a node remarked "direct" or "proxy"
+// must not keep that tag, otherwise it duplicates the built-in direct outbound
+// or the "proxy" selector that BuildSingboxConfig always appends, and the route
+// rules (which resolve "direct" by name) reach the wrong outbound.
+func TestRenderSingboxSubscriptionReservedTags(t *testing.T) {
+	t.Parallel()
+
+	result, err := buildResponse(newTestSubSvc(t), "singbox-reserved", aggregatedSources{
+		jsonConfigs: []json.RawMessage{
+			json.RawMessage(`{"type":"vless","address":"one.example","port":443,"uuid":"id-1","remark":"direct"}`),
+			json.RawMessage(`{"type":"vless","address":"two.example","port":443,"uuid":"id-2","remark":"proxy"}`),
+			json.RawMessage(`{"type":"vless","address":"three.example","port":443,"uuid":"id-3","remark":"node-three"}`),
+		},
+	}, 0, "", OutputSingbox)
+	require.NoError(t, err)
+
+	var doc struct {
+		Outbounds []struct {
+			Type      string   `json:"type"`
+			Tag       string   `json:"tag"`
+			Outbounds []string `json:"outbounds"`
+		} `json:"outbounds"`
+	}
+	require.NoError(t, json.Unmarshal(result.Body, &doc))
+	require.Len(t, doc.Outbounds, 5, "3 nodes + selector + direct")
+
+	serverTags := make([]string, 0, 3)
+	for _, ob := range doc.Outbounds[:3] {
+		serverTags = append(serverTags, ob.Tag)
+	}
+	require.Equal(t, []string{"proxy-1", "proxy-2", "node-three"}, serverTags)
+
+	seen := make(map[string]struct{}, len(doc.Outbounds))
+	for _, ob := range doc.Outbounds {
+		_, dup := seen[ob.Tag]
+		require.False(t, dup, "tag %q assigned twice", ob.Tag)
+		seen[ob.Tag] = struct{}{}
+	}
+
+	require.Equal(t, "selector", doc.Outbounds[3].Type)
+	require.Equal(t, "proxy", doc.Outbounds[3].Tag)
+	require.Equal(t, serverTags, doc.Outbounds[3].Outbounds, "selector lists only server outbounds")
+	require.Equal(t, "direct", doc.Outbounds[4].Type)
+	require.Equal(t, "direct", doc.Outbounds[4].Tag)
 }
 
 // ==================== Clash serializer ====================
