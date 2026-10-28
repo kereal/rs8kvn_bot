@@ -14,17 +14,46 @@ import (
 
 // TestFetchAndAggregateSources_Parallel verifies that source fetches are
 // performed concurrently (bounded by maxSourceConcurrency) without depending on
-// wall-clock timing. Each test server tracks the number of in-flight requests:
-// the observed peak concurrency must exceed one (sequential would never exceed
-// one) and stay within the semaphore bound, and every source must be aggregated.
+// wall-clock timing. Each test server tracks the number of in-flight requests
+// and holds its handler open until a second handler has entered: the observed
+// peak concurrency must exceed one (sequential would never exceed one) and stay
+// within the semaphore bound, and every source must be aggregated.
 func TestFetchAndAggregateSources_Parallel(t *testing.T) {
 	t.Parallel()
 
 	numNodes := 10
-	holdTime := 50 * time.Millisecond
+
+	// overlapTimeout bounds the wait for a second concurrent handler. When the
+	// fetches run sequentially no second handler can ever enter, so the driver
+	// stops waiting, releases the blocked handler, and the peak assertion below
+	// reports the failure instead of hanging the suite.
+	const overlapTimeout = 2 * time.Second
 
 	var inFlight atomic.Int32
 	var peak atomic.Int32
+
+	// entered receives one token per handler that is inside the server; release
+	// is closed once two handlers overlap, unblocking all of them.
+	entered := make(chan struct{}, numNodes)
+	release := make(chan struct{})
+
+	go func() {
+		timer := time.NewTimer(overlapTimeout)
+		defer timer.Stop()
+
+		for seen := 0; seen < 2; {
+			select {
+			case <-entered:
+				seen++
+			case <-timer.C:
+				close(release)
+
+				return
+			}
+		}
+
+		close(release)
+	}()
 
 	nodes := make([]database.Node, numNodes)
 	for i := range numNodes {
@@ -36,9 +65,11 @@ func TestFetchAndAggregateSources_Parallel(t *testing.T) {
 					break
 				}
 			}
-			// Hold the connection long enough for sibling goroutines to enter
-			// and be observed, proving overlap structurally.
-			time.Sleep(holdTime)
+			// Signal that this handler is in flight, then block until a sibling
+			// has also entered (or the overlap deadline fires). No wall-clock
+			// sleep: the peak above 1 is produced structurally.
+			entered <- struct{}{}
+			<-release
 			inFlight.Add(-1)
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("[]"))
