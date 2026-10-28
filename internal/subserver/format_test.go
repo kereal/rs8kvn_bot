@@ -89,6 +89,87 @@ func TestConvertJSONConfigsToSingbox(t *testing.T) {
 	require.Equal(t, "aes-128-gcm", ss["method"])
 }
 
+// TestApplySingboxTLS_RealityAlwaysEnablesUTLS pins sing-box's requirement that
+// a reality client carries utls (common/tls/reality_client.go fails with
+// "uTLS is required by reality client" otherwise). The advertised fingerprint is
+// used when present; an empty one falls back to sing-box's chrome default.
+// Non-reality TLS keeps the opt-in behaviour: no fp, no utls key.
+func TestApplySingboxTLS_RealityAlwaysEnablesUTLS(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		cfg     *serverConfig
+		wantUTL bool
+		wantFP  string
+	}{
+		{
+			name:    "reality without fingerprint falls back to chrome",
+			cfg:     &serverConfig{Security: "reality", PublicKey: "pk", ShortID: "sid"},
+			wantUTL: true,
+			wantFP:  "chrome",
+		},
+		{
+			name:    "reality keeps the advertised fingerprint",
+			cfg:     &serverConfig{Security: "reality", Fingerprint: "firefox", PublicKey: "pk"},
+			wantUTL: true,
+			wantFP:  "firefox",
+		},
+		{
+			name:    "reality matched case-insensitively",
+			cfg:     &serverConfig{Security: "Reality", PublicKey: "pk"},
+			wantUTL: true,
+			wantFP:  "chrome",
+		},
+		{
+			name:    "plain tls without fingerprint omits utls",
+			cfg:     &serverConfig{Security: "tls", SNI: "front.example"},
+			wantUTL: false,
+		},
+		{
+			name:    "plain tls with fingerprint keeps it",
+			cfg:     &serverConfig{Security: "tls", Fingerprint: "safari"},
+			wantUTL: true,
+			wantFP:  "safari",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			out := applySingboxTLSProbe(tt.cfg)
+			tlsBlock, ok := out["tls"].(map[string]any)
+			require.True(t, ok, "tls block must be emitted")
+
+			utls, hasUTLS := tlsBlock["utls"].(map[string]any)
+			require.Equal(t, tt.wantUTL, hasUTLS)
+			if !tt.wantUTL {
+				return
+			}
+
+			require.Equal(t, true, utls["enabled"])
+			require.Equal(t, tt.wantFP, utls["fingerprint"])
+		})
+	}
+
+	// The reality block itself is untouched next to utls.
+	out := applySingboxTLSProbe(&serverConfig{Security: "reality", PublicKey: "pk", ShortID: "sid"})
+	tlsBlock := out["tls"].(map[string]any)
+	reality, ok := tlsBlock["reality"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "pk", reality["public_key"])
+	require.Equal(t, "sid", reality["short_id"])
+}
+
+// applySingboxTLSProbe runs applySingboxTLS on an empty outbound map.
+func applySingboxTLSProbe(cfg *serverConfig) map[string]any {
+	out := map[string]any{}
+	applySingboxTLS(out, cfg)
+
+	return out
+}
+
 func TestBuildSingboxConfig_AppendsSelector(t *testing.T) {
 	t.Parallel()
 

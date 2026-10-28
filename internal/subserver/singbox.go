@@ -231,6 +231,12 @@ func buildTUICSingbox(cfg *serverConfig) map[string]any {
 	return out
 }
 
+// defaultRealityFingerprint is the uTLS fingerprint emitted for Reality
+// outbounds that advertise none. It matches sing-box's own default, so the
+// written profile states the fingerprint explicitly instead of relying on the
+// client's implicit choice.
+const defaultRealityFingerprint = "chrome"
+
 // applySingboxTLS attaches the "tls" field for VLESS/VMess/Trojan. sing-box
 // places TLS at the outbound's top level and uses field names that differ from
 // Xray (server_name, insecure, utls, reality).
@@ -249,6 +255,15 @@ func applySingboxTLS(out map[string]any, cfg *serverConfig) {
 		t["server_name"] = cfg.SNI
 	}
 	if cfg.Security == "reality" || strings.EqualFold(cfg.Security, "reality") {
+		// sing-box refuses a reality client without uTLS ("uTLS is required by
+		// reality client"), so utls is always enabled here regardless of the
+		// advertised fingerprint. An absent fp falls back to sing-box's own
+		// default (chrome) explicitly, keeping the emitted profile self-describing.
+		fp := cfg.Fingerprint
+		if fp == "" {
+			fp = defaultRealityFingerprint
+		}
+		t["utls"] = map[string]any{"enabled": true, "fingerprint": fp}
 		r := map[string]any{}
 		if cfg.PublicKey != "" {
 			r["public_key"] = cfg.PublicKey

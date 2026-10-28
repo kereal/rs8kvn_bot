@@ -116,6 +116,13 @@ func TestHandleSubscription_SingboxParity_MultiNode(t *testing.T) {
 	require.Equal(t, "d27e335d2b1679", reality["short_id"])
 	require.Equal(t, "www.github.com", vlessTLS["server_name"])
 
+	// sing-box rejects a reality outbound without uTLS, so utls must always be
+	// present and enabled, carrying the advertised fingerprint.
+	utls, ok := vlessTLS["utls"].(map[string]any)
+	require.True(t, ok, "reality outbound must carry utls, sing-box refuses it otherwise")
+	require.Equal(t, true, utls["enabled"])
+	require.Equal(t, "firefox", utls["fingerprint"])
+
 	// selector lists both readable tags; direct replaces the removed block outbound.
 	sel := obs[2]
 	require.Equal(t, "selector", sel["type"])
