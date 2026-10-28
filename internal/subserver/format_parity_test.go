@@ -72,9 +72,9 @@ func TestHandleSubscription_SingboxParity_MultiNode(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(result.Body, &doc))
 
-	// Two live nodes + selector + direct + block, in that order.
+	// Two live nodes + selector + direct (block outbound removed in sing-box 1.13).
 	obs := doc.Outbounds
-	require.Len(t, obs, 5)
+	require.Len(t, obs, 4)
 
 	var hy2, vless map[string]any
 	for _, ob := range obs[:2] {
@@ -116,46 +116,44 @@ func TestHandleSubscription_SingboxParity_MultiNode(t *testing.T) {
 	require.Equal(t, "d27e335d2b1679", reality["short_id"])
 	require.Equal(t, "www.github.com", vlessTLS["server_name"])
 
-	// selector lists both readable tags.
+	// selector lists both readable tags; direct replaces the removed block outbound.
 	sel := obs[2]
 	require.Equal(t, "selector", sel["type"])
 	require.Equal(t, []any{liveHy2Tag, liveVLESSTag}, sel["outbounds"])
 	require.Equal(t, "direct", obs[3]["tag"])
-	require.Equal(t, "block", obs[4]["tag"])
 
-	// Full routing/DNS parity with the Xray profile.
+	// Modern routing: rule_set definitions + 6 rules (sniff, reject, checkip,
+	// private, geoip-ru, geosite-ru/private), final → selector.
 	route := doc.Route
 	require.Equal(t, "proxy", route["final"])
+	rsAny, ok := route["rule_set"].([]any)
+	require.True(t, ok)
+	require.Len(t, rsAny, 4, "ads-all, geosite-ru, geosite-private, geoip-ru")
 	rulesAny, ok := route["rules"].([]any)
 	require.True(t, ok)
-	require.Len(t, rulesAny, 5)
-	rules := make([]map[string]any, len(rulesAny))
-	for i, r := range rulesAny {
-		rules[i], ok = r.(map[string]any)
-		require.True(t, ok)
-	}
-	require.Equal(t, "direct", rules[0]["outbound"], "IP-check domains route direct")
-	require.Equal(t, "block", rules[1]["outbound"], "ads route to block")
-	require.Equal(t, []any{"category-ru", "private"}, rules[4]["geosite"])
+	require.Len(t, rulesAny, 6)
+	ads, _ := rulesAny[1].(map[string]any)
+	require.Equal(t, "reject", ads["action"], "ads block via action:reject (block outbound removed)")
+	checkip, _ := rulesAny[2].(map[string]any)
+	require.Equal(t, "direct", checkip["outbound"], "IP-check domains route direct")
+	ruGeosite, _ := rulesAny[5].(map[string]any)
+	require.Equal(t, []any{"geosite-ru", "geosite-private"}, ruGeosite["rule_set"])
 
+	// Modern DNS: URI-form addresses; ru/private rules via rule_set.
 	dnsServersAny, ok := doc.DNS["servers"].([]any)
 	require.True(t, ok)
-	dnsServers := make([]map[string]any, len(dnsServersAny))
-	for i, s := range dnsServersAny {
-		dnsServers[i], ok = s.(map[string]any)
-		require.True(t, ok)
-	}
-	addresses := make([]string, 0, len(dnsServers))
-	for _, s := range dnsServers {
-		addr, _ := s["address"].(string)
-		addresses = append(addresses, addr)
+	addresses := make([]string, 0, len(dnsServersAny))
+	for _, s := range dnsServersAny {
+		addresses = append(addresses, s.(map[string]any)["address"].(string))
 	}
 	require.Contains(t, addresses, "https://1.1.1.1/dns-query")
-	require.Contains(t, addresses, "77.88.8.8")
+	require.Contains(t, addresses, "udp://77.88.8.8")
 
 	require.Len(t, doc.Inbounds, 1)
 	require.Equal(t, "mixed", doc.Inbounds[0]["type"])
 	require.Equal(t, float64(10808), doc.Inbounds[0]["listen_port"])
+	_, hasSniff := doc.Inbounds[0]["sniff"]
+	require.False(t, hasSniff, "sniff must live in a route rule, not the inbound")
 }
 
 // TestHandleSubscription_ClashParity_MultiNode proves the Clash/Mihomo renderer

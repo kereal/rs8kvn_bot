@@ -99,17 +99,17 @@ func TestBuildSingboxConfig_AppendsSelector(t *testing.T) {
 
 	obs, ok := doc["outbounds"].([]map[string]any)
 	require.True(t, ok)
-	require.Len(t, obs, 5, "2 nodes + selector + direct + block")
+	require.Len(t, obs, 4, "2 nodes + selector + direct (no legacy block outbound)")
 	require.Equal(t, "selector", obs[2]["type"])
 	require.Equal(t, "proxy", obs[2]["tag"])
 	require.Equal(t, []string{"node-one", "node-two"}, obs[2]["outbounds"])
 	require.Equal(t, "direct", obs[3]["tag"])
-	require.Equal(t, "block", obs[4]["tag"])
 }
 
-// TestBuildSingboxConfig_ParityWithXray guards sing-box/Xray config parity: the
-// subscription must deliver the same routing policy, DNS setup and local
-// listener the Xray profile carries — not a bare list of servers.
+// TestBuildSingboxConfig_ParityWithXray guards sing-box/Xray config parity under the
+// modern sing-box 1.12+ schema: rule-set-based rules replace the removed geosite/geoip
+// fields, block outbound is replaced by action:reject, sniff moves from inbound to route
+// rules, and DNS addresses use URI forms (legacy formats removed in 1.14).
 func TestBuildSingboxConfig_ParityWithXray(t *testing.T) {
 	t.Parallel()
 
@@ -124,9 +124,7 @@ func TestBuildSingboxConfig_ParityWithXray(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "warn", log["level"])
 
-	// dns: DoH default + Russian resolver for ru/private domains (skipFallback
-	// semantics: a rule steers ru/private to ru-dns, everything else hits the
-	// first server, the DoH one).
+	// dns: URI-form addresses required since sing-box 1.14.
 	dns, ok := doc["dns"].(map[string]any)
 	require.True(t, ok)
 	dnsServers, ok := dns["servers"].([]map[string]any)
@@ -136,57 +134,88 @@ func TestBuildSingboxConfig_ParityWithXray(t *testing.T) {
 		addresses = append(addresses, s["address"].(string))
 	}
 	require.Contains(t, addresses, "https://1.1.1.1/dns-query")
-	require.Contains(t, addresses, "77.88.8.8")
+	require.Contains(t, addresses, "udp://77.88.8.8", "ru-dns must use modern URI form (removed bare IP in 1.14)")
+
+	// ru/private domains steer to ru-dns via rule_set (modern replacement of geosite field).
 	dnsRules, ok := dns["rules"].([]map[string]any)
 	require.True(t, ok)
-	require.Len(t, dnsRules, 1, "ru/private domains resolve via ru-dns")
-	require.Equal(t, []string{"category-ru", "private"}, dnsRules[0]["geosite"])
-	require.Equal(t, "ru-dns", dnsRules[0]["server"])
+	require.Len(t, dnsRules, 1)
+	dnsRule := dnsRules[0]
+	require.Equal(t, []string{"geosite-ru", "geosite-private"}, dnsRule["rule_set"])
+	require.Equal(t, "ru-dns", dnsRule["server"])
 
-	// inbounds: mixed socks/http listener mirroring Xray 10808/10809.
+	// inbounds: mixed listener on 10808, sniff removed from inbound (migrated to route action).
 	inbounds, ok := doc["inbounds"].([]map[string]any)
 	require.True(t, ok)
 	require.Len(t, inbounds, 1)
 	require.Equal(t, "mixed", inbounds[0]["type"])
 	require.Equal(t, "127.0.0.1", inbounds[0]["listen"])
 	require.Equal(t, 10808, inbounds[0]["listen_port"])
-	require.Equal(t, true, inbounds[0]["sniff"])
+	_, hasSniff := inbounds[0]["sniff"]
+	require.False(t, hasSniff, "sniff must not be in inbound (migrated to route rule)")
 
-	// outbounds: every node + selector + direct + block.
+	// outbounds: 2 nodes + selector + direct (block outbound removed in 1.13).
 	obs, ok := doc["outbounds"].([]map[string]any)
 	require.True(t, ok)
-	require.Len(t, obs, 5)
+	require.Len(t, obs, 4)
 	sel := obs[2]
 	require.Equal(t, "selector", sel["type"])
 	require.Equal(t, "proxy", sel["tag"])
-	require.Equal(t, []string{"🇫🇮 Finland Hysteria 🔥", "🇩🇪 Germany VLESS"}, sel["outbounds"],
-		"selector must list every node by its remark")
+	require.Equal(t, []string{"🇫🇮 Finland Hysteria 🔥", "🇩🇪 Germany VLESS"}, sel["outbounds"])
 	require.Equal(t, "direct", obs[3]["tag"])
-	require.Equal(t, "block", obs[4]["tag"])
 
-	// route: same policy as the Xray template, catch-all → selector.
+	// route: modern schema: rule_set present (geosite/geoip removed in 1.12), no geoip/geosite fields in rules.
 	route, ok := doc["route"].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, "proxy", route["final"], "catch-all must target the selector")
+	require.Equal(t, "proxy", route["final"])
 	require.Equal(t, true, route["auto_detect_interface"])
-	rules, ok := route["rules"].([]map[string]any)
+
+	// rule_set definitions are loaded (4 sets covering ads, ru, private, ru-ips).
+	rsDefs, ok := route["rule_set"].([]map[string]any)
 	require.True(t, ok)
-	require.Len(t, rules, 5)
-
-	outs := make([]string, 0, len(rules))
-	for _, r := range rules {
-		outbound, _ := r["outbound"].(string)
-		outs = append(outs, outbound)
+	require.Len(t, rsDefs, 4)
+	rsTags := make([]string, 0, len(rsDefs))
+	for _, r := range rsDefs {
+		rsTags = append(rsTags, r["tag"].(string))
 	}
-	require.Equal(t, []string{"direct", "block", "direct", "direct", "direct"}, outs,
-		"rule order must mirror the Xray template: checkip→direct, ads→block, private→direct, geoip-ru→direct, geosite-ru→direct")
+	require.Contains(t, rsTags, "ads-all")
+	require.Contains(t, rsTags, "geosite-ru")
+	require.Contains(t, rsTags, "geosite-private")
+	require.Contains(t, rsTags, "geoip-ru")
 
-	require.Contains(t, rules[0]["domain_suffix"], "checkip.amazonaws.com")
-	require.Contains(t, rules[0]["domain_suffix"], "ifconfig.me")
-	require.Equal(t, []string{"category-ads-all"}, rules[1]["geosite"])
-	require.Equal(t, true, rules[2]["ip_is_private"])
-	require.Equal(t, []string{"ru"}, rules[3]["geoip"])
-	require.Equal(t, []string{"category-ru", "private"}, rules[4]["geosite"])
+	// 6 rules: sniff, reject, checkip, private, geoip-ru, geosite-ru/private.
+	rulesAny, ok := route["rules"].([]map[string]any)
+	require.True(t, ok)
+	require.Len(t, rulesAny, 6)
+	rules := make([]map[string]any, len(rulesAny))
+	for i, r := range rulesAny {
+		rules[i] = r
+	}
+
+	// Rule 0: sniff (migrated from legacy inbound sniff).
+	require.Equal(t, "sniff", rules[0]["action"])
+	require.Equal(t, []string{"mixed-in"}, rules[0]["inbound"])
+
+	// Rule 1: reject for ads (block outbound removed in 1.13).
+	require.Equal(t, []string{"ads-all"}, rules[1]["rule_set"])
+	require.Equal(t, "reject", rules[1]["action"])
+
+	// Rule 2: IP-check domains route direct.
+	require.Equal(t, "direct", rules[2]["outbound"])
+	require.Contains(t, rules[2]["domain_suffix"], "checkip.amazonaws.com")
+	require.Contains(t, rules[2]["domain_suffix"], "ifconfig.me")
+
+	// Rule 3: private IPs route direct.
+	require.Equal(t, true, rules[3]["ip_is_private"])
+	require.Equal(t, "direct", rules[3]["outbound"])
+
+	// Rule 4: Russian IPs via rule_set (geoip removed in 1.12).
+	require.Equal(t, []string{"geoip-ru"}, rules[4]["rule_set"])
+	require.Equal(t, "direct", rules[4]["outbound"])
+
+	// Rule 5: Russian/private sites via rule_set (geosite removed in 1.12).
+	require.Equal(t, []string{"geosite-ru", "geosite-private"}, rules[5]["rule_set"])
+	require.Equal(t, "direct", rules[5]["outbound"])
 }
 
 func TestTagSingboxOutbounds(t *testing.T) {
@@ -288,7 +317,7 @@ func TestHandleSubscription_FormatByUA(t *testing.T) {
 			Outbounds []any `json:"outbounds"`
 		}
 		require.NoError(t, json.Unmarshal(result.Body, &doc))
-		require.Len(t, doc.Outbounds, 4, "1 node + selector + direct + block")
+		require.Len(t, doc.Outbounds, 3, "1 node + selector + direct (no legacy block outbound)")
 		sel, ok := doc.Outbounds[1].(map[string]any)
 		require.True(t, ok)
 		require.Equal(t, "selector", sel["type"])

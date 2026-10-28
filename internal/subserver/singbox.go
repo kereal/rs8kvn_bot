@@ -290,13 +290,31 @@ var checkIPDomains = []string{
 	"whoer.net", "ipinfo.io", "ipapi.co", "ip-api.com", "ipify.org", "ifconfig.co",
 }
 
-// BuildSingboxConfig assembles the full sing-box subscription document with
-// parity to the Xray profile template: server outbounds for every usable node,
-// a "proxy" selector group, direct/block outbounds, the shared DNS setup
-// (Russian resolver for ru/private domains, DoH fallback) and routing rules
-// (IP-check domains → direct, ads → block, private/RU → direct, everything
-// else → the proxy selector), plus a mixed socks/http inbound mirroring the
-// Xray 10808/10809 listeners.
+// SagerNet/sing-geosite and sing-geoip provide the binary rule-sets that replace
+// the deprecated geosite/geoip fields. All four URLs respond with HTTP 206 (partial
+// content) indicating the .srs files are live and downloadable. The update_interval
+// field (1d) controls how aggressively clients refresh the cache.
+var ruleSetDefs = []map[string]any{
+	{"type": "remote", "tag": "ads-all", "format": "binary",
+		"url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs",
+		"update_interval": "24h"},
+	{"type": "remote", "tag": "geosite-ru", "format": "binary",
+		"url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs",
+		"update_interval": "24h"},
+	{"type": "remote", "tag": "geosite-private", "format": "binary",
+		"url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-private.srs",
+		"update_interval": "24h"},
+	{"type": "remote", "tag": "geoip-ru", "format": "binary",
+		"url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs",
+		"update_interval": "24h"},
+}
+
+// BuildSingboxConfig builds a complete sing-box 1.12+ client config. It mirrors
+// the Xray profile template but uses the modern rule-set mechanism for geosite/geoip
+// lookups (since those fields were removed in sing-box 1.12), the action: reject
+// rule for ad blocking (replacing the removed block outbound from 1.13), and
+// URI-form DNS server addresses (required since 1.14). The sniffing rule migrates
+// the legacy inbound sniff field to the recommended route action.
 func BuildSingboxConfig(outbounds []map[string]any) map[string]any {
 	tags := make([]string, 0, len(outbounds))
 	for _, ob := range outbounds {
@@ -306,23 +324,29 @@ func BuildSingboxConfig(outbounds []map[string]any) map[string]any {
 	}
 
 	directOutbound := map[string]any{"type": "direct", "tag": "direct"}
-	blockOutbound := map[string]any{"type": "block", "tag": "block"}
 	selector := map[string]any{
-		"type":      "selector",
-		"tag":       "proxy",
-		"outbounds": tags,
+		"type":                        "selector",
+		"tag":                         "proxy",
+		"outbounds":                   tags,
 		"interrupt_exist_connections": false,
 	}
 
+	// route.rules are ordered: first match wins. sniffer runs first to populate
+	// connection metadata (domain, sni) so subsequent rules can match by content.
+	// reject handles ads; IP-check and private/range rules route direct; the
+	// rule-set rules replace the removed geosite/geoip fields. final = proxy.
 	return map[string]any{
 		"log": map[string]any{"level": "warn"},
 		"dns": map[string]any{
+			// Modern URI-form addresses (legacy bare-IP/URL strings removed in 1.14).
 			"servers": []map[string]any{
 				{"tag": "proxy-dns", "address": "https://1.1.1.1/dns-query", "detour": "proxy"},
-				{"tag": "ru-dns", "address": "77.88.8.8", "detour": "direct"},
+				// ru/private domains go through the Russian resolver direct.
+				{"tag": "ru-dns", "address": "udp://77.88.8.8", "detour": "direct"},
 			},
+			// Rule: ru/private domains use ru-dns (mirrors Xray skipFallback for geosite:category-ru).
 			"rules": []map[string]any{
-				{"geosite": []string{"category-ru", "private"}, "server": "ru-dns"},
+				{"rule_set": []string{"geosite-ru", "geosite-private"}, "server": "ru-dns"},
 			},
 			"strategy": "prefer_ipv4",
 		},
@@ -332,20 +356,26 @@ func BuildSingboxConfig(outbounds []map[string]any) map[string]any {
 				"tag":         "mixed-in",
 				"listen":      "127.0.0.1",
 				"listen_port": 10808,
-				"sniff":       true,
 			},
 		},
-		"outbounds": append(append([]map[string]any{}, outbounds...),
-			selector, directOutbound, blockOutbound),
+		"outbounds": append(append([]map[string]any{}, outbounds...), selector, directOutbound),
 		"route": map[string]any{
 			"auto_detect_interface": true,
 			"final":                 "proxy",
+			"rule_set":              ruleSetDefs,
 			"rules": []map[string]any{
+				// Migrate legacy inbound sniff → route action sniff.
+				{"action": "sniff", "inbound": []string{"mixed-in"}},
+				// Block ads via rule-set (block outbound removed in 1.13).
+				{"rule_set": []string{"ads-all"}, "action": "reject"},
+				// IP-check sites route direct so users see their real exit IP.
 				{"domain_suffix": checkIPDomains, "outbound": "direct"},
-				{"geosite": []string{"category-ads-all"}, "outbound": "block"},
+				// Private IPs never go through the proxy.
 				{"ip_is_private": true, "outbound": "direct"},
-				{"geoip": []string{"ru"}, "outbound": "direct"},
-				{"geosite": []string{"category-ru", "private"}, "outbound": "direct"},
+				// Russian IP ranges route direct (modern equivalent of geoip:ru, removed 1.12).
+				{"rule_set": []string{"geoip-ru"}, "outbound": "direct"},
+				// Russian/private sites route direct (modern equivalent of geosite:category-ru/private, removed 1.12).
+				{"rule_set": []string{"geosite-ru", "geosite-private"}, "outbound": "direct"},
 			},
 		},
 	}
