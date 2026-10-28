@@ -209,9 +209,17 @@ func buildTUICSingbox(cfg *serverConfig) map[string]any {
 	out["uuid"] = cfg.UUID
 	out["password"] = password
 	out["congestion_control"] = "bbr"
-	if cfg.Alpn != "" {
-		out["alpn"] = splitComma(cfg.Alpn)
+	t := map[string]any{"enabled": true}
+	if cfg.SNI != "" {
+		t["server_name"] = cfg.SNI
 	}
+	if cfg.AllowInsecure {
+		t["insecure"] = true
+	}
+	if alpn := splitComma(cfg.Alpn); len(alpn) > 0 {
+		t["alpn"] = alpn
+	}
+	out["tls"] = t
 	return out
 }
 
