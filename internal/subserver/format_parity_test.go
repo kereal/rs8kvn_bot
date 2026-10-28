@@ -21,7 +21,7 @@ const (
 	liveHy2Link   = "hysteria2://REDACTED-HY2-AUTH@node1.example.net:443?sni=node1.example.net&fp=firefox&alpn=h3&obfs=salamander&obfs-password=REDACTED-HY2-OBFS#%F0%9F%87%AB%F0%9F%87%AE%20Finland%20Hysteria%20%F0%9F%94%A5"
 	liveVLESSLink = "vless://00000000-0000-0000-0000-000000000000@node1.example.net:443?security=reality&pbk=REDACTED-REALITY-PBK&sid=0000000000000000&sni=www.github.com&fp=firefox#🇫🇮%20Finland%20vless%20🎈"
 
-	liveHy2Tag  = "🇫🇮 Finland Hysteria 🔥"
+	liveHy2Tag   = "🇫🇮 Finland Hysteria 🔥"
 	liveVLESSTag = "🇫🇮 Finland vless 🎈"
 )
 
@@ -171,6 +171,21 @@ func TestHandleSubscription_ClashParity_MultiNode(t *testing.T) {
 	var parsed clashConfig
 	require.NoError(t, yaml.Unmarshal(result.Body, &parsed))
 	require.Len(t, parsed.Proxies, 2, "both live nodes must survive the Clash render")
+
+	// Full profile: mixed port, manual selector group and routing policy.
+	require.Equal(t, 7890, parsed.MixedPort)
+	require.Equal(t, "rule", parsed.Mode)
+	require.Len(t, parsed.ProxyGroups, 1)
+	selector, ok := parsed.ProxyGroups[0]["type"].(string)
+	require.True(t, ok)
+	require.Equal(t, "select", selector, "node switching must be manual, no automatic load balancing")
+	require.Equal(t, "PROXY", parsed.ProxyGroups[0]["name"])
+	groupProxies := parsed.ProxyGroups[0]["proxies"].([]any)
+	require.Equal(t, []any{liveHy2Tag, liveVLESSTag}, groupProxies, "selector lists both readable node names")
+	require.Contains(t, parsed.Rules, "MATCH,PROXY", "default route targets the manual group")
+	require.Contains(t, parsed.Rules, "GEOSITE,category-ads-all,REJECT", "ads blocked like Xray/sing-box")
+	require.Contains(t, parsed.Rules, "GEOSITE,category-ru,DIRECT")
+	require.NotContains(t, parsed.Rules, "GEOIP,LAN", "private ranges stay explicit IP-CIDR, not db-dependent")
 
 	byType := map[string]map[string]any{}
 	for _, p := range parsed.Proxies {

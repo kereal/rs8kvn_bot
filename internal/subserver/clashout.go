@@ -234,11 +234,88 @@ func buildTUICClash(cfg *serverConfig, name string) map[string]any {
 	return p
 }
 
+// clashPolicyRules land the terminal routing policy that mirrors the Xray and
+// sing-box profiles: ads rejected, private/RU domains and IPs direct, everything
+// else through the manual PROXY group. Private/loopback ranges are explicit
+// IP-CIDR/IP-CIDR6 entries rather than GEOIP,LAN, whose coverage varies between
+// the Mihomo and Stash geoip databases.
+var clashPolicyRules = []string{
+	"GEOSITE,category-ads-all,REJECT",
+	"IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+	"IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+	"IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+	"IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+	"IP-CIDR,169.254.0.0/16,DIRECT,no-resolve",
+	"IP-CIDR6,::1/128,DIRECT,no-resolve",
+	"IP-CIDR6,fc00::/7,DIRECT,no-resolve",
+	"IP-CIDR6,fe80::/10,DIRECT,no-resolve",
+	"GEOIP,RU,DIRECT,no-resolve",
+	"GEOSITE,category-ru,DIRECT",
+	"GEOSITE,private,DIRECT",
+	"MATCH,PROXY",
+}
+
+// buildClashConfig adds a manual selector, local DNS and routing policy around
+// converted nodes. Proxy names remain the source remarks assigned by
+// tagClashProxies; the group and terminal rule use the stable PROXY name.
+func buildClashConfig(proxies []map[string]any) clashConfig {
+	proxyNames := make([]string, 0, len(proxies))
+	for _, proxy := range proxies {
+		name, _ := proxy["name"].(string)
+		if name != "" {
+			proxyNames = append(proxyNames, name)
+		}
+	}
+
+	rules := make([]string, 0, len(checkIPDomains)+len(clashPolicyRules))
+	for _, domain := range checkIPDomains {
+		rules = append(rules, "DOMAIN-SUFFIX,"+domain+",DIRECT")
+	}
+	rules = append(rules, clashPolicyRules...)
+
+	return clashConfig{
+		MixedPort: 7890,
+		AllowLAN:  false,
+		Mode:      "rule",
+		LogLevel:  "warning",
+		IPv6:      true,
+		Profile:   map[string]bool{"store-selected": true},
+		DNS: map[string]any{
+			"enable":                          true,
+			"ipv6":                            true,
+			"enhanced-mode":                   "fake-ip",
+			"fake-ip-range":                   "198.18.0.1/16",
+			"default-nameserver":              []string{"77.88.8.8", "1.1.1.1"},
+			"nameserver":                      []string{"https://1.1.1.1/dns-query", "77.88.8.8"},
+			"proxy-server-nameserver":         []string{"77.88.8.8", "1.1.1.1"},
+			"direct-nameserver":               []string{"77.88.8.8", "1.1.1.1"},
+			"direct-nameserver-follow-policy": true,
+			"nameserver-policy": map[string]any{
+				"geosite:category-ru,private": []string{"77.88.8.8"},
+			},
+			"fake-ip-filter": []string{"geosite:private", "geosite:category-ru", "+.lan", "+.local"},
+		},
+		Proxies: proxies,
+		ProxyGroups: []map[string]any{
+			{"name": "PROXY", "type": "select", "proxies": proxyNames},
+		},
+		Rules: rules,
+	}
+}
+
+// clashGroupNames lists profile-internal outbound names (the PROXY selector).
+// tagClashProxies reserves them so a node remarked "PROXY" is renamed instead of
+// stealing the group name.
+var clashGroupNames = []string{"PROXY"}
+
 // tagClashProxies guarantees every proxy entry has a unique non-empty "name".
 // The upstream remark is kept when unique; otherwise a free positional
 // "proxy-N" name is used. It mutates the supplied entries in place.
 func tagClashProxies(proxies []map[string]any) {
-	used := make(map[string]struct{}, len(proxies))
+	used := make(map[string]struct{}, len(proxies)+len(clashGroupNames))
+	for _, reserved := range clashGroupNames {
+		used[reserved] = struct{}{}
+	}
 	for i := range proxies {
 		name, _ := proxies[i]["name"].(string)
 		if name == "" {

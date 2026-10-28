@@ -485,14 +485,14 @@ func renderSingboxSubscription(configs []json.RawMessage) ([]byte, error) {
 	return responseBody, nil
 }
 
-// renderClashSubscription converts configs into a Clash/Mihomo YAML document.
+// renderClashSubscription converts configs into a complete Clash/Mihomo YAML profile.
 func renderClashSubscription(configs []json.RawMessage) ([]byte, error) {
 	proxies, err := ConvertJSONConfigsToClash(configs)
 	if err != nil {
 		return nil, ErrNoSubscriptionItems
 	}
 	tagClashProxies(proxies)
-	doc := clashConfig{Proxies: proxies}
+	doc := buildClashConfig(proxies)
 	responseBody, err := yaml.Marshal(doc)
 	if err != nil {
 		return nil, fmt.Errorf("marshal clash subscription: %w", err)
