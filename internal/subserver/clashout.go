@@ -49,8 +49,9 @@ func ConvertJSONConfigsToClash(items []json.RawMessage) ([]map[string]any, error
 
 // buildClashProxy assembles a single Clash/Mihomo proxy entry from a normalized
 // serverConfig, using its remark as the name or "proxy-<address>" if absent.
-// Hysteria variants are rendered as hysteria2. Unsupported protocols return an
-// error; address, port, and credentials are not validated here.
+// Hysteria2 and its hy2 alias are rendered as hysteria2; legacy hysteria (v1) is
+// rejected as an unsupported protocol, as are all other unknown types. Address,
+// port, and credentials are not validated here.
 func buildClashProxy(cfg *serverConfig) (map[string]any, error) {
 	name := cfg.Remark
 	if name == "" {
@@ -66,7 +67,7 @@ func buildClashProxy(cfg *serverConfig) (map[string]any, error) {
 		return buildTrojanClash(cfg, name), nil
 	case "shadowsocks", "ss":
 		return buildShadowsocksClash(cfg, name), nil
-	case "hysteria", "hysteria2", "hy2":
+	case "hysteria2", "hy2":
 		return buildHysteria2Clash(cfg, name), nil
 	case "tuic":
 		return buildTUICClash(cfg, name), nil

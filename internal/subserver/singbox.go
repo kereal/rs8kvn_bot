@@ -13,8 +13,8 @@ import (
 
 // ConvertJSONConfigsToSingbox renders normalized server configs (the same shape
 // produced by ExtractClashConfigs / ExtractJSONConfigs) into sing-box outbound
-// objects, one per usable node. Unsupported protocols are skipped (not fatal) so
-// a partial subscription still yields usable nodes.
+// objects, one per usable node. Unsupported protocols and transports are skipped
+// (not fatal) so a partial subscription still yields usable nodes.
 // Malformed configs, nodes with an empty address or zero port, and Shadowsocks
 // nodes without a method are also skipped. It returns an error only when no
 // entries remain, including empty input.
@@ -51,7 +51,10 @@ func ConvertJSONConfigsToSingbox(items []json.RawMessage) ([]map[string]any, err
 
 // buildSingboxOutbound assembles a single sing-box outbound for the given config.
 // It returns an error for an empty address, a zero port, an unsupported protocol,
-// or a Shadowsocks config without a method. Hysteria variants render as hysteria2.
+// an unsupported transport, or a Shadowsocks config without a method. Hysteria2
+// and its hy2 alias render as hysteria2; legacy hysteria (v1) is rejected as an
+// unsupported protocol. xhttp/splithttp is Xray-only, so nodes carrying it are
+// rejected here instead of producing a profile sing-box cannot parse.
 func buildSingboxOutbound(cfg *serverConfig) (map[string]any, error) {
 	if cfg.Address == "" {
 		return nil, fmt.Errorf("missing address")
@@ -59,6 +62,11 @@ func buildSingboxOutbound(cfg *serverConfig) (map[string]any, error) {
 
 	if cfg.Port == 0 {
 		return nil, fmt.Errorf("missing port")
+	}
+
+	switch strings.ToLower(cfg.Network) {
+	case "xhttp", "splithttp":
+		return nil, fmt.Errorf("unsupported transport for sing-box: %s", cfg.Network)
 	}
 
 	switch strings.ToLower(cfg.Type) {
@@ -73,7 +81,7 @@ func buildSingboxOutbound(cfg *serverConfig) (map[string]any, error) {
 			return nil, fmt.Errorf("shadowsocks config has no method")
 		}
 		return buildShadowsocksSingbox(cfg), nil
-	case "hysteria", "hysteria2", "hy2":
+	case "hysteria2", "hy2":
 		return buildHysteria2Singbox(cfg), nil
 	case "tuic":
 		return buildTUICSingbox(cfg), nil
@@ -262,7 +270,8 @@ func applySingboxTLS(out map[string]any, cfg *serverConfig) {
 // applySingboxTransport attaches sing-box's "transport" field for non-tcp
 // transports. Network aliases are normalized so Clash configs map correctly.
 // Path supplies the gRPC service name or transport path, and Host supplies the
-// WebSocket Host header or HTTP/XHTTP host. Unrecognized networks leave out unchanged.
+// WebSocket Host header or HTTP host. Unrecognized networks leave out unchanged.
+// xhttp/splithttp never reaches here: buildSingboxOutbound rejects it.
 func applySingboxTransport(out map[string]any, cfg *serverConfig) {
 	network := cfg.Network
 	if network == "" || network == "tcp" || network == "raw" {
@@ -283,18 +292,6 @@ func applySingboxTransport(out map[string]any, cfg *serverConfig) {
 		t := map[string]any{"type": "grpc"}
 		if cfg.Path != "" {
 			t["service_name"] = cfg.Path
-		}
-		out["transport"] = t
-	case "xhttp", "splithttp":
-		t := map[string]any{"type": "xhttp"}
-		if cfg.Path != "" {
-			t["path"] = cfg.Path
-		}
-		if cfg.Host != "" {
-			t["host"] = cfg.Host
-		}
-		if cfg.Mode != "" {
-			t["mode"] = cfg.Mode
 		}
 		out["transport"] = t
 	case "h2", "http":
