@@ -60,7 +60,7 @@ func DetectOutputFormat(formatParam, ua string) OutputFormat {
 	switch {
 	case strings.Contains(u, "sing-box"), strings.Contains(u, "singbox"):
 		return OutputSingbox
-	case strings.Contains(u, "clash"), strings.Contains(u, "mihomo"):
+	case strings.Contains(u, "clash"), strings.Contains(u, "mihomo"), strings.Contains(u, "stash"):
 		return OutputClash
 	}
 

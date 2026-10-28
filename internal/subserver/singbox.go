@@ -338,11 +338,12 @@ func BuildSingboxConfig(outbounds []map[string]any) map[string]any {
 	return map[string]any{
 		"log": map[string]any{"level": "warn"},
 		"dns": map[string]any{
-			// Modern URI-form addresses (legacy bare-IP/URL strings removed in 1.14).
+			// New typed DNS server format (1.12+; legacy address/detour strings
+			// were removed in 1.14). proxy-dns routes through the proxy selector,
+			// ru-dns through direct.
 			"servers": []map[string]any{
-				{"tag": "proxy-dns", "address": "https://1.1.1.1/dns-query", "detour": "proxy"},
-				// ru/private domains go through the Russian resolver direct.
-				{"tag": "ru-dns", "address": "udp://77.88.8.8", "detour": "direct"},
+				{"type": "https", "tag": "proxy-dns", "server": "1.1.1.1", "detour": "proxy"},
+				{"type": "udp", "tag": "ru-dns", "server": "77.88.8.8", "detour": "direct"},
 			},
 			// Rule: ru/private domains use ru-dns (mirrors Xray skipFallback for geosite:category-ru).
 			"rules": []map[string]any{
@@ -363,6 +364,11 @@ func BuildSingboxConfig(outbounds []map[string]any) map[string]any {
 			"auto_detect_interface": true,
 			"final":                 "proxy",
 			"rule_set":              ruleSetDefs,
+			// Required since 1.14 when multiple DNS servers exist and outbounds
+			// use domain server addresses (node hostnames / reality sni): resolves
+			// node domains via ru-dns (direct), avoiding a circular dependency
+			// through the tunnel itself.
+			"default_domain_resolver": "ru-dns",
 			"rules": []map[string]any{
 				// Migrate legacy inbound sniff → route action sniff.
 				{"action": "sniff", "inbound": []string{"mixed-in"}},
