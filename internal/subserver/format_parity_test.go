@@ -21,7 +21,7 @@ const (
 	liveHy2Link   = "hysteria2://3662e46033d94414a3749b0cf2e2edd6@st01.kereal.qzz.io:443?sni=st01.kereal.qzz.io&fp=firefox&alpn=h3&obfs=salamander&obfs-password=qv24m6vhniw2pg2m#%F0%9F%87%AB%F0%9F%87%AE%20Finland%20Hysteria%20%F0%9F%94%A5"
 	liveVLESSLink = "vless://69b28568-1edb-3ee6-0d8a-0d8a3ee62034@st01.kereal.qzz.io:443?security=reality&pbk=oTWaJuUIEQQOvBErcJEL4lzj6jf9wdGnDB2ocEkeA0c&sid=d27e335d2b1679&sni=www.github.com&fp=firefox#🇫🇮%20Finland%20vless%20🎈"
 
-	liveHy2Tag  = "🇫🇮 Finland Hysteria 🔥"
+	liveHy2Tag   = "🇫🇮 Finland Hysteria 🔥"
 	liveVLESSTag = "🇫🇮 Finland vless 🎈"
 )
 
@@ -171,6 +171,21 @@ func TestHandleSubscription_ClashParity_MultiNode(t *testing.T) {
 	var parsed clashConfig
 	require.NoError(t, yaml.Unmarshal(result.Body, &parsed))
 	require.Len(t, parsed.Proxies, 2, "both live nodes must survive the Clash render")
+
+	// Full profile: mixed port, manual selector group and routing policy.
+	require.Equal(t, 7890, parsed.MixedPort)
+	require.Equal(t, "rule", parsed.Mode)
+	require.Len(t, parsed.ProxyGroups, 1)
+	selector, ok := parsed.ProxyGroups[0]["type"].(string)
+	require.True(t, ok)
+	require.Equal(t, "select", selector, "node switching must be manual, no automatic load balancing")
+	require.Equal(t, "PROXY", parsed.ProxyGroups[0]["name"])
+	groupProxies := parsed.ProxyGroups[0]["proxies"].([]any)
+	require.Equal(t, []any{liveHy2Tag, liveVLESSTag}, groupProxies, "selector lists both readable node names")
+	require.Contains(t, parsed.Rules, "MATCH,PROXY", "default route targets the manual group")
+	require.Contains(t, parsed.Rules, "GEOSITE,category-ads-all,REJECT", "ads blocked like Xray/sing-box")
+	require.Contains(t, parsed.Rules, "GEOSITE,category-ru,DIRECT")
+	require.NotContains(t, parsed.Rules, "GEOIP,LAN", "private ranges stay explicit IP-CIDR, not db-dependent")
 
 	byType := map[string]map[string]any{}
 	for _, p := range parsed.Proxies {

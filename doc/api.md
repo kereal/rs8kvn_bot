@@ -79,6 +79,11 @@ Returns a JSON **array** of Xray-core client configurations built from supported
 
 Routing uses `geosite:category-ru` (the built-in Xray category name for Russian domains) and `geoip:ru`. Each array element carries its own routing table and one proxy outbound; Xray's JSON schema has no portable manual-selector outbound group, so node switching happens through the client's profile list rather than inside a single config.
 
+The same aggregated nodes are also served in sing-box and Clash/Mihomo formats, selected by `?format=` or detected from the `User-Agent` (unknown/empty falls back to Xray):
+
+- **sing-box** (`?format=singbox` or UA `sing-box`/`singbox`): one modern sing-box 1.12+ config with a `proxy` selector outbound listing every node, a `mixed` loopback inbound, and rule-set based routing mirroring the Xray policy (`internal/subserver/singbox.go`).
+- **Clash/Mihomo** (`?format=clash` or UA `clash`/`mihomo`/`stash`): a complete local YAML profile — `mixed-port: 7890` loopback listener, a manual `PROXY` `select` group listing every node, fake-ip DNS with RU/private domains steered to local resolvers, and routing mirroring the Xray policy (ads GEOSITE REJECT; private/loopback and RU IP-CIDR/IP-CIDR6 direct; RU/private GEOSITE direct; `MATCH` to the PROXY group). No external rule-provider dependency. Node names are reserved against the `PROXY` group name so a node remarked `PROXY` is renamed instead of stealing the selector.
+
 **Response 404:** Subscription not found, inactive, or expired.
 
 **Response 503:** Subserver not initialized.

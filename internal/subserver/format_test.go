@@ -333,6 +333,13 @@ func TestHandleSubscription_FormatByUA(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "text/yaml; charset=utf-8", result.Headers["content-type"])
 		require.Contains(t, string(result.Body), "proxies:")
+
+		// Full profile: local listener + manual selector + terminal rule.
+		require.Contains(t, string(result.Body), "mixed-port: 7890")
+		require.Contains(t, string(result.Body), "proxy-groups:")
+		require.Contains(t, string(result.Body), "- DOMAIN-SUFFIX,api.ipify.org,DIRECT")
+		require.Contains(t, string(result.Body), "- MATCH,PROXY")
+		require.NotContains(t, string(result.Body), "rule-providers:", "no remote rule-set dependency")
 	})
 
 	t.Run("explicit format overrides UA", func(t *testing.T) {

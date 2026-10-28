@@ -14,10 +14,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// clashConfig is a minimal Clash/Mihomo YAML config — only the "proxies"
-// section is needed for subscription aggregation.
+// clashConfig is a complete local Clash/Mihomo profile. It intentionally binds
+// only to loopback and contains no external controller or rule-provider services.
 type clashConfig struct {
-	Proxies []map[string]any `yaml:"proxies"`
+	MixedPort   int              `yaml:"mixed-port"`
+	AllowLAN    bool             `yaml:"allow-lan"`
+	Mode        string           `yaml:"mode"`
+	LogLevel    string           `yaml:"log-level"`
+	IPv6        bool             `yaml:"ipv6"`
+	Profile     map[string]bool  `yaml:"profile"`
+	DNS         map[string]any   `yaml:"dns,omitempty"`
+	Proxies     []map[string]any `yaml:"proxies"`
+	ProxyGroups []map[string]any `yaml:"proxy-groups"`
+	Rules       []string         `yaml:"rules"`
 }
 
 // ExtractClashConfigs parses a Clash/Mihomo YAML config body and returns the
