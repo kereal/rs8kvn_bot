@@ -156,7 +156,7 @@ internal/backup/             — ежедневные бэкапы БД с WAL c
 internal/scheduler/          — backup + trial cleanup + subscription sync + expiry reminders
 internal/ratelimiter/        — per-user token bucket
 internal/web/                — /healthz, /readyz, /i/{code}, /sub/{subID}, /metrics, /payment/callback, ... + singleflight
-internal/subserver/           — кэш + merge подписок; Clash/Mihomo нормализация share-ссылок; optional access log
+internal/subserver/           — кэш + merge подписок; выдаёт полные профили (Xray JSON-массив, sing-box 1.12+, Clash/Mihomo YAML) по UA/?format=; optional access log
 internal/metrics/            — Prometheus/обёртка; напоминания имеют выделенные счётчики
 ```
 

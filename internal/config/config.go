@@ -52,6 +52,11 @@ type Config struct {
 	GlobalSubURL           string
 	SubServerAccessLogPath string
 
+	// NotificationsEnabled controls the background workers that message users
+	// (expiry reminders and traffic notifications). Defaults to true; set to
+	// false for local runs against a production-DB copy.
+	NotificationsEnabled bool
+
 	// Payment configuration
 	PaymentEnabled    bool
 	PaymentProvider   string
@@ -80,6 +85,7 @@ type configFlags struct {
 	globalSubURL           *flag.StringValue
 	subServerAccessLogPath *flag.StringValue
 	paymentEnabled         *flag.BoolValue
+	notificationsEnabled   *flag.BoolValue
 	paymentProvider        *flag.StringValue
 	plategaMerchantID      *flag.StringValue
 	plategaSecret          *flag.StringValue
@@ -101,6 +107,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		donateURL: flag.NewString(DonateURL), donateEnabled: flag.NewBool(DefaultDonateEnabled),
 		globalSubURL: flag.NewString(""), subServerAccessLogPath: flag.NewString(""),
 		paymentEnabled: flag.NewBool(false), paymentProvider: flag.NewString("platega"), plategaMerchantID: flag.NewString(""), plategaSecret: flag.NewString(""),
+		notificationsEnabled: flag.NewBool(DefaultNotificationsEnabled),
 	}
 	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
 	r.Register("TELEGRAM_ADMIN_ID", f.telegramAdminID)
@@ -121,6 +128,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("DONATE_ENABLED", f.donateEnabled)
 	r.Register("SUBSERVER_ACCESS_LOG", f.subServerAccessLogPath)
 	r.Register("PAYMENT_ENABLED", f.paymentEnabled)
+	r.Register("NOTIFICATIONS_ENABLED", f.notificationsEnabled)
 	r.Register("PAYMENT_PROVIDER", f.paymentProvider)
 	r.Register("PLATEGA_MERCHANT_ID", f.plategaMerchantID)
 	r.Register("PLATEGA_SECRET", f.plategaSecret)
@@ -149,7 +157,8 @@ func Load() (*Config, error) {
 		DonateEnabled: f.donateEnabled.Get(), GlobalSubURL: f.globalSubURL.Get(),
 		SubServerAccessLogPath: f.subServerAccessLogPath.Get(),
 		PaymentEnabled:         f.paymentEnabled.Get(), PaymentProvider: f.paymentProvider.Get(),
-		PlategaMerchantID: f.plategaMerchantID.Get(), PlategaSecret: f.plategaSecret.Get(),
+		NotificationsEnabled: f.notificationsEnabled.Get(),
+		PlategaMerchantID:    f.plategaMerchantID.Get(), PlategaSecret: f.plategaSecret.Get(),
 	}
 	// Validate all required fields
 	err = cfg.validate()

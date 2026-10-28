@@ -496,10 +496,10 @@ func TestHysteriaV1UnsupportedInSingboxAndClash(t *testing.T) {
 	require.Error(t, err, "a subscription of only hysteria v1 nodes must not render")
 }
 
-// TestSingboxRejectsXHTTPTransport pins that xhttp/splithttp — an Xray-only
-// transport with no sing-box equivalent — is rejected before an outbound is
-// built, instead of emitting transport.type=xhttp that sing-box cannot parse.
-func TestSingboxRejectsXHTTPTransport(t *testing.T) {
+// TestSingboxRendersXHTTPTransport pins that xhttp/splithttp nodes emit a
+// sing-box xhttp transport (supported since sing-box 1.9), with path/host/mode
+// carried through from the source config.
+func TestSingboxRendersXHTTPTransport(t *testing.T) {
 	t.Parallel()
 
 	for _, network := range []string{"xhttp", "splithttp", "XHTTP"} {
@@ -515,13 +515,17 @@ func TestSingboxRejectsXHTTPTransport(t *testing.T) {
 		}
 
 		out, err := buildSingboxOutbound(cfg)
-		require.Error(t, err, "network %q must be rejected for sing-box", network)
-		assert.Contains(t, err.Error(), "unsupported transport")
-		assert.Nil(t, out)
+		require.NoError(t, err, "network %q must render for sing-box", network)
+		transport, ok := out["transport"].(map[string]any)
+		require.True(t, ok, "xhttp outbound must carry a transport")
+		assert.Equal(t, "xhttp", transport["type"])
+		assert.Equal(t, "/x", transport["path"])
+		assert.Equal(t, "x.example.com", transport["host"])
+		assert.Equal(t, "stream-up", transport["mode"])
 	}
 
-	// Mixed subscription: the xhttp node is skipped, the ws node survives with
-	// its transport intact, and the document contains no xhttp type.
+	// Mixed subscription: both the xhttp and the ws node survive with their
+	// transports intact.
 	items := []json.RawMessage{
 		json.RawMessage(`{"type":"vless","address":"x.example","port":443,"uuid":"id-1","network":"xhttp","path":"/x","remark":"xhttp-node"}`),
 		json.RawMessage(`{"type":"vless","address":"ws.example","port":443,"uuid":"id-2","security":"tls","network":"ws","path":"/ws","remark":"ws-node"}`),
@@ -529,15 +533,13 @@ func TestSingboxRejectsXHTTPTransport(t *testing.T) {
 
 	outbounds, err := ConvertJSONConfigsToSingbox(items)
 	require.NoError(t, err)
-	require.Len(t, outbounds, 1, "only the ws node survives")
-	assert.Equal(t, "ws-node", outbounds[0]["tag"])
+	require.Len(t, outbounds, 2, "both nodes survive")
+	assert.Equal(t, "xhttp-node", outbounds[0]["tag"])
+	assert.Equal(t, "ws-node", outbounds[1]["tag"])
 
-	transport, ok := outbounds[0]["transport"].(map[string]any)
+	transport, ok := outbounds[1]["transport"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "ws", transport["type"])
-
-	_, err = ConvertJSONConfigsToSingbox(items[:1])
-	require.Error(t, err, "a subscription of only xhttp nodes must not render")
 }
 
 // ==================== UA-driven dispatch (wiring) ====================

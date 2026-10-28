@@ -83,8 +83,9 @@ git push origin --delete <name>  # удалить удалённую ветку
 - SSH ключ настроен.
 
 ## Текущая активная ветка
-- `plans_and_pricing` (merge candidate, ready for v2.3.0)
+- `dev` (HEAD = origin/dev = `10e2a40`, 2026-10-28): полный Clash/Mihomo профиль + sing-box 1.12+ + parity
+- PR #161 открыт в main (пользователь оставил; НЕ открывать новые PR без явной просьбы)
 
 ---
 
-**Обновлено:** 2026-06-28
+**Обновлено:** 2026-10-28

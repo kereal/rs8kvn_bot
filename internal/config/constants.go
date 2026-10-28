@@ -170,6 +170,11 @@ const (
 // in the main menu. Override via DONATE_ENABLED env var.
 const DefaultDonateEnabled = true
 
+// DefaultNotificationsEnabled keeps user-facing notification workers (expiry
+// reminders and traffic notifications) running unless explicitly disabled.
+// Override via NOTIFICATIONS_ENABLED env var.
+const DefaultNotificationsEnabled = true
+
 // Donate Constants
 const (
 	// DonateCardNumber is the card number for donations (T-Bank)
