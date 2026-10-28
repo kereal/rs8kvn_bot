@@ -313,6 +313,96 @@ func TestConvertJSONConfigsToClash(t *testing.T) {
 	require.Len(t, parsed.Proxies, 2)
 }
 
+// TestHysteriaV1UnsupportedInSingboxAndClash pins the protocol split: hysteria2
+// and its hy2 share-link alias render as a sing-box/Clash hysteria2 outbound,
+// while legacy hysteria (v1) is not silently upgraded to v2 — both serializers
+// reject it so the node is skipped instead of producing a profile that cannot
+// handshake.
+func TestHysteriaV1UnsupportedInSingboxAndClash(t *testing.T) {
+	t.Parallel()
+
+	legacy := &serverConfig{Type: "hysteria", Address: "hy1.example", Port: 36712, Password: "v1-token"}
+
+	_, err := buildSingboxOutbound(legacy)
+	require.Error(t, err, "hysteria v1 must not be rendered as a sing-box hysteria2 outbound")
+	assert.Contains(t, err.Error(), "unsupported protocol")
+
+	_, err = buildClashProxy(legacy)
+	require.Error(t, err, "hysteria v1 must not be rendered as a Clash hysteria2 proxy")
+	assert.Contains(t, err.Error(), "unsupported protocol")
+
+	for _, typ := range []string{"hysteria2", "hy2"} {
+		cfg := &serverConfig{Type: typ, Address: "hy2.example", Port: 443, Password: "hy2-pass"}
+
+		singboxOut, err := buildSingboxOutbound(cfg)
+		require.NoError(t, err, "type %q must stay supported in sing-box", typ)
+		assert.Equal(t, "hysteria2", singboxOut["type"])
+
+		clashOut, err := buildClashProxy(cfg)
+		require.NoError(t, err, "type %q must stay supported in Clash", typ)
+		assert.Equal(t, "hysteria2", clashOut["type"])
+	}
+
+	// End to end: a legacy hysteria item is dropped from a mixed sing-box
+	// subscription, and is a hard error when it is the only item.
+	items := []json.RawMessage{
+		json.RawMessage(`{"type":"hysteria","address":"hy1.example","port":36712,"password":"v1-token","remark":"legacy"}`),
+		json.RawMessage(`{"type":"hysteria2","address":"hy2.example","port":443,"password":"hy2-pass","remark":"modern"}`),
+	}
+
+	outbounds, err := ConvertJSONConfigsToSingbox(items)
+	require.NoError(t, err)
+	require.Len(t, outbounds, 1, "only the hysteria2 node survives")
+	assert.Equal(t, "modern", outbounds[0]["tag"])
+
+	_, err = ConvertJSONConfigsToSingbox(items[:1])
+	require.Error(t, err, "a subscription of only hysteria v1 nodes must not render")
+}
+
+// TestSingboxRejectsXHTTPTransport pins that xhttp/splithttp — an Xray-only
+// transport with no sing-box equivalent — is rejected before an outbound is
+// built, instead of emitting transport.type=xhttp that sing-box cannot parse.
+func TestSingboxRejectsXHTTPTransport(t *testing.T) {
+	t.Parallel()
+
+	for _, network := range []string{"xhttp", "splithttp", "XHTTP"} {
+		cfg := &serverConfig{
+			Type:    "vless",
+			Address: "x.example",
+			Port:    443,
+			UUID:    "id-1",
+			Network: network,
+			Path:    "/x",
+			Host:    "x.example.com",
+			Mode:    "stream-up",
+		}
+
+		out, err := buildSingboxOutbound(cfg)
+		require.Error(t, err, "network %q must be rejected for sing-box", network)
+		assert.Contains(t, err.Error(), "unsupported transport")
+		assert.Nil(t, out)
+	}
+
+	// Mixed subscription: the xhttp node is skipped, the ws node survives with
+	// its transport intact, and the document contains no xhttp type.
+	items := []json.RawMessage{
+		json.RawMessage(`{"type":"vless","address":"x.example","port":443,"uuid":"id-1","network":"xhttp","path":"/x","remark":"xhttp-node"}`),
+		json.RawMessage(`{"type":"vless","address":"ws.example","port":443,"uuid":"id-2","security":"tls","network":"ws","path":"/ws","remark":"ws-node"}`),
+	}
+
+	outbounds, err := ConvertJSONConfigsToSingbox(items)
+	require.NoError(t, err)
+	require.Len(t, outbounds, 1, "only the ws node survives")
+	assert.Equal(t, "ws-node", outbounds[0]["tag"])
+
+	transport, ok := outbounds[0]["transport"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "ws", transport["type"])
+
+	_, err = ConvertJSONConfigsToSingbox(items[:1])
+	require.Error(t, err, "a subscription of only xhttp nodes must not render")
+}
+
 // ==================== UA-driven dispatch (wiring) ====================
 
 func TestHandleSubscription_FormatByUA(t *testing.T) {
