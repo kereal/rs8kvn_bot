@@ -959,14 +959,12 @@ func isLocalAddress(host string) bool {
 }
 
 // handleSubscription is the HTTP handler for GET /sub/{subID}.
-// It first checks the per-subID response cache (added in v2.3.0) and, on
-// hit, verifies the subscription is still active via a cheap status lookup
-// before replaying the cached body and headers. On miss it fetches the
-// subscription together with its plan and active sources from the database,
-// tracks the request device and IP, fetches each source URL, detects the
-// response format (JSON / Base64 / plain), converts JSON server configs to
-// share links, aggregates subscription-userinfo headers across sources,
-// caches the result, and writes the final response.
+// It serves cached or aggregated Xray, sing-box, or Clash/Mihomo profiles,
+// selecting the format through DetectOutputFormat using ?format= and User-Agent.
+// Cache hits revalidate subscription status; misses record device/IP analytics
+// and fetch upstream sources. Non-GET requests receive 405; an unavailable
+// subserver receives 503. Invalid IDs, unavailable subscriptions, and results
+// with no usable nodes receive 404; other processing errors receive 500.
 func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIP(r)
 

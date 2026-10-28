@@ -15,6 +15,9 @@ import (
 // produced by ExtractClashConfigs / ExtractJSONConfigs) into sing-box outbound
 // objects, one per usable node. Unsupported protocols are skipped (not fatal) so
 // a partial subscription still yields usable nodes.
+// Malformed configs, nodes with an empty address or zero port, and Shadowsocks
+// nodes without a method are also skipped. It returns an error only when no
+// entries remain, including empty input.
 func ConvertJSONConfigsToSingbox(items []json.RawMessage) ([]map[string]any, error) {
 	out := make([]map[string]any, 0, len(items))
 	for i, raw := range items {
@@ -47,6 +50,8 @@ func ConvertJSONConfigsToSingbox(items []json.RawMessage) ([]map[string]any, err
 }
 
 // buildSingboxOutbound assembles a single sing-box outbound for the given config.
+// It returns an error for an empty address, a zero port, an unsupported protocol,
+// or a Shadowsocks config without a method. Hysteria variants render as hysteria2.
 func buildSingboxOutbound(cfg *serverConfig) (map[string]any, error) {
 	if cfg.Address == "" {
 		return nil, fmt.Errorf("missing address")
@@ -92,6 +97,7 @@ func singboxOutboundBase(proxyType string, cfg *serverConfig) map[string]any {
 	return out
 }
 
+// buildVLESSSingbox builds a VLESS outbound with flow, TLS, and transport options.
 func buildVLESSSingbox(cfg *serverConfig) map[string]any {
 	out := singboxOutboundBase("vless", cfg)
 	out["uuid"] = cfg.UUID
@@ -103,6 +109,8 @@ func buildVLESSSingbox(cfg *serverConfig) map[string]any {
 	return out
 }
 
+// buildVMessSingbox builds a VMess outbound with TLS and transport options.
+// Missing or non-integer aid becomes zero; an empty cipher becomes "auto".
 func buildVMessSingbox(cfg *serverConfig) map[string]any {
 	aid := 0
 	if cfg.Aid != "" {
@@ -124,6 +132,8 @@ func buildVMessSingbox(cfg *serverConfig) map[string]any {
 	return out
 }
 
+// buildTrojanSingbox builds a Trojan outbound with flow, TLS, and transport
+// options, using the UUID as the password when Password is empty.
 func buildTrojanSingbox(cfg *serverConfig) map[string]any {
 	password := cfg.Password
 	if password == "" {
@@ -139,6 +149,8 @@ func buildTrojanSingbox(cfg *serverConfig) map[string]any {
 	return out
 }
 
+// buildShadowsocksSingbox builds a Shadowsocks outbound with cipher and password,
+// including plugin options only when a plugin name is present.
 func buildShadowsocksSingbox(cfg *serverConfig) map[string]any {
 	out := singboxOutboundBase("shadowsocks", cfg)
 	out["method"] = cfg.Method
@@ -150,6 +162,9 @@ func buildShadowsocksSingbox(cfg *serverConfig) map[string]any {
 	return out
 }
 
+// buildHysteria2Singbox builds a Hysteria2 outbound with obfuscation and TLS
+// options, using the UUID as the password when Password is empty. An obfuscation
+// password is included only when an obfuscation mode is set.
 func buildHysteria2Singbox(cfg *serverConfig) map[string]any {
 	password := cfg.Password
 	if password == "" {
@@ -183,6 +198,8 @@ func buildHysteria2Singbox(cfg *serverConfig) map[string]any {
 	return out
 }
 
+// buildTUICSingbox builds a TUIC outbound with BBR congestion control and ALPN,
+// using the UUID as the password when Password is empty.
 func buildTUICSingbox(cfg *serverConfig) map[string]any {
 	password := cfg.Password
 	if password == "" {
@@ -236,6 +253,8 @@ func applySingboxTLS(out map[string]any, cfg *serverConfig) {
 
 // applySingboxTransport attaches sing-box's "transport" field for non-tcp
 // transports. Network aliases are normalized so Clash configs map correctly.
+// Path supplies the gRPC service name or transport path, and Host supplies the
+// WebSocket Host header or HTTP/XHTTP host. Unrecognized networks leave out unchanged.
 func applySingboxTransport(out map[string]any, cfg *serverConfig) {
 	network := cfg.Network
 	if network == "" || network == "tcp" || network == "raw" {
@@ -313,8 +332,12 @@ var ruleSetDefs = []map[string]any{
 // the Xray profile template but uses the modern rule-set mechanism for geosite/geoip
 // lookups (since those fields were removed in sing-box 1.12), the action: reject
 // rule for ad blocking (replacing the removed block outbound from 1.13), and
-// URI-form DNS server addresses (required since 1.14). The sniffing rule migrates
+// typed DNS servers with type/server fields. The sniffing rule migrates
 // the legacy inbound sniff field to the recommended route action.
+// The profile includes a mixed listener on 127.0.0.1:10808, a "proxy" selector
+// listing nonempty outbound tags, and a direct outbound. Callers must assign
+// suitable unique tags before calling. The config references remote rule sets
+// for clients to download.
 func BuildSingboxConfig(outbounds []map[string]any) map[string]any {
 	tags := make([]string, 0, len(outbounds))
 	for _, ob := range outbounds {
