@@ -13,6 +13,8 @@ import (
 // ConvertJSONConfigsToClash renders normalized server configs into Clash/Mihomo
 // proxy entries, one per usable node. Unsupported protocols are skipped (not
 // fatal) so a partial subscription still yields usable nodes.
+// Malformed configs and nodes with an empty address or zero port are also
+// skipped. It returns an error only when no entries remain, including empty input.
 func ConvertJSONConfigsToClash(items []json.RawMessage) ([]map[string]any, error) {
 	out := make([]map[string]any, 0, len(items))
 	for i, raw := range items {
@@ -46,8 +48,9 @@ func ConvertJSONConfigsToClash(items []json.RawMessage) ([]map[string]any, error
 }
 
 // buildClashProxy assembles a single Clash/Mihomo proxy entry from a normalized
-// serverConfig. It is the exact reverse of normaliseClashProxy, so the same node
-// data round-trips between the Clash parser and the Clash renderer.
+// serverConfig, using its remark as the name or "proxy-<address>" if absent.
+// Hysteria variants are rendered as hysteria2. Unsupported protocols return an
+// error; address, port, and credentials are not validated here.
 func buildClashProxy(cfg *serverConfig) (map[string]any, error) {
 	name := cfg.Remark
 	if name == "" {
@@ -72,6 +75,7 @@ func buildClashProxy(cfg *serverConfig) (map[string]any, error) {
 	}
 }
 
+// baseClashNode creates a named proxy entry with the server endpoint and UDP enabled.
 func baseClashNode(cfg *serverConfig, proxyType string, name string) map[string]any {
 	return map[string]any{
 		"name":   name,
@@ -82,6 +86,9 @@ func baseClashNode(cfg *serverConfig, proxyType string, name string) map[string]
 	}
 }
 
+// applyClashNetwork sets transport fields in p. Path is the WebSocket path or
+// gRPC service name; Host supplies the WebSocket Host header. Unknown networks
+// leave p unchanged.
 func applyClashNetwork(p map[string]any, cfg *serverConfig) {
 	switch cfg.Network {
 	case "ws":
@@ -106,6 +113,9 @@ func applyClashNetwork(p map[string]any, cfg *serverConfig) {
 	}
 }
 
+// applyClashTLS adds TLS, SNI, fingerprint, ALPN, Reality, and certificate
+// verification options to p when configured. TLS is enabled by TLS="true"/"1"
+// or Security="tls"/"reality", ignoring case; other options are copied independently.
 func applyClashTLS(p map[string]any, cfg *serverConfig) {
 	security := strings.ToLower(cfg.Security)
 	tlsEnabled := strings.EqualFold(cfg.TLS, "true") || strings.EqualFold(cfg.TLS, "1") ||
@@ -137,6 +147,7 @@ func applyClashTLS(p map[string]any, cfg *serverConfig) {
 	}
 }
 
+// buildVLESSClash builds a named VLESS proxy with flow, transport, and TLS options.
 func buildVLESSClash(cfg *serverConfig, name string) map[string]any {
 	p := baseClashNode(cfg, "vless", name)
 	if cfg.UUID != "" {
@@ -150,6 +161,8 @@ func buildVLESSClash(cfg *serverConfig, name string) map[string]any {
 	return p
 }
 
+// buildVMessClash builds a named VMess proxy with transport and TLS options,
+// defaulting an empty cipher to "auto" and preserving aid as a string.
 func buildVMessClash(cfg *serverConfig, name string) map[string]any {
 	p := baseClashNode(cfg, "vmess", name)
 	if cfg.UUID != "" {
@@ -168,6 +181,8 @@ func buildVMessClash(cfg *serverConfig, name string) map[string]any {
 	return p
 }
 
+// buildTrojanClash builds a named Trojan proxy with password, flow, transport,
+// and TLS options. An empty password is omitted.
 func buildTrojanClash(cfg *serverConfig, name string) map[string]any {
 	p := baseClashNode(cfg, "trojan", name)
 	if cfg.Password != "" {
@@ -181,6 +196,8 @@ func buildTrojanClash(cfg *serverConfig, name string) map[string]any {
 	return p
 }
 
+// buildShadowsocksClash builds a named Shadowsocks proxy, copying nonempty
+// cipher, password, and plugin fields without validating them.
 func buildShadowsocksClash(cfg *serverConfig, name string) map[string]any {
 	p := baseClashNode(cfg, "ss", name)
 	if cfg.Method != "" {
@@ -198,6 +215,8 @@ func buildShadowsocksClash(cfg *serverConfig, name string) map[string]any {
 	return p
 }
 
+// buildHysteria2Clash builds a named Hysteria2 proxy with obfuscation and SNI
+// options, using the UUID as the password when Password is empty.
 func buildHysteria2Clash(cfg *serverConfig, name string) map[string]any {
 	p := baseClashNode(cfg, "hysteria2", name)
 	password := cfg.Password
@@ -220,6 +239,7 @@ func buildHysteria2Clash(cfg *serverConfig, name string) map[string]any {
 	return p
 }
 
+// buildTUICClash builds a named TUIC proxy with UUID, password, and ALPN options.
 func buildTUICClash(cfg *serverConfig, name string) map[string]any {
 	p := baseClashNode(cfg, "tuic", name)
 	if cfg.UUID != "" {
@@ -309,8 +329,9 @@ func buildClashConfig(proxies []map[string]any) clashConfig {
 var clashGroupNames = []string{"PROXY"}
 
 // tagClashProxies guarantees every proxy entry has a unique non-empty "name".
-// The upstream remark is kept when unique; otherwise a free positional
-// "proxy-N" name is used. It mutates the supplied entries in place.
+// The upstream remark is kept when unique and not reserved for the PROXY group;
+// otherwise the first free "proxy-N" name starting at 1 is used. It mutates the
+// supplied entries in place.
 func tagClashProxies(proxies []map[string]any) {
 	used := make(map[string]struct{}, len(proxies)+len(clashGroupNames))
 	for _, reserved := range clashGroupNames {

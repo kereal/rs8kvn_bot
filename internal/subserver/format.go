@@ -43,11 +43,10 @@ func (f OutputFormat) ContentType() string {
 }
 
 // DetectOutputFormat picks the serialization format for a subscription request.
-// An explicit formatParam (from ?format=) wins when it names a supported format;
-// otherwise the format is inferred from the client's User-Agent. Unknown,
-// empty, or unparseable inputs fall back to OutputXray so existing clients keep
-// the current behavior. Callers should already have lowercase UA via
-// requestHeaders["user-agent"].
+// A trimmed, case-insensitive sing-box or Clash alias in formatParam (from
+// ?format=) overrides the User-Agent. Other values, including "xray", fall back
+// to case-insensitive User-Agent detection. If neither input selects sing-box
+// or Clash, it returns OutputXray.
 func DetectOutputFormat(formatParam, ua string) OutputFormat {
 	switch strings.ToLower(strings.TrimSpace(formatParam)) {
 	case "singbox", "sing-box", "sing_box", "sb":

@@ -16,15 +16,17 @@ import (
 )
 
 // HandleSubscription processes a subscription request from cache or upstream sources.
-// It returns the aggregated response body with headers, or an error if the subscription
-// cannot be served.
+// It returns the body and headers in the format chosen by DetectOutputFormat
+// using formatParam and requestHeaders["user-agent"], with a separate cache entry
+// per format. The two counts are successful upstream fetches and nodes with a
+// subscription URL; both are zero on a cache hit or a subscription lookup error.
 //
-// The flow is:
-//  1. Check the cache for a fresh entry keyed by subID (serveFromCache).
-//  2. On cache miss, load the subscription with plan and sources from the database (loadSubscription).
-//  3. Track the requesting device and IP for analytics.
-//  4. For each active source, fetch the upstream response and detect its format (fetchAndAggregateSources).
-//  5. Aggregate subscription-userinfo headers and build the final response (buildResponse).
+// Missing, inactive, or expired subscriptions yield ErrSubscriptionNotFound;
+// database lookup and status revalidation errors propagate. Failed sources and
+// invalid items are skipped, with ErrNoSubscriptionItems when none can be
+// rendered; other Xray rendering errors propagate. Device/IP analytics are
+// recorded on cache misses, and last_request is updated on successful lookups
+// and cache revalidation. Analytics and last_request errors do not block delivery.
 func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID, clientIP string, requestHeaders map[string]string, formatParam string) (*SubscriptionResult, int, int, error) {
 	outFormat := DetectOutputFormat(formatParam, requestHeaders["user-agent"])
 	cacheKey := subID
