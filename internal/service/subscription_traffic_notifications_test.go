@@ -177,6 +177,29 @@ func TestProcessTrafficNotifications_ResetAndReenable(t *testing.T) {
 	assert.Equal(t, "monthly", gotRequest.TrafficReset)
 	assert.Equal(t, 1, gotRequest.TrafficResetDay)
 }
+func TestProcessTrafficReset_ReenablesWithoutNotificationBit(t *testing.T) {
+	t.Parallel()
+
+	used := int64(1) * 1024 * 1024 * 1024
+	updated := false
+	traffic := &xui.ClientTraffic{
+		Up: used, Enable: false, Total: 100 * 1024 * 1024 * 1024,
+		Reset: 30, UUID: "reset-without-notification",
+	}
+	svc, bot, _, xuiClient, _, _ := trafficNotifySetup(t, traffic, 100*1024*1024*1024,
+		func(context.Context, xui.ClientRequest) error {
+			updated = true
+			return nil
+		})
+	xuiClient.GetClientByEmailFunc = func(context.Context, int, string) (*xui.ClientConfig, error) {
+		return &xui.ClientConfig{TrafficReset: "monthly", TrafficResetDay: 1}, nil
+	}
+
+	sub := &database.Subscription{ID: 30, TelegramID: 123490, Username: "reset-no-bit", PlanID: 1, TrafficRemindersSent: database.TrafficBitExhausted}
+	require.NoError(t, svc.ProcessTrafficReset(context.Background(), sub))
+	assert.True(t, updated, "recovery mode must re-enable a reset client without notification state")
+	assert.Zero(t, bot.SendCount, "recovery mode must not send Telegram messages")
+}
 
 func TestProcessTrafficNotifications_SkippedWhenBelow90(t *testing.T) {
 	t.Parallel()
