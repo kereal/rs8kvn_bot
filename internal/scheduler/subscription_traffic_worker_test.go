@@ -20,10 +20,18 @@ func (f *fakeTrafficRepo) GetActiveSubscriptionsWithTrafficLimit(ctx context.Con
 
 type fakeTrafficSvc struct {
 	processFn func(ctx context.Context, sub *database.Subscription) error
+	resetFn   func(ctx context.Context, sub *database.Subscription) error
 }
 
 func (f *fakeTrafficSvc) ProcessTrafficNotifications(ctx context.Context, sub *database.Subscription) error {
 	return f.processFn(ctx, sub)
+}
+
+func (f *fakeTrafficSvc) ProcessTrafficReset(ctx context.Context, sub *database.Subscription) error {
+	if f.resetFn != nil {
+		return f.resetFn(ctx, sub)
+	}
+	return nil
 }
 
 func TestTrafficWorker_ProcessIteratesTargets(t *testing.T) {
@@ -58,6 +66,35 @@ func TestTrafficWorker_ProcessIteratesTargets(t *testing.T) {
 	assert.True(t, seen[1])
 	assert.True(t, seen[2])
 	assert.False(t, seen[3])
+}
+func TestTrafficWorker_ProcessResetsWithoutNotifications(t *testing.T) {
+	t.Parallel()
+
+	resetCalls := 0
+	notificationCalls := 0
+	repo := &fakeTrafficRepo{
+		targetsFn: func(ctx context.Context) ([]database.SubscriptionTrafficTarget, error) {
+			return []database.SubscriptionTrafficTarget{
+				{Subscription: database.Subscription{ID: 1, TelegramID: 101, PlanID: 1}, TrafficLimit: 1024},
+			}, nil
+		},
+	}
+	svc := &fakeTrafficSvc{
+		processFn: func(context.Context, *database.Subscription) error {
+			notificationCalls++
+			return nil
+		},
+		resetFn: func(context.Context, *database.Subscription) error {
+			resetCalls++
+			return nil
+		},
+	}
+
+	worker := NewSubscriptionTrafficWorker(repo, svc)
+	worker.processResets(context.Background())
+
+	assert.Equal(t, 1, resetCalls)
+	assert.Zero(t, notificationCalls)
 }
 
 func TestTrafficWorker_ProcessContinuesOnError(t *testing.T) {

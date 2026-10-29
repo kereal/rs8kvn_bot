@@ -128,12 +128,12 @@ type SubscriptionTrafficRepository interface {
 	GetActiveSubscriptionsWithTrafficLimit(ctx context.Context) ([]database.SubscriptionTrafficTarget, error)
 }
 
-// SubscriptionTrafficService is the narrow contract the traffic worker needs
-// from the subscription service: it inspects a subscription's live traffic on
-// its active nodes, sends notifications, and re-enables clients whose traffic
-// was exhausted but has since been reset.
+// SubscriptionTrafficService is the narrow contract the traffic workers need
+// from the subscription service: it inspects live traffic, sends notifications,
+// and re-enables clients whose traffic was exhausted but has since been reset.
 type SubscriptionTrafficService interface {
 	ProcessTrafficNotifications(ctx context.Context, sub *database.Subscription) error
+	ProcessTrafficReset(ctx context.Context, sub *database.Subscription) error
 }
 
 // SubscriptionLastRequest updates the last_request timestamp on subscriptions.

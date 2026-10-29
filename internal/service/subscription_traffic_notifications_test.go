@@ -177,6 +177,44 @@ func TestProcessTrafficNotifications_ResetAndReenable(t *testing.T) {
 	assert.Equal(t, "monthly", gotRequest.TrafficReset)
 	assert.Equal(t, 1, gotRequest.TrafficResetDay)
 }
+func TestProcessTrafficReset_ReenablesWithoutNotificationBit(t *testing.T) {
+	t.Parallel()
+
+	traffic := &xui.ClientTraffic{
+		Up: 100 * 1024 * 1024 * 1024, Enable: false, Total: 100 * 1024 * 1024 * 1024,
+		Reset: 30, UUID: "reset-without-notification",
+	}
+	svc, bot, db, xuiClient, claimedBits, sentMsgs := trafficNotifySetup(t, traffic, 100*1024*1024*1024, nil)
+	_ = db
+	updated := false
+	xuiClient.UpdateClientFunc = func(context.Context, xui.ClientRequest) error {
+		updated = true
+		return nil
+	}
+	xuiClient.GetClientByEmailFunc = func(context.Context, int, string) (*xui.ClientConfig, error) {
+		return &xui.ClientConfig{TrafficReset: "monthly", TrafficResetDay: 1}, nil
+	}
+
+	// Phase 1: quota exceeded in recovery mode, no notification bit saved yet.
+	// The worker must record TrafficBitExhausted so later reset recovery can
+	// recognize this subscription — without sending any message.
+	sub := &database.Subscription{ID: 30, TelegramID: 123490, Username: "reset-no-bit", PlanID: 1}
+	require.NoError(t, svc.ProcessTrafficReset(context.Background(), sub))
+	assert.Equal(t, []uint{uint(database.TrafficBitExhausted)}, *claimedBits,
+		"recovery mode must record the exhausted bit without sending a notification")
+	assert.Equal(t, 0, bot.SendCount, "recovery mode must not send Telegram messages")
+	assert.False(t, updated, "recovery mode must not re-enable while the quota is still exceeded")
+
+	// Phase 2: the panel reset the counter (used < limit) but left the client
+	// disabled. With the saved exhausted bit the recovery pass must re-enable
+	// the client — still without any Telegram messages.
+	traffic.Up = int64(1) * 1024 * 1024 * 1024
+	sub.TrafficRemindersSent = database.TrafficBitExhausted
+	require.NoError(t, svc.ProcessTrafficReset(context.Background(), sub))
+	assert.True(t, updated, "recovery mode must re-enable a reset client using the recorded exhaustion state")
+	assert.Equal(t, 0, bot.SendCount, "recovery mode must not send Telegram messages")
+	assert.Zero(t, *sentMsgs, "no notification of any kind must be sent in recovery mode")
+}
 
 func TestProcessTrafficNotifications_SkippedWhenBelow90(t *testing.T) {
 	t.Parallel()

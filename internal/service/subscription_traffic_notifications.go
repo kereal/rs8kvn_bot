@@ -78,22 +78,29 @@ func (s *SubscriptionService) trafficNotifyCandidates(ctx context.Context, sub *
 	return nodes, nil
 }
 
-// ProcessTrafficNotifications inspects a subscription's live traffic on its
-// active 3x-ui nodes and, once per condition (bitmask-guarded):
-//  1. warns when >= 90% of the plan's traffic limit is used,
-//  2. notifies when the limit is exceeded (the panel disables the client),
-//  3. re-enables a disabled client whose traffic has since been reset, and
-//     notifies the user to come back.
-//
-// It never sends more than one message per subscription per condition and only
-// touches subscriptions on plans with a non-zero traffic limit. If any node
-// returns an error, an empty, negative, or overflowing snapshot, the condition
-// is logged at Warn and processing stops without taking an action.
+// ProcessTrafficNotifications inspects live traffic, sends quota notifications,
+// and re-enables clients whose exhausted quota has been reset.
 func (s *SubscriptionService) ProcessTrafficNotifications(ctx context.Context, sub *database.Subscription) error {
 	if sub == nil || sub.TelegramID <= 0 || s.bot == nil {
 		return nil
 	}
 
+	return s.processTraffic(ctx, sub, true)
+}
+
+// ProcessTrafficReset inspects live traffic and re-enables clients whose
+// exhausted quota has been reset, without sending user notifications. It is
+// used when notification workers are disabled so automatic access recovery
+// remains independent from Telegram messaging.
+func (s *SubscriptionService) ProcessTrafficReset(ctx context.Context, sub *database.Subscription) error {
+	if sub == nil || sub.TelegramID <= 0 {
+		return nil
+	}
+
+	return s.processTraffic(ctx, sub, false)
+}
+
+func (s *SubscriptionService) processTraffic(ctx context.Context, sub *database.Subscription, sendNotifications bool) error {
 	plan, err := s.db.GetPlanByID(ctx, sub.PlanID)
 	if err != nil {
 		return fmt.Errorf("traffic notifications: load plan: %w", err)
@@ -161,27 +168,69 @@ func (s *SubscriptionService) ProcessTrafficNotifications(ctx context.Context, s
 	case used >= limit:
 		// Quota exceeded: the panel disables the client. Warn once and do NOT
 		// re-enable (the user should buy Premium).
+		if !sendNotifications {
+			// Recovery mode: still mark the exhaustion via the existing claim
+			// mechanism (no message is sent), so the post-reset pass can
+			// recognize this subscription as previously exhausted and
+			// re-enable it once the counter resets.
+			_, cErr := s.trafficRepo.ClaimTrafficReminder(ctx, sub.ID, database.TrafficBitExhausted)
+			if cErr != nil {
+				logger.Warn("traffic notifications: failed to record exhausted state in recovery mode",
+					zap.Uint("subscription_id", sub.ID),
+					zap.Error(cErr))
+			}
+			return nil
+		}
 		return s.notifyExhausted(ctx, sub)
 	case !anyEnabled:
 		// Only a previously exhausted subscription may be re-enabled after reset.
+		// This prevents the recovery pass from overriding a deliberate manual
+		// disablement of an otherwise healthy client.
 		if sub.TrafficRemindersSent&database.TrafficBitExhausted == 0 {
 			return nil
 		}
 		// Traffic counter was reset (used < limit) but the panel left the client
-		// disabled. Re-enable it and invite the user back.
-		return s.reenableAndNotify(ctx, sub, snapshots)
-	case used*trafficQuotaWarningDenominator >= limit*trafficQuotaWarningNumerator:
+		// disabled. Re-enable it before optionally notifying the user.
+		if !s.reenableResetClients(ctx, sub, snapshots) {
+			return nil
+		}
+
+		// Forget the exhausted and 90% bits so future cycles can fire again.
+		rErr := s.trafficRepo.ReleaseTrafficReminder(ctx, sub.ID, database.TrafficBitExhausted)
+		if rErr != nil {
+			logger.Warn("traffic notifications: failed to release exhausted bit", zap.Uint("subscription_id", sub.ID), zap.Error(rErr))
+		}
+		rErr = s.trafficRepo.ReleaseTrafficReminder(ctx, sub.ID, database.TrafficBit90)
+		if rErr != nil {
+			logger.Warn("traffic notifications: failed to release 90 bit", zap.Uint("subscription_id", sub.ID), zap.Error(rErr))
+		}
+
+		if !sendNotifications {
+			return nil
+		}
+		return s.sendOnce(ctx, sub, database.TrafficBitReset, "reset", func() (string, tgbotapi.InlineKeyboardMarkup, error) {
+			text := utils.EscapeMarkdownV2(
+				"✅ *Твой трафик сброшен — ты снова в сети!*\n\n" +
+					"Возвращайся и продолжай пользоваться.\n\n🔗 " +
+					s.cfg.SubURL(sub.SubscriptionID))
+			// Empty keyboard: the reset message is a simple "come back", not a sales CTA.
+			return text, tgbotapi.InlineKeyboardMarkup{}, nil
+		})
+
+	case sendNotifications && used*trafficQuotaWarningDenominator >= limit*trafficQuotaWarningNumerator:
 		// Still enabled and approaching the cap: warm the user once.
 		return s.notifyNinety(ctx, sub)
-	default:
+	case sendNotifications:
 		// Below 90%: release the 90% bit so it can fire again if use climbs back.
 		return s.trafficRepo.ReleaseTrafficReminder(ctx, sub.ID, database.TrafficBit90)
+	default:
+		return nil
 	}
 }
 
-// reenableAndNotify re-enables disabled clients whose traffic has been reset and
-// sends a single "come back" notification.
-func (s *SubscriptionService) reenableAndNotify(ctx context.Context, sub *database.Subscription, snapshots []trafficSnapshot) error {
+// reenableResetClients re-enables disabled clients whose traffic has been reset.
+// It returns true when at least one panel update succeeds.
+func (s *SubscriptionService) reenableResetClients(ctx context.Context, sub *database.Subscription, snapshots []trafficSnapshot) bool {
 	reenabled := false
 
 	for _, snapshot := range snapshots {
@@ -202,13 +251,6 @@ func (s *SubscriptionService) reenableAndNotify(ctx context.Context, sub *databa
 		// client's inbound settings. Without it, UpdateClient would overwrite
 		// the profile with "never" and the monthly traffic reset would stop
 		// firing. Read it back best-effort before re-enabling.
-		//
-		// Distinguish ErrClientNotFound (client truly gone — safe to treat as
-		// "no profile" and pass empty values) from infrastructure errors
-		// (network/parse — must skip UpdateClient so the next retry can read
-		// the profile again). A nil response without an error is treated like
-		// a transient miss: skip UpdateClient rather than risk overwriting the
-		// panel profile with zeroes.
 		profile := &xui.ClientConfig{}
 		if len(n.inbound) > 0 {
 			p, pErr := n.client.GetClientByEmail(ctx, n.inbound[0], n.email)
@@ -263,30 +305,7 @@ func (s *SubscriptionService) reenableAndNotify(ctx context.Context, sub *databa
 		reenabled = true
 	}
 
-	if !reenabled {
-		return nil
-	}
-
-	// Forget the "exhausted" and "90%" bits so future cycles can fire again.
-	rErr := s.trafficRepo.ReleaseTrafficReminder(ctx, sub.ID, database.TrafficBitExhausted)
-	if rErr != nil {
-		logger.Warn("traffic notifications: failed to release exhausted bit", zap.Uint("subscription_id", sub.ID), zap.Error(rErr))
-	}
-	rErr = s.trafficRepo.ReleaseTrafficReminder(ctx, sub.ID, database.TrafficBit90)
-	if rErr != nil {
-		logger.Warn("traffic notifications: failed to release 90 bit", zap.Uint("subscription_id", sub.ID), zap.Error(rErr))
-	}
-
-	// The user's quota was exhausted and reset; we re-enabled the client. Invite
-	// them back — without pushing a purchase (unlike the warning/exhausted cases).
-	return s.sendOnce(ctx, sub, database.TrafficBitReset, "reset", func() (string, tgbotapi.InlineKeyboardMarkup, error) {
-		text := utils.EscapeMarkdownV2(
-			"✅ *Твой трафик сброшен — ты снова в сети!*\n\n" +
-				"Возвращайся и продолжай пользоваться.\n\n🔗 " +
-				s.cfg.SubURL(sub.SubscriptionID))
-		// Empty keyboard: the reset message is a simple "come back", not a sales CTA.
-		return text, tgbotapi.InlineKeyboardMarkup{}, nil
-	})
+	return reenabled
 }
 
 // notifyExhausted sends the "quota exceeded" notification at most once.
