@@ -233,6 +233,8 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | `PAYMENT_PROVIDER` | Payment provider | `platega` | ❌ | Only `platega` is supported |
 | `PLATEGA_MERCHANT_ID` | Platega merchant ID | *(empty)* | Required when enabled | Sent as `X-MerchantId` |
 | `PLATEGA_SECRET` | Platega webhook/API secret | *(empty)* | Required when enabled | Sent as `X-Secret`; keep private |
+| **User Notifications** |
+| `NOTIFICATIONS_ENABLED` | Start expiry-reminder and traffic-notification workers | `true` | ❌ | Set `false` for local runs against a copy of the production DB so real users receive no messages |
 | **Donation** |
 | `DONATE_CARD_NUMBER` | Donation card (T-Bank) | *(empty)* | ❌ | Shown in donate menu |
 | `DONATE_URL` | Donation collection link | *(empty)* | ❌ | T-Bank or other |
