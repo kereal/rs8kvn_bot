@@ -186,11 +186,14 @@ func TestProcessTrafficReset_ReenablesWithoutNotificationBit(t *testing.T) {
 		Up: used, Enable: false, Total: 100 * 1024 * 1024 * 1024,
 		Reset: 30, UUID: "reset-without-notification",
 	}
-	svc, bot, _, xuiClient, _, _ := trafficNotifySetup(t, traffic, 100*1024*1024*1024,
+	svc, bot, db, xuiClient, claimedBits, sentMsgs := trafficNotifySetup(t, traffic, 100*1024*1024*1024,
 		func(context.Context, xui.ClientRequest) error {
 			updated = true
 			return nil
 		})
+	_ = db
+	_ = claimedBits
+	_ = sentMsgs
 	xuiClient.GetClientByEmailFunc = func(context.Context, int, string) (*xui.ClientConfig, error) {
 		return &xui.ClientConfig{TrafficReset: "monthly", TrafficResetDay: 1}, nil
 	}
