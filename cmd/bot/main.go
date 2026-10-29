@@ -279,9 +279,9 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subService *service.SubscriptionService, syncSvc *service.SyncService, orderSvc *service.OrderService, dbService *database.Service, cfg *config.Config) *sync.WaitGroup {
 	workers := 9
 	if !cfg.NotificationsEnabled {
-		// The reminder and traffic workers are the only ones that message
-		// users; everything else keeps running.
-		workers -= 2
+		// The reminder worker is disabled; traffic recovery still runs because
+		// it restores VPN access after the panel resets the quota.
+		workers--
 	}
 
 	var wg sync.WaitGroup
@@ -402,18 +402,20 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 		}()
 	}
 
-	if cfg.NotificationsEnabled {
-		go func() {
-			defer recoverAndReport("Subscription traffic worker")
-			defer wg.Done()
+	go func() {
+		defer recoverAndReport("Subscription traffic worker")
+		defer wg.Done()
 
-			trafficWorker := scheduler.NewSubscriptionTrafficWorker(dbService, subService)
+		trafficWorker := scheduler.NewSubscriptionTrafficWorker(dbService, subService)
+		if cfg.NotificationsEnabled {
 			trafficWorker.Run(ctx)
-		}()
-	}
+			return
+		}
+		trafficWorker.RunRecovery(ctx)
+	}()
 
 	if !cfg.NotificationsEnabled {
-		logger.Warn("User notifications disabled by config (NOTIFICATIONS_ENABLED=false); reminder and traffic workers not started")
+		logger.Warn("User notifications disabled by config (NOTIFICATIONS_ENABLED=false); reminder worker disabled, traffic recovery remains active")
 	}
 
 	return &wg
