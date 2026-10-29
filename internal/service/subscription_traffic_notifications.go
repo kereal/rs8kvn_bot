@@ -169,6 +169,16 @@ func (s *SubscriptionService) processTraffic(ctx context.Context, sub *database.
 		// Quota exceeded: the panel disables the client. Warn once and do NOT
 		// re-enable (the user should buy Premium).
 		if !sendNotifications {
+			// Recovery mode: still mark the exhaustion via the existing claim
+			// mechanism (no message is sent), so the post-reset pass can
+			// recognize this subscription as previously exhausted and
+			// re-enable it once the counter resets.
+			_, cErr := s.trafficRepo.ClaimTrafficReminder(ctx, sub.ID, database.TrafficBitExhausted)
+			if cErr != nil {
+				logger.Warn("traffic notifications: failed to record exhausted state in recovery mode",
+					zap.Uint("subscription_id", sub.ID),
+					zap.Error(cErr))
+			}
 			return nil
 		}
 		return s.notifyExhausted(ctx, sub)
