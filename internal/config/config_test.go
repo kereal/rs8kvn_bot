@@ -54,6 +54,10 @@ func TestLoad_DefaultValues(t *testing.T) {
 
 	defer os.Unsetenv("GLOBAL_SUB_URL")
 
+	// Isolate from host environment / .env — empty value is treated as unset
+	// by LoadEnv, so the default (true) is preserved.
+	t.Setenv("NOTIFICATIONS_ENABLED", "")
+
 	cfg, err := Load()
 	require.NoError(t, err, "Load() error")
 
