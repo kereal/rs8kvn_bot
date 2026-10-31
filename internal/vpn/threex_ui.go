@@ -2,6 +2,7 @@ package vpn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
@@ -9,6 +10,20 @@ import (
 )
 
 var _ Client = (*ThreeXUIClient)(nil)
+
+// mapPanelError переводит sentinel-ошибки адаптера панели (internal/xui) в
+// семантику vpn. Классификация текстов панели выполняется в xui (classify.go),
+// здесь — только маппинг типов.
+func mapPanelError(err error) error {
+	switch {
+	case errors.Is(err, xui.ErrClientAlreadyExists):
+		return fmt.Errorf("%w: %w", ErrSubscriptionAlreadyExists, err)
+	case errors.Is(err, xui.ErrClientNotFound):
+		return fmt.Errorf("%w: %w", ErrSubscriptionNotFound, err)
+	}
+
+	return err
+}
 
 // ThreeXUIClient adapts an xui.Client to the Client interface.
 type ThreeXUIClient struct {
@@ -39,7 +54,7 @@ func (c *ThreeXUIClient) CreateSubscription(ctx context.Context, provision Subsc
 		Comment:         provision.Comment,
 	})
 	if err != nil {
-		return fmt.Errorf("3x-ui create subscription: %w", classifyCreateSubscriptionError(err))
+		return fmt.Errorf("3x-ui create subscription: %w", mapPanelError(err))
 	}
 
 	return nil
@@ -64,7 +79,7 @@ func (c *ThreeXUIClient) UpdateSubscription(ctx context.Context, provision Subsc
 		Comment:         provision.Comment,
 	})
 	if err != nil {
-		return fmt.Errorf("3x-ui update subscription: %w", classifyCreateSubscriptionError(err))
+		return fmt.Errorf("3x-ui update subscription: %w", mapPanelError(err))
 	}
 
 	return nil
@@ -74,7 +89,7 @@ func (c *ThreeXUIClient) UpdateSubscription(ctx context.Context, provision Subsc
 func (c *ThreeXUIClient) DeleteSubscription(ctx context.Context, provision SubscriptionProvision) error {
 	err := c.client.DeleteClient(ctx, provision.Username)
 	if err != nil {
-		return fmt.Errorf("3x-ui delete subscription: %w", classifyDeleteSubscriptionError(err))
+		return fmt.Errorf("3x-ui delete subscription: %w", mapPanelError(err))
 	}
 
 	return nil

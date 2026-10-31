@@ -167,7 +167,7 @@ func TestIsRetryable(t *testing.T) {
 		{"no such host", fmt.Errorf("no such host"), false},
 		{"temporary failure", fmt.Errorf("temporary failure in name resolution"), false},
 		{"connection refused", &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused")}, true},
-		{"non-200", fmt.Errorf("upstream returned non-200: %w", ErrNon200Response), false},
+		{"non-200", fmt.Errorf("upstream returned non-200: %w", utils.ErrNon200Response), false},
 		{"other error", fmt.Errorf("some other error"), false},
 	}
 
@@ -277,7 +277,7 @@ func TestRetryWithBackoff(t *testing.T) {
 			},
 			fn: func() error {
 				non200Calls.Add(1)
-				return fmt.Errorf("upstream returned non-200: %w", ErrNon200Response)
+				return fmt.Errorf("upstream returned non-200: %w", utils.ErrNon200Response)
 			},
 			wantErr:      true,
 			wantContains: "upstream returned non-200",
@@ -1074,90 +1074,8 @@ func TestGetClientTraffic(t *testing.T) {
 	})
 }
 
-func TestGetClientByEmail(t *testing.T) {
-	t.Parallel()
-
-	if testing.Short() {
-		t.Skip("Skipping slow test in short mode")
-	}
-
-	const settingsJSON = `{"clients":[{"id":"uuid-1","email":"alpha@example.com","enable":true,"totalGB":1073741824,"expiryTime":0,"reset":30,"resetDay":0,"resetMax":0,"trafficReset":"monthly","trafficResetDay":1},{"id":"uuid-2","email":"beta@example.com","enable":false,"totalGB":0,"expiryTime":0,"reset":0}]}`
-
-	t.Run("success", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, "/panel/api/inbounds/get/1", r.URL.Path)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"settings":%s}}`, settingsJSON)
-		}))
-		defer server.Close()
-
-		client, err := NewClient(server.URL, testAPIToken)
-		require.NoError(t, err)
-		defer client.Close()
-
-		cfg, err := client.GetClientByEmail(context.Background(), 1, "alpha@example.com")
-		require.NoError(t, err)
-		require.NotNil(t, cfg)
-		assert.Equal(t, "uuid-1", cfg.ID)
-		assert.Equal(t, 30, cfg.Reset)
-		assert.Equal(t, 0, cfg.ResetDay)
-		assert.Equal(t, 0, cfg.ResetMax)
-		assert.Equal(t, "monthly", cfg.TrafficReset)
-		assert.Equal(t, 1, cfg.TrafficResetDay)
-	})
-
-	t.Run("legacy escaped settings string", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"settings":%q}}`, settingsJSON)
-		}))
-		defer server.Close()
-
-		client, err := NewClient(server.URL, testAPIToken)
-		require.NoError(t, err)
-		defer client.Close()
-
-		cfg, err := client.GetClientByEmail(context.Background(), 1, "alpha@example.com")
-		require.NoError(t, err)
-		require.NotNil(t, cfg)
-		assert.Equal(t, "monthly", cfg.TrafficReset)
-	})
-
-	t.Run("email match is case-insensitive", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"settings":%s}}`, settingsJSON)
-		}))
-		defer server.Close()
-
-		client, err := NewClient(server.URL, testAPIToken)
-		require.NoError(t, err)
-		defer client.Close()
-
-		cfg, err := client.GetClientByEmail(context.Background(), 1, "ALPHA@example.com")
-		require.NoError(t, err)
-		assert.Equal(t, "alpha@example.com", cfg.Email)
-	})
-
-	t.Run("client not found", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"settings":%s}}`, settingsJSON)
-		}))
-		defer server.Close()
-
-		client, err := NewClient(server.URL, testAPIToken)
-		require.NoError(t, err)
-		defer client.Close()
-
-		_, err = client.GetClientByEmail(context.Background(), 1, "ghost@example.com")
-		assert.ErrorIs(t, err, ErrClientNotFound)
-	})
-}
+// GetClientByEmail теперь читает выделенный эндпоинт GET /clients/get/{email};
+// контрактные тесты — в panel_contract_test.go.
 
 func TestGetInbound(t *testing.T) {
 	t.Parallel()

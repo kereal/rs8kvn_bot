@@ -150,11 +150,10 @@ func TestProcessTrafficNotifications_ResetAndReenable(t *testing.T) {
 		return nil
 	})
 	// The panel's traffic endpoint does not return the auto-renew profile, so
-	// the worker must read it back from the client's inbound settings and
-	// forward it, otherwise the re-enable update resets trafficReset to never.
-	xuiClient.GetClientByEmailFunc = func(ctx context.Context, inboundID int, email string) (*xui.ClientConfig, error) {
-		assert.Equal(t, 1, inboundID)
-		return &xui.ClientConfig{Email: email, Reset: 30, ResetDay: 5, ResetMax: 3, TrafficReset: "monthly", TrafficResetDay: 1}, nil
+	// the worker must read it back from the client card and forward it,
+	// otherwise the re-enable update resets trafficReset to never.
+	xuiClient.GetClientByEmailFunc = func(ctx context.Context, email string) (*xui.ClientRecord, error) {
+		return &xui.ClientRecord{Client: xui.ClientConfig{Email: email, Reset: 30, ResetDay: 5, ResetMax: 3, TrafficReset: "monthly", TrafficResetDay: 1}, InboundIDs: []int{1}}, nil
 	}
 	db.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
 		return &database.Subscription{TrafficRemindersSent: database.TrafficBitExhausted}, nil
@@ -191,8 +190,8 @@ func TestProcessTrafficReset_ReenablesWithoutNotificationBit(t *testing.T) {
 		updated = true
 		return nil
 	}
-	xuiClient.GetClientByEmailFunc = func(context.Context, int, string) (*xui.ClientConfig, error) {
-		return &xui.ClientConfig{TrafficReset: "monthly", TrafficResetDay: 1}, nil
+	xuiClient.GetClientByEmailFunc = func(context.Context, string) (*xui.ClientRecord, error) {
+		return &xui.ClientRecord{Client: xui.ClientConfig{TrafficReset: "monthly", TrafficResetDay: 1}, InboundIDs: []int{1}}, nil
 	}
 
 	// Phase 1: quota exceeded in recovery mode, no notification bit saved yet.

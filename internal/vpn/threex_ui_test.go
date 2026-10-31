@@ -3,7 +3,6 @@ package vpn
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -81,7 +80,7 @@ func (f *fakeXUIClient) GetClientTraffic(ctx context.Context, email string) (*xu
 	return nil, nil
 }
 
-func (f *fakeXUIClient) GetClientByEmail(ctx context.Context, inboundID int, email string) (*xui.ClientConfig, error) {
+func (f *fakeXUIClient) GetClientByEmail(ctx context.Context, email string) (*xui.ClientRecord, error) {
 	return nil, nil
 }
 
@@ -142,10 +141,12 @@ func TestThreeXUIClient_DeleteSubscription_CallsDeleteClient(t *testing.T) {
 	assert.Equal(t, provision.Username, fake.deleteCapture.email)
 }
 
-func TestThreeXUIClient_CreateSubscription_WrapsError(t *testing.T) {
+// Sentinel'ы панели маппятся в семантику vpn напрямую (mapPanelError);
+// поведение продублировано тестами в client_test.go на все три операции.
+func TestThreeXUIClient_CreateSubscription_WrapsAlreadyExists(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeXUIClient{addErr: fmt.Errorf("client already exists")}
+	fake := &fakeXUIClient{addErr: xui.ErrClientAlreadyExists}
 	client := NewThreeXUIClient(fake, []int{1})
 
 	err := client.CreateSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
@@ -153,10 +154,10 @@ func TestThreeXUIClient_CreateSubscription_WrapsError(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrSubscriptionAlreadyExists))
 }
 
-func TestThreeXUIClient_DeleteSubscription_WrapsError(t *testing.T) {
+func TestThreeXUIClient_DeleteSubscription_WrapsNotFound(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeXUIClient{deleteErr: fmt.Errorf("client not found")}
+	fake := &fakeXUIClient{deleteErr: xui.ErrClientNotFound}
 	client := NewThreeXUIClient(fake, []int{1})
 
 	err := client.DeleteSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
