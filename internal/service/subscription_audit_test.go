@@ -24,7 +24,7 @@ import (
 // auditTestSvc собирает SubscriptionService с фейком, накапливающим
 // audit-события в m.AuditLogs.
 func auditTestSvc(m *testutil.DatabaseService) *SubscriptionService {
-	return NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	return NewSubscriptionService(m, nil, nil, &config.Config{})
 }
 
 func TestSubscriptionService_Create_WritesCreatedAudit(t *testing.T) {

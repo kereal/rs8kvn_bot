@@ -8,7 +8,7 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
-	"github.com/kereal/rs8kvn_bot/internal/interfaces"
+
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
@@ -54,10 +54,10 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 				}
 			},
 			setupSubService: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient, cfg *config.Config) *service.SubscriptionService {
-				mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+				clients := service.NodeClients{1: {Reader: mockXUI}}
 				nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
 
-				return service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg)
+				return service.NewSubscriptionService(mockDB, clients, nodes, cfg)
 			},
 			wantSend: true,
 			wantText: "Ваша подписка готова",
@@ -141,10 +141,10 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 				}
 			},
 			setupSubService: func(mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient, cfg *config.Config) *service.SubscriptionService {
-				mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+				clients := service.NodeClients{1: {Reader: mockXUI}}
 				nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
 
-				return service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg)
+				return service.NewSubscriptionService(mockDB, clients, nodes, cfg)
 			},
 			wantSend: true,
 			wantText: "Ваша подписка",
@@ -457,9 +457,9 @@ func TestHandleCallback_MenuSubscription_NoSubscription(t *testing.T) {
 	mockBot := testutil.NewBotAPI()
 	mockXUI := testutil.NewXUIClient()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	clients := service.NodeClients{1: {Reader: mockXUI}}
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, mockXUIClients, nil, nodes, cfg)
+	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -820,13 +820,13 @@ func TestHandleBackToSubscription_RequestError(t *testing.T) {
 	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
 	mockBot.RequestError = errors.New("request failed")
-	xuiClients := map[uint]interfaces.XUIClient{1: testutil.NewXUIClient()}
+	clients := service.NodeClients{1: {Reader: testutil.NewXUIClient()}}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "https://p", APIToken: "t", InboundIDs: "[1]"}}
 
 	require.NoError(t, mockDB.CreateSubscription(context.Background(), &database.Subscription{
 		TelegramID: 123456, Username: "testuser", ClientID: "c", SubscriptionID: "s", Status: "active",
 	}, ""))
-	svc := service.NewSubscriptionService(mockDB, xuiClients, nil, nodes, cfg)
+	svc := service.NewSubscriptionService(mockDB, clients, nodes, cfg)
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), svc, "")
 
 	ctx := context.Background()
@@ -974,4 +974,3 @@ func TestHandleCallback_BackToInvite(t *testing.T) {
 
 	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to delete message")
 }
-

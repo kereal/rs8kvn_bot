@@ -11,7 +11,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
-	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -115,10 +114,10 @@ func TestDeactivateBlockedBroadcastRecipients_RevokesAndDeprovisions(t *testing.
 	}
 
 	client := &mockVPNClient{}
-	vpnClients := map[uint]vpn.Client{node.ID: client}
+	clients := NodeClients{node.ID: {Provision: client}}
 
-	svc := NewSubscriptionService(m, nil, vpnClients, []database.Node{node}, &config.Config{})
-	svc.SetSyncService(NewSyncService(m, vpnClients, []database.Node{node}))
+	svc := NewSubscriptionService(m, clients, []database.Node{node}, &config.Config{})
+	svc.SetSyncService(NewSyncService(m, clients, []database.Node{node}))
 
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.NoError(t, err)
@@ -177,7 +176,7 @@ func TestDeactivateBlockedBroadcastRecipients_ReportsPartialFailure(t *testing.T
 		return nil
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.Error(t, err)
@@ -234,7 +233,7 @@ func TestDeactivateBlockedBroadcastRecipients_RetriesFailedDeprovision(t *testin
 			}
 			// Leave queued removals to the background worker.
 			m.GetPendingBySubscriptionIDFunc = func(context.Context, uint) ([]database.SubscriptionNode, error) { return nil, nil }
-			svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+			svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 			svc.SetSyncService(NewSyncService(m, nil, nil))
 
 			result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
@@ -274,7 +273,7 @@ func TestDeactivateBlockedBroadcastRecipients_StatsError(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get broadcast stats")
@@ -295,7 +294,7 @@ func TestDeactivateBlockedBroadcastRecipients_NoTargets(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -319,7 +318,7 @@ func TestDeactivateBlockedBroadcastRecipients_SkipsTelegramWithoutSubscription(t
 		return nil, database.ErrSubscriptionNotFound
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -340,7 +339,7 @@ func TestDeactivateBlockedBroadcastRecipients_SubscriptionReadErrorCountsFailed(
 		return nil, errors.New("db read error")
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.Error(t, err)
 	require.NotNil(t, result)
@@ -395,7 +394,7 @@ func TestDeactivateBlockedBroadcastRecipients_UnreachableAdressees(t *testing.T)
 		return nil
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -487,10 +486,10 @@ func TestDeactivateBlockedBroadcastRecipients_ImmediateSyncCapped(t *testing.T) 
 	}
 
 	client := &mockVPNClient{}
-	vpnClients := map[uint]vpn.Client{node.ID: client}
+	clients := NodeClients{node.ID: {Provision: client}}
 
-	svc := NewSubscriptionService(m, nil, vpnClients, []database.Node{node}, &config.Config{})
-	svc.SetSyncService(NewSyncService(m, vpnClients, []database.Node{node}))
+	svc := NewSubscriptionService(m, clients, []database.Node{node}, &config.Config{})
+	svc.SetSyncService(NewSyncService(m, clients, []database.Node{node}))
 
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.NoError(t, err)
@@ -535,7 +534,7 @@ func TestDeactivateBlockedBroadcastRecipients_InvalidatesSubscriberCache(t *test
 		return nil
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 	svc.SetInvalidateBySubIDFunc(func(subID string) {
 		invalidated = append(invalidated, subID)
 	})
@@ -594,7 +593,7 @@ func TestDeactivateBlockedBroadcastRecipients_RefreshesMetrics(t *testing.T) {
 		return 0, nil
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.NoError(t, err)

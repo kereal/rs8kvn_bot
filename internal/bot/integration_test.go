@@ -11,7 +11,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
-	"github.com/kereal/rs8kvn_bot/internal/interfaces"
+
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
@@ -159,9 +159,9 @@ func NewTestFixture(t *testing.T) *IntegrationTestFixture {
 	}
 
 	handler := NewHandler(testutil.NewBotAPI(), cfg, dbService, NewTestBotConfig(), nil, "")
-	mockXUIClients := map[uint]interfaces.XUIClient{1: mockXUI.Client}
+	clients := service.NodeClients{1: {Reader: mockXUI.Client}}
 	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: mockXUI.Server.URL, APIToken: "test-api-token", InboundIDs: "[1]"}}
-	subService := service.NewSubscriptionService(dbService, mockXUIClients, nil, nodes, cfg)
+	subService := service.NewSubscriptionService(dbService, clients, nodes, cfg)
 	handler.subscriptionService = subService
 	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
 

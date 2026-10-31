@@ -7,7 +7,6 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
-	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,7 +32,7 @@ func TestSyncService_SyncSubscription_PendingUpdate_SendsProvisionAndActivates(t
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusPendingUpdate}))
 
 	client := &mockVPNClient{}
-	svc := NewSyncService(db, map[uint]vpn.Client{node.ID: client}, []database.Node{*node})
+	svc := NewSyncService(db, NodeClients{node.ID: {Provision: client}}, []database.Node{*node})
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
@@ -77,7 +76,7 @@ func TestSyncService_ApplyPlanToSubscription_MarksUpdatesAndReconcilesMembership
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: oldNode.ID, Status: database.SyncStatusActive}))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: targetNode.ID, Status: database.SyncStatusActive}))
 
-	svc := NewSyncService(db, map[uint]vpn.Client{}, []database.Node{*oldNode, *targetNode})
+	svc := NewSyncService(db, NodeClients{}, []database.Node{*oldNode, *targetNode})
 	require.NoError(t, svc.ApplyPlanToSubscription(ctx, sub.ID))
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
@@ -125,7 +124,7 @@ func TestSyncService_PendingUpdate_FreeToPremium_ResetTraffic(t *testing.T) {
 	}))
 
 	client := &mockVPNClient{}
-	svc := NewSyncService(db, map[uint]vpn.Client{node.ID: client}, []database.Node{*node})
+	svc := NewSyncService(db, NodeClients{node.ID: {Provision: client}}, []database.Node{*node})
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
@@ -174,7 +173,7 @@ func TestSyncService_PendingUpdate_PremiumToFree_ResetTraffic(t *testing.T) {
 	}))
 
 	client := &mockVPNClient{}
-	svc := NewSyncService(db, map[uint]vpn.Client{node.ID: client}, []database.Node{*node})
+	svc := NewSyncService(db, NodeClients{node.ID: {Provision: client}}, []database.Node{*node})
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)

@@ -133,11 +133,10 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 	require.NoError(t, db.LinkNodeToPlan(ctx, "trial", node.ID), "link node to trial plan")
 	require.NoError(t, db.LinkNodeToPlan(ctx, "free", node.ID), "link node to free plan")
 
-	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	clients := e2eNodeClients(map[uint]interfaces.XUIClient{1: mockXUI})
 	nodes := e2eNodes("https://panel.example.com")
-	vpnClients := e2eVPNClients(xuiClients)
-	syncService := service.NewSyncService(db, vpnClients, nodes)
-	subService := service.NewSubscriptionService(db, xuiClients, vpnClients, nodes, cfg)
+	syncService := service.NewSyncService(db, clients, nodes)
+	subService := service.NewSubscriptionService(db, clients, nodes, cfg)
 	subService.SetSyncService(syncService)
 	handler := bot.NewHandler(mockBotAPI, cfg, db, botCfg, subService, "")
 
@@ -212,14 +211,15 @@ func newCommandMessage(chatID int64, userID int64, username, text string, cmdLen
 	}
 }
 
-// e2eVPNClients builds a vpn.Client map mirroring the given XUI clients map so
-// that SubscriptionService can provision/deprovision trials and subscriptions in
-// tests the same way production wiring does (cmd/bot/main.go buildRuntimeNodeClients).
-func e2eVPNClients(xuiClients map[uint]interfaces.XUIClient) map[uint]vpn.Client {
-	m := make(map[uint]vpn.Client, len(xuiClients))
-	for id, xc := range xuiClients {
-		m[id] = vpn.NewThreeXUIClient(xc, []int{1})
+// e2eNodeClients builds a service.NodeClients value from the given XUI reader
+// clients so that SubscriptionService can provision/deprovision trials and
+// subscriptions in tests the same way production wiring does
+// (cmd/bot/main.go buildRuntimeNodeClients).
+func e2eNodeClients(readers map[uint]interfaces.XUIClient) service.NodeClients {
+	clients := make(service.NodeClients, len(readers))
+	for id, xc := range readers {
+		clients[id] = service.NodeAccess{Provision: vpn.NewThreeXUIClient(xc, []int{1}), Reader: xc}
 	}
 
-	return m
+	return clients
 }

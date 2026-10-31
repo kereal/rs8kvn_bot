@@ -37,8 +37,7 @@ type SubscriptionService struct {
 	db                interfaces.DatabaseService
 	reminderRepo      interfaces.SubscriptionReminderRepository
 	trafficRepo       interfaces.TrafficReminderRepository
-	xuiClients        map[uint]interfaces.XUIClient
-	vpnClients        map[uint]vpn.Client
+	clients           NodeClients
 	nodes             []database.Node
 	cfg               *config.Config
 	invalidate        func(telegramID int64)
@@ -79,15 +78,14 @@ func XUIEmail(username string, telegramID int64) string {
 	return fmt.Sprintf("tgId_%d", telegramID)
 }
 
-// NewSubscriptionService creates a SubscriptionService configured with the given
-// database, XUI/VPN clients, nodes, and application configuration.
-func NewSubscriptionService(db interfaces.DatabaseService, xuiClients map[uint]interfaces.XUIClient, vpnClients map[uint]vpn.Client, nodes []database.Node, cfg *config.Config) *SubscriptionService {
+// NewSubscriptionService creates a SubscriptionService configured with the
+// given database, runtime node registry, nodes, and application configuration.
+func NewSubscriptionService(db interfaces.DatabaseService, clients NodeClients, nodes []database.Node, cfg *config.Config) *SubscriptionService {
 	return &SubscriptionService{
 		db:           db,
 		reminderRepo: db,
 		trafficRepo:  db,
-		xuiClients:   xuiClients,
-		vpnClients:   vpnClients,
+		clients:      clients,
 		nodes:        nodes,
 		cfg:          cfg,
 	}
@@ -653,7 +651,7 @@ func (s *SubscriptionService) deleteClientFromAllNodes(ctx context.Context, prov
 			continue
 		}
 
-		client, ok := s.vpnClients[node.ID]
+		client, ok := s.clients.Provision(node.ID)
 		if !ok {
 			errs = append(errs, fmt.Errorf("delete client on node %d: VPN client is not configured", node.ID))
 			continue
@@ -733,7 +731,7 @@ func (s *SubscriptionService) CreateTrial(ctx context.Context, inviteCode string
 
 	node := trialNodes[0]
 
-	client, ok := s.vpnClients[node.ID]
+	client, ok := s.clients.Provision(node.ID)
 	if !ok {
 		return nil, fmt.Errorf("vpn client not found for trial node %d", node.ID)
 	}
@@ -812,7 +810,7 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	}
 
 	node := nodes[0]
-	client, ok := s.vpnClients[node.ID]
+	client, ok := s.clients.Provision(node.ID)
 	if !ok {
 		return nil, fmt.Errorf("vpn client not found for trial node %d", node.ID)
 	}
@@ -990,7 +988,7 @@ func (s *SubscriptionService) InvalidateBySubID(ctx context.Context, subID strin
 // provisioning — instead of querying each node's panel directly. This works for
 // every node type (3x-ui, proxman, fetch) and fixes the previous bug where
 // subscriptions on proxman/fetch nodes were falsely deleted because the legacy
-// xuiClients map only covers 3x-ui nodes.
+// read registry only covered 3x-ui nodes.
 //
 // A subscription is orphaned when it has subscription_nodes rows but none are in
 // a live state (active/pending_add/pending_update) — i.e. every binding is

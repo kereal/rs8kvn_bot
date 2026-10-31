@@ -8,7 +8,6 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
-	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -45,7 +44,7 @@ func TestSyncService_RevokedPendingProvisioningIsRemoved(t *testing.T) {
 				deleteErr := errors.New("VPN node temporarily unavailable")
 				client := &mockVPNClient{deleteError: deleteErr}
 				// Removal must use the current DB node even without a runtime snapshot.
-				svc := NewSyncService(db, map[uint]vpn.Client{node.ID: client}, nil)
+				svc := NewSyncService(db, NodeClients{node.ID: {Provision: client}}, nil)
 				sync := func() error {
 					if background {
 						return svc.SyncPendingNodes(ctx)
@@ -122,7 +121,7 @@ func TestSyncService_RevokedRemovalQueueFailure(t *testing.T) {
 				return nil
 			}
 			failedClient, nextClient := &mockVPNClient{}, &mockVPNClient{}
-			svc := NewSyncService(db, map[uint]vpn.Client{1: failedClient, 2: nextClient}, []database.Node{
+			svc := NewSyncService(db, NodeClients{1: {Provision: failedClient}, 2: {Provision: nextClient}}, []database.Node{
 				{ID: 1, Type: database.NodeType3xUI}, {ID: 2, Type: database.NodeType3xUI},
 			})
 			sub := &database.Subscription{ID: 42, Status: string(database.SubscriptionStatusRevoked)}

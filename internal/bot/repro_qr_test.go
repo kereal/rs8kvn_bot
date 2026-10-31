@@ -6,7 +6,7 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
-	"github.com/kereal/rs8kvn_bot/internal/interfaces"
+
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 
@@ -34,11 +34,11 @@ func newQRTestHandler(t *testing.T) (*Handler, *testutil.BotAPI) {
 	db := testutil.NewDatabaseService()
 	cfg := &config.Config{TelegramAdminID: 123456, SiteURL: "https://x.com", GlobalSubURL: "https://x.com/sub/"}
 	mockXUI := testutil.NewXUIClient()
-	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	clients := service.NodeClients{1: {Reader: mockXUI}}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "https://p", APIToken: "t", InboundIDs: "[1]"}}
 	sub := &database.Subscription{TelegramID: 42, Username: "u", ClientID: "c", SubscriptionID: "s", Status: "active"}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
-	svc := service.NewSubscriptionService(db, xuiClients, nil, nodes, cfg)
+	svc := service.NewSubscriptionService(db, clients, nodes, cfg)
 	bot := testutil.NewBotAPI()
 
 	return NewHandler(bot, cfg, db, NewTestBotConfig(), svc, ""), bot

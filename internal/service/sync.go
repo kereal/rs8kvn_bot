@@ -19,9 +19,9 @@ import (
 
 // SyncService manages the synchronization of subscriptions with VPN nodes.
 type SyncService struct {
-	db         interfaces.DatabaseService
-	vpnClients map[uint]vpn.Client
-	nodes      []database.Node
+	db      interfaces.DatabaseService
+	clients NodeClients
+	nodes   []database.Node
 
 	locksMu     sync.Mutex
 	locks       map[uint]*subscriptionSyncLock
@@ -39,10 +39,10 @@ func syncIdentifier(sub *database.Subscription) string {
 }
 
 // NewSyncService creates a new SyncService.
-func NewSyncService(db interfaces.DatabaseService, vpnClients map[uint]vpn.Client, nodes []database.Node) *SyncService {
+func NewSyncService(db interfaces.DatabaseService, clients NodeClients, nodes []database.Node) *SyncService {
 	return &SyncService{
 		db:          db,
-		vpnClients:  vpnClients,
+		clients:     clients,
 		nodes:       nodes,
 		locks:       make(map[uint]*subscriptionSyncLock),
 		lockTimeout: 2 * time.Minute,
@@ -591,7 +591,7 @@ func (s *SyncService) retryUnavailableNode(ctx context.Context, sn *database.Sub
 // processPendingUpdate updates an existing VPN subscription client configuration.
 // Used when a plan change requires updating traffic limits or expiry on an active node.
 func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription) error {
-	client, ok := s.vpnClients[sn.NodeID]
+	client, ok := s.clients.Provision(sn.NodeID)
 	if !ok {
 		return s.retryUnavailableNode(ctx, sn, sub, "pending_update")
 	}
@@ -673,7 +673,7 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 // processPendingAdd creates a VPN subscription on the target node.
 // Handles idempotent "already exists" errors by synchronizing config and only then marking active.
 func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription) error {
-	client, ok := s.vpnClients[sn.NodeID]
+	client, ok := s.clients.Provision(sn.NodeID)
 	if !ok {
 		return s.retryUnavailableNode(ctx, sn, sub, "pending_add")
 	}
@@ -793,7 +793,7 @@ func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.Sub
 		return nil
 	}
 
-	client, ok := s.vpnClients[sn.NodeID]
+	client, ok := s.clients.Provision(sn.NodeID)
 	if !ok {
 		return s.retryUnavailableNode(ctx, sn, sub, "pending_remove")
 	}
