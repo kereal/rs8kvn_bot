@@ -1,5 +1,30 @@
 # Architecture — rs8kvn_bot
 
+## Карта документации
+
+Документ без строки в этой таблице считается неактуальным. Новый документ
+добавляется сюда же — иначе он просто ляжет и умрёт. Источник истины по
+взаимодействию с панелью — `doc/panel-api-contract.md` + contract-тесты
+`internal/xui/panel_contract_test.go`.
+
+| Документ | О чём | Когда читать |
+|---|---|---|
+| `architecture.md` | устройство системы, модули, потоки | перед изменением архитектуры |
+| `operations.md` | эксплуатация: деплой, логи, health, инциденты | при инциденте или релизе |
+| `installation.md` | развёртывание с нуля | при первичной установке |
+| `api.md` | HTTP-эндпоинты бота и веба | при работе с API |
+| `panel-api-contract.md` | контракт панели 3x-ui: эндпоинты, тексты ошибок, quirks | при изменении `internal/xui` или `internal/vpn` |
+| `audit-log.md` | модель аудита и правила событий | при изменении `internal/database/audit_log.go` |
+| `security.md` | требования безопасности | перед изменением auth/секретов |
+| `broadcast.md`, `broadcast-deactivation.md` | рассылки и деактивация получателей | при работе с broadcast-флоу |
+| `platega-T3.md` | платёжный провайдер Platega | при работе с оплатой |
+| `doc/adr/` | принятые архитектурные решения | **до** предложения рефакторинга: не переоткрывать |
+| `handover.md`, `subscription_sync_technical_spec.md`, `reports/`, `diagrams/` | исторические отчёты и визуализации | только по прямой необходимости, не как источник истины |
+
+По правилам `AGENTS.md` не читать и не писать: `bypass_clients_comparison.md`,
+`bypass_research.md`, `marketing_strategy.md`, `nginx-xhttp-hysteria2-architecture.md`,
+`task-bot-integration.md`.
+
 ## Multi-outbounds per node
 
 A single 3x-ui node can now expose multiple inbounds. Inbound IDs are stored as a JSON array in `nodes.inbound_ids` and sent to the panel as `inboundIds` during client creation/update.
