@@ -11,6 +11,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
@@ -337,7 +338,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 			logger.Warn("node not found in runtime clients, skipping",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID))
-			s.handleSyncError(ctx, &sn, fmt.Errorf("node not found in runtime clients"))
+			s.handleSyncError(ctx, &sn, fmt.Errorf("%w: node not found in runtime clients", errNodeUnavailable))
 
 			continue
 		}
@@ -349,7 +350,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID),
 				zap.String("node_type", string(nodeType)))
-			s.handleSyncError(ctx, &sn, fmt.Errorf("unsupported node type %s", nodeType))
+			s.handleSyncError(ctx, &sn, fmt.Errorf("%w: unsupported node type %s", errNodeUnavailable, nodeType))
 
 			continue
 		}
@@ -402,10 +403,16 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 // retryUnavailableNode reports a node that cannot serve the given sync
 // operation (missing config, inactive, or no VPN client) and keeps the
 // subscription_node record pending for the background worker to retry.
+//
+// Unavailability is a transient condition: the runtime registry is a startup
+// snapshot, the node may re-enter the fleet or gain a client later. The error
+// is wrapped in errNodeUnavailable so the retry policy treats it as retryable
+// (it ladders up to maxSyncRetries instead of parking on the first hit),
+// while still parking eventually if the node never recovers.
 func (s *SyncService) retryUnavailableNode(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription, operation string) error {
 	node, nodeErr := s.db.GetNodeByID(ctx, sn.NodeID)
 	if nodeErr != nil {
-		err := fmt.Errorf("%s node %d unavailable: load node: %w", operation, sn.NodeID, nodeErr)
+		err := fmt.Errorf("%w: %s node %d unavailable: load node: %w", errNodeUnavailable, operation, sn.NodeID, nodeErr)
 		logger.Warn("node unavailable for sync operation, keeping pending record",
 			zap.String("operation", operation),
 			zap.Uint("subscription_id", sub.ID),
@@ -417,7 +424,7 @@ func (s *SyncService) retryUnavailableNode(ctx context.Context, sn *database.Sub
 	}
 
 	if !node.IsActive {
-		err := fmt.Errorf("%s node %d unavailable: inactive=%t type=%s", operation, sn.NodeID, node.IsActive, node.Type)
+		err := fmt.Errorf("%w: %s node %d unavailable: inactive=%t type=%s", errNodeUnavailable, operation, sn.NodeID, node.IsActive, node.Type)
 		logger.Warn("node unsuitable for sync operation, keeping pending record",
 			zap.String("operation", operation),
 			zap.Uint("subscription_id", sub.ID),
@@ -430,10 +437,44 @@ func (s *SyncService) retryUnavailableNode(ctx context.Context, sn *database.Sub
 		return err
 	}
 
-	err := fmt.Errorf("%s node %d unavailable: no VPN client", operation, sn.NodeID)
+	err := fmt.Errorf("%w: %s node %d unavailable: no VPN client", errNodeUnavailable, operation, sn.NodeID)
 	s.handleSyncError(ctx, sn, err)
 
 	return err
+}
+
+// errNodeUnavailable marks node-unavailability errors as retryable: the
+// condition is transient (startup registry snapshot, node may come back), so
+// the retry policy ladders instead of parking on the first hit. It is wrapped
+// with %w by every retryUnavailableNode error and checked by errors.Is in the
+// policy.
+var errNodeUnavailable = errors.New("node unavailable")
+
+// fallbackUpdateToCreate re-queues an update whose target client is gone from
+// the panel (vpn.ErrSubscriptionNotFound): an update cannot succeed, the
+// create path can. The node moves to pending_add — a legitimate status
+// transition, so UpdateSubscriptionNodeStatus resets retry metadata and the
+// next worker pass provisions the client fresh. The re-queue is not a scan
+// failure: nil is returned and the outcome is visible in the node status and
+// the Warn log.
+func (s *SyncService) fallbackUpdateToCreate(ctx context.Context, sn *database.SubscriptionNode, cause error) error {
+	err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingAdd)
+	if err != nil {
+		err = fmt.Errorf("fallback pending_update to pending_add node %d: %w", sn.NodeID, err)
+		logger.Warn("update fallback to create failed",
+			zap.Uint("subscription_id", sn.SubscriptionID),
+			zap.Uint("node_id", sn.NodeID),
+			zap.Error(err))
+
+		return err
+	}
+
+	logger.Warn("panel client is gone, update re-queued as create",
+		zap.Uint("subscription_id", sn.SubscriptionID),
+		zap.Uint("node_id", sn.NodeID),
+		zap.Error(cause))
+
+	return nil
 }
 
 // processPendingUpdate updates an existing VPN subscription client configuration.
@@ -448,6 +489,10 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 
 	provision, err := s.buildNodeProvision(ctx, sub, sn.NodeID, profilePreserve)
 	if err != nil {
+		if errors.Is(err, vpn.ErrSubscriptionNotFound) {
+			return s.fallbackUpdateToCreate(ctx, sn, err)
+		}
+
 		s.handleSyncError(ctx, sn, err)
 
 		return fmt.Errorf("build provision for pending update node %d: %w", sn.NodeID, err)
@@ -459,6 +504,10 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 
 	err = client.UpdateSubscription(ctx, provision)
 	if err != nil {
+		if errors.Is(err, vpn.ErrSubscriptionNotFound) {
+			return s.fallbackUpdateToCreate(ctx, sn, err)
+		}
+
 		s.handleSyncError(ctx, sn, err)
 		return fmt.Errorf("update VPN subscription node %d: %w", sn.NodeID, err)
 	}
@@ -748,17 +797,81 @@ func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.Sub
 }
 
 // handleSyncError updates retry metadata for a failed sync operation.
-// Increments RetryCount and schedules next attempt via exponential backoff.
+//
+// Policy:
+//   - context.Canceled / context.DeadlineExceeded from the caller's ctx mean
+//     the scan is shutting down — no retry metadata is written, the background
+//     worker will pick the record up on the next pass (R3).
+//   - A retryable error (network timeout per utils.IsRetryable, transient node
+//     unavailability per errNodeUnavailable) ladders with exponential backoff
+//     until maxSyncRetries.
+//   - Anything else (the panel answered and refused, a non-200 front response)
+//     is parked immediately: retrying cannot succeed.
+//   - An exhausted ladder (retry_count reached maxSyncRetries) parks too.
+//
+// A parked node keeps its pending status, holds the terminal cause in
+// last_error, and carries a far-future retry_at so GetPendingSync stops
+// selecting it. It is not a new state: any legitimate re-transition
+// (UpdateSubscriptionNodeStatus, UpsertSubscriptionNode,
+// MarkActiveNodesPendingUpdate) resets retry metadata and releases the node.
 func (s *SyncService) handleSyncError(ctx context.Context, sn *database.SubscriptionNode, err error) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		logger.Debug("sync aborted by context, retry metadata untouched",
+			zap.Uint("subscription_id", sn.SubscriptionID),
+			zap.Uint("node_id", sn.NodeID),
+			zap.Error(err))
+
+		return
+	}
+
+	errMsg := err.Error()
+	retryable := utils.IsRetryable(err) || errors.Is(err, errNodeUnavailable)
+
+	if !retryable || sn.RetryCount >= maxSyncRetries {
+		switch {
+		case !retryable:
+			logger.Warn("sync error is not retryable, parking node",
+				zap.Uint("subscription_id", sn.SubscriptionID),
+				zap.Uint("node_id", sn.NodeID),
+				zap.Int("retry_count", sn.RetryCount),
+				zap.Error(err))
+		case errors.Is(err, errNodeUnavailable):
+			logger.Warn("node unavailability retries exhausted, parking node",
+				zap.Uint("subscription_id", sn.SubscriptionID),
+				zap.Uint("node_id", sn.NodeID),
+				zap.Int("retry_count", sn.RetryCount),
+				zap.Error(err))
+		default:
+			logger.Warn("sync retries exhausted, parking node",
+				zap.Uint("subscription_id", sn.SubscriptionID),
+				zap.Uint("node_id", sn.NodeID),
+				zap.Int("retry_count", sn.RetryCount),
+				zap.Error(err))
+		}
+
+		sn.RetryAt = &parkedRetryAt
+		sn.LastError = &errMsg
+
+		dbErr := s.db.UpdateRetry(ctx, sn.SubscriptionID, sn.NodeID, sn.RetryCount, sn.RetryAt, sn.LastError)
+		if dbErr != nil {
+			logger.Warn("failed to update retry metadata",
+				zap.Uint("subscription_id", sn.SubscriptionID),
+				zap.Uint("node_id", sn.NodeID),
+				zap.Error(dbErr))
+		}
+
+		return
+	}
+
 	logger.Warn("sync error, scheduling retry",
 		zap.Uint("subscription_id", sn.SubscriptionID),
 		zap.Uint("node_id", sn.NodeID),
 		zap.Int("retry_count", sn.RetryCount),
 		zap.Error(err))
+
 	retryAt := CalculateRetryAt(sn.RetryCount)
 	sn.RetryAt = &retryAt
 	sn.RetryCount++
-	errMsg := err.Error()
 	sn.LastError = &errMsg
 
 	dbErr := s.db.UpdateRetry(ctx, sn.SubscriptionID, sn.NodeID, sn.RetryCount, sn.RetryAt, sn.LastError)
@@ -769,6 +882,20 @@ func (s *SyncService) handleSyncError(ctx context.Context, sn *database.Subscrip
 			zap.Error(dbErr))
 	}
 }
+
+// maxSyncRetries caps the retry ladder of a pending node. With the backoff
+// intervals below it spans ~5.6h of retrying (1m+2m+5m+15m+30m+45m+60m×4)
+// before the node parks. Production showed unbounded growth (retry_count
+// reached 1373 — ~57 days of hourly retries against a permanently refusing
+// panel), so the cap is deliberate.
+const maxSyncRetries = 10
+
+// parkedRetryAt parks a node beyond every planning horizon once its retries
+// are exhausted or its error is not retryable: GetPendingSync selects records
+// with retry_at IS NULL OR retry_at <= now, so a far-future timestamp removes
+// the node from every scan. The cause stays visible in last_error. Any
+// legitimate status re-transition resets retry metadata and releases the node.
+var parkedRetryAt = time.Date(9999, 12, 31, 23, 59, 0, 0, time.UTC)
 
 // retryBackoffIntervals defines exponential-ish backoff for sync retries.
 // Index = retryCount; beyond the last entry, the final interval is reused (capped).

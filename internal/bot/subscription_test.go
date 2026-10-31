@@ -585,6 +585,13 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 		return nil, errors.New("traffic error")
 	}
 
+	mockDB.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+		// Одна активная привязка на узел 1: читатель опрашивается, но
+		// отвечает ошибкой — трафик измерить не удалось, Available=true
+		// (узел читаемый), поэтому карточка показывает 0.00.
+		return []database.SubscriptionNode{{SubscriptionID: subscriptionID, NodeID: 1, Status: database.SyncStatusActive}}, nil
+	}
+
 	ctx := context.Background()
 	handler.handleMySubscription(ctx, 123456, "testuser", 1)
 

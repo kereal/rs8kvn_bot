@@ -17,11 +17,16 @@ import (
 // It carries already-formatted strings so callers can render a Telegram message
 // without re-deriving presentation logic.
 type TrafficInfo struct {
-	UsedGB             float64
-	LimitGB            int
-	Percentage         float64
-	ProgressBar        string
-	ResetInfo          string
+	UsedGB      float64
+	LimitGB     int
+	Percentage  float64
+	ProgressBar string
+	ResetInfo   string
+	// Available reports that the traffic figure is actually measured. False
+	// means no active node of the subscription has a panel reader (proxman,
+	// fetch) — the card shows an honest "unavailable" line instead of a
+	// misleading 0 ГБ.
+	Available          bool
 	CreatedAtFormatted string
 	ExpiresAtFormatted string
 	PlanName           string
@@ -115,7 +120,24 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		profileSource      readerTarget
 	)
 
-	for _, target := range s.activeReaders(activeSubNodeIDs, email) {
+	readers := s.activeReaders(activeSubNodeIDs, email)
+
+	// Все активные привязки на узлах без читателя (proxman, fetch): трафик
+	// измерить нечем. Карточка показывает честное «недоступен», а не вводящие
+	// в заблуждение 0 ГБ. Пустой набор активных привязок (подписка нигде не
+	// активна) и деградация чтения БД сохраняют прежнее поведение.
+	if len(activeSubNodeIDs) > 0 && len(readers) == 0 {
+		return sub, &TrafficInfo{
+			LimitGB:            limitGB,
+			ResetInfo:          resetUnknownText,
+			Available:          false,
+			CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
+			ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
+			PlanName:           planName,
+		}, nil
+	}
+
+	for _, target := range readers {
 		traffic, err := target.reader.GetClientTraffic(ctx, email)
 		if err != nil {
 			logger.Debug("GetClientTraffic failed on source",
@@ -133,7 +155,8 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		}
 	}
 
-	// не получилось опросить серверы
+	// не получилось опросить серверы: читатели есть, но ответили ошибкой —
+	// трафик существует, просто не измерен (деградация, не отсутствие данных).
 	if !anySuccess {
 		return sub, &TrafficInfo{
 			UsedGB:             0,
@@ -141,6 +164,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 			Percentage:         0,
 			ProgressBar:        utils.GenerateProgressBar(0, float64(limitGB)),
 			ResetInfo:          resetUnknownText,
+			Available:          len(readers) > 0,
 			CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
 			ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
 			PlanName:           planName,
@@ -192,6 +216,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		Percentage:         percentage,
 		ProgressBar:        progressBar,
 		ResetInfo:          resetInfo,
+		Available:          true,
 		CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
 		ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
 		PlanName:           planName,

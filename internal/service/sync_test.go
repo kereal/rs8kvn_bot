@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"testing"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
 	"github.com/stretchr/testify/assert"
@@ -761,14 +764,178 @@ func TestSyncService_handleSyncError_IncrementsRetry(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, sn))
 
 	svc := NewSyncService(db, nil, []database.Node{*node1})
-	svc.handleSyncError(ctx, sn, assert.AnError)
+	// A network timeout is retryable: the node climbs the ladder once.
+	svc.handleSyncError(ctx, sn, &url.Error{Op: "Post", URL: "http://panel/api", Err: errors.New("i/o timeout")})
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, 1, rows[0].RetryCount)
-	assert.Contains(t, *rows[0].LastError, "assert.AnError")
+	assert.Contains(t, *rows[0].LastError, "i/o timeout")
 	assert.NotNil(t, rows[0].RetryAt)
+}
+
+// TestSyncService_handleSyncError_NonRetryableParksImmediately checks that an
+// error the panel answered with (non-200) parks the node on the first hit:
+// retrying cannot succeed, retry_at moves beyond every planning horizon, the
+// pending status and the terminal cause stay visible.
+func TestSyncService_handleSyncError_NonRetryableParksImmediately(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-park-nonretry", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-park-nonretry-node", IsActive: true, Host: "http://spnr", APIToken: "tspnr", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     7778,
+		Username:       "syncparknonretry",
+		ClientID:       "c-syncparknonretry",
+		SubscriptionID: "s-syncparknonretry",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	sn := &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd, RetryCount: 0}
+	require.NoError(t, db.CreateSubscriptionNode(ctx, sn))
+
+	svc := NewSyncService(db, nil, []database.Node{*node1})
+	svc.handleSyncError(ctx, sn, fmt.Errorf("upstream returned non-200: %w", utils.ErrNon200Response))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusPendingAdd, rows[0].Status, "parking keeps the pending status")
+	assert.Equal(t, 0, rows[0].RetryCount, "non-retryable errors must not climb the ladder")
+	require.NotNil(t, rows[0].RetryAt)
+	assert.True(t, rows[0].RetryAt.After(time.Now().UTC().AddDate(1, 0, 0)), "parked retry_at is beyond every planning horizon")
+	require.NotNil(t, rows[0].LastError)
+	assert.Contains(t, *rows[0].LastError, utils.ErrNon200Response.Error())
+
+	// The parked record is invisible to both pending scans.
+	pending, err := db.GetPendingSync(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+}
+
+// TestSyncService_handleSyncError_RetryableClimbsThenParks checks that a
+// network timeout retries with backoff, and that once retry_count reaches
+// maxSyncRetries the node parks instead of climbing forever.
+func TestSyncService_handleSyncError_RetryableClimbsThenParks(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-park-climb", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-park-climb-node", IsActive: true, Host: "http://spc", APIToken: "tspc", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     7779,
+		Username:       "syncparkclimb",
+		ClientID:       "c-syncparkclimb",
+		SubscriptionID: "s-syncparkclimb",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	sn := &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd, RetryCount: 0}
+	require.NoError(t, db.CreateSubscriptionNode(ctx, sn))
+
+	// A network timeout surfaces as url.Error, which implements net.Error.
+	timeoutErr := &url.Error{Op: "Post", URL: "http://panel/api", Err: errors.New("i/o timeout")}
+	require.True(t, utils.IsRetryable(timeoutErr), "precondition: url.Error timeout is retryable")
+
+	svc := NewSyncService(db, nil, []database.Node{*node1})
+
+	// Climb the ladder: each hit schedules a near-future retry.
+	for range maxSyncRetries {
+		svc.handleSyncError(ctx, sn, timeoutErr)
+
+		rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		require.True(t, rows[0].RetryAt.Before(time.Now().UTC().Add(2*time.Hour)), "ladder retries stay in the near future")
+	}
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, maxSyncRetries, rows[0].RetryCount)
+	require.NotNil(t, rows[0].RetryAt)
+	assert.True(t, rows[0].RetryAt.After(time.Now().UTC()) && rows[0].RetryAt.Before(time.Now().UTC().Add(2*time.Hour)), "ladder retries stay in the near future")
+
+	// Next hit parks.
+	svc.handleSyncError(ctx, sn, timeoutErr)
+
+	rows, err = db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, maxSyncRetries, rows[0].RetryCount, "parking does not grow the counter")
+	require.NotNil(t, rows[0].RetryAt)
+	assert.True(t, rows[0].RetryAt.After(time.Now().UTC().AddDate(1, 0, 0)), "parked retry_at is beyond every planning horizon")
+
+	pending, err := db.GetPendingSync(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+}
+
+// TestSyncService_handleSyncError_ContextCancelDoesNotRetry checks R3: a
+// caller-ctx cancellation aborts the scan and must not write retry metadata
+// for the node.
+func TestSyncService_handleSyncError_ContextCancelDoesNotRetry(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-ctx", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-ctx-node", IsActive: true, Host: "http://scn", APIToken: "tscn", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     7780,
+		Username:       "syncctx",
+		ClientID:       "c-syncctx",
+		SubscriptionID: "s-syncctx",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	sn := &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd, RetryCount: 0}
+	require.NoError(t, db.CreateSubscriptionNode(ctx, sn))
+
+	svc := NewSyncService(db, nil, []database.Node{*node1})
+	svc.handleSyncError(ctx, sn, context.Canceled)
+	svc.handleSyncError(ctx, sn, context.DeadlineExceeded)
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Zero(t, rows[0].RetryCount, "cancellation must not climb the ladder")
+	assert.Nil(t, rows[0].RetryAt)
+	assert.Nil(t, rows[0].LastError)
 }
 
 func TestCalculateRetryAt(t *testing.T) {
@@ -913,7 +1080,7 @@ func TestSyncService_SyncSubscription_PendingAdd_AlreadyExistsUpdateFails(t *tes
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
-	mockVPN := &mockVPNClient{createError: fmt.Errorf("%w: %w", vpn.ErrSubscriptionAlreadyExists, fmt.Errorf("client already exists")), updateError: fmt.Errorf("update refused")}
+	mockVPN := &mockVPNClient{createError: fmt.Errorf("%w: %w", vpn.ErrSubscriptionAlreadyExists, fmt.Errorf("client already exists")), updateError: &url.Error{Op: "Post", URL: "http://panel/api", Err: errors.New("update refused")}}
 	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
@@ -925,7 +1092,7 @@ func TestSyncService_SyncSubscription_PendingAdd_AlreadyExistsUpdateFails(t *tes
 	assert.Equal(t, database.SyncStatusPendingAdd, rows[0].Status)
 	assert.Equal(t, 1, rows[0].RetryCount)
 	assert.NotNil(t, rows[0].LastError)
-	assert.Equal(t, "update refused", *rows[0].LastError)
+	assert.Contains(t, *rows[0].LastError, "update refused")
 	assert.True(t, mockVPN.updateCalled)
 }
 
@@ -993,7 +1160,9 @@ func TestSyncService_SyncSubscription_PendingAdd_RetryOnOtherError(t *testing.T)
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
-	mockVPN := &mockVPNClient{createError: fmt.Errorf("connection refused")}
+	// net.OpError("connection refused") is retryable by the policy, so the
+	// item ladders: RetryCount 1 and a near-future retry_at.
+	mockVPN := &mockVPNClient{createError: &net.OpError{Op: "dial", Err: errors.New("connection refused")}}
 	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
@@ -1331,7 +1500,9 @@ func TestSyncService_SyncPendingNodes_ContinuesAfterNodeFailure(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: subOne.ID, NodeID: nodeOne.ID, Status: database.SyncStatusPendingAdd}))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: subTwo.ID, NodeID: nodeTwo.ID, Status: database.SyncStatusPendingAdd}))
 
-	failedClient := &mockVPNClient{createError: errors.New("node one unavailable")}
+	// A retryable network failure on node one: the item ladders and the run
+	// is still reported as degraded via the aggregate error.
+	failedClient := &mockVPNClient{createError: &net.OpError{Op: "dial", Err: errors.New("node one unavailable")}}
 	successClient := &mockVPNClient{}
 	svc := NewSyncService(db, NodeClients{nodeOne.ID: {Provision: failedClient}, nodeTwo.ID: {Provision: successClient}}, []database.Node{*nodeOne, *nodeTwo})
 

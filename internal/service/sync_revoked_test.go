@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
 	"time"
 
@@ -41,7 +42,9 @@ func TestSyncService_RevokedPendingProvisioningIsRemoved(t *testing.T) {
 					SubscriptionID: sub.ID, NodeID: node.ID, Status: status, RetryCount: 4, RetryAt: &due,
 				}))
 
-				deleteErr := errors.New("VPN node temporarily unavailable")
+				// A transient network failure at deletion: retryable by the
+				// policy, so the removal ladders (fresh retry sequence from 0).
+				deleteErr := &net.OpError{Op: "dial", Err: errors.New("VPN node temporarily unavailable")}
 				client := &mockVPNClient{deleteError: deleteErr}
 				// Removal must use the current DB node even without a runtime snapshot.
 				svc := NewSyncService(db, NodeClients{node.ID: {Provision: client}}, nil)
