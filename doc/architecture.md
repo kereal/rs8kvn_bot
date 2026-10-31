@@ -902,10 +902,13 @@ subscription). Parity is pinned by `TestApplyPlan_Parity_BackgroundAndTxSameEndS
 | `Heartbeat` | Configured interval, default 5m | Sends optional external monitoring heartbeat |
 
 ### Retry Behavior
-- Transient failures: `retry_count` incremented, `retry_at` set with exponential backoff
+- Caller-ctx cancellation (`context.Canceled`/`DeadlineExceeded`) writes no retry metadata — the scan aborts early, the next pass picks the record up
+- Retryable (network timeouts per `utils.IsRetryable`, transient node unavailability `errNodeUnavailable`): `retry_count` incremented, `retry_at` set with exponential backoff, capped at `maxSyncRetries` (10, ~5.6h)
+- Non-retryable (the panel answered and refused: non-200, record not found, already in use) — parked immediately, no ladder
+- Exhausted ladder parks the node: `retry_at` set far-future (`parkedRetryAt`), the terminal cause stays in `last_error`; any legitimate status re-transition resets retry metadata and releases the node (no fifth state, no migration)
 - `last_error` column stores the last error message
 - `SyncPendingNodes` returns aggregate error (`errors.Join`) on partial failures
-- Only `context.Cancelled`/`DeadlineExceeded` abort the scan early
+- A `pending_update` whose panel client is gone (`vpn.ErrSubscriptionNotFound`) is re-queued as `pending_add` (create path) instead of retrying an impossible update
 
 ---
 
