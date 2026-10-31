@@ -18,7 +18,7 @@ import (
 // ReferralHandler manages all referral-related operations: invite generation,
 // sharing links, and QR code presentation for referral links.
 type ReferralHandler struct {
-	db        interfaces.DatabaseService
+	db        interfaces.ReferralInviteStore
 	cfg       *config.Config
 	bot       interfaces.BotAPI
 	botConfig *BotConfig
@@ -28,7 +28,7 @@ type ReferralHandler struct {
 
 // NewReferralHandler creates a new ReferralHandler.
 func NewReferralHandler(
-	db interfaces.DatabaseService,
+	db interfaces.ReferralInviteStore,
 	cfg *config.Config,
 	bot interfaces.BotAPI,
 	botConfig *BotConfig,

@@ -18,7 +18,7 @@ import (
 type SubscriptionSyncWorker struct {
 	syncSvc  *service.SyncService
 	orderSvc *service.OrderService
-	db       interfaces.DatabaseService
+	db       interfaces.AuditLogWriter
 }
 
 // NewSubscriptionSyncWorker creates a new SubscriptionSyncWorker. The optional
@@ -35,7 +35,7 @@ func NewSubscriptionSyncWorker(syncSvc *service.SyncService, orderSvc ...*servic
 
 // SetAuditDB подключает хранилище журнала аудита. Опционально: без него
 // воркер не пишет события (существующие test/embedding вызовы не ломаются).
-func (w *SubscriptionSyncWorker) SetAuditDB(db interfaces.DatabaseService) {
+func (w *SubscriptionSyncWorker) SetAuditDB(db interfaces.AuditLogWriter) {
 	w.db = db
 }
 

@@ -164,7 +164,7 @@ func TestE2E_StartCommand_AdminUser(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := &config.Config{TelegramAdminID: env.chatID}
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 
 	mockBot := testutil.NewBotAPI()
 	handler := bot.NewHandler(mockBot, cfg, mockDB, &bot.BotConfig{

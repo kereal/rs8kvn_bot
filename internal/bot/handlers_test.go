@@ -33,7 +33,7 @@ func TestNewHandler(t *testing.T) {
 		TelegramBotToken: "test_token",
 	}
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	handler := NewHandler(testutil.NewBotAPI(), cfg, mockDB, NewTestBotConfig(), nil, "")
 
 	require.NotNil(t, handler, "NewHandler returned nil")
@@ -69,7 +69,7 @@ func TestHandleBroadcast_MessageTooLong(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
@@ -110,7 +110,7 @@ func TestHandleSend_RateLimit(t *testing.T) {
 	cfg := &config.Config{
 		TelegramAdminID: 123456,
 	}
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
@@ -133,7 +133,7 @@ func TestHandleSend_NoArguments(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 123456}
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
@@ -156,7 +156,7 @@ func TestHandleSend_OnlyTarget(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 123456}
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
@@ -182,7 +182,7 @@ func TestHandleSend_OnlyTarget(t *testing.T) {
 func TestSendInviteLink_Success(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	cfg := &config.Config{
 		SiteURL:         "https://vpn.site",
@@ -205,7 +205,7 @@ func TestSendInviteLink_Success(t *testing.T) {
 func TestSendInviteLink_DatabaseError(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	cfg := &config.Config{
 		SiteURL:         "https://vpn.site",
@@ -232,7 +232,7 @@ func TestHandler_RateLimiter_EventuallyBlocks(t *testing.T) {
 
 	cfg := &config.Config{}
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
 	chatID := int64(123456)
@@ -434,7 +434,7 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 			t.Parallel()
 
 			mockBot := testutil.NewBotAPI()
-			mockDB := testutil.NewDatabaseService()
+			mockDB := testutil.NewBotStoreFake()
 
 			// /invite needs GetOrCreateInvite
 			if tt.name == "/invite command" {
@@ -480,7 +480,7 @@ func TestHandleUpdate_AdminCommandsBlockedForNonAdmin(t *testing.T) {
 		t.Parallel()
 
 		mockBot := testutil.NewBotAPI()
-		handler := NewHandler(mockBot, cfg, testutil.NewDatabaseService(), NewTestBotConfig(), nil, "")
+		handler := NewHandler(mockBot, cfg, testutil.NewBotStoreFake(), NewTestBotConfig(), nil, "")
 
 		handler.HandleUpdate(context.Background(), commandUpdate(111, "/refstats"))
 
@@ -495,7 +495,7 @@ func TestHandleUpdate_AdminCommandsBlockedForNonAdmin(t *testing.T) {
 			t.Parallel()
 
 			mockBot := testutil.NewBotAPI()
-			handler := NewHandler(mockBot, cfg, testutil.NewDatabaseService(), NewTestBotConfig(), nil, "")
+			handler := NewHandler(mockBot, cfg, testutil.NewBotStoreFake(), NewTestBotConfig(), nil, "")
 
 			handler.HandleUpdate(context.Background(), commandUpdate(111, cmd))
 
@@ -513,7 +513,7 @@ func TestHandleUpdate_NonCommandMessage(t *testing.T) {
 	}
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
 	update := tgbotapi.Update{
@@ -539,7 +539,7 @@ func TestHandleUpdate_CallbackQuery(t *testing.T) {
 	}
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, id int64) (*database.Subscription, error) {
 		return &database.Subscription{
 			ID:             1,
@@ -577,7 +577,7 @@ func TestHandleUpdateMalformedStartDoesNotPanic(t *testing.T) {
 		TelegramAdminID:  123456789,
 		TelegramBotToken: "test_token",
 	}
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	handler := NewHandler(testutil.NewBotAPI(), cfg, mockDB, NewTestBotConfig(), nil, "")
 
 	// /start with nil From → HandleStart returns "nil from" error.

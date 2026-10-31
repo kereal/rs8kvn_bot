@@ -34,7 +34,7 @@ func newTestSubSvc(t *testing.T) *Service {
 func TestHandleSubscription_CacheHit_Active(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -57,7 +57,7 @@ func TestHandleSubscription_CacheHit_Active(t *testing.T) {
 func TestHandleSubscription_CacheHit_Revoked_InvalidatesCache(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -82,7 +82,7 @@ func TestHandleSubscription_CacheHit_Revoked_InvalidatesCache(t *testing.T) {
 func TestHandleSubscription_CacheHit_Expired_InvalidatesCache(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -106,7 +106,7 @@ func TestHandleSubscription_CacheHit_Expired_InvalidatesCache(t *testing.T) {
 func TestHandleSubscription_CacheHit_StatusCheckError_ReturnsError(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -131,7 +131,7 @@ func TestHandleSubscription_CacheHit_StatusCheckError_ReturnsError(t *testing.T)
 func TestHandleSubscription_CacheMiss_SubscriptionNotFound(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -161,7 +161,7 @@ func TestHandleSubscription_ParallelCacheMiss_PreservesDevicesAndIPs(t *testing.
 		ips     = "[]"
 	)
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
 		stateMu.Lock()
 		curDevices, curIPs := devices, ips
@@ -263,7 +263,7 @@ func TestHandleSubscription_ParallelCacheMiss_PreservesDevicesAndIPs(t *testing.
 func TestUpdateDevices_NewDevice(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 
 	var capturedDevices string
 
@@ -291,7 +291,7 @@ func TestUpdateDevices_NewDevice(t *testing.T) {
 func TestUpdateDevices_NilHeaders_SkipsDevice(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 
 	var capturedDevices string
 
@@ -316,7 +316,7 @@ func TestUpdateDevices_NilHeaders_SkipsDevice(t *testing.T) {
 func TestUpdateDevices_ReplacesExistingDevice(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 
 	var capturedDevices string
 
@@ -348,7 +348,7 @@ func TestUpdateDevices_ReplacesExistingDevice(t *testing.T) {
 func TestUpdateIPs_NewIP(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 	subFull := &database.SubscriptionFull{
 		Subscription: database.Subscription{
 			ID:             10,
@@ -366,7 +366,7 @@ func TestUpdateIPs_NewIP(t *testing.T) {
 func TestUpdateIPs_EmptyIP_SkipsEntry(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 
 	subFull := &database.SubscriptionFull{
 		Subscription: database.Subscription{
@@ -385,7 +385,7 @@ func TestUpdateIPs_EmptyIP_SkipsEntry(t *testing.T) {
 func TestUpdateIPs_ReplacesExistingIP(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 
 	existingIPs := `[{"10.0.0.1":"2025-01-01T00:00:00Z"}]`
 	subFull := &database.SubscriptionFull{
@@ -677,7 +677,7 @@ func TestHandleSubscription_PaidSubscription_ProfileTitleSuffix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockDB := testutil.NewDatabaseService()
+			mockDB := testutil.NewSubscriptionRepositoryFake()
 			svc := newTestSubSvc(t)
 
 			mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
@@ -786,7 +786,7 @@ func TestIsValidServer(t *testing.T) {
 func TestHandleSubscription_CacheHit_UpdatesLastRequest(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -813,7 +813,7 @@ func TestHandleSubscription_CacheHit_UpdatesLastRequest(t *testing.T) {
 func TestHandleSubscription_CacheHit_LastRequestError_DoesNotBlockResponse(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
@@ -838,7 +838,7 @@ func TestHandleSubscription_CacheMiss_UpdatesLastRequestAndReturnsXrayJSON(t *te
 	}))
 	defer backend.Close()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, SubscriptionID: subID, Status: "active"},

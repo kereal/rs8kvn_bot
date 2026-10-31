@@ -61,7 +61,7 @@ func (m *mockVPNClient) Close() error {
 	return nil
 }
 
-func newTestSyncService(t *testing.T, db interfaces.DatabaseService, nodes []database.Node) *SyncService {
+func newTestSyncService(t *testing.T, db interfaces.SyncStore, nodes []database.Node) *SyncService {
 	t.Helper()
 
 	clients := make(NodeClients)
@@ -131,7 +131,7 @@ func TestSyncService_ReconcilePlanNodes_ContinuesAfterNodeFailure(t *testing.T) 
 	firstErr := errors.New("node one upsert failed")
 	processed := make([]uint, 0, 2)
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewServiceStoreFake()
 	db.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
 		return &database.Subscription{ID: 42, PlanID: 7}, nil
 	}
@@ -1361,7 +1361,7 @@ func TestSyncService_SyncNodes_ReferrerErrorRetriesAndContinues(t *testing.T) {
 
 	referrerErr := errors.New("referrer lookup failed")
 	retryNodes := make([]uint, 0, 2)
-	db := testutil.NewDatabaseService()
+	db := testutil.NewServiceStoreFake()
 	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
 		return &database.Plan{ID: 7, Name: database.FreePlanName, TrafficLimit: 1024}, nil
 	}
@@ -1412,7 +1412,7 @@ func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {
 		{SubscriptionID: 20, NodeID: 2, Status: database.SyncStatusPendingAdd},
 	}
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewServiceStoreFake()
 	db.GetPendingSyncFunc = func(ctx context.Context) ([]database.SubscriptionNode, error) {
 		return pending, nil
 	}
@@ -1453,7 +1453,7 @@ func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {
 func TestSyncService_lockSubscription_Timeout(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewServiceStoreFake()
 	svc := newTestSyncService(t, db, nil)
 	// Pin the production timeout so the elapsed-time assertion is stable.
 	svc.lockTimeout = 2 * time.Minute
@@ -1482,7 +1482,7 @@ func TestSyncService_lockSubscription_Timeout(t *testing.T) {
 func TestSyncService_lockSubscription_TimeoutWhenAlreadyHeld(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewServiceStoreFake()
 	svc := newTestSyncService(t, db, nil)
 	// Override the production two-minute timeout so the already-held case is
 	// bounded to a short duration in this test.
@@ -1518,7 +1518,7 @@ func TestSyncService_ReconcilePlanNodes_RevokedIsUntouched(t *testing.T) {
 
 			planRead := false
 			bindingsRead := false
-			db := &testutil.DatabaseService{
+			db := &testutil.ServiceStoreFake{
 				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 					return &database.Subscription{ID: 42, PlanID: 1, Status: status}, nil
 				},

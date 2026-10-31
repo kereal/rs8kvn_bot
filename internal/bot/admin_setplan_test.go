@@ -19,7 +19,7 @@ func TestHandleSetPlan_AdminOnly(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 123456}
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, testutil.NewXUIClient(), mockBot)
 
@@ -54,7 +54,7 @@ func TestHandleSetPlan_UsageAndValidation(t *testing.T) {
 			t.Parallel()
 
 			cfg := &config.Config{TelegramAdminID: 123456}
-			mockDB := testutil.NewDatabaseService()
+			mockDB := testutil.NewBotStoreFake()
 			mockBot := testutil.NewBotAPI()
 			handler := newTestAdminHandler(cfg, mockDB, testutil.NewXUIClient(), mockBot)
 
@@ -73,7 +73,7 @@ func TestHandleSetPlan_Success(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 123456}
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, testutil.NewXUIClient(), mockBot)
 
@@ -118,7 +118,7 @@ func TestHandleSetPlan_ServiceError(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 123456}
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := newTestAdminHandler(cfg, mockDB, testutil.NewXUIClient(), mockBot)
 

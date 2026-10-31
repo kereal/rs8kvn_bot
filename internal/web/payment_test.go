@@ -534,10 +534,10 @@ func paymentRequestWithCurrency(status string, id uuid.UUID, amount, currency st
 	return req
 }
 
-func newPaymentTestServer(t *testing.T, order *database.Order) (*Server, *testutil.DatabaseService, *testutil.BotAPI) {
+func newPaymentTestServer(t *testing.T, order *database.Order) (*Server, *testutil.SubscriptionRepositoryFake, *testutil.BotAPI) {
 	t.Helper()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewSubscriptionRepositoryFake()
 	if order != nil {
 		db.Orders = map[uint]*database.Order{order.ID: order}
 	}

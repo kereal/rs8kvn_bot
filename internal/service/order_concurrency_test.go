@@ -37,7 +37,7 @@ func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T)
 
 	var casCalls atomic.Int32
 
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			return order, nil
 		},
@@ -158,7 +158,7 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 		casCalls               atomic.Int32
 	)
 
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(_ context.Context, _ string, id uuid.UUID) (*database.Order, error) {
 			o, ok := orders[id]
 			if !ok {
@@ -267,7 +267,7 @@ func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 
 	var startOnce1, startOnce2 sync.Once
 
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(_ context.Context, _ string, id uuid.UUID) (*database.Order, error) {
 			o, ok := orders[id]
 			if !ok {
@@ -384,7 +384,7 @@ func TestRequestPayment_ConcurrentCallersSingleProviderTransaction(t *testing.T)
 	// keeps the race detector quiet.
 	provider := &countingPaymentProvider{}
 
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) { return product, nil },
 		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
 			return sub, nil
@@ -497,7 +497,7 @@ func TestCancelPaymentByProvider_SameOrderParallelChargebacksTransitionOnce(t *t
 		transitions  atomic.Int32
 	)
 
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			return order, nil
 		},
@@ -617,7 +617,7 @@ func TestCancelPaymentByProvider_SameOrderParallelPendingCancelsIdempotent(t *te
 		transitions  atomic.Int32
 	)
 
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			return order, nil
 		},

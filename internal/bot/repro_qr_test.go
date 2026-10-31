@@ -31,7 +31,7 @@ func newQRTestHandler(t *testing.T) (*Handler, *testutil.BotAPI) {
 	t.Helper()
 
 	ctx := context.Background()
-	db := testutil.NewDatabaseService()
+	db := testutil.NewBotStoreFake()
 	cfg := &config.Config{TelegramAdminID: 123456, SiteURL: "https://x.com", GlobalSubURL: "https://x.com/sub/"}
 	mockXUI := testutil.NewXUIClient()
 	clients := service.NodeClients{1: {Reader: mockXUI}}

@@ -85,7 +85,7 @@ func atomicChargebackResult(orderID, subscriptionID uint, wasPaid, downgraded bo
 func TestOrderService_NotifiesAdminForUncertainPayment(t *testing.T) {
 	adminBot := testutil.NewBotAPI()
 	order := &database.Order{ID: 12, SubscriptionID: 3, ProductID: 7, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", PaymentCreationUncertain: true}
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
 			return &database.Product{ID: 7, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
 		},
@@ -114,7 +114,7 @@ func TestOrderService_NotifiesAdminForUncertainPayment(t *testing.T) {
 func TestOrderService_NotifiesAdminForLateConfirmedPayment(t *testing.T) {
 	adminBot := testutil.NewBotAPI()
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440103")
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			expiresAt := time.Now().UTC().Add(-6 * time.Minute)
 
@@ -157,7 +157,7 @@ func TestOrderService_ActivatesExpiredPaymentWithinSettlementGrace(t *testing.T)
 	sub := &database.Subscription{ID: 8, TelegramID: 44, PlanID: 1, Status: "active"}
 	casCalls := 0
 
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			return order, nil
 		},
@@ -189,7 +189,7 @@ func TestOrderService_ActivatesExpiredPaymentWithinSettlementGrace(t *testing.T)
 func TestOrderService_NotifiesAdminForProviderRejection(t *testing.T) {
 	adminBot := testutil.NewBotAPI()
 	order := &database.Order{ID: 15, SubscriptionID: 6, ProductID: 10, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
 			return &database.Product{ID: 10, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
 		},
@@ -221,7 +221,7 @@ func TestOrderService_NotifiesAdminWhenProviderOutcomeIsUncertain(t *testing.T) 
 	adminBot := testutil.NewBotAPI()
 	providerErr := errors.New("provider timeout")
 	order := &database.Order{ID: 14, SubscriptionID: 5, ProductID: 9, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
 			return &database.Product{ID: 9, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
 		},
@@ -259,7 +259,7 @@ func TestRequestPayment_SavesRedirectPaymentDetails(t *testing.T) {
 		savedExpiry time.Time
 	)
 
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
 			return &database.Product{ID: 11, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
 		},
@@ -315,7 +315,7 @@ func TestRequestPayment_InvalidProviderResponsesNotifyAdmin(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			order := &database.Order{ID: 17, SubscriptionID: 8, ProductID: 12, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
 			adminBot := testutil.NewBotAPI()
-			mock := &testutil.DatabaseService{
+			mock := &testutil.ServiceStoreFake{
 				GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
 					return &database.Product{ID: 12, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
 				},
@@ -347,7 +347,7 @@ func TestRequestPayment_InvalidProviderResponsesNotifyAdmin(t *testing.T) {
 func TestRequestPayment_LatePlanLoadFailureNotifiesAdmin(t *testing.T) {
 	adminBot := testutil.NewBotAPI()
 	order := &database.Order{ID: 21, SubscriptionID: 12, ProductID: 16, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
 			return &database.Product{ID: 16, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
 		},
@@ -377,7 +377,7 @@ func TestRequestPayment_SaveDetailsFailureNotifiesAdmin(t *testing.T) {
 	adminBot := testutil.NewBotAPI()
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440108")
 	order := &database.Order{ID: 18, SubscriptionID: 9, ProductID: 13, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
 			return &database.Product{ID: 13, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
 		},
@@ -415,7 +415,7 @@ func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
 
 	var syncStartOnce sync.Once
 
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(_ context.Context, _ string, id uuid.UUID) (*database.Order, error) {
 			if id == firstID {
 				return &database.Order{ID: 31, SubscriptionID: 41, ProductID: 51, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
@@ -479,7 +479,7 @@ func TestConfirmPayment_ActivatedCASWithNilExpiryDoesNotPanic(t *testing.T) {
 	// sub.ExpiresAt must not panic and must leave order.ExpiresAt nil.
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440122")
 	beforeAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("confirmed", "METRIC"))
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			return &database.Order{ID: 32, SubscriptionID: 42, ProductID: 52, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "METRIC"}, nil
 		},
@@ -511,7 +511,7 @@ func TestConfirmPayment_ActivatedCASWithNilExpiryDoesNotPanic(t *testing.T) {
 
 func TestConfirmPayment_RequiresSyncServiceForPendingOrder(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440105")
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			return &database.Order{ID: 11, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
 		},
@@ -544,7 +544,7 @@ func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			adminBot := testutil.NewBotAPI()
-			mock := &testutil.DatabaseService{
+			mock := &testutil.ServiceStoreFake{
 				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 					return &database.Order{ID: 19, SubscriptionID: 10, ProductID: 14, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
 				},
@@ -589,7 +589,7 @@ func TestConfirmPayment_NotifiesAdminOnActivation(t *testing.T) {
 	sub := &database.Subscription{ID: 85, TelegramID: 55, Username: "alice", ExpiresAt: testutil.PtrTime(time.Now().Add(30 * 24 * time.Hour))}
 	product := &database.Product{ID: 66, PlanID: 2, Name: "Premium 1 месяц", PriceCents: 230000, Currency: "RUB"}
 	order := &database.Order{ID: 96, SubscriptionID: 85, ProductID: 66, Status: database.OrderStatusPending, AmountCents: 230000, Currency: "RUB", ProviderPaymentID: providerID.String()}
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			return order, nil
 		},
@@ -640,7 +640,7 @@ func TestConfirmPayment_NotifiesAdminOnRenewal(t *testing.T) {
 	sub := &database.Subscription{ID: 87, TelegramID: 56, Username: "bob", PlanID: 2, ProductID: &productID, PricePaidCents: 230000, ExpiresAt: testutil.PtrTime(time.Now().Add(10 * 24 * time.Hour))}
 	product := &database.Product{ID: 67, PlanID: 2, Name: "Premium 1 месяц", PriceCents: 230000, Currency: "RUB"}
 	order := &database.Order{ID: 97, SubscriptionID: 87, ProductID: 67, Status: database.OrderStatusPending, AmountCents: 230000, Currency: "RUB", ProviderPaymentID: providerID.String()}
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			return order, nil
 		},
@@ -680,7 +680,7 @@ func TestConfirmPayment_InvalidatesSubserverCacheOnActivation(t *testing.T) {
 	sub := &database.Subscription{ID: 95, TelegramID: 57, Username: "carol", SubscriptionID: "sub-abc", ExpiresAt: testutil.PtrTime(time.Now().Add(30 * 24 * time.Hour))}
 	product := &database.Product{ID: 68, PlanID: 2, Name: "Premium 1 месяц", PriceCents: 230000, Currency: "RUB"}
 	order := &database.Order{ID: 98, SubscriptionID: 95, ProductID: 68, Status: database.OrderStatusPending, AmountCents: 230000, Currency: "RUB", ProviderPaymentID: providerID.String()}
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			return order, nil
 		},
@@ -774,7 +774,7 @@ func TestCancelPaymentByProvider_ChargebackNotifiesAdmin(t *testing.T) {
 			sub := &database.Subscription{ID: 92, TelegramID: 62, Username: "carol", PlanID: 99, Status: "active"}
 			product := &database.Product{ID: 72, PlanID: 99, Name: "Premium 3 месяца", PriceCents: 690000, Currency: "RUB", IsActive: true}
 			order := &database.Order{ID: 104, SubscriptionID: 92, ProductID: 72, Status: database.OrderStatusCanceled, AmountCents: 690000, Currency: "RUB", ProviderPaymentID: providerID.String()}
-			mock := &testutil.DatabaseService{
+			mock := &testutil.ServiceStoreFake{
 				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 					return &database.Order{ID: 104, SubscriptionID: 92, ProductID: 72, Status: database.OrderStatusPaid, AmountCents: 690000, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
 				},
@@ -856,7 +856,7 @@ func TestCancelPaymentByProvider_ErrorsNotifyAdmin(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			adminBot := testutil.NewBotAPI()
-			mock := &testutil.DatabaseService{
+			mock := &testutil.ServiceStoreFake{
 				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 					return &database.Order{ID: 20, SubscriptionID: 11, ProductID: 15, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
 				},
@@ -887,7 +887,7 @@ func TestCancelPaymentByProvider_PaidChargebackReturnsWasPaid(t *testing.T) {
 	// from the pre-transition state.
 	beforeAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("chargeback", "RUB"))
 	calls := 0
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		CancelOrderCASFunc: func(ctx context.Context, provider string, providerID uuid.UUID, from []database.OrderStatus) (bool, error) {
 			assert.Equal(t, "platega", provider)
 			assert.Equal(t, "550e8400-e29b-41d4-a716-446655440101", providerID.String())
@@ -920,7 +920,7 @@ func TestCancelPaymentByProvider_ChargebackOnPendingReportsNotPaid(t *testing.T)
 	// no money was collected yet, so nothing to refund.
 	beforeAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("chargeback", "RUB"))
 	calls := 0
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		CancelOrderCASFunc: func(ctx context.Context, provider string, providerID uuid.UUID, from []database.OrderStatus) (bool, error) {
 			assert.Contains(t, from, database.OrderStatusPaid, "chargeback must allow transition from paid")
 			return true, nil
@@ -947,7 +947,7 @@ func TestCancelPaymentByProvider_ChargebackOnPendingReportsNotPaid(t *testing.T)
 func TestCancelPaymentByProvider_RejectsUnknownStatus(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440104")
 	called := false
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			return &database.Order{ID: 10, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
 		},
@@ -964,7 +964,7 @@ func TestCancelPaymentByProvider_RejectsUnknownStatus(t *testing.T) {
 
 func TestCancelPaymentByProvider_PendingCancelNotChargeback(t *testing.T) {
 	calls := 0
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		CancelOrderCASFunc: func(ctx context.Context, provider string, providerID uuid.UUID, from []database.OrderStatus) (bool, error) {
 			assert.NotContains(t, from, database.OrderStatusPaid, "plain CANCELED must not touch paid orders")
 			return true, nil
@@ -1021,7 +1021,7 @@ func TestConfirmPayment_DeletedSubscriptionOrProductReturnsNoop(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			adminBot := testutil.NewBotAPI()
 			casCalled := false
-			mock := &testutil.DatabaseService{
+			mock := &testutil.ServiceStoreFake{
 				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 					return &database.Order{ID: 90, SubscriptionID: 70, ProductID: 60, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
 				},
@@ -1051,7 +1051,7 @@ func TestRequestPayment_ConcurrentClaimReturnsAlreadyInProgress(t *testing.T) {
 	adminBot := testutil.NewBotAPI()
 	order := &database.Order{ID: 95, SubscriptionID: 75, ProductID: 65, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
 	latest := &database.Order{ID: 95, SubscriptionID: 75, ProductID: 65, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", PaymentCreationUncertain: true}
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
 			return &database.Product{ID: 65, PlanID: 2, Name: "Premium", PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
 		},
@@ -1086,7 +1086,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradesPaidSubscription(t *testing
 	sub := &database.Subscription{ID: 85, TelegramID: 55, PlanID: 99, Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
 	calls := 0
 	downgradePersisted := false
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			calls++
 			return &database.Order{ID: 96, SubscriptionID: 85, ProductID: 66, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
@@ -1126,7 +1126,7 @@ func TestCancelPaymentByProvider_ChargebackKeepsAccessWithAnotherPaidOrder(t *te
 	sub := &database.Subscription{ID: 86, TelegramID: 56, PlanID: 99, Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
 	calls := 0
 	updateCalled := false
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			calls++
 			return &database.Order{ID: 97, SubscriptionID: 86, ProductID: 67, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
@@ -1160,7 +1160,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradeFailureAlertsAdmin(t *testin
 	adminBot := testutil.NewBotAPI()
 	sub := &database.Subscription{ID: 88, TelegramID: 58, PlanID: 99, Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
 	calls := 0
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			calls++
 			return &database.Order{ID: 100, SubscriptionID: 88, ProductID: 69, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
@@ -1201,7 +1201,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T
 	deleteNodesCalled := false
 	syncInvoked := false
 	premiumMarkedForRemoval := false
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			calls++
 			return &database.Order{ID: 101, SubscriptionID: 89, ProductID: 70, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
@@ -1268,7 +1268,7 @@ func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
 	var casAmount int64 = -1
 	var saves []paymentAmountsSave
 
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			return &database.Order{ID: 33, SubscriptionID: 43, ProductID: 53, Status: database.OrderStatusPending, AmountCents: 5000, Currency: "RUB"}, nil
 		},
@@ -1317,7 +1317,7 @@ func TestConfirmPayment_ProviderFeeUnavailableKeepsCallbackAmount(t *testing.T) 
 	var casAmount int64 = -1
 	var saves []paymentAmountsSave
 
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			return &database.Order{ID: 34, SubscriptionID: 44, ProductID: 54, Status: database.OrderStatusPending, AmountCents: 5000, Currency: "RUB"}, nil
 		},
@@ -1355,7 +1355,7 @@ func TestSyncProviderFees_NotFoundIsTerminal(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440129")
 	var saves []paymentAmountsSave
 
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetPaidOrdersWithoutProviderFeeFunc: func(context.Context, int) ([]database.Order, error) {
 			return []database.Order{{ID: 35, AmountCents: 5000, CallbackAmountCents: testutil.PtrInt64(5250), ProviderPaymentID: providerID.String()}}, nil
 		},
@@ -1379,7 +1379,7 @@ func TestSyncProviderFees_NotConfirmedDeferred(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440130")
 	var saves []paymentAmountsSave
 
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetPaidOrdersWithoutProviderFeeFunc: func(context.Context, int) ([]database.Order, error) {
 			return []database.Order{{ID: 36, AmountCents: 5000, CallbackAmountCents: testutil.PtrInt64(5250), ProviderPaymentID: providerID.String()}}, nil
 		},
@@ -1407,7 +1407,7 @@ func TestSyncProviderFees_ContinuesPastDeferredFirstPage(t *testing.T) {
 	}
 
 	var saves []paymentAmountsSave
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetPaidOrdersWithoutProviderFeeAfterIDFunc: func(_ context.Context, afterID uint, limit int) ([]database.Order, error) {
 			page := make([]database.Order, 0, limit)
 			for _, order := range orders {
@@ -1438,7 +1438,7 @@ func TestSyncProviderFees_ContinuesPastDeferredFirstPage(t *testing.T) {
 func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440126")
 	calls := 0
-	mock := &testutil.DatabaseService{
+	mock := &testutil.ServiceStoreFake{
 		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
 			calls++
 			return &database.Order{ID: 99, SubscriptionID: 87, ProductID: 68, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil

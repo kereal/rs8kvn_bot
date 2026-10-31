@@ -69,3 +69,28 @@ Embedding сломал бы их компиляцию — нарушил бы о
 `5a06117` как мёртвый код: ни один тест не использовал ни один `*...Fake` тип (0 ссылок), а узкие
 срезы покрываются структурной типизацией `*testutil.DatabaseService`. Плоский фейк остаётся
 единственным. Это не меняет решение ADR — только убирает неиспользуемый дублирующий слой.
+
+## Дополнение (2026-10-31): доработка — сужение широких модулей и расщепление фейка
+
+Оставшиеся широкие потребители переведены на consumer-defined срезы (в `internal/interfaces`,
+по образцу `WebRepository`): `SubscriptionStore` (SubscriptionService), `SyncStore` (SyncService
+и `dbServicePlanStore`), `OrderStore` (OrderService), `BotStore` (bot.Handler; включает
+invite/referral-методы, которые handler прокидывает в `ReferralHandler`/`ReferralCache`),
+`ReferralCountSource`, `ReferralInviteStore`, `AuditLogWriter` (SubscriptionSyncWorker).
+Из `interfaces.DatabaseService` удалены `Transaction` и `GetPoolStats` (0 production-вызовов);
+`Ping`/`Close` выведены из интерфейса — composition root держит concrete `*database.Service`
+и вызывает их на нём, отдельный `DatabaseLifecycle`-интерфейс не нужен. Мёртвые члены фейка
+(plan-admin, `SeedDefaultData`, `GetSubscription`, lifecycle) удалены вместе с плоским фейком.
+
+Плоский фейк `testutil.DatabaseService` (2185 строк, зеркалил доменную логику: bitmask-claim,
+broadcast state-машину, CAS с расчётом expiry) заменён per-consumer фейками — plain-структуры
+с map/slice-полями и Func-override'ами, без зеркалирования доменной логики (дефолты — простая
+storage-семантика или явная ошибка «Func is not set»; доменную семантику тестирует real SQLite
+через `testutil.NewTestDatabaseService`): `ServiceStoreFake` (SubscriptionStore+SyncStore+
+OrderStore — service-тесты строят все три сервиса над одним инстансом), `BotStoreFake`
+(embeds `*ServiceStoreFake` + BotStore-поверхность — bot-тесты строят handler и сервисы над
+одним инстансом), `SubscriptionRepositoryFake` (embeds `*ServiceStoreFake`, реализует
+`WebRepository` — subserver/web/expire-worker), плюс мелкие `ReferralCountSourceFake`,
+`ReferralInviteStoreFake`, `AuditLogWriterFake`. Embedding здесь — композиция тестового графа,
+а не запрещённая сборка god-фейка `DatabaseService` из срезов; composite-литералы совместимы,
+т.к. Func-поля объявлены на уровне каждого фейка (промоутед — присваиванием).

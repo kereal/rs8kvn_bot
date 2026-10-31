@@ -116,7 +116,7 @@ func TestSubscriptionService_SendExpiryReminder_NilBotNoop(t *testing.T) {
 func TestSubscriptionService_SendExpiryReminder_ClaimErrorPropagates(t *testing.T) {
 	t.Parallel()
 
-	db := &testutil.DatabaseService{}
+	db := &testutil.ServiceStoreFake{}
 	ctx := context.Background()
 	expiry := time.Now().UTC().Add(3 * time.Hour)
 	sub := &database.Subscription{

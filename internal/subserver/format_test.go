@@ -553,10 +553,10 @@ func TestHandleSubscription_FormatByUA(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	withBackend := func(t *testing.T, subID string) (*Service, *testutil.DatabaseService, string) {
+	withBackend := func(t *testing.T, subID string) (*Service, *testutil.SubscriptionRepositoryFake, string) {
 		t.Helper()
 
-		mockDB := testutil.NewDatabaseService()
+		mockDB := testutil.NewSubscriptionRepositoryFake()
 		mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, id string) (*database.SubscriptionFull, error) {
 			return &database.SubscriptionFull{
 				Subscription: database.Subscription{ID: 1, SubscriptionID: id, Status: "active"},
@@ -644,7 +644,7 @@ func TestHandleSubscription_PerFormatCacheKeys(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, SubscriptionID: subID, Status: "active"},

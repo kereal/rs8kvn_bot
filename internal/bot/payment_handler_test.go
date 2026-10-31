@@ -36,7 +36,7 @@ func (fakePaymentProvider) GetTransactionStatus(context.Context, uuid.UUID) (*pl
 // newPaymentTestHandler builds a Handler with payment enabled and an OrderService
 // backed by the provided DB mock and provider. Passing a nil provider yields an
 // OrderService with disabled payments (ErrPaymentDisabled from RequestPayment).
-func newPaymentTestHandler(t *testing.T, mockDB *testutil.DatabaseService, provider service.PaymentProvider) (*Handler, *testutil.BotAPI) {
+func newPaymentTestHandler(t *testing.T, mockDB *testutil.BotStoreFake, provider service.PaymentProvider) (*Handler, *testutil.BotAPI) {
 	t.Helper()
 
 	cfg := &config.Config{TelegramAdminID: 123, PaymentEnabled: true}
@@ -52,7 +52,7 @@ func TestHandleBuyPremiumList_NotConfigured(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 123, PaymentEnabled: false}
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	bot := testutil.NewBotAPI()
 	h := NewHandler(bot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
@@ -67,7 +67,7 @@ func TestHandleBuyPremiumList_NotConfigured(t *testing.T) {
 func TestHandleBuyPremiumList_ListErrorShowsTempError(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.ListActiveProductsFunc = func(context.Context) ([]database.Product, error) {
 		return nil, assert.AnError
 	}
@@ -84,7 +84,7 @@ func TestHandleBuyPremiumList_ListErrorShowsTempError(t *testing.T) {
 func TestHandleBuyPremiumList_EmptyListShowsNoTariffs(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.ListActiveProductsFunc = func(context.Context) ([]database.Product, error) {
 		return nil, nil
 	}
@@ -101,7 +101,7 @@ func TestHandleBuyPremiumList_EmptyListShowsNoTariffs(t *testing.T) {
 func TestHandleBuyPremiumList_SuccessShowsProducts(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.ListActiveProductsFunc = func(context.Context) ([]database.Product, error) {
 		return []database.Product{
 			{ID: 1, Name: "Месяц", PriceCents: 19900, IsActive: true},
@@ -135,7 +135,7 @@ func TestHandleBuyProduct_NotConfigured(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 123, PaymentEnabled: false}
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	bot := testutil.NewBotAPI()
 	h := NewHandler(bot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
@@ -150,7 +150,7 @@ func TestHandleBuyProduct_NotConfigured(t *testing.T) {
 func TestHandleBuyProduct_ProductLoadErrorShowsTempError(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
 		return nil, assert.AnError
 	}
@@ -179,7 +179,7 @@ func TestHandleBuyProduct_TariffUnavailable(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			mockDB := testutil.NewDatabaseService()
+			mockDB := testutil.NewBotStoreFake()
 			mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
 				return tt.product, nil
 			}
@@ -198,7 +198,7 @@ func TestHandleBuyProduct_TariffUnavailable(t *testing.T) {
 func TestHandleBuyProduct_PaymentDisabled(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
 		return &database.Product{ID: 1, Name: "Месяц", PriceCents: 19900, IsActive: true}, nil
 	}
@@ -216,7 +216,7 @@ func TestHandleBuyProduct_PaymentDisabled(t *testing.T) {
 func TestHandleBuyProduct_PaymentAlreadyInProgress(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
 		return &database.Product{ID: 1, Name: "Месяц", PriceCents: 19900, Currency: "RUB", IsActive: true}, nil
 	}
@@ -243,7 +243,7 @@ func TestHandleBuyProduct_PaymentAlreadyInProgress(t *testing.T) {
 func TestHandleBuyProduct_PaymentNeedsReview(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
 		return &database.Product{ID: 1, Name: "Месяц", PriceCents: 19900, Currency: "RUB", IsActive: true}, nil
 	}
@@ -266,7 +266,7 @@ func TestHandleBuyProduct_PaymentNeedsReview(t *testing.T) {
 func TestHandleBuyProduct_GenericRequestErrorShowsTempError(t *testing.T) {
 	t.Parallel()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
 		return &database.Product{ID: 1, Name: "Месяц", PriceCents: 19900, Currency: "RUB", IsActive: true}, nil
 	}
@@ -302,7 +302,7 @@ func TestHandleBuyProduct_SuccessShowsPaymentButton(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			mockDB := testutil.NewDatabaseService()
+			mockDB := testutil.NewBotStoreFake()
 			mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
 				return &database.Product{ID: 1, Name: "Месяц", PriceCents: tt.priceCents, Currency: "RUB", IsActive: true}, nil
 			}

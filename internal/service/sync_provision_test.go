@@ -131,7 +131,7 @@ func TestSyncService_buildNodeProvision(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			db := testutil.NewDatabaseService()
+			db := testutil.NewServiceStoreFake()
 			db.GetPlanByIDFunc = func(_ context.Context, _ uint) (*database.Plan, error) {
 				return tt.plan, nil
 			}
@@ -174,7 +174,7 @@ func TestSyncService_buildNodeProvision_AddUpdateParity(t *testing.T) {
 
 	ctx := context.Background()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewServiceStoreFake()
 
 	expiresAt := time.Now().UTC().Add(72 * time.Hour).Truncate(time.Minute)
 
@@ -223,7 +223,7 @@ func TestSyncService_buildNodeProvision_DefaultExpiryWhenNone(t *testing.T) {
 
 	ctx := context.Background()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewServiceStoreFake()
 
 	plan := &database.Plan{Name: "prov-default-expiry", DevicesLimit: 1, TrafficLimit: 1024}
 	db.GetPlanByIDFunc = func(_ context.Context, _ uint) (*database.Plan, error) {
@@ -258,7 +258,7 @@ func TestSyncService_buildNodeProvision_UpdateMissingClient(t *testing.T) {
 
 	ctx := context.Background()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewServiceStoreFake()
 
 	plan := &database.Plan{Name: "prov-missing", DevicesLimit: 1, TrafficLimit: 1024}
 	db.GetPlanByIDFunc = func(_ context.Context, _ uint) (*database.Plan, error) {
@@ -297,7 +297,7 @@ func TestSyncService_buildNodeProvision_UpdateProfileReadError(t *testing.T) {
 
 	ctx := context.Background()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewServiceStoreFake()
 
 	plan := &database.Plan{Name: "prov-read-err", DevicesLimit: 1, TrafficLimit: 1024}
 	db.GetPlanByIDFunc = func(_ context.Context, _ uint) (*database.Plan, error) {

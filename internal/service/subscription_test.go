@@ -34,7 +34,7 @@ func TestSubscriptionService_Create_Success(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 		},
@@ -69,7 +69,7 @@ func TestSubscriptionService_Create_NoNodesDBFirst(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 		},
@@ -107,7 +107,7 @@ func TestSubscriptionService_Create_DBError(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 		},
@@ -138,7 +138,7 @@ func TestSubscriptionService_Create_DBError_AfterRowCreationNoOrphanClient(t *te
 
 	cfg := &config.Config{}
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 		},
@@ -185,7 +185,7 @@ func TestSubscriptionService_Create_PropagatesInviteCodeToDB(t *testing.T) {
 		gotInviteCode string
 	)
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 		},
@@ -226,7 +226,7 @@ func TestSubscriptionService_Create_EmptyInviteCodeIsNoop(t *testing.T) {
 
 	var gotInviteCode string
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 		},
@@ -262,7 +262,7 @@ func TestSubscriptionService_Create_FillsFallbackUsername(t *testing.T) {
 
 	var gotSub *database.Subscription
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: database.FreePlanName, TrafficLimit: 1073741824}, nil
 		},
@@ -302,7 +302,7 @@ func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 		ExpiresAt:  testutil.PtrTime(time.Now().Add(7 * 24 * time.Hour)),
 	}
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
 		},
@@ -341,7 +341,7 @@ func TestSubscriptionService_GetWithTraffic_XUIErrorFallback(t *testing.T) {
 		CreatedAt:  time.Now(),
 	}
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return sub, nil
 		},
@@ -373,7 +373,7 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 		TrialDurationHours: 3,
 	}
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: name, TrafficLimit: 1073741824}, nil
 		},
@@ -409,7 +409,7 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 		TrialDurationHours: 3,
 	}
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: "trial", TrafficLimit: 1073741824}, nil
 		},
@@ -447,7 +447,7 @@ func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 	}
 
 	deleteCalled := false
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: name, TrafficLimit: 1073741824}, nil
 		},
@@ -487,7 +487,7 @@ func TestSubscriptionService_CreateTrial_NoTrialNodes(t *testing.T) {
 		TrialDurationHours: 3,
 	}
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: name, TrafficLimit: 1073741824}, nil
 		},
@@ -530,7 +530,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_RevokesFullyDeprovisioned(
 	inactive := &database.Subscription{ID: 40, TelegramID: 400, Username: "bad", Status: "revoked"}
 
 	updated := make(map[uint]string)
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
 			return []database.Subscription{*withLive, *orphan, *trial, *inactive}, nil
 		},
@@ -577,7 +577,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_NoActive(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
 			return []database.Subscription{{ID: 1, Status: "revoked"}}, nil
 		},
@@ -601,7 +601,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_UpdateError(t *testing.T) 
 	orphan := &database.Subscription{ID: 20, TelegramID: 200, Username: "orphanuser", Status: "active"}
 	withLive := &database.Subscription{ID: 10, TelegramID: 100, Username: "liveuser", Status: "active"}
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
 			return []database.Subscription{*orphan, *withLive}, nil
 		},
@@ -640,7 +640,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_InvalidatesBySubID(t *test
 
 	orphan := &database.Subscription{ID: 20, TelegramID: 200, Username: "orphanuser", SubscriptionID: "sub-orphan", Status: "active"}
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
 			return []database.Subscription{*orphan}, nil
 		},
@@ -685,7 +685,7 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 		PlanID:         2,
 	}
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetTrialSubscriptionBySubIDFunc: func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 			return bound, nil
 		},
@@ -775,7 +775,7 @@ func TestSubscriptionService_BindTrial_ReferrerErrorStopsProvisioning(t *testing
 	updateCalls := 0
 	bindCalls := 0
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetTrialSubscriptionBySubIDFunc: func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 			return bound, nil
 		},
@@ -825,7 +825,7 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 		PlanID:         2,
 	}
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetTrialSubscriptionBySubIDFunc: func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 			return bound, nil
 		},
@@ -919,7 +919,7 @@ func TestSubscriptionService_BindTrial_DBBindFailureRollsBack(t *testing.T) {
 	}
 
 	lookupCalls := 0
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetTrialSubscriptionBySubIDFunc: func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 			lookupCalls++
 			// First call: load the trial. Second call: verify it is still unbound.
@@ -999,7 +999,7 @@ func TestSubscriptionService_BindTrial_DBBindFailureCheckErrorSkipsRollback(t *t
 	}
 
 	lookupCalls := 0
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetTrialSubscriptionBySubIDFunc: func(ctx context.Context, subscriptionID string) (*database.Subscription, error) {
 			lookupCalls++
 			if lookupCalls > 1 {
@@ -1045,14 +1045,14 @@ func TestReferrerComment(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("no invite code returns empty", func(t *testing.T) {
-		db := &testutil.DatabaseService{}
+		db := &testutil.ServiceStoreFake{}
 		comment, err := referrerComment(ctx, db, &database.Subscription{})
 		require.NoError(t, err)
 		assert.Empty(t, comment)
 	})
 
 	t.Run("unknown invite returns empty without error", func(t *testing.T) {
-		db := &testutil.DatabaseService{
+		db := &testutil.ServiceStoreFake{
 			GetInviteByCodeFunc: func(ctx context.Context, code string) (*database.Invite, error) {
 				return nil, database.ErrInviteNotFound
 			},
@@ -1064,7 +1064,7 @@ func TestReferrerComment(t *testing.T) {
 	})
 
 	t.Run("unknown referrer returns empty without error", func(t *testing.T) {
-		db := &testutil.DatabaseService{
+		db := &testutil.ServiceStoreFake{
 			GetInviteByCodeFunc: func(ctx context.Context, code string) (*database.Invite, error) {
 				return &database.Invite{Code: code, ReferrerTGID: 555}, nil
 			},
@@ -1079,7 +1079,7 @@ func TestReferrerComment(t *testing.T) {
 	})
 
 	t.Run("context error is wrapped", func(t *testing.T) {
-		db := &testutil.DatabaseService{
+		db := &testutil.ServiceStoreFake{
 			GetInviteByCodeFunc: func(ctx context.Context, code string) (*database.Invite, error) {
 				return nil, context.DeadlineExceeded
 			},
@@ -1094,7 +1094,7 @@ func TestReferrerComment(t *testing.T) {
 
 	t.Run("referrer error is wrapped", func(t *testing.T) {
 		loadErr := errors.New("database unavailable")
-		db := &testutil.DatabaseService{
+		db := &testutil.ServiceStoreFake{
 			GetInviteByCodeFunc: func(ctx context.Context, code string) (*database.Invite, error) {
 				return &database.Invite{Code: code, ReferrerTGID: 555}, nil
 			},
@@ -1111,7 +1111,7 @@ func TestReferrerComment(t *testing.T) {
 	})
 
 	t.Run("referrer found formats comment", func(t *testing.T) {
-		db := &testutil.DatabaseService{
+		db := &testutil.ServiceStoreFake{
 			GetInviteByCodeFunc: func(ctx context.Context, code string) (*database.Invite, error) {
 				return &database.Invite{Code: code, ReferrerTGID: 555}, nil
 			},
@@ -1132,7 +1132,7 @@ func TestSubscriptionService_DeleteByID_Success(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: 7, TelegramID: 42, Username: "u", ClientID: "c1", SubscriptionID: "s1"}, nil
 		},
@@ -1162,7 +1162,7 @@ func TestSubscriptionService_DeleteByID_GetError(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
 			return nil, errors.New("not found")
 		},
@@ -1182,7 +1182,7 @@ func TestSubscriptionService_DeleteByID_DBError(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: 1, ClientID: "c", SubscriptionID: "s", TelegramID: 1, Username: "u"}, nil
 		},
@@ -1217,7 +1217,7 @@ func TestSubscriptionService_DeleteByID_MarkRevokedBeforeDBDelete(t *testing.T) 
 	deleteCalled := false
 
 	cfg := &config.Config{}
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: 1, ClientID: "c", SubscriptionID: "s", TelegramID: 1, Username: "u", Status: "active"}, nil
 		},
@@ -1260,7 +1260,7 @@ func TestSubscriptionService_DeleteByID_SyncFailureKeepsRetryQueue(t *testing.T)
 	var deleteByIDCalled bool
 	// Node binding used by MarkAllForRemoval / SyncSubscription.
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: 1, ClientID: "c", SubscriptionID: "s", TelegramID: 1, Username: "u", Status: "active"}, nil
 		},
@@ -1313,7 +1313,7 @@ func TestSubscriptionService_InvalidateSubscription_CallsCallback(t *testing.T) 
 	clients := NodeClients{1: {Reader: &testutil.XUIClient{}}}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
 
-	svc := NewSubscriptionService(&testutil.DatabaseService{}, clients, sources, cfg)
+	svc := NewSubscriptionService(&testutil.ServiceStoreFake{}, clients, sources, cfg)
 
 	var captured int64
 
@@ -1331,7 +1331,7 @@ func TestSubscriptionService_InvalidateSubscription_NoCallback(t *testing.T) {
 	clients := NodeClients{1: {Reader: &testutil.XUIClient{}}}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
 
-	svc := NewSubscriptionService(&testutil.DatabaseService{}, clients, sources, &config.Config{})
+	svc := NewSubscriptionService(&testutil.ServiceStoreFake{}, clients, sources, &config.Config{})
 
 	assert.NotPanics(t, func() {
 		svc.InvalidateSubscription(context.Background(), 1)
@@ -1348,7 +1348,7 @@ func TestSubscriptionService_CleanupExpiredTrials_Success(t *testing.T) {
 		{SubscriptionID: "exp1", ClientID: "c1", TelegramID: 0},
 		{SubscriptionID: "exp2", ClientID: "c2", TelegramID: 0},
 	}
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		CleanupExpiredTrialsFunc: func(ctx context.Context, hours int) ([]database.Subscription, error) {
 			assert.Equal(t, 24, hours)
 			return expired, nil
@@ -1374,7 +1374,7 @@ func TestSubscriptionService_CleanupExpiredTrials_DBError(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TrialDurationHours: 24}
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		CleanupExpiredTrialsFunc: func(ctx context.Context, hours int) ([]database.Subscription, error) {
 			return nil, errors.New("db fail")
 		},
@@ -1401,7 +1401,7 @@ func TestSubscriptionService_CleanupExpiredTrials_DeprovisionFailureKeepsRow(t *
 		{ID: 1, ClientID: "c1", SubscriptionID: "exp1", TelegramID: 0},
 	}
 	deleteCalled := false
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		ClaimExpiredTrialsFunc: func(ctx context.Context, hours int) ([]database.Subscription, error) {
 			return expired, nil
 		},
@@ -1441,7 +1441,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_RecreatesMissingQueue(t *t
 	upserted := make([]database.SubscriptionNode, 0)
 	updated := make(map[uint]string)
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
 			return []database.Subscription{*sub}, nil
 		},
@@ -1486,7 +1486,7 @@ func TestSubscriptionService_GetOrCreateSubscription_RepairsExistingSubscription
 	existingNodes := []database.SubscriptionNode{{SubscriptionID: existing.ID, NodeID: 1, Status: database.SyncStatusActive}}
 
 	upserted := make([]database.SubscriptionNode, 0)
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			assert.Equal(t, int64(4242), telegramID)
 			return existing, nil
@@ -1561,7 +1561,7 @@ func TestSubscriptionService_Create_ReanimatesRevoked_ReturnsCleanupError(t *tes
 	}
 	updateCalled := false
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
 			return nil, database.ErrSubscriptionNotFound
 		},
@@ -1613,7 +1613,7 @@ func TestSubscriptionService_DeleteByID_KeepsRetryQueueOnDeprovisionFailure(t *t
 	deleteClient := &mockVPNClient{deleteError: deprovisionErr}
 	hardDeleteCalled := false
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
@@ -1843,7 +1843,7 @@ func TestSubscriptionService_AdminSetPlan_ExpirySemantics(t *testing.T) {
 
 			var captured *database.Subscription
 
-			db := &testutil.DatabaseService{
+			db := &testutil.ServiceStoreFake{
 				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 					return sub, nil
 				},
@@ -1893,7 +1893,7 @@ func TestSubscriptionService_AdminSetPlan_Errors(t *testing.T) {
 	}
 
 	t.Run("subscription not found", func(t *testing.T) {
-		db := &testutil.DatabaseService{
+		db := &testutil.ServiceStoreFake{
 			GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 				return nil, database.ErrSubscriptionNotFound
 			},
@@ -1907,7 +1907,7 @@ func TestSubscriptionService_AdminSetPlan_Errors(t *testing.T) {
 	})
 
 	t.Run("plan not found", func(t *testing.T) {
-		db := &testutil.DatabaseService{
+		db := &testutil.ServiceStoreFake{
 			GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 				return sub, nil
 			},
@@ -1926,7 +1926,7 @@ func TestSubscriptionService_AdminSetPlan_Errors(t *testing.T) {
 	t.Run("apply plan failure surfaces to caller", func(t *testing.T) {
 		applyErr := errors.New("reconcile plan nodes database unavailable")
 
-		db := &testutil.DatabaseService{
+		db := &testutil.ServiceStoreFake{
 			GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 				return sub, nil
 			},
@@ -1975,7 +1975,7 @@ func TestSubscriptionService_AdminSetPlan_FreePlanClearsPaidState(t *testing.T) 
 
 	var captured *database.Subscription
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
@@ -2018,7 +2018,7 @@ func TestSubscriptionService_AdminSetPlan_DaysTooLarge(t *testing.T) {
 
 	updateCalled := false
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},

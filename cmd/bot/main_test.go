@@ -126,7 +126,7 @@ func TestHandleUpdateSafely(t *testing.T) {
 		TelegramAdminID: 123456,
 	}
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 
 	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
@@ -153,7 +153,7 @@ func TestHandleUpdate_UnknownCommand(t *testing.T) {
 		TelegramAdminID: 123456,
 	}
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 
 	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
@@ -178,7 +178,7 @@ func TestHandleUpdate_NilMessage(t *testing.T) {
 		TelegramAdminID: 123456,
 	}
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 
 	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
@@ -198,7 +198,7 @@ func TestHandleUpdate_UnknownCommands(t *testing.T) {
 		TelegramAdminID: 123456,
 	}
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 
 	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
@@ -237,7 +237,7 @@ func TestHandleUpdate_UnknownCommand_Text(t *testing.T) {
 		TelegramAdminID: 123456,
 	}
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 
 	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
@@ -266,7 +266,7 @@ func TestHandleUpdate_NonCommandMessage_Text(t *testing.T) {
 		TelegramAdminID: 123456,
 	}
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 
 	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
@@ -292,7 +292,7 @@ func TestHandleUpdate_NonCommandMessage_UsernameFallback(t *testing.T) {
 		TelegramAdminID: 123456,
 	}
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 
 	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
@@ -317,7 +317,7 @@ func TestHandleUpdate_NonCommandMessage_NoUser(t *testing.T) {
 		TelegramAdminID: 123456,
 	}
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 
 	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
@@ -341,7 +341,7 @@ func TestHandleUpdate_NonCommandMessage_LongText(t *testing.T) {
 		TelegramAdminID: 123456,
 	}
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 
 	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
@@ -367,7 +367,7 @@ func TestHandleUpdate_CallbackQuery_NoMessage(t *testing.T) {
 		TelegramAdminID: 123456,
 	}
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 
 	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
@@ -392,7 +392,7 @@ func TestHandleUpdate_NilMessageAndNilCallback(t *testing.T) {
 		TelegramAdminID: 123456,
 	}
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 
 	handler := bot.NewHandler(mockBot, cfg, mockDB, bot.NewTestBotConfig(), nil, "")
 	ctx := context.Background()
