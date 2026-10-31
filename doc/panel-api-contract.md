@@ -2,8 +2,12 @@
 
 Проверенные факты о панели, с которой работает бот. Источники: живая панель
 (`https://panel.example.net/pnl`, доступ через Bearer-токен ноды) и исходники
-панели `MHSanaei/3x-ui` (`internal/web/service/client_crud.go`). Дата проверки:
-**2026-10-31**. Панель работает на Xray `26.10.21`.
+панели `MHSanaei/3x-ui` **тега `v3.11.0`** (`internal/web/service/client_crud.go`,
+`internal/web/controller/api.go`, `internal/web/controller/client.go`,
+`internal/web/service/inbound_traffic.go`, `internal/web/service/panel/api_token.go`).
+Дата проверки: **2026-10-31**. Живая панель: `currentVersion: 3.11.0`
+(`GET /panel/api/server/getPanelUpdateInfo`, Xray `26.10.21`) — проверка шла
+прямо на целевой версии.
 
 Документ существует, чтобы контракт не пришлось выяснять заново по живому
 доступу к панели. Всё, что ниже помечено «проверено», воспроизводится
@@ -119,6 +123,24 @@ read-only запросами или из исходников панели.
 `resetMax < 0`, `trafficResetDay` вне [0, 31]. Ошибки приходят в `msg` с
 HTTP 200 — поэтому панельный адаптер обязан разбирать `msg`, а не полагаться на
 код ответа.
+
+## 4.4. Скоупы API-токенов (v3.11.0)
+
+Bearer-токены панели имеют скоуп: `admin` (по умолчанию, `gorm default:admin`),
+`monitor`, `node-sync`, `node-admin`. Скоупы кроме `admin` режут запросы по
+allowlist'у (`nodeSyncScopeAllow`/`monitorScopeAllow` в
+`internal/web/controller/api.go`); путь вне allowlist'а → **HTTP 403** с
+`msg: "this API token is not permitted to access this endpoint"`.
+
+**В allowlist `node-sync` НЕ входят** `/clients/get/{email}` и
+`/clients/traffic/{email}` — чтение карточки и трафика клиента на этих скоупах
+невозможно. Бот читает профиль и трафик (группа B), поэтому:
+
+- токен ноды в базе бота должен иметь скоуп `admin` (дефолт `NormalizeScope`);
+  проверено живой пробой на v3.11.0: `clients/get` с токеном ноды отвечает 200;
+- при смене скоупа на `node-sync`/`monitor` бот получит 403 на все операции с
+  клиентами; адаптер классифицирует не-200 как `utils.ErrNon200Response`
+  (не ретрабельный — раздел 5), синхронизация узла деградирует с Warn в логе.
 
 ## 5. Как это реализовано в боте
 
