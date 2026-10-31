@@ -353,8 +353,8 @@ func TestHandleUpdate_CommandRouting(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		update  tgbotapi.Update
+		name     string
+		update   tgbotapi.Update
 		wantText string
 	}{
 		{

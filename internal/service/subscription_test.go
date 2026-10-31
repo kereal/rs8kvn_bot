@@ -11,7 +11,6 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
-	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
@@ -51,9 +50,9 @@ func TestSubscriptionService_Create_Success(t *testing.T) {
 		},
 	}
 	sources := []database.Node{}
-	xuiClients := map[uint]interfaces.XUIClient{}
+	clients := NodeClients{}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
 	assert.NoError(t, err)
@@ -93,9 +92,9 @@ func TestSubscriptionService_Create_NoNodesDBFirst(t *testing.T) {
 		},
 	}
 	sources := []database.Node{}
-	xuiClients := map[uint]interfaces.XUIClient{}
+	clients := NodeClients{}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
 	// DB-first, no nodes: Create succeeds, and the 3x-ui layer is never touched.
@@ -117,9 +116,9 @@ func TestSubscriptionService_Create_DBError(t *testing.T) {
 		},
 	}
 	sources := []database.Node{}
-	xuiClients := map[uint]interfaces.XUIClient{}
+	clients := NodeClients{}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
 	// The very first DB write decides the fate of the whole operation: no VPN
@@ -158,10 +157,10 @@ func TestSubscriptionService_Create_DBError_AfterRowCreationNoOrphanClient(t *te
 
 	vpnClient := &mockVPNClient{}
 	nodes := []database.Node{{ID: 1, Name: "db-err-node", IsActive: true, InboundIDs: `[1]`, Host: "http://node"}}
-	vpnClients := map[uint]vpn.Client{1: vpnClient}
+	clients := NodeClients{1: {Provision: vpnClient}}
 
-	svc := NewSubscriptionService(db, nil, vpnClients, nodes, cfg)
-	svc.SetSyncService(NewSyncService(db, vpnClients, nodes))
+	svc := NewSubscriptionService(db, clients, nodes, cfg)
+	svc.SetSyncService(NewSyncService(db, clients, nodes))
 
 	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
@@ -205,9 +204,9 @@ func TestSubscriptionService_Create_PropagatesInviteCodeToDB(t *testing.T) {
 		},
 	}
 	sources := []database.Node{}
-	xuiClients := map[uint]interfaces.XUIClient{}
+	clients := NodeClients{}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	result, err := svc.Create(context.Background(), 123456, "testuser", "INV-ABC")
 
 	assert.NoError(t, err)
@@ -245,9 +244,9 @@ func TestSubscriptionService_Create_EmptyInviteCodeIsNoop(t *testing.T) {
 		},
 	}
 	sources := []database.Node{}
-	xuiClients := map[uint]interfaces.XUIClient{}
+	clients := NodeClients{}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	result, err := svc.Create(context.Background(), 123456, "testuser", "")
 
 	assert.NoError(t, err)
@@ -281,7 +280,7 @@ func TestSubscriptionService_Create_FillsFallbackUsername(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+	svc := NewSubscriptionService(db, nil, nil, cfg)
 	result, err := svc.Create(context.Background(), 123456, "", "")
 
 	assert.NoError(t, err)
@@ -320,9 +319,9 @@ func TestSubscriptionService_GetWithTraffic_Success(t *testing.T) {
 	sources := []database.Node{
 		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
 	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	clients := NodeClients{1: {Reader: xuiClient}}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	resultSub, traffic, err := svc.GetWithTraffic(context.Background(), 123456)
 
 	assert.NoError(t, err)
@@ -356,9 +355,9 @@ func TestSubscriptionService_GetWithTraffic_XUIErrorFallback(t *testing.T) {
 	sources := []database.Node{
 		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
 	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	clients := NodeClients{1: {Reader: xuiClient}}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	resultSub, traffic, err := svc.GetWithTraffic(context.Background(), 123456)
 
 	assert.NoError(t, err)
@@ -391,10 +390,9 @@ func TestSubscriptionService_CreateTrial_Success(t *testing.T) {
 	sources := []database.Node{
 		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
 	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
-	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xuiClient, []int{1})}
+	clients := NodeClients{1: {Provision: vpn.NewThreeXUIClient(xuiClient, []int{1}), Reader: xuiClient}}
 
-	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.NoError(t, err)
@@ -431,10 +429,9 @@ func TestSubscriptionService_CreateTrial_XUIError(t *testing.T) {
 	sources := []database.Node{
 		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
 	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
-	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xuiClient, []int{1})}
+	clients := NodeClients{1: {Provision: vpn.NewThreeXUIClient(xuiClient, []int{1}), Reader: xuiClient}}
 
-	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.Error(t, err)
@@ -473,10 +470,9 @@ func TestSubscriptionService_CreateTrial_DBError(t *testing.T) {
 	sources := []database.Node{
 		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
 	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
-	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xuiClient, []int{1})}
+	clients := NodeClients{1: {Provision: vpn.NewThreeXUIClient(xuiClient, []int{1}), Reader: xuiClient}}
 
-	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.Error(t, err)
@@ -507,10 +503,9 @@ func TestSubscriptionService_CreateTrial_NoTrialNodes(t *testing.T) {
 	sources := []database.Node{
 		{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"},
 	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
-	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xuiClient, []int{1})}
+	clients := NodeClients{1: {Provision: vpn.NewThreeXUIClient(xuiClient, []int{1}), Reader: xuiClient}}
 
-	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	result, err := svc.CreateTrial(context.Background(), "testcode")
 
 	assert.Error(t, err)
@@ -560,7 +555,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_RevokesFullyDeprovisioned(
 			return nil
 		},
 	}
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+	svc := NewSubscriptionService(db, nil, nil, cfg)
 
 	invoked := []int64{}
 
@@ -587,7 +582,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_NoActive(t *testing.T) {
 			return []database.Subscription{{ID: 1, Status: "revoked"}}, nil
 		},
 	}
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+	svc := NewSubscriptionService(db, nil, nil, cfg)
 
 	count, err := svc.ReconcileOrphanedClients(context.Background())
 	assert.NoError(t, err)
@@ -628,7 +623,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_UpdateError(t *testing.T) 
 			return errors.New("db write failed")
 		},
 	}
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+	svc := NewSubscriptionService(db, nil, nil, cfg)
 
 	count, err := svc.ReconcileOrphanedClients(context.Background())
 	assert.NoError(t, err)
@@ -659,7 +654,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_InvalidatesBySubID(t *test
 			return nil
 		},
 	}
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+	svc := NewSubscriptionService(db, nil, nil, cfg)
 
 	invokedSubIDs := []string{}
 
@@ -742,17 +737,16 @@ func TestSubscriptionService_BindTrial_SingleNode_ErrorPropagated(t *testing.T) 
 		},
 	}
 
-	xuiClients := map[uint]interfaces.XUIClient{1: xui1, 2: xui2}
-	vpnClients := map[uint]vpn.Client{
-		1: vpn.NewThreeXUIClient(xui1, []int{1}),
-		2: vpn.NewThreeXUIClient(xui2, []int{1}),
+	clients := NodeClients{
+		1: {Provision: vpn.NewThreeXUIClient(xui1, []int{1}), Reader: xui1},
+		2: {Provision: vpn.NewThreeXUIClient(xui2, []int{1}), Reader: xui2},
 	}
 	sources := []database.Node{
 		{ID: 1, IsActive: true, Host: "http://x1", InboundIDs: "[1]"},
 		{ID: 2, IsActive: true, Host: "http://x2", InboundIDs: "[1]"},
 	}
 
-	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 
 	got, err := svc.BindTrial(context.Background(), "trial-sub-1", 123456, "testuser")
 	require.Error(t, err, "BindTrial must propagate UpdateClient failure on nodes[0]")
@@ -804,7 +798,7 @@ func TestSubscriptionService_BindTrial_ReferrerErrorStopsProvisioning(t *testing
 		},
 	}
 	node := database.Node{ID: 1, IsActive: true, Host: "http://x1", InboundIDs: "[1]"}
-	svc := NewSubscriptionService(db, nil, map[uint]vpn.Client{1: vpn.NewThreeXUIClient(client, []int{1})}, []database.Node{node}, &config.Config{})
+	svc := NewSubscriptionService(db, NodeClients{1: {Provision: vpn.NewThreeXUIClient(client, []int{1})}}, []database.Node{node}, &config.Config{})
 
 	got, err := svc.BindTrial(context.Background(), "trial-sub-1", 123456, "testuser")
 	require.Error(t, err)
@@ -883,17 +877,16 @@ func TestSubscriptionService_BindTrial_SingleNode_Success(t *testing.T) {
 		},
 	}
 
-	xuiClients := map[uint]interfaces.XUIClient{1: xui1, 2: xui2}
-	vpnClients := map[uint]vpn.Client{
-		1: vpn.NewThreeXUIClient(xui1, []int{1}),
-		2: vpn.NewThreeXUIClient(xui2, []int{1}),
+	clients := NodeClients{
+		1: {Provision: vpn.NewThreeXUIClient(xui1, []int{1}), Reader: xui1},
+		2: {Provision: vpn.NewThreeXUIClient(xui2, []int{1}), Reader: xui2},
 	}
 	sources := []database.Node{
 		{ID: 1, IsActive: true, Host: "http://x1", InboundIDs: "[1]"},
 		{ID: 2, IsActive: true, Host: "http://x2", InboundIDs: "[1]"},
 	}
 
-	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 
 	got, err := svc.BindTrial(context.Background(), "trial-sub-1", 123456, "testuser")
 	require.NoError(t, err)
@@ -968,10 +961,10 @@ func TestSubscriptionService_BindTrial_DBBindFailureRollsBack(t *testing.T) {
 			return nil
 		},
 	}
-	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xui1, []int{1})}
+	clients := NodeClients{1: {Provision: vpn.NewThreeXUIClient(xui1, []int{1})}}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x1", InboundIDs: "[1]"}}
 
-	svc := NewSubscriptionService(db, nil, vpnClients, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 
 	got, err := svc.BindTrial(context.Background(), "trial-sub-1", 123456, "testuser")
 	require.Error(t, err)
@@ -1035,10 +1028,10 @@ func TestSubscriptionService_BindTrial_DBBindFailureCheckErrorSkipsRollback(t *t
 			return nil
 		},
 	}
-	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xui1, []int{1})}
+	clients := NodeClients{1: {Provision: vpn.NewThreeXUIClient(xui1, []int{1})}}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x1", InboundIDs: "[1]"}}
 
-	svc := NewSubscriptionService(db, nil, vpnClients, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 
 	got, err := svc.BindTrial(context.Background(), "trial-sub-1", 123456, "testuser")
 	require.Error(t, err)
@@ -1154,10 +1147,10 @@ func TestSubscriptionService_DeleteByID_Success(t *testing.T) {
 			return nil
 		},
 	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	clients := NodeClients{1: {Reader: xuiClient}}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	deleted, err := svc.DeleteByID(context.Background(), 7)
 
 	assert.NoError(t, err)
@@ -1174,10 +1167,10 @@ func TestSubscriptionService_DeleteByID_GetError(t *testing.T) {
 			return nil, errors.New("not found")
 		},
 	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
+	clients := NodeClients{1: {Reader: &testutil.XUIClient{}}}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	deleted, err := svc.DeleteByID(context.Background(), 1)
 
 	assert.Error(t, err)
@@ -1197,10 +1190,10 @@ func TestSubscriptionService_DeleteByID_DBError(t *testing.T) {
 			return nil, errors.New("db fail")
 		},
 	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
+	clients := NodeClients{1: {Reader: &testutil.XUIClient{}}}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	deleted, err := svc.DeleteByID(context.Background(), 1)
 
 	assert.Error(t, err)
@@ -1242,10 +1235,10 @@ func TestSubscriptionService_DeleteByID_MarkRevokedBeforeDBDelete(t *testing.T) 
 			return nil, errors.New("db delete failed")
 		},
 	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
+	clients := NodeClients{1: {Reader: &testutil.XUIClient{}}}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	_, err := svc.DeleteByID(context.Background(), 1)
 
 	// DB delete failed → error returned to caller.
@@ -1295,14 +1288,12 @@ func TestSubscriptionService_DeleteByID_SyncFailureKeepsRetryQueue(t *testing.T)
 		},
 	}
 
-	// XUI client is unused by the teardown path (syncService owns deprovision).
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
 	// VPN client fails on delete → SyncSubscription reaches DeleteSubscription
 	// and receives the configured "vpn delete failed" error (best-effort).
-	vpnClients := map[uint]vpn.Client{1: &mockVPNClient{deleteError: errors.New("vpn delete failed")}}
+	clients := NodeClients{1: {Provision: &mockVPNClient{deleteError: errors.New("vpn delete failed")}}}
 
-	svc := NewSubscriptionService(db, xuiClients, vpnClients, nodes, &config.Config{})
-	svc.SetSyncService(NewSyncService(db, vpnClients, nodes))
+	svc := NewSubscriptionService(db, clients, nodes, &config.Config{})
+	svc.SetSyncService(NewSyncService(db, clients, nodes))
 
 	deleted, err := svc.DeleteByID(context.Background(), 1)
 
@@ -1319,10 +1310,10 @@ func TestSubscriptionService_InvalidateSubscription_CallsCallback(t *testing.T) 
 	t.Parallel()
 
 	cfg := &config.Config{}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
+	clients := NodeClients{1: {Reader: &testutil.XUIClient{}}}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
 
-	svc := NewSubscriptionService(&testutil.DatabaseService{}, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(&testutil.DatabaseService{}, clients, sources, cfg)
 
 	var captured int64
 
@@ -1337,10 +1328,10 @@ func TestSubscriptionService_InvalidateSubscription_CallsCallback(t *testing.T) 
 func TestSubscriptionService_InvalidateSubscription_NoCallback(t *testing.T) {
 	t.Parallel()
 
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
+	clients := NodeClients{1: {Reader: &testutil.XUIClient{}}}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
 
-	svc := NewSubscriptionService(&testutil.DatabaseService{}, xuiClients, nil, sources, &config.Config{})
+	svc := NewSubscriptionService(&testutil.DatabaseService{}, clients, sources, &config.Config{})
 
 	assert.NotPanics(t, func() {
 		svc.InvalidateSubscription(context.Background(), 1)
@@ -1369,11 +1360,10 @@ func TestSubscriptionService_CleanupExpiredTrials_Success(t *testing.T) {
 			return nil
 		},
 	}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
-	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xuiClient, []int{1})}
+	clients := NodeClients{1: {Provision: vpn.NewThreeXUIClient(xuiClient, []int{1}), Reader: xuiClient}}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
 
-	svc := NewSubscriptionService(db, xuiClients, vpnClients, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	n, err := svc.CleanupExpiredTrials(context.Background())
 
 	assert.NoError(t, err)
@@ -1389,10 +1379,10 @@ func TestSubscriptionService_CleanupExpiredTrials_DBError(t *testing.T) {
 			return nil, errors.New("db fail")
 		},
 	}
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
+	clients := NodeClients{1: {Reader: &testutil.XUIClient{}}}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
 
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	n, err := svc.CleanupExpiredTrials(context.Background())
 
 	assert.Error(t, err)
@@ -1426,10 +1416,10 @@ func TestSubscriptionService_CleanupExpiredTrials_DeprovisionFailureKeepsRow(t *
 			return errors.New("panel unreachable")
 		},
 	}
-	vpnClients := map[uint]vpn.Client{1: vpn.NewThreeXUIClient(xuiClient, []int{1})}
+	clients := NodeClients{1: {Provision: vpn.NewThreeXUIClient(xuiClient, []int{1})}}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
 
-	svc := NewSubscriptionService(db, nil, vpnClients, sources, cfg)
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 	n, err := svc.CleanupExpiredTrials(context.Background())
 
 	assert.Error(t, err, "deprovision failure must be surfaced")
@@ -1473,7 +1463,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_RecreatesMissingQueue(t *t
 			return nil
 		},
 	}
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+	svc := NewSubscriptionService(db, nil, nil, cfg)
 
 	count, err := svc.ReconcileOrphanedClients(context.Background())
 	assert.NoError(t, err)
@@ -1515,9 +1505,9 @@ func TestSubscriptionService_GetOrCreateSubscription_RepairsExistingSubscription
 		},
 	}
 
-	xuiClients := map[uint]interfaces.XUIClient{1: &testutil.XUIClient{}}
+	clients := NodeClients{1: {Reader: &testutil.XUIClient{}}}
 	sources := []database.Node{{ID: 1, IsActive: true, Host: "http://x", InboundIDs: "[1]"}}
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, &config.Config{})
+	svc := NewSubscriptionService(db, clients, sources, &config.Config{})
 
 	got, err := svc.GetOrCreateSubscription(context.Background(), 4242, "repairuser", "")
 
@@ -1590,7 +1580,7 @@ func TestSubscriptionService_Create_ReanimatesRevoked_ReturnsCleanupError(t *tes
 		},
 	}
 
-	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(db, nil, nil, &config.Config{})
 	result, err := svc.Create(context.Background(), existing.TelegramID, "", "")
 
 	require.Error(t, err)
@@ -1649,12 +1639,12 @@ func TestSubscriptionService_DeleteByID_KeepsRetryQueueOnDeprovisionFailure(t *t
 		},
 	}
 
-	syncSvc := NewSyncService(db, map[uint]vpn.Client{nodeID: deleteClient}, []database.Node{{
+	syncSvc := NewSyncService(db, NodeClients{nodeID: {Provision: deleteClient}}, []database.Node{{
 		ID:       nodeID,
 		Type:     database.NodeType3xUI,
 		IsActive: true,
 	}})
-	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(db, nil, nil, &config.Config{})
 	svc.SetSyncService(syncSvc)
 
 	deleted, err := svc.DeleteByID(context.Background(), subscriptionID)
@@ -1703,8 +1693,8 @@ func TestSubscriptionService_Create_ReanimatesRevoked(t *testing.T) {
 
 	cfg := &config.Config{}
 	sources := []database.Node{}
-	xuiClients := map[uint]interfaces.XUIClient{}
-	svc := NewSubscriptionService(db, xuiClients, nil, sources, cfg)
+	clients := NodeClients{}
+	svc := NewSubscriptionService(db, clients, sources, cfg)
 
 	result, err := svc.Create(ctx, 777777, "revoked_user", "")
 	require.NoError(t, err)
@@ -1782,12 +1772,12 @@ func TestSubscriptionService_AdminSetPlan_ReconcilesNodesAndInvalidatesCache(t *
 	var invalidatedTGIDs []int64
 	var invalidatedSubIDs []string
 
-	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(db, nil, nil, &config.Config{})
 	svc.SetInvalidateFunc(func(id int64) { invalidatedTGIDs = append(invalidatedTGIDs, id) })
 	svc.SetInvalidateBySubIDFunc(func(id string) { invalidatedSubIDs = append(invalidatedSubIDs, id) })
 	// No VPN clients wired: SyncSubscription treats nodes as unavailable and
 	// keeps them pending (best-effort), leaving the reconciled state visible.
-	svc.SetSyncService(NewSyncService(db, map[uint]vpn.Client{}, nil))
+	svc.SetSyncService(NewSyncService(db, NodeClients{}, nil))
 
 	updated, err := svc.AdminSetPlan(ctx, sub.ID, premiumPlan.ID, 30)
 	require.NoError(t, err)
@@ -1866,7 +1856,7 @@ func TestSubscriptionService_AdminSetPlan_ExpirySemantics(t *testing.T) {
 				},
 			}
 
-			svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+			svc := NewSubscriptionService(db, nil, nil, &config.Config{})
 
 			updated, err := svc.AdminSetPlan(context.Background(), sub.ID, 2, tt.days)
 			require.NoError(t, err)
@@ -1908,7 +1898,7 @@ func TestSubscriptionService_AdminSetPlan_Errors(t *testing.T) {
 				return nil, database.ErrSubscriptionNotFound
 			},
 		}
-		svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+		svc := NewSubscriptionService(db, nil, nil, &config.Config{})
 
 		_, err := svc.AdminSetPlan(context.Background(), 42, 2, 30)
 		require.Error(t, err)
@@ -1925,7 +1915,7 @@ func TestSubscriptionService_AdminSetPlan_Errors(t *testing.T) {
 				return nil, database.ErrPlanNotFound
 			},
 		}
-		svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+		svc := NewSubscriptionService(db, nil, nil, &config.Config{})
 
 		_, err := svc.AdminSetPlan(context.Background(), 42, 2, 30)
 		require.Error(t, err)
@@ -1951,7 +1941,7 @@ func TestSubscriptionService_AdminSetPlan_Errors(t *testing.T) {
 			},
 		}
 
-		svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+		svc := NewSubscriptionService(db, nil, nil, &config.Config{})
 		svc.SetSyncService(NewSyncService(db, nil, nil))
 
 		_, err := svc.AdminSetPlan(context.Background(), 42, 2, 30)
@@ -1998,7 +1988,7 @@ func TestSubscriptionService_AdminSetPlan_FreePlanClearsPaidState(t *testing.T) 
 		},
 	}
 
-	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(db, nil, nil, &config.Config{})
 
 	updated, err := svc.AdminSetPlan(context.Background(), sub.ID, 2, 30)
 	require.NoError(t, err)
@@ -2041,7 +2031,7 @@ func TestSubscriptionService_AdminSetPlan_DaysTooLarge(t *testing.T) {
 		},
 	}
 
-	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(db, nil, nil, &config.Config{})
 
 	_, err := svc.AdminSetPlan(context.Background(), sub.ID, 2, AdminSetPlanMaxDays+1)
 	require.Error(t, err)

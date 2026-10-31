@@ -54,6 +54,7 @@ type ClientConfig struct {
 	Reset           int    `json:"reset,omitempty"`
 	ResetDay        int    `json:"resetDay,omitempty"`
 	ResetMax        int    `json:"resetMax,omitempty"`
+	ResetWeekday    int    `json:"resetWeekday,omitempty"`
 	TrafficReset    string `json:"trafficReset,omitempty"`
 	TrafficResetDay int    `json:"trafficResetDay,omitempty"`
 

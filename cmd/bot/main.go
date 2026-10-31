@@ -75,10 +75,11 @@ func defaultOptions() *runOptions {
 	}
 }
 
-// buildRuntimeNodeClients фильтрует активные ноды и для каждой создаёт
-// runtime-клиенты: XUI-клиент (только для 3x-ui нод) и VPN-клиент. Возвращает
-// отфильтрованные ноды и карты клиентов, индексированные по ID ноды.
-func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]database.Node, map[uint]interfaces.XUIClient, map[uint]vpn.Client, error) {
+// buildRuntimeNodeClients filters active nodes and for each one builds the
+// runtime access: a VPN provisioning client (every node type) and, for 3x-ui
+// nodes, a panel reader. Both slots live in the single NodeClients registry
+// indexed by node ID that SubscriptionService and SyncService share.
+func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]database.Node, service.NodeClients, error) {
 	runtimeNodes := make([]database.Node, 0, len(nodes))
 	for _, node := range nodes {
 		if node.IsActive {
@@ -87,11 +88,10 @@ func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]databas
 	}
 
 	if len(runtimeNodes) == 0 {
-		return nil, nil, nil, fmt.Errorf("no active nodes configured")
+		return nil, nil, fmt.Errorf("no active nodes configured")
 	}
 
-	xuiClients := make(map[uint]interfaces.XUIClient)
-	vpnClients := make(map[uint]vpn.Client)
+	clients := make(service.NodeClients, len(runtimeNodes))
 
 	for _, node := range runtimeNodes {
 		var xuiClient interfaces.XUIClient
@@ -99,7 +99,7 @@ func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]databas
 		if node.Type == database.NodeType3xUI {
 			client, err := opts.xuiClientFn(node.Host, node.APIToken)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("init 3x-ui client for node %d: %w", node.ID, err)
+				return nil, nil, fmt.Errorf("init 3x-ui client for node %d: %w", node.ID, err)
 			}
 
 			if nodeAware, ok := client.(interface{ SetNode(name string) }); ok {
@@ -107,10 +107,9 @@ func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]databas
 			}
 
 			xuiClient = client
-			xuiClients[node.ID] = client
 		}
 
-		client, err := opts.vpnClientFn(vpn.Config{
+		provision, err := opts.vpnClientFn(vpn.Config{
 			Host:       node.Host,
 			APIToken:   node.APIToken,
 			Type:       node.Type,
@@ -118,13 +117,17 @@ func buildRuntimeNodeClients(nodes []database.Node, opts *runOptions) ([]databas
 			XUIClient:  xuiClient,
 		})
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("init vpn client for node %d: %w", node.ID, err)
+			return nil, nil, fmt.Errorf("init vpn client for node %d: %w", node.ID, err)
 		}
 
-		vpnClients[node.ID] = client
+		clients[node.ID] = service.NodeAccess{
+			Provision: provision,
+			Reader:    xuiClient,
+			Type:      node.Type,
+		}
 	}
 
-	return runtimeNodes, xuiClients, vpnClients, nil
+	return runtimeNodes, clients, nil
 }
 
 // getVersion returns the service version string prefixed with "rs8kvn_bot@".
@@ -467,8 +470,17 @@ func main() {
 		}
 	}()
 	defer func() {
-		for id, client := range deps.xuiClients {
-			err := client.Close()
+		for id, access := range deps.clients {
+			if access.Reader == nil {
+				continue
+			}
+
+			closer, ok := access.Reader.(interface{ Close() error })
+			if !ok {
+				continue
+			}
+
+			err := closer.Close()
 			if err != nil {
 				logger.Error("Failed to close 3x-ui client",
 					zap.Uint("node_id", id),

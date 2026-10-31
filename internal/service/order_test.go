@@ -697,7 +697,7 @@ func TestConfirmPayment_InvalidatesSubserverCacheOnActivation(t *testing.T) {
 
 	var invalidated []string
 
-	subSvc := NewSubscriptionService(mock, nil, nil, nil, nil)
+	subSvc := NewSubscriptionService(mock, nil, nil, nil)
 	subSvc.SetInvalidateBySubIDFunc(func(subID string) { invalidated = append(invalidated, subID) })
 
 	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
@@ -1110,7 +1110,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradesPaidSubscription(t *testing
 			return nil
 		},
 	}
-	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
+	subSvc := NewSubscriptionService(mock, nil, nil, &config.Config{})
 	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 
 	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
@@ -1145,7 +1145,7 @@ func TestCancelPaymentByProvider_ChargebackKeepsAccessWithAnotherPaidOrder(t *te
 			return nil
 		},
 	}
-	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
+	subSvc := NewSubscriptionService(mock, nil, nil, &config.Config{})
 	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 
 	_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
@@ -1176,7 +1176,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradeFailureAlertsAdmin(t *testin
 			return nil, errors.New("free plan node lookup failed")
 		},
 	}
-	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
+	subSvc := NewSubscriptionService(mock, nil, nil, &config.Config{})
 	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
 	o.SetAdminBot(adminBot)
 
@@ -1243,7 +1243,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T
 			return nil, nil
 		},
 	}
-	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
+	subSvc := NewSubscriptionService(mock, nil, nil, &config.Config{})
 	subSvc.SetSyncService(NewSyncService(mock, nil, nil))
 	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 
@@ -1450,7 +1450,7 @@ func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.
 			return &database.Subscription{ID: 87, TelegramID: 57, PlanID: 99}, nil
 		},
 	}
-	subSvc := NewSubscriptionService(mock, nil, nil, nil, &config.Config{})
+	subSvc := NewSubscriptionService(mock, nil, nil, &config.Config{})
 	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 
 	_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")

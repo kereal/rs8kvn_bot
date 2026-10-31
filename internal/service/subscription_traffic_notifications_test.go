@@ -7,7 +7,6 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
-	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
@@ -75,7 +74,7 @@ func trafficNotifySetup(t *testing.T, traffic *xui.ClientTraffic, planTrafficLim
 	}
 
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://node1", InboundIDs: "[1]"}}
-	xuiClients := map[uint]interfaces.XUIClient{1: xuiClient}
+	clients := NodeClients{1: {Reader: xuiClient}}
 
 	bot := testutil.NewBotAPI()
 	bot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -84,7 +83,7 @@ func trafficNotifySetup(t *testing.T, traffic *xui.ClientTraffic, planTrafficLim
 		}
 		return tgbotapi.Message{MessageID: 1}, nil
 	}
-	svc := NewSubscriptionService(db, xuiClients, nil, nodes, &config.Config{})
+	svc := NewSubscriptionService(db, clients, nodes, &config.Config{})
 	svc.SetBot(bot)
 
 	return svc, bot, db, xuiClient, &claimedBits, &sentMsgs
@@ -371,7 +370,7 @@ func TestProcessTrafficNotifications_PartialNodeFailureSkipsAction(t *testing.T)
 		GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) { return nil, errors.New("node unavailable") },
 	}
 	bot := testutil.NewBotAPI()
-	svc := NewSubscriptionService(db, map[uint]interfaces.XUIClient{1: client1, 2: client2}, nil, []database.Node{
+	svc := NewSubscriptionService(db, NodeClients{1: {Reader: client1}, 2: {Reader: client2}}, []database.Node{
 		{ID: 1, IsActive: true, Host: "http://node1", InboundIDs: "[1]"},
 		{ID: 2, IsActive: true, Host: "http://node2", InboundIDs: "[2]"},
 	}, &config.Config{})

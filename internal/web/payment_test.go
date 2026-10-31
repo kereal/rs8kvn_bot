@@ -589,7 +589,7 @@ func newPaymentTestServer(t *testing.T, order *database.Order) (*Server, *testut
 	bot := testutil.NewBotAPI()
 	cfg := &config.Config{TelegramAdminID: 999, GlobalSubURL: "https://example.com/sub/"}
 	provider := testPaymentProvider{}
-	subSvc := service.NewSubscriptionService(db, nil, nil, nil, cfg)
+	subSvc := service.NewSubscriptionService(db, nil, nil, cfg)
 	syncSvc := service.NewSyncService(db, nil, nil)
 	o := service.NewOrderService(db, subSvc, syncSvc, provider, "bot", cfg)
 	o.SetAdminBot(bot)

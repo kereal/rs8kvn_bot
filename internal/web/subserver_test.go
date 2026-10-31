@@ -28,7 +28,7 @@ import (
 )
 
 func testServer(t *testing.T, db interfaces.DatabaseService, cfg *config.Config) *Server {
-	subSvc := service.NewSubscriptionService(db, nil, nil, nil, cfg)
+	subSvc := service.NewSubscriptionService(db, nil, nil, cfg)
 	srv := NewServer(":0", db, cfg, "testbot", subSvc, subserver.NewService(config.SubServerCacheTTL))
 
 	return srv

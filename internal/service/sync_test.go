@@ -64,12 +64,12 @@ func (m *mockVPNClient) Close() error {
 func newTestSyncService(t *testing.T, db interfaces.DatabaseService, nodes []database.Node) *SyncService {
 	t.Helper()
 
-	vpnClients := make(map[uint]vpn.Client)
+	clients := make(NodeClients)
 	for _, n := range nodes {
-		vpnClients[n.ID] = &mockVPNClient{}
+		clients[n.ID] = NodeAccess{Provision: &mockVPNClient{}}
 	}
 
-	return NewSyncService(db, vpnClients, nodes)
+	return NewSyncService(db, clients, nodes)
 }
 
 func TestSyncService_ReconcilePlanNodes_AddMissing(t *testing.T) {
@@ -271,7 +271,7 @@ func TestSyncService_SyncNodes_SkipsUnknownNodeType(t *testing.T) {
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: unknownNode.ID, Status: database.SyncStatusPendingAdd}))
 
-	svc := NewSyncService(db, map[uint]vpn.Client{}, []database.Node{*unknownNode})
+	svc := NewSyncService(db, NodeClients{}, []database.Node{*unknownNode})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err, "unknown node type should be skipped without error")
@@ -313,7 +313,7 @@ func TestSyncService_SyncNodes_FetchType_PendingAddBecomesActive(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: fetchNode.ID, Status: database.SyncStatusPendingAdd}))
 
 	fetchClient := vpn.NewFetchClient()
-	svc := NewSyncService(db, map[uint]vpn.Client{fetchNode.ID: fetchClient}, []database.Node{*fetchNode})
+	svc := NewSyncService(db, NodeClients{fetchNode.ID: {Provision: fetchClient}}, []database.Node{*fetchNode})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err)
@@ -471,8 +471,8 @@ func TestSyncService_SyncSubscription_PendingAdd(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
 	mockVPN := &mockVPNClient{}
-	vpnClients := map[uint]vpn.Client{node1.ID: mockVPN}
-	svc := NewSyncService(db, vpnClients, []database.Node{*node1})
+	clients := NodeClients{node1.ID: {Provision: mockVPN}}
+	svc := NewSyncService(db, clients, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
@@ -515,8 +515,8 @@ func TestSyncService_SyncSubscription_PendingAdd_UnlimitedPlan(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
 	mockVPN := &mockVPNClient{}
-	vpnClients := map[uint]vpn.Client{node1.ID: mockVPN}
-	svc := NewSyncService(db, vpnClients, []database.Node{*node1})
+	clients := NodeClients{node1.ID: {Provision: mockVPN}}
+	svc := NewSyncService(db, clients, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
@@ -564,7 +564,7 @@ func TestSyncService_SyncPendingAdd_KeepsExpiredExpiry(t *testing.T) {
 		require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
 		mockVPN := &mockVPNClient{}
-		svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+		svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 		require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 		assert.True(t, mockVPN.createCalled)
@@ -592,7 +592,7 @@ func TestSyncService_SyncPendingAdd_KeepsExpiredExpiry(t *testing.T) {
 		require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
 		mockVPN := &mockVPNClient{}
-		svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+		svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 		require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 		assert.True(t, mockVPN.createCalled)
@@ -629,8 +629,8 @@ func TestSyncService_SyncSubscription_PendingRemove(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
 
 	mockVPN := &mockVPNClient{}
-	vpnClients := map[uint]vpn.Client{node1.ID: mockVPN}
-	svc := NewSyncService(db, vpnClients, []database.Node{*node1})
+	clients := NodeClients{node1.ID: {Provision: mockVPN}}
+	svc := NewSyncService(db, clients, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
@@ -670,7 +670,7 @@ func TestSyncService_SyncSubscription_UsesFallbackXUIIdentifier(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
 	mockVPN := &mockVPNClient{}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 	assert.Equal(t, "tgId_777000", mockVPN.createProvision.Username)
@@ -713,7 +713,7 @@ func TestSyncService_SyncPendingNodes_ProcessesOnlyDueNodes(t *testing.T) {
 
 	dueClient := &mockVPNClient{}
 	laterClient := &mockVPNClient{}
-	svc := NewSyncService(db, map[uint]vpn.Client{nodeDue.ID: dueClient, nodeLater.ID: laterClient}, []database.Node{*nodeDue, *nodeLater})
+	svc := NewSyncService(db, NodeClients{nodeDue.ID: {Provision: dueClient}, nodeLater.ID: {Provision: laterClient}}, []database.Node{*nodeDue, *nodeLater})
 
 	require.NoError(t, svc.SyncPendingNodes(ctx))
 	assert.True(t, dueClient.createCalled)
@@ -870,7 +870,7 @@ func TestSyncService_SyncSubscription_PendingAdd_AlreadyExists(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
 	mockVPN := &mockVPNClient{createError: fmt.Errorf("%w: %w", vpn.ErrSubscriptionAlreadyExists, fmt.Errorf("client already exists"))}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
@@ -914,7 +914,7 @@ func TestSyncService_SyncSubscription_PendingAdd_AlreadyExistsUpdateFails(t *tes
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
 	mockVPN := &mockVPNClient{createError: fmt.Errorf("%w: %w", vpn.ErrSubscriptionAlreadyExists, fmt.Errorf("client already exists")), updateError: fmt.Errorf("update refused")}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err, "background-style sync: missing VPN client must not propagate")
@@ -957,7 +957,7 @@ func TestSyncService_SyncSubscription_PendingRemove_NotFound(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
 
 	mockVPN := &mockVPNClient{deleteError: fmt.Errorf("%w: %w", vpn.ErrSubscriptionNotFound, fmt.Errorf("client not found"))}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
@@ -994,7 +994,7 @@ func TestSyncService_SyncSubscription_PendingAdd_RetryOnOtherError(t *testing.T)
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
 	mockVPN := &mockVPNClient{createError: fmt.Errorf("connection refused")}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err, "background-style sync: per-node failure must not propagate")
@@ -1033,7 +1033,7 @@ func TestSyncService_SyncSubscription_PendingAdd_NoVPNClientKeepsPending(t *test
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
-	svc := NewSyncService(db, map[uint]vpn.Client{}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err, "background-style sync: missing VPN client must not propagate")
@@ -1073,7 +1073,7 @@ func TestSyncService_SyncSubscription_PendingUpdate_NoVPNClientKeepsPending(t *t
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingUpdate}))
 
-	svc := NewSyncService(db, map[uint]vpn.Client{}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err, "background-style sync: missing VPN client must not propagate")
@@ -1113,7 +1113,7 @@ func TestSyncService_SyncSubscription_PendingUpdate_ResetsTraffic(t *testing.T) 
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingUpdate}))
 
 	mock := &mockVPNClient{}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mock}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mock}}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err)
@@ -1155,7 +1155,7 @@ func TestSyncService_SyncSubscription_PendingUpdate_ResetTrafficBestEffort(t *te
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingUpdate}))
 
 	mock := &mockVPNClient{resetTrafficError: errors.New("panel reset failed")}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mock}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mock}}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err, "reset traffic failure is best-effort and must not fail the sync")
@@ -1195,7 +1195,7 @@ func TestSyncService_SyncSubscription_PendingRemove_NoVPNClientKeepsPending(t *t
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
 
-	svc := NewSyncService(db, map[uint]vpn.Client{}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err, "background-style sync: missing VPN client must not propagate")
@@ -1238,7 +1238,7 @@ func TestSyncService_SyncSubscription_PendingRemove_InactiveNodeDropsBinding(t *
 
 	// Inactive nodes are not loaded into the runtime snapshot, so there is no
 	// VPN client — the stale binding must be dropped, not retried forever.
-	svc := NewSyncService(db, map[uint]vpn.Client{}, nil)
+	svc := NewSyncService(db, NodeClients{}, nil)
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
@@ -1290,7 +1290,7 @@ func TestSyncService_SyncPendingNodes_RevokedSubscriptionNotReprovisioned(t *tes
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
 
 	mockVPN := &mockVPNClient{}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncPendingNodes(ctx))
 
@@ -1333,7 +1333,7 @@ func TestSyncService_SyncPendingNodes_ContinuesAfterNodeFailure(t *testing.T) {
 
 	failedClient := &mockVPNClient{createError: errors.New("node one unavailable")}
 	successClient := &mockVPNClient{}
-	svc := NewSyncService(db, map[uint]vpn.Client{nodeOne.ID: failedClient, nodeTwo.ID: successClient}, []database.Node{*nodeOne, *nodeTwo})
+	svc := NewSyncService(db, NodeClients{nodeOne.ID: {Provision: failedClient}, nodeTwo.ID: {Provision: successClient}}, []database.Node{*nodeOne, *nodeTwo})
 
 	err = svc.SyncPendingNodes(ctx)
 	require.Error(t, err, "a per-node failure must surface as an aggregate error so the caller can observe degraded runs")
@@ -1373,10 +1373,7 @@ func TestSyncService_SyncNodes_ReferrerErrorRetriesAndContinues(t *testing.T) {
 		return nil
 	}
 
-	clients := map[uint]vpn.Client{
-		1: &mockVPNClient{},
-		2: &mockVPNClient{},
-	}
+	clients := NodeClients{1: {Provision: &mockVPNClient{}}, 2: {Provision: &mockVPNClient{}}}
 	svc := NewSyncService(db, clients, []database.Node{
 		{ID: 1, Type: database.NodeType3xUI, IsActive: true},
 		{ID: 2, Type: database.NodeType3xUI, IsActive: true},
@@ -1399,8 +1396,8 @@ func TestSyncService_SyncNodes_ReferrerErrorRetriesAndContinues(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, referrerErr)
 	assert.ElementsMatch(t, []uint{1, 2}, retryNodes)
-	assert.False(t, clients[1].(*mockVPNClient).createCalled)
-	assert.False(t, clients[2].(*mockVPNClient).createCalled)
+	assert.False(t, clients[1].Provision.(*mockVPNClient).createCalled)
+	assert.False(t, clients[2].Provision.(*mockVPNClient).createCalled)
 }
 
 func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {
@@ -1445,7 +1442,7 @@ func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {
 		return []database.SubscriptionNode{}, nil
 	}
 
-	svc := NewSyncService(db, map[uint]vpn.Client{}, nil)
+	svc := NewSyncService(db, NodeClients{}, nil)
 
 	err := svc.SyncPendingNodes(ctx)
 	require.Error(t, err)

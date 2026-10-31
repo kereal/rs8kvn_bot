@@ -51,7 +51,7 @@ func newTestSubServiceForExpire(t testing.TB, db *database.Service) *service.Sub
 		TrialDurationHours: 1,
 	}
 
-	return service.NewSubscriptionService(db, nil, nil, nil, cfg)
+	return service.NewSubscriptionService(db, nil, nil, cfg)
 }
 
 func TestSubscriptionExpireWorker_process_FindsAndExpires(t *testing.T) {
@@ -206,9 +206,9 @@ func TestSubscriptionExpireWorker_process_PaidPlanExpires_DowngradesToFree(t *te
 	)
 
 	mockVPN := &mockVPNClientForExpire{}
-	vpnClients := map[uint]vpn.Client{node.ID: mockVPN}
-	syncSvc := service.NewSyncService(db, vpnClients, []database.Node{*node})
-	subService := service.NewSubscriptionService(db, nil, vpnClients, []database.Node{*node}, &config.Config{TrialDurationHours: 1})
+	clients := service.NodeClients{node.ID: {Provision: mockVPN}}
+	syncSvc := service.NewSyncService(db, clients, []database.Node{*node})
+	subService := service.NewSubscriptionService(db, clients, []database.Node{*node}, &config.Config{TrialDurationHours: 1})
 	subService.SetSyncService(syncSvc)
 	subService.SetInvalidateBySubIDFunc(func(id string) {
 		invalidateCalled = true

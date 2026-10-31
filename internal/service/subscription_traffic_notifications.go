@@ -25,57 +25,22 @@ const (
 	maxInt64                             = int64(^uint64(0) >> 1)
 )
 
+// trafficSnapshot carries one node's live traffic reading.
 type trafficSnapshot struct {
-	node    trafficNode
+	node    readerTarget
 	traffic xui.ClientTraffic
 }
 
-// trafficNode is a concrete live panel client a subscription is provisioned on.
-type trafficNode struct {
-	nodeID  uint
-	inbound []int
-	client  interfaces.XUIClient
-	email   string
-}
-
-// trafficNotifyCandidates returns the active 3x-ui nodes a subscription is
+// trafficNotifyCandidates returns the readable panel nodes a subscription is
 // actually provisioned on. Mirrors GetWithTraffic: only nodes with an active
 // binding are polled so other plans' nodes and pending_* states are excluded.
-func (s *SubscriptionService) trafficNotifyCandidates(ctx context.Context, sub *database.Subscription) ([]trafficNode, error) {
-	subNodes, err := s.db.GetBySubscriptionID(ctx, sub.ID)
+func (s *SubscriptionService) trafficNotifyCandidates(ctx context.Context, sub *database.Subscription) ([]readerTarget, error) {
+	activeSubNodeIDs, err := s.activeBindingNodeIDs(ctx, sub.ID)
 	if err != nil {
 		return nil, fmt.Errorf("traffic notifications: load subscription nodes: %w", err)
 	}
 
-	activeSubNodeIDs := make(map[uint]struct{}, len(subNodes))
-	for _, sn := range subNodes {
-		if sn.Status == database.SyncStatusActive {
-			activeSubNodeIDs[sn.NodeID] = struct{}{}
-		}
-	}
-
-	email := XUIEmail(sub.Username, sub.TelegramID)
-
-	var nodes []trafficNode
-	for _, node := range s.activeNodes() {
-		if _, ok := activeSubNodeIDs[node.ID]; !ok {
-			continue
-		}
-
-		client, ok := s.xuiClients[node.ID]
-		if !ok {
-			continue
-		}
-
-		nodes = append(nodes, trafficNode{
-			nodeID:  node.ID,
-			inbound: node.ResolveInboundIDs(),
-			client:  client,
-			email:   email,
-		})
-	}
-
-	return nodes, nil
+	return s.activeReaders(activeSubNodeIDs, XUIEmail(sub.Username, sub.TelegramID)), nil
 }
 
 // ProcessTrafficNotifications inspects live traffic, sends quota notifications,
@@ -121,7 +86,7 @@ func (s *SubscriptionService) processTraffic(ctx context.Context, sub *database.
 
 	snapshots := make([]trafficSnapshot, 0, len(nodes))
 	for _, n := range nodes {
-		traffic, tErr := n.client.GetClientTraffic(ctx, n.email)
+		traffic, tErr := n.reader.GetClientTraffic(ctx, n.email)
 		if tErr != nil {
 			logger.Warn("traffic notifications: GetClientTraffic failed on source",
 				zap.Uint("subscription_id", sub.ID),
@@ -239,6 +204,16 @@ func (s *SubscriptionService) reenableResetClients(ctx context.Context, sub *dat
 		if traffic.Enable {
 			continue
 		}
+		// Re-enabling is a panel mutation: the read slot must also carry the
+		// writer capability (the 3x-ui client does; a read-only adapter would
+		// be skipped rather than fail).
+		writer, canWrite := n.reader.(interfaces.XUIClientWriter)
+		if !canWrite {
+			logger.Warn("traffic notifications: node reader does not support panel writes",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", n.nodeID))
+			continue
+		}
 		if traffic.UUID == "" || traffic.ExpiresAt < 0 || traffic.ExpiresAt > 0 && time.UnixMilli(traffic.ExpiresAt).Before(time.Now()) {
 			logger.Warn("traffic notifications: refusing to re-enable invalid or expired client",
 				zap.Uint("subscription_id", sub.ID),
@@ -253,7 +228,7 @@ func (s *SubscriptionService) reenableResetClients(ctx context.Context, sub *dat
 		// monthly traffic reset would stop firing. Read it back best-effort
 		// before re-enabling; inbound IDs come from the same response.
 		profile := &xui.ClientConfig{}
-		record, pErr := n.client.GetClientByEmail(ctx, n.email)
+		record, pErr := n.reader.GetClientByEmail(ctx, n.email)
 		switch {
 		case errors.Is(pErr, xui.ErrClientNotFound):
 			// Client fully removed on the panel — keep empty profile.
@@ -285,7 +260,7 @@ func (s *SubscriptionService) reenableResetClients(ctx context.Context, sub *dat
 			inboundIDs = record.InboundIDs
 		}
 
-		uErr := n.client.UpdateClient(ctx, xui.ClientRequest{
+		uErr := writer.UpdateClient(ctx, xui.ClientRequest{
 			InboundIDs:      inboundIDs,
 			Email:           n.email,
 			CurrentEmail:    n.email,

@@ -83,15 +83,16 @@ func TestBuildRuntimeNodeClients_FiltersInactiveAndInitializes3xUIOnly(t *testin
 		{ID: 2, Type: database.NodeTypeProxman, IsActive: false, Host: "http://inactive-prox", APIToken: "token-b", InboundIDs: `[2]`},
 	}
 
-	runtimeNodes, xuiClients, vpnClients, err := buildRuntimeNodeClients(nodes, opts)
+	runtimeNodes, clients, err := buildRuntimeNodeClients(nodes, opts)
 
 	require.NoError(t, err)
 	require.Len(t, runtimeNodes, 1)
 	assert.Equal(t, uint(1), runtimeNodes[0].ID)
 	assert.Len(t, xuiCalls, 1)
 	assert.Len(t, vpnCalls, 1)
-	assert.Len(t, xuiClients, 1)
-	assert.Len(t, vpnClients, 1)
+	assert.Len(t, clients, 1)
+	assert.NotNil(t, clients[1].Provision)
+	assert.NotNil(t, clients[1].Reader)
 	assert.Equal(t, database.NodeType3xUI, vpnCalls[0].Type)
 	assert.NotNil(t, vpnCalls[0].XUIClient)
 }
@@ -108,14 +109,14 @@ func TestBuildRuntimeNodeClients_SkipsUnsupportedActiveNode(t *testing.T) {
 
 	nodes := []database.Node{{ID: 7, Type: database.NodeTypeProxman, IsActive: true, Host: "http://prox", APIToken: "token", InboundIDs: `[1]`}}
 
-	runtimeNodes, xuiClients, vpnClients, err := buildRuntimeNodeClients(nodes, opts)
+	runtimeNodes, clients, err := buildRuntimeNodeClients(nodes, opts)
 
 	require.NoError(t, err)
 	assert.Len(t, runtimeNodes, 1)
 	assert.Equal(t, uint(7), runtimeNodes[0].ID)
-	assert.Empty(t, xuiClients)
-	assert.Len(t, vpnClients, 1)
-	assert.NotNil(t, vpnClients[7])
+	assert.Len(t, clients, 1)
+	assert.NotNil(t, clients[7].Provision)
+	assert.Nil(t, clients[7].Reader)
 }
 
 func TestHandleUpdateSafely(t *testing.T) {
