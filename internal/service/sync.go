@@ -127,191 +127,38 @@ func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uin
 }
 
 // reconcilePlanNodesLocked is the lock-free body of ReconcilePlanNodes.
-// The caller must hold lockSubscription(subscriptionID). Revoked subscriptions
-// are left unchanged. Load errors return immediately; node mutation errors are
-// joined after processing, except cancellation or deadline errors, which abort.
+// The caller must hold lockSubscription(subscriptionID). It delegates to the
+// shared reconciliation core (plan_reconcile.go) with the background error
+// policy: per-node failures are logged and joined via errors.Join, while
+// cancellation or deadline errors abort immediately. Revoked subscriptions
+// are left unchanged by the core's readSubscription option.
 func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscriptionID uint) error {
 	logger.Debug("reconcile plan nodes",
 		zap.Uint("subscription_id", subscriptionID))
 
-	sub, err := s.db.GetByID(ctx, subscriptionID)
-	if err != nil {
-		return fmt.Errorf("reconcile plan nodes: load subscription: %w", err)
-	}
-	if sub.Status == string(database.SubscriptionStatusRevoked) {
-		return nil
-	}
-
-	targetNodes, err := s.db.GetNodesByPlanID(ctx, sub.PlanID)
-	if err != nil {
-		return fmt.Errorf("reconcile plan nodes: load plan nodes: %w", err)
-	}
-
-	currentNodes, err := s.db.GetBySubscriptionID(ctx, subscriptionID)
-	if err != nil {
-		return fmt.Errorf("reconcile plan nodes: load current nodes: %w", err)
-	}
-
-	targetSet := make(map[uint]struct{}, len(targetNodes))
-	for _, n := range targetNodes {
-		if n.IsActive {
-			targetSet[n.ID] = struct{}{}
-		}
-	}
-
-	currentActive := make(map[uint]database.SubscriptionNode)
-	currentPendingAdd := make(map[uint]database.SubscriptionNode)
-	currentPendingRemove := make(map[uint]database.SubscriptionNode)
-	currentPendingUpdate := make(map[uint]database.SubscriptionNode)
-
 	var errs []error
 
-	recordNodeError := func(operation string, nodeID uint, err error) error {
-		wrappedErr := fmt.Errorf("reconcile plan nodes: %s node %d: %w", operation, nodeID, err)
-		logger.Warn("reconcile plan nodes: node operation failed",
-			zap.Uint("subscription_id", subscriptionID),
-			zap.Uint("node_id", nodeID),
-			zap.String("operation", operation),
-			zap.Error(wrappedErr))
-
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return wrappedErr
-		}
-
-		errs = append(errs, wrappedErr)
-
-		return nil
-	}
-
-	for _, sn := range currentNodes {
-		switch sn.Status {
-		case database.SyncStatusActive:
-			currentActive[sn.NodeID] = sn
-		case database.SyncStatusPendingAdd:
-			currentPendingAdd[sn.NodeID] = sn
-		case database.SyncStatusPendingRemove:
-			currentPendingRemove[sn.NodeID] = sn
-		case database.SyncStatusPendingUpdate:
-			currentPendingUpdate[sn.NodeID] = sn
-		}
-	}
-
-	for _, target := range targetNodes {
-		if !target.IsActive {
-			continue
-		}
-
-		if _, exists := currentActive[target.ID]; exists {
-			continue
-		}
-
-		if _, exists := currentPendingAdd[target.ID]; exists {
-			continue
-		}
-
-		if _, exists := currentPendingUpdate[target.ID]; exists {
-			logger.Debug("pending_update node in target plan, leaving as-is",
+	err := reconcilePlanNodesCore(ctx, dbServicePlanStore{db: s.db}, subscriptionID, planReconcileOptions{
+		readSubscription: true,
+		onNodeError: func(operation string, nodeID uint, err error) error {
+			wrappedErr := fmt.Errorf("reconcile plan nodes: %s node %d: %w", operation, nodeID, err)
+			logger.Warn("reconcile plan nodes: node operation failed",
 				zap.Uint("subscription_id", subscriptionID),
-				zap.Uint("node_id", target.ID))
+				zap.Uint("node_id", nodeID),
+				zap.String("operation", operation),
+				zap.Error(wrappedErr))
 
-			continue
-		}
-
-		if pending, ok := currentPendingRemove[target.ID]; ok {
-			err := s.db.UpdateSubscriptionNodeStatus(ctx, pending.SubscriptionID, pending.NodeID, database.SyncStatusPendingAdd)
-			if err != nil {
-				stopErr := recordNodeError("reactivate pending_remove", target.ID, err)
-				if stopErr != nil {
-					return stopErr
-				}
-
-				continue
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return wrappedErr
 			}
 
-			logger.Debug("reactivated pending_remove to pending_add",
-				zap.Uint("subscription_id", subscriptionID),
-				zap.Uint("node_id", target.ID))
+			errs = append(errs, wrappedErr)
 
-			continue
-		}
-
-		err := s.db.UpsertSubscriptionNode(ctx, &database.SubscriptionNode{
-			SubscriptionID: subscriptionID,
-			NodeID:         target.ID,
-			Status:         database.SyncStatusPendingAdd,
-		})
-		if err != nil {
-			stopErr := recordNodeError("upsert pending_add", target.ID, err)
-			if stopErr != nil {
-				return stopErr
-			}
-
-			continue
-		}
-
-		logger.Debug("created pending_add node",
-			zap.Uint("subscription_id", subscriptionID),
-			zap.Uint("node_id", target.ID))
-	}
-
-	for nodeID, sn := range currentActive {
-		if _, inTarget := targetSet[nodeID]; inTarget {
-			continue
-		}
-
-		err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
-		if err != nil {
-			stopErr := recordNodeError("set pending_remove", nodeID, err)
-			if stopErr != nil {
-				return stopErr
-			}
-
-			continue
-		}
-
-		logger.Debug("set pending_remove for active node not in target",
-			zap.Uint("subscription_id", subscriptionID),
-			zap.Uint("node_id", nodeID))
-	}
-
-	for nodeID, sn := range currentPendingAdd {
-		if _, inTarget := targetSet[nodeID]; inTarget {
-			continue
-		}
-
-		err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
-		if err != nil {
-			stopErr := recordNodeError("set pending_remove for stale pending_add", nodeID, err)
-			if stopErr != nil {
-				return stopErr
-			}
-
-			continue
-		}
-
-		logger.Debug("set pending_remove for stale pending_add node",
-			zap.Uint("subscription_id", subscriptionID),
-			zap.Uint("node_id", nodeID))
-	}
-
-	for nodeID, sn := range currentPendingUpdate {
-		if _, inTarget := targetSet[nodeID]; inTarget {
-			continue
-		}
-
-		err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
-		if err != nil {
-			stopErr := recordNodeError("set pending_remove for stale pending_update", nodeID, err)
-			if stopErr != nil {
-				return stopErr
-			}
-
-			continue
-		}
-
-		logger.Debug("set pending_remove for stale pending_update node",
-			zap.Uint("subscription_id", subscriptionID),
-			zap.Uint("node_id", nodeID))
+			return nil
+		},
+	})
+	if err != nil {
+		return err
 	}
 
 	logger.Debug("reconcile plan nodes completed",
