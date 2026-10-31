@@ -176,8 +176,11 @@ internal/
 ├── service/          # Business logic
 │   ├── subscription.go      # Use cases: Create, Delete, DeleteByID, Renew; unified two-phase teardown (revokeAndDeprovisionThenDelete)
 │   ├── subscription_reminders.go # Reminder window model and Telegram delivery
-│   ├── subscription_traffic.go # Presentation: TrafficInfo, GetWithTraffic, formatExpiresAt
+│   ├── subscription_traffic.go # Presentation: TrafficInfo, GetWithTraffic
+│   ├── subscription_reset.go # «🔄 Сброс» card line: next traffic reset from the panel profile
+│   ├── node_clients.go       # NodeClients registry: per-node Provision + Reader slots, built in cmd/bot
 │   ├── sync.go              # Multi-node subscription sync (Reconcile, SyncPendingNodes)
+│   ├── plan_reconcile.go     # Single subscription_nodes transition core + db/tx planNodeStore adapters
 │   ├── order.go             # Order lifecycle (Create, Activate, Expire)
 │   └── subscription_nodes.go # Subscription-node join table CRUD
 ├── vpn/                # VPN client abstraction (multi-node, multi-type)
@@ -186,9 +189,10 @@ internal/
 │   ├── proxman.go           # proxman client implementation (classifies Create/Delete)
 │   └── fetch.go             # fetch client (read-only HTTP, no-op provisioning)
 ├── xui/              # Legacy 3x-ui API client (used by vpn/threex_ui.go)
-│   ├── client.go            # 3x-ui REST API + RetryWithBackoff (Bearer auth, multi-outbound flow grouping)
+│   ├── client.go            # 3x-ui REST API + RetryWithBackoff (Bearer auth, multi-outbound flow grouping; reads client profile via GET /clients/get/{email})
+│   ├── classify.go          # Single panel-response classifier: {success,msg,obj} envelope → sentinel errors
 │   ├── breaker.go           # Circuit breaker (5/30s/3-half-open)
-│   └── errors.go            # Sentinel errors (ErrClientNotFound)
+│   └── errors.go            # Sentinel errors (ErrClientNotFound, ErrClientAlreadyExists)
 ├── database/         # Persistence
 │   ├── service.go           # GORM service + connection pool
 │   ├── migrations.go        # Embedded migration runner
@@ -225,7 +229,7 @@ internal/
 ├── heartbeat/        # External monitoring
 │   └── heartbeat.go         # Periodic POST to HEARTBEAT_URL
 ├── interfaces/       # DI interfaces
-│   └── interfaces.go        # BotAPI, DatabaseService (composition root), XUIClient; per-slice seams SubscriptionRepository/InviteRepository/TrialRepository/PlanRepository and composed WebRepository
+│   └── interfaces.go        # BotAPI, XUIClient; composition-root DatabaseService; per-consumer seams (ADR-0001): SubscriptionStore, SyncStore, OrderStore, BotStore, ReferralCountSource, ReferralInviteStore, AuditLogWriter, WebRepository
 ├── utils/            # Utilities
 │   ├── uuid.go              # Crypto-random UUID v4, SubID, invite code
 │   ├── qr.go                # QR code generation
@@ -233,7 +237,11 @@ internal/
 │   ├── format.go            # Progress bar, date formatting
 │   └── markdown.go          # Markdown sanitization
 └── testutil/         # Test helpers
-    └── testutil.go          # Mock DB, XUI, Bot (flat DatabaseService fake)
+    ├── testutil.go          # Config/XUI/Bot fakes + real-SQLite helper
+    ├── fake_service_store.go # ServiceStoreFake: SubscriptionStore+SyncStore+OrderStore (no domain mirroring)
+    ├── fake_bot_store.go     # BotStoreFake: *ServiceStoreFake + BotStore surface
+    ├── fake_web_repository.go # SubscriptionRepositoryFake: *ServiceStoreFake + WebRepository
+    └── fake_small.go         # ReferralCountSourceFake, ReferralInviteStoreFake, AuditLogWriterFake
 ```
 
 ---
@@ -867,6 +875,14 @@ The `SyncService` manages synchronization of subscriptions with VPN nodes via a 
 | `SyncPendingNodes` | Scan all `pending_*` records, process with retry |
 | `ReconcilePlanNodes` | Add/remove nodes when plan changes |
 | `ReconcileOrphanedClients` | Recover missing node queues and revoke fully deprovisioned subscriptions |
+
+The transition rules (mark / add / remove over `subscription_nodes`) live in one
+implementation — `plan_reconcile.go` (`reconcilePlanNodesCore` + `planNodeStore`
+seam with a `DatabaseService` adapter and a `*gorm.DB` adapter). The background
+path runs it best-effort with a revoked guard and `errors.Join`; the payment CAS
+path (`ApplyPlanToSubscriptionInTx`) runs it fail-fast without the guard (the CAS
+already set the subscription `active` — paying reactivates a revoked
+subscription). Parity is pinned by `TestApplyPlan_Parity_BackgroundAndTxSameEndState`.
 
 ### Concurrency
 - Per-subscription locking via `lockSubscription(subscriptionID)` — prevents concurrent sync of the same subscription
