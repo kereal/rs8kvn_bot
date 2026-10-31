@@ -3,16 +3,13 @@ package xui
 import "errors"
 
 var (
-	// ErrUnauthorized indicates the XUI panel returned 401 Unauthorized.
-	ErrUnauthorized = errors.New("unauthorized")
-	// ErrForbidden indicates the XUI panel returned 403 Forbidden.
-	ErrForbidden = errors.New("forbidden")
-	// ErrBadRequest indicates the XUI panel returned 400 Bad Request.
-	ErrBadRequest = errors.New("bad request")
-	// ErrNotFound indicates the XUI panel returned 404 Not Found.
-	ErrNotFound = errors.New("not found")
-	// ErrServerError indicates the XUI panel returned a 5xx error.
-	ErrServerError = errors.New("server error")
-	// ErrNon200Response indicates the panel responded with a non-200 status code.
-	ErrNon200Response = errors.New("upstream returned non-200")
+	// ErrClientNotFound сигнализирует, что панель не нашла клиента по email.
+	// Порождается классификацией ответов add/update/del/resetTraffic/traffic/get
+	// (см. classifyPanelError); тексты сообщений панели зафиксированы в
+	// doc/panel-api-contract.md.
+	ErrClientNotFound = errors.New("client not found")
+
+	// ErrClientAlreadyExists сигнализирует, что панель отклонила создание
+	// клиента из-за занятого email или subId (add: "already in use").
+	ErrClientAlreadyExists = errors.New("client already exists")
 )

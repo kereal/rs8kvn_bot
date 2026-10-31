@@ -53,7 +53,7 @@ func (c *ProxmanClient) CreateSubscription(ctx context.Context, provision Subscr
 		SubscriptionID: provision.SubID,
 	}
 
-	return classifyCreateSubscriptionError(c.sendEvent(ctx, event))
+	return c.sendEvent(ctx, event)
 }
 
 // UpdateSubscription is a no-op for proxman: the webhook payload carries no
@@ -77,7 +77,7 @@ func (c *ProxmanClient) DeleteSubscription(ctx context.Context, provision Subscr
 		SubscriptionID: provision.SubID,
 	}
 
-	return classifyDeleteSubscriptionError(c.sendEvent(ctx, event))
+	return c.sendEvent(ctx, event)
 }
 
 func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error {
@@ -110,6 +110,9 @@ func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error
 
 	bodyStr := string(bytes.TrimSpace(respBody))
 
+	// Семантика узла маппится напрямую в sentinel'ы vpn; строковых
+	// классификаторов нет. "duplicate" — собственная семантика proxman
+	// (идемпотентный повтор subscription.create).
 	switch resp.StatusCode {
 	case http.StatusOK:
 		if bodyStr == "duplicate" {
@@ -117,6 +120,8 @@ func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error
 		}
 
 		return nil
+	case http.StatusNotFound:
+		return fmt.Errorf("proxman client not found: %s: %w", bodyStr, ErrSubscriptionNotFound)
 	case http.StatusBadRequest:
 		return fmt.Errorf("proxman bad request: %s", bodyStr)
 	case http.StatusUnauthorized:

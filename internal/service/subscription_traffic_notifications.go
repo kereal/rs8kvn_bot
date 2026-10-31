@@ -248,35 +248,45 @@ func (s *SubscriptionService) reenableResetClients(ctx context.Context, sub *dat
 
 		// The panel's traffic endpoint does not return the auto-renew profile
 		// (resetDay/resetMax/trafficReset/trafficResetDay) — it lives in the
-		// client's inbound settings. Without it, UpdateClient would overwrite
-		// the profile with "never" and the monthly traffic reset would stop
-		// firing. Read it back best-effort before re-enabling.
+		// client card from GET /panel/api/clients/get/{email}. Without it,
+		// UpdateClient would overwrite the profile with "never" and the
+		// monthly traffic reset would stop firing. Read it back best-effort
+		// before re-enabling; inbound IDs come from the same response.
 		profile := &xui.ClientConfig{}
-		if len(n.inbound) > 0 {
-			p, pErr := n.client.GetClientByEmail(ctx, n.inbound[0], n.email)
-			switch {
-			case errors.Is(pErr, xui.ErrClientNotFound):
-				// Client fully removed on the panel — keep empty profile.
-			case pErr != nil:
-				logger.Warn("traffic notifications: failed to load client auto-renew profile; skipping update to retry later",
-					zap.Uint("subscription_id", sub.ID),
-					zap.Uint("node_id", n.nodeID),
-					zap.String("email", n.email),
-					zap.Error(pErr))
-				continue
-			case p == nil:
-				logger.Warn("traffic notifications: client profile was nil without error; skipping update to retry later",
-					zap.Uint("subscription_id", sub.ID),
-					zap.Uint("node_id", n.nodeID),
-					zap.String("email", n.email))
-				continue
-			default:
-				profile = p
-			}
+		record, pErr := n.client.GetClientByEmail(ctx, n.email)
+		switch {
+		case errors.Is(pErr, xui.ErrClientNotFound):
+			// Client fully removed on the panel — keep empty profile.
+		case pErr != nil:
+			logger.Warn("traffic notifications: failed to load client auto-renew profile; skipping update to retry later",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", n.nodeID),
+				zap.String("email", n.email),
+				zap.Error(pErr))
+			continue
+		case record == nil:
+			logger.Warn("traffic notifications: client record was nil without error; skipping update to retry later",
+				zap.Uint("subscription_id", sub.ID),
+				zap.Uint("node_id", n.nodeID),
+				zap.String("email", n.email))
+			continue
+		default:
+			profile = &record.Client
+		}
+
+		// Effective inbound set is unchanged from the previous behaviour:
+		// the update goes out with the node's configured inbound list. When
+		// the panel reports inboundIds, prefer them; when the panel returns
+		// none, fall back to n.inbound instead of sending an empty list
+		// silently — with both empty UpdateClient rejects the request and
+		// the node is skipped with a Warn, as before.
+		inboundIDs := n.inbound
+		if record != nil && len(record.InboundIDs) > 0 {
+			inboundIDs = record.InboundIDs
 		}
 
 		uErr := n.client.UpdateClient(ctx, xui.ClientRequest{
-			InboundIDs:      n.inbound,
+			InboundIDs:      inboundIDs,
 			Email:           n.email,
 			CurrentEmail:    n.email,
 			ClientID:        traffic.UUID,

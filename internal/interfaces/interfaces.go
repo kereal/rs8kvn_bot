@@ -264,10 +264,10 @@ type DatabaseService interface {
 type XUIClientReader interface {
 	Ping(ctx context.Context) error
 	GetClientTraffic(ctx context.Context, email string) (*xui.ClientTraffic, error)
-	// GetClientByEmail возвращает клиента по email из settings указанного
-	// inbound, включая auto-renew профиль (resetDay/resetMax/trafficReset/
-	// trafficResetDay), который /clients/traffic не отдаёт.
-	GetClientByEmail(ctx context.Context, inboundID int, email string) (*xui.ClientConfig, error)
+	// GetClientByEmail возвращает полную карточку клиента по email через
+	// GET /panel/api/clients/get/{email}: поля клиента (включая auto-renew
+	// профиль, который /clients/traffic не отдаёт) и список inbound'ов.
+	GetClientByEmail(ctx context.Context, email string) (*xui.ClientRecord, error)
 }
 
 // XUIClientWriter contains panel mutation and lifecycle operations.
