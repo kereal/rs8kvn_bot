@@ -20,7 +20,7 @@ import (
 
 // SyncService manages the synchronization of subscriptions with VPN nodes.
 type SyncService struct {
-	db      interfaces.DatabaseService
+	db      interfaces.SyncStore
 	clients NodeClients
 	nodes   []database.Node
 
@@ -40,7 +40,7 @@ func syncIdentifier(sub *database.Subscription) string {
 }
 
 // NewSyncService creates a new SyncService.
-func NewSyncService(db interfaces.DatabaseService, clients NodeClients, nodes []database.Node) *SyncService {
+func NewSyncService(db interfaces.SyncStore, clients NodeClients, nodes []database.Node) *SyncService {
 	return &SyncService{
 		db:          db,
 		clients:     clients,

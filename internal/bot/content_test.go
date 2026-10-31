@@ -76,10 +76,9 @@ func TestGetMainMenuContent_FreeSubscriptionShowsPremiumTeaser(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 0, PaymentEnabled: true}
-	db := &testutil.DatabaseService{
-		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
-			return &database.Plan{ID: 2, Name: database.FreePlanName}, nil
-		},
+	db := testutil.NewBotStoreFake()
+	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
+		return &database.Plan{ID: 2, Name: database.FreePlanName}, nil
 	}
 	handler := &Handler{
 		cfg:            cfg,

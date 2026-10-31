@@ -147,13 +147,12 @@ func TestTrialCleanupScheduler_FallbackDeprovisionEvenWithSyncService(t *testing
 	// SubscriptionService.CleanupExpiredTrials is unreachable: expired trial
 	// clients must still be deprovisioned via the direct fallback even when a
 	// sync service is wired (the wiring in main.go must not break this).
-	db := &testutil.DatabaseService{
-		CleanupExpiredTrialsFunc: func(context.Context, int) ([]database.Subscription, error) {
-			return []database.Subscription{
-				{ID: 1, ClientID: "c1", SubscriptionID: "exp1"},
-				{ID: 2, ClientID: "c2", SubscriptionID: "exp2"},
-			}, nil
-		},
+	db := testutil.NewSubscriptionRepositoryFake()
+	db.CleanupExpiredTrialsFunc = func(context.Context, int) ([]database.Subscription, error) {
+		return []database.Subscription{
+			{ID: 1, ClientID: "c1", SubscriptionID: "exp1"},
+			{ID: 2, ClientID: "c2", SubscriptionID: "exp2"},
+		}, nil
 	}
 	mockVPN := &mockVPNClientForExpire{}
 	clients := service.NodeClients{1: {Provision: mockVPN}}

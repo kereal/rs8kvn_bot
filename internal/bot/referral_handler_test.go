@@ -18,7 +18,7 @@ import (
 // generated Telegram invite link uses the real username.
 func TestReferralInviteLinkUsesRealBotUsername(t *testing.T) {
 	cfg := &config.Config{}
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 
 	// Step 5: handler wired with an EMPTY (placeholder) bot config, exactly
@@ -54,7 +54,7 @@ func TestReferralInviteLinkUsesRealBotUsername(t *testing.T) {
 // ReferralHandler.keyboards.InviteLinkText contains the real @username.
 func TestReferralInviteTextShowsRealBotUsername(t *testing.T) {
 	cfg := &config.Config{}
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 
 	// Step 5: handler wired with an EMPTY (placeholder) bot config, exactly

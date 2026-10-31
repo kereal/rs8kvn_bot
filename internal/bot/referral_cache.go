@@ -24,13 +24,13 @@ type referralEntry struct {
 
 type ReferralCache struct {
 	noCopy noCopy
-	db     interfaces.DatabaseService
+	db     interfaces.ReferralCountSource
 	data   map[int64]*referralEntry
 	mu     sync.RWMutex
 	sendMu sync.Map
 }
 
-func NewReferralCache(db interfaces.DatabaseService) *ReferralCache {
+func NewReferralCache(db interfaces.ReferralCountSource) *ReferralCache {
 	return &ReferralCache{
 		db:   db,
 		data: make(map[int64]*referralEntry),

@@ -22,7 +22,7 @@ func TestFormatPaymentIssue_TruncatesUntrustedFields(t *testing.T) {
 
 func TestBuildPaidUserNotification_MissingSubscriptionServiceReturnsError(t *testing.T) {
 	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440211")
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: 1, TelegramID: 42}, nil
 		},

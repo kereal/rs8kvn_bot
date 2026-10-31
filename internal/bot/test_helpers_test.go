@@ -17,7 +17,7 @@ import (
 // newTestAdminHandler creates a Handler with admin config and a stub SubscriptionService
 // wired to the provided mock objects. Eliminates repeated NewHandler + subscriptionService
 // assignment across admin tests.
-func newTestAdminHandler(cfg *config.Config, mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient, mockBot *testutil.BotAPI) *Handler {
+func newTestAdminHandler(cfg *config.Config, mockDB *testutil.BotStoreFake, mockXUI *testutil.XUIClient, mockBot *testutil.BotAPI) *Handler {
 	h := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	clients := service.NodeClients{1: {Reader: mockXUI}}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", APIToken: "test-token", InboundIDs: "[1]", SubscriptionURL: "http://example.com/sub/"}}
@@ -79,7 +79,7 @@ func createCommandUpdate(messageID int64, fromUser *tgbotapi.User, text string) 
 
 // newTestHandlerWithSubService creates a Handler with a stub SubscriptionService
 // wired from the provided mock DB and XUI. Falls back to fresh mocks when nil.
-func newTestHandlerWithSubService(t *testing.T, cfg *config.Config, mockDB *testutil.DatabaseService, mockXUI *testutil.XUIClient, mockBot *testutil.BotAPI) *Handler {
+func newTestHandlerWithSubService(t *testing.T, cfg *config.Config, mockDB *testutil.BotStoreFake, mockXUI *testutil.XUIClient, mockBot *testutil.BotAPI) *Handler {
 	t.Helper()
 
 	if cfg == nil {
@@ -87,7 +87,7 @@ func newTestHandlerWithSubService(t *testing.T, cfg *config.Config, mockDB *test
 	}
 
 	if mockDB == nil {
-		mockDB = testutil.NewDatabaseService()
+		mockDB = testutil.NewBotStoreFake()
 	}
 
 	if mockXUI == nil {

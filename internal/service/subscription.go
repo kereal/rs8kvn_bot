@@ -34,8 +34,8 @@ func WithAuditAdmin(ctx context.Context, telegramID int64) context.Context {
 // SubscriptionService coordinates subscription persistence, VPN provisioning,
 // cache invalidation, metrics, and referral/trial lifecycle operations.
 type SubscriptionService struct {
-	db                interfaces.DatabaseService
-	reminderRepo      interfaces.SubscriptionReminderRepository
+	db                interfaces.SubscriptionStore
+	reminderRepo      interfaces.SubscriptionReminderBits
 	trafficRepo       interfaces.TrafficReminderRepository
 	clients           NodeClients
 	nodes             []database.Node
@@ -80,7 +80,7 @@ func XUIEmail(username string, telegramID int64) string {
 
 // NewSubscriptionService creates a SubscriptionService configured with the
 // given database, runtime node registry, nodes, and application configuration.
-func NewSubscriptionService(db interfaces.DatabaseService, clients NodeClients, nodes []database.Node, cfg *config.Config) *SubscriptionService {
+func NewSubscriptionService(db interfaces.SubscriptionStore, clients NodeClients, nodes []database.Node, cfg *config.Config) *SubscriptionService {
 	return &SubscriptionService{
 		db:           db,
 		reminderRepo: db,
@@ -891,11 +891,17 @@ func (s *SubscriptionService) BindTrial(ctx context.Context, subscriptionID stri
 	return sub, nil
 }
 
+// referrerCommentDB is the narrow seam referrerComment reads through.
+type referrerCommentDB interface {
+	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	GetInviteByCode(ctx context.Context, code string) (*database.Invite, error)
+}
+
 // referrerComment returns the panel comment "from: @<username>" for a
 // subscription created through an invite code. Missing referral records are
 // expected after legacy cleanup and produce an empty comment; all other errors
 // are returned so callers do not overwrite a panel comment with empty data.
-func referrerComment(ctx context.Context, db interfaces.DatabaseService, sub *database.Subscription) (string, error) {
+func referrerComment(ctx context.Context, db referrerCommentDB, sub *database.Subscription) (string, error) {
 	if sub.InviteCode == nil {
 		return "", nil
 	}

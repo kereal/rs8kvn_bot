@@ -8,8 +8,6 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
-
-	"github.com/stretchr/testify/require"
 )
 
 func TestBot_GracefulShutdown(t *testing.T) {
@@ -21,7 +19,7 @@ func TestBot_GracefulShutdown(t *testing.T) {
 	}
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -59,7 +57,7 @@ func TestServer_GracefulShutdown(t *testing.T) {
 	}
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -100,7 +98,7 @@ func TestGracefulShutdown_StopsAllBackgroundLoops(t *testing.T) {
 	}
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -126,18 +124,6 @@ func TestGracefulShutdown_StopsAllBackgroundLoops(t *testing.T) {
 	}
 }
 
-func TestGracefulShutdown_DatabaseClose(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewDatabaseService()
-
-	err := mockDB.Close()
-	require.NoError(t, err, "Database should close without error")
-
-	err = mockDB.Close()
-	require.NoError(t, err, "Second close should also be safe (idempotent)")
-}
-
 func TestGracefulShutdown_RateLimiterCleanup(t *testing.T) {
 	t.Parallel()
 
@@ -147,7 +133,7 @@ func TestGracefulShutdown_RateLimiterCleanup(t *testing.T) {
 	}
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "test")
 
 	// Exercise the limiter so a bucket exists before cleanup.

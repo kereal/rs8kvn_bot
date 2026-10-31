@@ -39,13 +39,13 @@ func hasPremiumButton(msgs []tgbotapi.MessageConfig) bool {
 // It captures every sent message and claimed bit so tests can inspect what the
 // service actually did. The mock objects are returned too so individual tests
 // can swap behaviors (plan without limit, claim=false, send error, node error).
-func trafficNotifySetup(t *testing.T, traffic *xui.ClientTraffic, planTrafficLimit int64, updateFn func(ctx context.Context, req xui.ClientRequest) error) (*SubscriptionService, *testutil.BotAPI, *testutil.DatabaseService, *testutil.XUIClient, *[]uint, *[]tgbotapi.MessageConfig) {
+func trafficNotifySetup(t *testing.T, traffic *xui.ClientTraffic, planTrafficLimit int64, updateFn func(ctx context.Context, req xui.ClientRequest) error) (*SubscriptionService, *testutil.BotAPI, *testutil.ServiceStoreFake, *testutil.XUIClient, *[]uint, *[]tgbotapi.MessageConfig) {
 	t.Helper()
 
 	var claimedBits []uint
 	var sentMsgs []tgbotapi.MessageConfig
 
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetPlanByIDFunc: func(ctx context.Context, planID uint) (*database.Plan, error) {
 			return &database.Plan{ID: planID, TrafficLimit: planTrafficLimit}, nil // bytes; 0 = unlimited
 		},
@@ -351,7 +351,7 @@ func TestProcessTrafficNotifications_PartialNodeFailureSkipsAction(t *testing.T)
 	used := int64(1) * 1024 * 1024 * 1024
 	traffic := &xui.ClientTraffic{Up: used, Enable: false, Total: 100 * 1024 * 1024 * 1024, UUID: "client"}
 	var updated bool
-	db := &testutil.DatabaseService{
+	db := &testutil.ServiceStoreFake{
 		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
 			return &database.Plan{TrafficLimit: 100 * 1024 * 1024 * 1024}, nil
 		},

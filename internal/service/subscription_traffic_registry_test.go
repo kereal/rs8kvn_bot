@@ -72,7 +72,7 @@ func newTrafficRegistryHarness(t *testing.T, h *trafficRegistryHarness) func(int
 			})
 		}
 
-		db := &testutil.DatabaseService{
+		db := &testutil.ServiceStoreFake{
 			GetBySubscriptionIDFunc: func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 				bindings := make([]database.SubscriptionNode, 0, len(h.bindings))
 				for nodeID, status := range h.bindings {
@@ -104,7 +104,7 @@ func TestGetWithTraffic_SkipsNodesWithoutReader(t *testing.T) {
 	svc := newTrafficRegistryHarness(t, h)(1)
 
 	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
-	db := svc.db.(*testutil.DatabaseService)
+	db := svc.db.(*testutil.ServiceStoreFake)
 	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
 	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
 		return &database.Plan{ID: 1, TrafficLimit: 10 * 1024 * 1024 * 1024}, nil
@@ -128,7 +128,7 @@ func TestGetWithTraffic_ReaderErrorDoesNotBreakAggregation(t *testing.T) {
 	svc := newTrafficRegistryHarness(t, h)(1)
 
 	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
-	db := svc.db.(*testutil.DatabaseService)
+	db := svc.db.(*testutil.ServiceStoreFake)
 	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
 	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
 		return &database.Plan{ID: 1, TrafficLimit: 10 * 1024 * 1024 * 1024}, nil
@@ -203,7 +203,7 @@ func TestGetWithTraffic_ResetLineScenarios(t *testing.T) {
 			svc := newTrafficRegistryHarness(t, h)(1)
 
 			sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
-			db := svc.db.(*testutil.DatabaseService)
+			db := svc.db.(*testutil.ServiceStoreFake)
 			db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
 			db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
 				return &database.Plan{ID: 1, TrafficLimit: 10 * 1024 * 1024 * 1024}, nil
@@ -225,7 +225,7 @@ func TestGetWithTraffic_NoLimitSkipsProfileRead(t *testing.T) {
 	svc := newTrafficRegistryHarness(t, h)(1)
 
 	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
-	db := svc.db.(*testutil.DatabaseService)
+	db := svc.db.(*testutil.ServiceStoreFake)
 	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
 	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
 		return &database.Plan{ID: 1, TrafficLimit: 0}, nil
@@ -250,7 +250,7 @@ func TestGetWithTraffic_InactiveBindingNotPolled(t *testing.T) {
 	svc := newTrafficRegistryHarness(t, h)(1)
 
 	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
-	db := svc.db.(*testutil.DatabaseService)
+	db := svc.db.(*testutil.ServiceStoreFake)
 	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
 	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
 		return &database.Plan{ID: 1, TrafficLimit: 10 * 1024 * 1024 * 1024}, nil

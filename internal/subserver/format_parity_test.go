@@ -27,7 +27,7 @@ const (
 
 // newMultiNodeSub spins a backend serving the two live-shaped share links and
 // mocks the DB for the given subscription id.
-func newMultiNodeSub(t *testing.T, subID string) (*Service, *testutil.DatabaseService) {
+func newMultiNodeSub(t *testing.T, subID string) (*Service, *testutil.SubscriptionRepositoryFake) {
 	t.Helper()
 
 	body := liveHy2Link + "\n" + liveVLESSLink
@@ -36,7 +36,7 @@ func newMultiNodeSub(t *testing.T, subID string) (*Service, *testutil.DatabaseSe
 	}))
 	t.Cleanup(backend.Close)
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, id string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, SubscriptionID: id, Status: "active"},

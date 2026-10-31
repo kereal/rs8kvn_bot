@@ -23,7 +23,7 @@ import (
 
 const broadcastTestAdminID = int64(123456)
 
-func newBroadcastTestHandler(mockDB *testutil.DatabaseService, mockBot *testutil.BotAPI) *Handler {
+func newBroadcastTestHandler(mockDB *testutil.BotStoreFake, mockBot *testutil.BotAPI) *Handler {
 	cfg := &config.Config{TelegramAdminID: broadcastTestAdminID}
 	return NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 }
@@ -32,10 +32,94 @@ func broadcastTestAdmin() *tgbotapi.User {
 	return &tgbotapi.User{ID: broadcastTestAdminID, UserName: "admin"}
 }
 
+// newBroadcastSQLiteHandler wires a handler to a real SQLite service for tests
+// that exercise the recipient lease state machine (Snapshot/Claim/Finish/
+// Progress/Recover/Stats), which the in-memory fake deliberately does not
+// mirror (ADR-0001: fakes must not re-implement domain logic).
+func newBroadcastSQLiteHandler(t *testing.T, mockBot *testutil.BotAPI) (*Handler, *database.Service) {
+	t.Helper()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	cfg := &config.Config{TelegramAdminID: broadcastTestAdminID}
+	return NewHandler(mockBot, cfg, db, NewTestBotConfig(), nil, ""), db
+}
+
+// seedBroadcastAudience creates active subscriptions so the real audience
+// snapshot/count queries see the given telegram IDs.
+func seedBroadcastAudience(t *testing.T, db *database.Service, ids ...int64) {
+	t.Helper()
+
+	ctx := context.Background()
+	for _, id := range ids {
+		sub := testutil.CreateTestSubscription(id, fmt.Sprintf("user%d", id), string(database.SubscriptionStatusActive), testutil.PtrTime(time.Now().Add(24*time.Hour)))
+		require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	}
+}
+
+// prepareBroadcastSessionSQLite drives the flow up to the confirm callback
+// against a real database.
+func prepareBroadcastSessionSQLite(t *testing.T, handler *Handler) {
+	t.Helper()
+
+	ctx := context.Background()
+	handler.HandleBroadcast(ctx, createCommandUpdate(broadcastTestAdminID, broadcastTestAdmin(), "/broadcast"))
+	handler.HandleBroadcastDraft(ctx, createTextUpdate(broadcastTestAdmin(), "Тестовая рассылка"))
+	handler.HandleBroadcastDraft(ctx, createTextUpdate(broadcastTestAdmin(), "Привет всем!"))
+}
+
+// confirmBroadcastSQLite confirms the campaign and waits for the durable worker
+// result in the real database instead of relying on a timing-sensitive sleep.
+func confirmBroadcastSQLite(t *testing.T, handler *Handler, db *database.Service) {
+	t.Helper()
+
+	ctx := context.Background()
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "broadcast_confirm",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "broadcast_final_confirm",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+
+	require.Eventually(t, func() bool {
+		broadcasts, err := db.ListBroadcasts(ctx, 10)
+		return err == nil && len(broadcasts) == 1 && broadcasts[0].Status == string(database.BroadcastStatusCompleted)
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+// stubBroadcastRecipientLease scripts the recipient lease machine on the fake
+// for tests that need failure injection: one recipient (telegram 111), a single
+// claim, otherwise-successful finish/recover/stats. Tests override individual
+// Funcs on top of these stubs.
+func stubBroadcastRecipientLease(mockDB *testutil.BotStoreFake) {
+	claimed := false
+	mockDB.SnapshotBroadcastRecipientsFunc = func(context.Context, uint, database.BroadcastFilter) (int64, error) {
+		return 1, nil
+	}
+	mockDB.RecoverStaleBroadcastRecipientsFunc = func(context.Context, uint, time.Time) error {
+		return nil
+	}
+	mockDB.ClaimBroadcastRecipientsFunc = func(_ context.Context, broadcastID uint, now time.Time, _ int) ([]database.BroadcastRecipient, error) {
+		if claimed {
+			return nil, nil
+		}
+		claimed = true
+		return []database.BroadcastRecipient{{ID: 1, BroadcastID: broadcastID, TelegramID: 111, Status: database.BroadcastRecipientSending, Attempts: 1, UpdatedAt: now}}, nil
+	}
+	mockDB.FinishBroadcastRecipientFunc = func(context.Context, uint, uint, int, database.BroadcastRecipientStatus, string, time.Time) error {
+		return nil
+	}
+	mockDB.GetBroadcastRecipientsStatsFunc = func(context.Context, uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error) {
+		return 1, 1, 0, 0, 0, database.BroadcastDeliveryReport{Delivered: []int64{111}}, nil
+	}
+}
+
 func TestBroadcastDetailsCallbackKeepsFullBlockedListInDatabase(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	blocked := make([]int64, 0, 20)
 	for i := int64(1); i <= 20; i++ {
@@ -92,11 +176,11 @@ func TestBroadcast_FloodWaitsRetryAfterThenDelivers(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
-	handler := newBroadcastTestHandler(mockDB, mockBot)
+	handler, db := newBroadcastSQLiteHandler(t, mockBot)
 
-	prepareBroadcastSession(t, handler, mockDB)
+	seedBroadcastAudience(t, db, 111)
+	prepareBroadcastSessionSQLite(t, handler)
 
 	// Telegram rate-limits the bot once (429, retry_after 1s). Delivery must wait
 	// out the hint and deliver WITHOUT spending a normal retry: a flood wait is not
@@ -112,10 +196,10 @@ func TestBroadcast_FloodWaitsRetryAfterThenDelivers(t *testing.T) {
 		return tgbotapi.Message{MessageID: 1}, nil
 	}
 
-	confirmBroadcast(t, handler, mockDB)
+	confirmBroadcastSQLite(t, handler, db)
 
 	assert.Equal(t, 2, sendCalls, "one flood wait + one successful send, normal retry not consumed")
-	broadcasts, err := mockDB.ListBroadcasts(ctx, 10)
+	broadcasts, err := db.ListBroadcasts(ctx, 10)
 	require.NoError(t, err)
 	require.Len(t, broadcasts, 1)
 	b := broadcasts[0]
@@ -131,7 +215,7 @@ func TestBroadcastDetailsCallback(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 
 	require.NoError(t, mockDB.CreateBroadcast(ctx, &database.Broadcast{Name: "Кнопка", MessageText: "Текст", Status: string(database.BroadcastStatusCompleted), SentCount: 7}))
@@ -154,68 +238,24 @@ func TestBroadcastDetailsCallback(t *testing.T) {
 
 // prepareBroadcastSession drives the flow up to the confirm callback: the
 // preview send must succeed before SendFunc is installed by the test.
-func prepareBroadcastSession(t *testing.T, handler *Handler, mockDB *testutil.DatabaseService) {
+func prepareBroadcastSession(t *testing.T, handler *Handler, mockDB *testutil.BotStoreFake) {
 	t.Helper()
 
 	ctx := context.Background()
-
-	mockDB.GetTelegramIDsBatchFunc = func(ctx context.Context, offset, limit int) ([]int64, error) {
-		if offset > 0 {
-			return nil, nil
-		}
-		return []int64{111}, nil
-	}
 
 	handler.HandleBroadcast(ctx, createCommandUpdate(broadcastTestAdminID, broadcastTestAdmin(), "/broadcast"))
 	handler.HandleBroadcastDraft(ctx, createTextUpdate(broadcastTestAdmin(), "Тестовая рассылка"))
 	handler.HandleBroadcastDraft(ctx, createTextUpdate(broadcastTestAdmin(), "Привет всем!"))
 }
 
-func confirmBroadcast(t *testing.T, handler *Handler, mockDB *testutil.DatabaseService) {
-	t.Helper()
-
-	ctx := context.Background()
-
-	// Шаг 1: показать количество получателей.
-	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			From: broadcastTestAdmin(),
-			Data: "broadcast_confirm",
-			Message: &tgbotapi.Message{
-				Chat:      &tgbotapi.Chat{ID: broadcastTestAdminID},
-				MessageID: 1,
-			},
-		},
-	}))
-
-	// Шаг 2: подтвердить и запустить рассылку.
-	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			From: broadcastTestAdmin(),
-			Data: "broadcast_final_confirm",
-			Message: &tgbotapi.Message{
-				Chat:      &tgbotapi.Chat{ID: broadcastTestAdminID},
-				MessageID: 1,
-			},
-		},
-	}))
-
-	// Sending is intentionally asynchronous. Wait for the durable worker result
-	// instead of relying on a timing-sensitive sleep.
-	require.Eventually(t, func() bool {
-		broadcasts, err := mockDB.ListBroadcasts(ctx, 10)
-		return err == nil && len(broadcasts) == 1 && broadcasts[0].Status == string(database.BroadcastStatusCompleted)
-	}, 5*time.Second, 10*time.Millisecond)
-}
-
 func TestBroadcast_DuplicateFinalConfirmCreatesOneCampaign(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
-	handler := newBroadcastTestHandler(mockDB, mockBot)
-	prepareBroadcastSession(t, handler, mockDB)
+	handler, db := newBroadcastSQLiteHandler(t, mockBot)
+	seedBroadcastAudience(t, db, 111)
+	prepareBroadcastSessionSQLite(t, handler)
 
 	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
 		From: broadcastTestAdmin(), Data: "broadcast_confirm",
@@ -243,7 +283,7 @@ func TestBroadcast_DuplicateFinalConfirmCreatesOneCampaign(t *testing.T) {
 	assert.NoError(t, callbackErr)
 
 	require.Eventually(t, func() bool {
-		broadcasts, err := mockDB.ListBroadcasts(ctx, 10)
+		broadcasts, err := db.ListBroadcasts(ctx, 10)
 		return err == nil && len(broadcasts) == 1
 	}, 5*time.Second, 10*time.Millisecond)
 }
@@ -252,11 +292,11 @@ func TestBroadcast_TransientFailureRetriedThenDelivered(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
-	handler := newBroadcastTestHandler(mockDB, mockBot)
+	handler, db := newBroadcastSQLiteHandler(t, mockBot)
 
-	prepareBroadcastSession(t, handler, mockDB)
+	seedBroadcastAudience(t, db, 111)
+	prepareBroadcastSessionSQLite(t, handler)
 
 	// Первая попытка отправки пользователю падает с временной ошибкой, повтор
 	// успешен. Считаем только вызовы к получателю (111) — финальный отчёт
@@ -272,11 +312,11 @@ func TestBroadcast_TransientFailureRetriedThenDelivered(t *testing.T) {
 		return tgbotapi.Message{MessageID: 1}, nil
 	}
 
-	confirmBroadcast(t, handler, mockDB)
+	confirmBroadcastSQLite(t, handler, db)
 
 	assert.Equal(t, 2, sendCalls, "one failed attempt + one retry")
 
-	broadcasts, err := mockDB.ListBroadcasts(ctx, 10)
+	broadcasts, err := db.ListBroadcasts(ctx, 10)
 	require.NoError(t, err)
 	require.Len(t, broadcasts, 1)
 
@@ -293,7 +333,7 @@ func TestBroadcast_TransientFailureRetriedThenDelivered(t *testing.T) {
 func TestBroadcast_CorruptFilterBecomesFailed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := newBroadcastTestHandler(mockDB, mockBot)
 	b := &database.Broadcast{Name: "broken", Filters: "not-json", MessageText: "text", Status: string(database.BroadcastStatusScheduled)}
@@ -308,10 +348,11 @@ func TestBroadcast_CorruptFilterBecomesFailed(t *testing.T) {
 func TestBroadcast_ResultPersistenceFailureLeavesCampaignResumable(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := newBroadcastTestHandler(mockDB, mockBot)
 	prepareBroadcastSession(t, handler, mockDB)
+	stubBroadcastRecipientLease(mockDB)
 	mockDB.FinishBroadcastRecipientFunc = func(ctx context.Context, broadcastID uint, id uint, attempts int, status database.BroadcastRecipientStatus, lastError string, now time.Time) error {
 		return fmt.Errorf("state storage unavailable")
 	}
@@ -327,11 +368,11 @@ func TestBroadcast_RetriesExhaustedRecordsError(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
-	handler := newBroadcastTestHandler(mockDB, mockBot)
+	handler, db := newBroadcastSQLiteHandler(t, mockBot)
 
-	prepareBroadcastSession(t, handler, mockDB)
+	seedBroadcastAudience(t, db, 111)
+	prepareBroadcastSessionSQLite(t, handler)
 
 	// Постоянная временная ошибка: все повторы исчерпаны, ошибка в отчёте.
 	// Считаем только вызовы к получателю (111).
@@ -344,11 +385,11 @@ func TestBroadcast_RetriesExhaustedRecordsError(t *testing.T) {
 		return tgbotapi.Message{MessageID: 1}, nil
 	}
 
-	confirmBroadcast(t, handler, mockDB)
+	confirmBroadcastSQLite(t, handler, db)
 
 	assert.Equal(t, 1+2, sendCalls, "initial attempt + 2 retries")
 
-	broadcasts, err := mockDB.ListBroadcasts(ctx, 10)
+	broadcasts, err := db.ListBroadcasts(ctx, 10)
 	require.NoError(t, err)
 	require.Len(t, broadcasts, 1)
 
@@ -368,10 +409,10 @@ func TestBroadcast_UnreachableUserIsNotReportedAsBlocked(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
-	handler := newBroadcastTestHandler(mockDB, mockBot)
-	prepareBroadcastSession(t, handler, mockDB)
+	handler, db := newBroadcastSQLiteHandler(t, mockBot)
+	seedBroadcastAudience(t, db, 111)
+	prepareBroadcastSessionSQLite(t, handler)
 
 	var sendCalls int
 	mockBot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -382,10 +423,10 @@ func TestBroadcast_UnreachableUserIsNotReportedAsBlocked(t *testing.T) {
 		return tgbotapi.Message{MessageID: 1}, nil
 	}
 
-	confirmBroadcast(t, handler, mockDB)
+	confirmBroadcastSQLite(t, handler, db)
 	assert.Equal(t, 1, sendCalls, "permanent unreachable errors must not be retried")
 
-	broadcasts, err := mockDB.ListBroadcasts(ctx, 10)
+	broadcasts, err := db.ListBroadcasts(ctx, 10)
 	require.NoError(t, err)
 	require.Len(t, broadcasts, 1)
 	assert.Equal(t, int64(0), broadcasts[0].BlockedCount)
@@ -399,7 +440,7 @@ func TestBroadcast_UnreachableUserIsNotReportedAsBlocked(t *testing.T) {
 func TestBroadcast_ProcessFailurePersistsRetryMetadata(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := newBroadcastTestHandler(mockDB, mockBot)
 	campaign := &database.Broadcast{Name: "snapshot retry", MessageText: "text", Status: string(database.BroadcastStatusScheduled)}
@@ -421,26 +462,27 @@ func TestBroadcast_ProcessFailurePersistsRetryMetadata(t *testing.T) {
 func TestBroadcast_PlannedResumeDoesNotCountAsRetry(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
-	handler := newBroadcastTestHandler(mockDB, mockBot)
-	campaign := &database.Broadcast{Name: "resume", MessageText: "text", Status: string(database.BroadcastStatusScheduled)}
-	require.NoError(t, mockDB.CreateBroadcast(ctx, campaign))
+	handler, db := newBroadcastSQLiteHandler(t, mockBot)
 
 	// One recipient already delivered, one still in flight: the campaign ends
 	// its time slice incomplete and must resume on the next pass without being
 	// counted as a failed launch.
-	mockDB.ClaimBroadcastRecipientsFunc = func(context.Context, uint, time.Time, int) ([]database.BroadcastRecipient, error) {
-		return nil, nil
-	}
-	mockDB.GetBroadcastRecipientsStatsFunc = func(context.Context, uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error) {
-		return 2, 1, 0, 0, 0, database.BroadcastDeliveryReport{Delivered: []int64{710001}}, nil
-	}
+	state, err := json.Marshal(map[string]any{
+		"snapshot": true,
+		"recipients": []database.BroadcastRecipient{
+			{ID: 1, TelegramID: 710001, Status: database.BroadcastRecipientSent, UpdatedAt: time.Now().UTC()},
+			{ID: 2, TelegramID: 710002, Status: database.BroadcastRecipientSending, UpdatedAt: time.Now().UTC()},
+		},
+	})
+	require.NoError(t, err)
+	campaign := &database.Broadcast{Name: "resume", MessageText: "text", Status: string(database.BroadcastStatusScheduled), RecipientsState: string(state)}
+	require.NoError(t, db.CreateBroadcast(ctx, campaign))
 
-	err := handler.broadcastWorker.processCampaign(ctx, campaign)
+	err = handler.broadcastWorker.processCampaign(ctx, campaign)
 	require.ErrorIs(t, err, errBroadcastIncomplete)
 
-	stored, getErr := mockDB.GetBroadcast(ctx, campaign.ID)
+	stored, getErr := db.GetBroadcast(ctx, campaign.ID)
 	require.NoError(t, getErr)
 	assert.Equal(t, string(database.BroadcastStatusRunning), stored.Status, "incomplete campaign stays resumable")
 	assert.Zero(t, stored.RetryCount, "a planned resume must not count as a retry")
@@ -450,7 +492,7 @@ func TestBroadcast_PlannedResumeDoesNotCountAsRetry(t *testing.T) {
 func TestBroadcast_ScheduleRetryPersistsBackoffMetadata(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := newBroadcastTestHandler(mockDB, mockBot)
 	campaign := &database.Broadcast{Name: "retry", MessageText: "text", Status: string(database.BroadcastStatusScheduled)}
@@ -471,11 +513,11 @@ func TestBroadcast_BlockedUserNeverRetried(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
-	handler := newBroadcastTestHandler(mockDB, mockBot)
+	handler, db := newBroadcastSQLiteHandler(t, mockBot)
 
-	prepareBroadcastSession(t, handler, mockDB)
+	seedBroadcastAudience(t, db, 111)
+	prepareBroadcastSessionSQLite(t, handler)
 
 	var sendCalls int
 	mockBot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -486,11 +528,11 @@ func TestBroadcast_BlockedUserNeverRetried(t *testing.T) {
 		return tgbotapi.Message{MessageID: 1}, nil
 	}
 
-	confirmBroadcast(t, handler, mockDB)
+	confirmBroadcastSQLite(t, handler, db)
 
 	assert.Equal(t, 1, sendCalls, "blocked error must not be retried")
 
-	broadcasts, err := mockDB.ListBroadcasts(ctx, 10)
+	broadcasts, err := db.ListBroadcasts(ctx, 10)
 	require.NoError(t, err)
 	require.Len(t, broadcasts, 1)
 
@@ -509,12 +551,12 @@ func TestBroadcast_ConfirmCreatesBroadcastAndShowsHeader(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
-	handler := newBroadcastTestHandler(mockDB, mockBot)
+	handler, db := newBroadcastSQLiteHandler(t, mockBot)
 
-	prepareBroadcastSession(t, handler, mockDB)
-	confirmBroadcast(t, handler, mockDB)
+	seedBroadcastAudience(t, db, 111)
+	prepareBroadcastSessionSQLite(t, handler)
+	confirmBroadcastSQLite(t, handler, db)
 
 	// The worker persists completion before sending its report, and the queue
 	// acknowledgement can arrive after that report. Wait for the actual report
@@ -533,7 +575,7 @@ func TestBroadcast_ConfirmCreatesBroadcastAndShowsHeader(t *testing.T) {
 	assert.Contains(t, report, "Рассылка #1")
 	assert.Contains(t, report, "Тестовая рассылка")
 
-	broadcasts, err := mockDB.ListBroadcasts(ctx, 10)
+	broadcasts, err := db.ListBroadcasts(ctx, 10)
 	require.NoError(t, err)
 	require.Len(t, broadcasts, 1)
 	assert.Equal(t, "Тестовая рассылка", broadcasts[0].Name)
@@ -547,9 +589,10 @@ func TestBroadcast_ConfirmDBFailureKeepsDraftRecoverable(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := newBroadcastTestHandler(mockDB, mockBot)
+	stubBroadcastRecipientLease(mockDB)
 
 	mockDB.CreateBroadcastFunc = func(ctx context.Context, b *database.Broadcast) error {
 		return fmt.Errorf("db is down")
@@ -624,9 +667,8 @@ func TestBroadcast_RecipientResumesFromSavedChunk(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
 	mockBot := testutil.NewBotAPI()
-	handler := newBroadcastTestHandler(mockDB, mockBot)
+	handler, db := newBroadcastSQLiteHandler(t, mockBot)
 
 	// Первый чанк уже был доставлен до краша: в снапшоте сохранён NextChunk=1.
 	state, err := json.Marshal(map[string]any{
@@ -640,7 +682,7 @@ func TestBroadcast_RecipientResumesFromSavedChunk(t *testing.T) {
 		Name: "resume", MessageText: multiChunkText(),
 		Status: string(database.BroadcastStatusScheduled), RecipientsState: string(state),
 	}
-	require.NoError(t, mockDB.CreateBroadcast(ctx, b))
+	require.NoError(t, db.CreateBroadcast(ctx, b))
 
 	var sends []string
 	var mu sync.Mutex
@@ -659,7 +701,7 @@ func TestBroadcast_RecipientResumesFromSavedChunk(t *testing.T) {
 	assert.Contains(t, sends[0], strings.Repeat("2", 64), "отправка возобновляется со второго чанка")
 	assert.Contains(t, sends[1], strings.Repeat("3", 64))
 
-	stored, err := mockDB.GetBroadcast(ctx, b.ID)
+	stored, err := db.GetBroadcast(ctx, b.ID)
 	require.NoError(t, err)
 	assert.Equal(t, string(database.BroadcastStatusCompleted), stored.Status)
 	assert.Equal(t, int64(1), stored.SentCount)
@@ -669,9 +711,10 @@ func TestBroadcast_ProgressPersistedAfterEachChunk(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := newBroadcastTestHandler(mockDB, mockBot)
+	stubBroadcastRecipientLease(mockDB)
 
 	state, err := json.Marshal(map[string]any{
 		"snapshot": true,
@@ -707,7 +750,7 @@ func TestHandleCallback_BroadcastNonAdminAnswersCallback(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 999999} // not the chat ID
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 

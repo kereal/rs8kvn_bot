@@ -4,7 +4,7 @@ package service
 // used by both ApplyPlan entry points:
 //
 //   - background best-effort sync (reconcilePlanNodesLocked in sync.go,
-//     backed by interfaces.DatabaseService, per-node errors joined);
+//     backed by interfaces.SyncStore, per-node errors joined);
 //   - transactional payment CAS (ApplyPlanToSubscriptionInTx in sync_tx.go,
 //     backed by the caller's *gorm.DB, fail-fast with rollback).
 //
@@ -274,10 +274,10 @@ func reconcilePlanNodesCore(ctx context.Context, store planNodeStore, subscripti
 	return nil
 }
 
-// dbServicePlanStore adapts the reconciliation core to interfaces.DatabaseService
+// dbServicePlanStore adapts the reconciliation core to interfaces.SyncStore
 // for the background best-effort sync path.
 type dbServicePlanStore struct {
-	db interfaces.DatabaseService
+	db interfaces.SyncStore
 }
 
 func (s dbServicePlanStore) LoadSubscription(ctx context.Context, subscriptionID uint) (*database.Subscription, error) {

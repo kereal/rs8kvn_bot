@@ -10,7 +10,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"gorm.io/gorm"
 )
 
 var _ DatabaseService = (*database.Service)(nil)
@@ -94,11 +93,16 @@ type SubscriptionJSONFields interface {
 	UpdateIPs(ctx context.Context, id uint, ipsJSON string) error
 }
 
-// SubscriptionReminderRepository provides the atomic reminder workflow and expiry query.
-type SubscriptionReminderRepository interface {
-	GetSubscriptionsExpiringInRange(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
+// SubscriptionReminderBits is the atomic claim/release reminder workflow.
+type SubscriptionReminderBits interface {
 	ClaimReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
 	ReleaseReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) error
+}
+
+// SubscriptionReminderRepository provides the atomic reminder workflow and expiry query.
+type SubscriptionReminderRepository interface {
+	SubscriptionReminderBits
+	GetSubscriptionsExpiringInRange(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
 }
 
 // SubscriptionReminderWindow identifies one expiry reminder touch.
@@ -237,12 +241,10 @@ type BroadcastRepository interface {
 	GetBroadcastRecipientsStats(ctx context.Context, broadcastID uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error)
 }
 
-// AuditLogRepository provides append-only write access to the system audit log.
-type AuditLogRepository interface {
-	InsertAuditLog(ctx context.Context, e *database.AuditLog) error
-}
-
-// DatabaseService is the composed persistence contract used by application services.
+// DatabaseService is the composed persistence contract for the composition
+// root (cmd/bot). Business modules depend on the narrow per-consumer seams
+// below (ADR-0001); lifecycle (Ping/Close) and pool inspection stay on the
+// concrete *database.Service the root already holds.
 type DatabaseService interface {
 	SubscriptionNodeRepository
 	SubscriptionRepository
@@ -253,11 +255,119 @@ type DatabaseService interface {
 	ProductRepository
 	OrderRepository
 	BroadcastRepository
-	AuditLogRepository
-	Ping(ctx context.Context) error
-	Close() error
-	GetPoolStats() (*database.PoolStats, error)
-	Transaction(ctx context.Context, fn func(*gorm.DB) error) error
+	AuditLogWriter
+}
+
+// SubscriptionStore is the persistence seam of service.SubscriptionService:
+// the subscription/trial/invite/plan/product/node operations it performs plus
+// the reminder claim/release bits it drives through its reminder and traffic
+// repos and the broadcast stats its deactivation report reads.
+type SubscriptionStore interface {
+	CreateSubscription(ctx context.Context, sub *database.Subscription, inviteCode string) error
+	UpdateSubscription(ctx context.Context, sub *database.Subscription) error
+	DeleteSubscriptionByID(ctx context.Context, id uint) (*database.Subscription, error)
+	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	GetAnyByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
+	GetAllSubscriptions(ctx context.Context) ([]database.Subscription, error)
+	GetBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
+	CountActiveSubscriptions(ctx context.Context) (int64, error)
+	CountPremiumSubscriptions(ctx context.Context) (int64, error)
+	CountFreeSubscriptions(ctx context.Context) (int64, error)
+	CountTrialSubscriptions(ctx context.Context) (int64, error)
+	ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error
+	GetInviteByCode(ctx context.Context, code string) (*database.Invite, error)
+	CreateTrialSubscription(ctx context.Context, inviteCode, subscriptionID, clientID string, expiryTime time.Time) (*database.Subscription, error)
+	GetTrialSubscriptionBySubID(ctx context.Context, subscriptionID string) (*database.Subscription, error)
+	BindTrialSubscription(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
+	ClaimExpiredTrials(ctx context.Context, hours int) ([]database.Subscription, error)
+	DeleteClaimedTrial(ctx context.Context, id uint) error
+	GetNodesByPlanID(ctx context.Context, planID uint) ([]database.Node, error)
+	GetNodesByPlanName(ctx context.Context, planName string) ([]database.Node, error)
+	GetPlanByID(ctx context.Context, planID uint) (*database.Plan, error)
+	GetPlanByName(ctx context.Context, name string) (*database.Plan, error)
+	GetProductByID(ctx context.Context, id uint) (*database.Product, error)
+	ClaimReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
+	ReleaseReminder(ctx context.Context, id uint, bit int, expiresAt time.Time) error
+	ClaimTrafficReminder(ctx context.Context, id uint, bit int) (bool, error)
+	ReleaseTrafficReminder(ctx context.Context, id uint, bit int) error
+	DeleteSubscriptionNodesBySubscriptionID(ctx context.Context, subID uint) error
+	UpsertSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error
+	GetBroadcastRecipientsStats(ctx context.Context, broadcastID uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error)
+	InsertAuditLog(ctx context.Context, e *database.AuditLog) error
+}
+
+// SyncStore is the persistence seam of service.SyncService and the
+// planNodeStore adapter built on it: subscription reads/writes plus the
+// subscription-node sync state machine.
+type SyncStore interface {
+	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
+	GetBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
+	GetPendingSync(ctx context.Context) ([]database.SubscriptionNode, error)
+	GetPendingBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
+	GetNodeByID(ctx context.Context, id uint) (*database.Node, error)
+	GetNodesByPlanID(ctx context.Context, planID uint) ([]database.Node, error)
+	GetPlanByID(ctx context.Context, planID uint) (*database.Plan, error)
+	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	GetInviteByCode(ctx context.Context, code string) (*database.Invite, error)
+	UpdateSubscription(ctx context.Context, sub *database.Subscription) error
+	DeleteSubscriptionNode(ctx context.Context, subID, nodeID uint) error
+	DeleteSubscriptionNodesBySubscriptionID(ctx context.Context, subID uint) error
+	UpdateSubscriptionNodeStatus(ctx context.Context, subID, nodeID uint, status database.SyncStatus) error
+	UpsertSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error
+	MarkActiveNodesPendingUpdate(ctx context.Context, subID uint, targetNodeIDs []uint) error
+	UpdateRetry(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error
+}
+
+// OrderStore is the persistence seam of service.OrderService: order lifecycle,
+// payment-intent writes, CAS transitions, plus the plan/product/subscription
+// reads and audit writes its callbacks need.
+type OrderStore interface {
+	OrderRepository
+	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
+	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	GetPlanByID(ctx context.Context, planID uint) (*database.Plan, error)
+	GetPlanByName(ctx context.Context, name string) (*database.Plan, error)
+	GetProductByID(ctx context.Context, id uint) (*database.Product, error)
+	InsertAuditLog(ctx context.Context, e *database.AuditLog) error
+}
+
+// BotStore is the persistence seam of bot.Handler: broadcast management,
+// subscription/plan/product reads for menus and lookups, invite-code reads,
+// and audit writes. It also covers the narrower referral seams the handler
+// wires its referral cache and handler with.
+type BotStore interface {
+	BroadcastRepository
+	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error)
+	CountAllSubscriptions(ctx context.Context) (int64, error)
+	CountActiveSubscriptions(ctx context.Context) (int64, error)
+	GetTelegramIDByUsername(ctx context.Context, username string) (int64, error)
+	GetFilteredTelegramIDCount(ctx context.Context, filter database.BroadcastFilter) (int64, error)
+	GetPlanByID(ctx context.Context, planID uint) (*database.Plan, error)
+	GetProductByID(ctx context.Context, id uint) (*database.Product, error)
+	ListActiveProducts(ctx context.Context) ([]database.Product, error)
+	GetInviteByCode(ctx context.Context, code string) (*database.Invite, error)
+	GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
+	GetInviteByReferrer(ctx context.Context, referrerTGID int64) (*database.Invite, error)
+	GetAllReferralCounts(ctx context.Context) (map[int64]int64, error)
+	InsertAuditLog(ctx context.Context, e *database.AuditLog) error
+}
+
+// ReferralCountSource feeds bot.ReferralCache with referral counters.
+type ReferralCountSource interface {
+	GetAllReferralCounts(ctx context.Context) (map[int64]int64, error)
+}
+
+// ReferralInviteStore is the persistence seam of bot.ReferralHandler.
+type ReferralInviteStore interface {
+	GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
+	GetInviteByReferrer(ctx context.Context, referrerTGID int64) (*database.Invite, error)
+}
+
+// AuditLogWriter is the persistence seam of scheduler.SubscriptionSyncWorker.
+type AuditLogWriter interface {
+	InsertAuditLog(ctx context.Context, e *database.AuditLog) error
 }
 
 // XUIClientReader contains read-only panel operations.

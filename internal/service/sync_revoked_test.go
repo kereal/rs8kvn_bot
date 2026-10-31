@@ -99,7 +99,7 @@ func TestSyncService_RevokedRemovalQueueFailure(t *testing.T) {
 			t.Parallel()
 
 			var queued, retried, deleted []uint
-			db := testutil.NewDatabaseService()
+			db := testutil.NewServiceStoreFake()
 			db.UpdateSubscriptionNodeStatusFunc = func(_ context.Context, _ uint, nodeID uint, status database.SyncStatus) error {
 				assert.Equal(t, database.SyncStatusPendingRemove, status)
 				queued = append(queued, nodeID)

@@ -44,7 +44,7 @@ func TestBroadcastCancelCallback_Scheduled(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	cancelCalled := false
 	mockDB.CancelBroadcastFunc = func(ctx context.Context, id uint, now time.Time) (bool, error) {
@@ -65,7 +65,7 @@ func TestBroadcastCancelCallback_AlreadyTerminal(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	mockDB.CancelBroadcastFunc = func(ctx context.Context, id uint, now time.Time) (bool, error) {
 		return false, nil
@@ -83,7 +83,7 @@ func TestBroadcastRetryCallback(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	retryCalled := false
 	mockDB.ResetBroadcastFailedRecipientsFunc = func(ctx context.Context, id uint, now time.Time) error {
@@ -105,7 +105,7 @@ func TestBroadcastCancelRejectedForNonAdmin(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.CancelBroadcastFunc = func(ctx context.Context, id uint, now time.Time) (bool, error) {
 		t.Fatal("CancelBroadcast must not be called for a non-admin")
 		return false, nil
@@ -179,7 +179,7 @@ func TestHandleBroadcastFilter(t *testing.T) {
 			t.Parallel()
 
 			ctx := context.Background()
-			mockDB := testutil.NewDatabaseService()
+			mockDB := testutil.NewBotStoreFake()
 			mockBot := testutil.NewBotAPI()
 			handler := newBroadcastTestHandler(mockDB, mockBot)
 			prepareBroadcastSession(t, handler, mockDB)
@@ -200,7 +200,7 @@ func TestHandleBroadcastFilter_ToggleOff(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := newBroadcastTestHandler(mockDB, mockBot)
 	prepareBroadcastSession(t, handler, mockDB)
@@ -224,7 +224,7 @@ func TestHandleBroadcastBackToFilters(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	mockDB.GetFilteredTelegramIDCountFunc = func(ctx context.Context, filter database.BroadcastFilter) (int64, error) {
 		return 5, nil
@@ -251,7 +251,7 @@ func TestBroadcastScheduleFlow(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := newBroadcastTestHandler(mockDB, mockBot)
 	prepareBroadcastSession(t, handler, mockDB)
@@ -312,7 +312,7 @@ func TestBroadcastScheduleBackToConfirm(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockBot := testutil.NewBotAPI()
 	handler := newBroadcastTestHandler(mockDB, mockBot)
 	prepareBroadcastSession(t, handler, mockDB)
