@@ -381,11 +381,11 @@ func TestSyncService_SyncSubscription_PendingUpdate_PreservesPanelProfile(t *tes
 	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
 }
 
-// TestSyncService_SyncSubscription_PendingUpdate_MissingClientNoCreateFallback
+// TestSyncService_SyncSubscription_PendingUpdate_MissingClientFallsBackToCreate
 // checks the full update path when the client is gone from the panel: the item
-// fails with the sentinel and neither UpdateSubscription nor CreateSubscription
-// is attempted (no fallback to create).
-func TestSyncService_SyncSubscription_PendingUpdate_MissingClientNoCreateFallback(t *testing.T) {
+// is re-queued as pending_add (create path) in the same pass — no update
+// attempted, no retry ladder, next worker pass provisions the client.
+func TestSyncService_SyncSubscription_PendingUpdate_MissingClientFallsBackToCreate(t *testing.T) {
 	t.Parallel()
 
 	db, err := testutil.NewTestDatabaseService(t)
@@ -413,16 +413,72 @@ func TestSyncService_SyncSubscription_PendingUpdate_MissingClientNoCreateFallbac
 	svc := NewSyncService(db, NodeClients{node.ID: {Provision: mockVPN, Reader: reader}}, []database.Node{*node})
 
 	// SyncSubscription swallows per-node failures by contract (best-effort
-	// external sync); the outcome is observable in the DB retry state.
+	// external sync); the outcome is observable in the node status.
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 	assert.False(t, mockVPN.updateCalled, "update must not run without the panel profile")
-	assert.False(t, mockVPN.createCalled, "update must not fall back to create when the client is missing")
+	assert.False(t, mockVPN.createCalled, "create runs on the next pass, not in the same one")
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Equal(t, database.SyncStatusPendingUpdate, rows[0].Status, "the item must stay pending for retry")
-	assert.NotZero(t, rows[0].RetryCount)
-	require.NotNil(t, rows[0].LastError)
-	assert.Contains(t, *rows[0].LastError, vpn.ErrSubscriptionNotFound.Error())
+	assert.Equal(t, database.SyncStatusPendingAdd, rows[0].Status, "the item must be re-queued for create")
+	assert.Zero(t, rows[0].RetryCount, "the status transition resets retry metadata")
+	assert.Nil(t, rows[0].RetryAt)
+	assert.Nil(t, rows[0].LastError)
+}
+
+// TestSyncService_SyncSubscription_PendingUpdate_MissingClientThenCreate
+// runs the fallback end-to-end: after the pending_add re-queue the next pass
+// creates the client and marks the node active.
+func TestSyncService_SyncSubscription_PendingUpdate_MissingClientThenCreate(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "prov-e2e-fallback", IsActive: true, DevicesLimit: 1, TrafficLimit: 2048}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node := &database.Node{Name: "prov-fallback-node", Type: database.NodeType3xUI, IsActive: true, Host: "http://pf", APIToken: "t", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node.ID}).Error)
+
+	sub := &database.Subscription{TelegramID: 994004, Username: "fb-user", ClientID: "fb-client", SubscriptionID: "fb-sub", Status: "active", PlanID: plan.ID, ExpiresAt: testutil.PtrTime(time.Now().UTC().Add(12 * time.Hour))}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusPendingUpdate}))
+
+	clientGone := true
+	reader := &testutil.XUIClient{}
+	reader.GetClientByEmailFunc = func(context.Context, string) (*xui.ClientRecord, error) {
+		if clientGone {
+			return nil, xui.ErrClientNotFound
+		}
+
+		return &xui.ClientRecord{Client: xui.ClientConfig{Reset: 30, TrafficReset: "monthly", TrafficResetDay: 1}}, nil
+	}
+
+	mockVPN := &mockVPNClient{}
+	svc := NewSyncService(db, NodeClients{node.ID: {Provision: mockVPN, Reader: reader}}, []database.Node{*node})
+
+	// Pass 1: update discovers the missing client, re-queues pending_add.
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, database.SyncStatusPendingAdd, rows[0].Status)
+
+	// Pass 2: the create path provisions the client fresh.
+	clientGone = false
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	assert.True(t, mockVPN.createCalled, "the re-queued node must be provisioned by the create path")
+
+	rows, err = db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
+	assert.Zero(t, rows[0].RetryCount)
 }

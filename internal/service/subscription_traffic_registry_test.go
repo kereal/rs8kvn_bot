@@ -263,6 +263,100 @@ func TestGetWithTraffic_InactiveBindingNotPolled(t *testing.T) {
 	assert.Equal(t, "неизвестно", info.ResetInfo)
 }
 
+// TestGetWithTraffic_NoReadersOnActiveBindings shows the honest card when all
+// active bindings sit on reader-less nodes (proxman/fetch): no polling, no
+// misleading 0 ГБ — Available=false carries the «недоступен» rendering.
+func TestGetWithTraffic_NoReadersOnActiveBindings(t *testing.T) {
+	t.Parallel()
+
+	h := &trafficRegistryHarness{
+		// readableNodeID=0: no node in the registry carries a reader.
+		bindings: map[uint]database.SyncStatus{1: database.SyncStatusActive, 2: database.SyncStatusActive},
+	}
+	svc := newTrafficRegistryHarness(t, h)(0)
+
+	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
+	db := svc.db.(*testutil.ServiceStoreFake)
+	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
+	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
+		return &database.Plan{ID: 1, TrafficLimit: 10 * 1024 * 1024 * 1024}, nil
+	}
+
+	_, info, err := svc.GetWithTraffic(context.Background(), 42)
+	require.NoError(t, err)
+
+	assert.Zero(t, h.trafficCalls, "no readers means no polling")
+	assert.False(t, info.Available, "no reader on any active node: traffic is not measured")
+	assert.Zero(t, info.UsedGB)
+	assert.Equal(t, "неизвестно", info.ResetInfo)
+
+	msg := FormatSubscriptionMessage("📋 *Ваша подписка*", "активна", info, "https://example.test/sub/abc")
+	assert.Contains(t, msg, "📊 Трафик: недоступен")
+	assert.NotContains(t, msg, "0.00 из 10 Гб")
+}
+
+// TestGetWithTraffic_PartialReadersSumReadableOnly checks a mixed fleet: the
+// sum covers the readable nodes and the figure is measured (Available=true).
+func TestGetWithTraffic_PartialReadersSumReadableOnly(t *testing.T) {
+	t.Parallel()
+
+	h := &trafficRegistryHarness{
+		traffic:  &xui.ClientTraffic{Up: 1024, Down: 2048},
+		bindings: map[uint]database.SyncStatus{1: database.SyncStatusActive, 2: database.SyncStatusActive},
+	}
+	svc := newTrafficRegistryHarness(t, h)(1)
+
+	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
+	db := svc.db.(*testutil.ServiceStoreFake)
+	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
+	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
+		return &database.Plan{ID: 1, TrafficLimit: 10 * 1024 * 1024 * 1024}, nil
+	}
+
+	_, info, err := svc.GetWithTraffic(context.Background(), 42)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, h.trafficCalls, "only readable nodes are polled")
+	assert.True(t, info.Available)
+	assert.InDelta(t, 3.0/1024/1024, info.UsedGB, 1e-9)
+}
+
+// TestFormatSubscriptionMessage_TrafficUnavailable pins the honest rendering:
+// a measured figure keeps the classic line, an unmeasurable one (no readers)
+// shows «недоступен» without a progress bar.
+func TestFormatSubscriptionMessage_TrafficUnavailable(t *testing.T) {
+	t.Parallel()
+
+	unavailable := &TrafficInfo{
+		LimitGB:            100,
+		ResetInfo:          "неизвестно",
+		CreatedAtFormatted: "01.10.2026 12:00",
+		ExpiresAtFormatted: "31.10.2026 12:00",
+		PlanName:           "Free",
+	}
+
+	got := FormatSubscriptionMessage("📋 *Ваша подписка*", "активна", unavailable, "https://example.test/sub/abc")
+	assert.Contains(t, got, "📊 Трафик: недоступен\n")
+	assert.NotContains(t, got, "Гб")
+	assert.NotContains(t, got, "█")
+
+	// Measured traffic is unchanged by the Available flag rendering.
+	measured := &TrafficInfo{
+		UsedGB:             2.5,
+		LimitGB:            100,
+		Percentage:         2.5,
+		ProgressBar:        "[█░░░]",
+		ResetInfo:          "через 12 дн.",
+		CreatedAtFormatted: "01.10.2026 12:00",
+		ExpiresAtFormatted: "31.10.2026 12:00",
+		PlanName:           "Free",
+	}
+	measured.Available = true
+
+	got = FormatSubscriptionMessage("📋 *Ваша подписка*", "активна", measured, "https://example.test/sub/abc")
+	assert.Contains(t, got, "📊 Трафик: 2.50 из 100 Гб (2%)")
+}
+
 // TestFormatSubscriptionMessage_Golden pins the full card text: only the
 // «🔄 Сброс» line may carry the new reset values, every other line must stay
 // byte-identical.
@@ -285,6 +379,7 @@ func TestFormatSubscriptionMessage_Golden(t *testing.T) {
 				CreatedAtFormatted: "01.10.2026 12:00",
 				ExpiresAtFormatted: "31.10.2026 12:00",
 				PlanName:           "Free",
+				Available:          true,
 			},
 			want: "📋 *Ваша подписка*\n\n" +
 				"✌️ Статус: *активна*\n" +
@@ -308,6 +403,7 @@ func TestFormatSubscriptionMessage_Golden(t *testing.T) {
 				CreatedAtFormatted: "01.10.2026 12:00",
 				ExpiresAtFormatted: "31.10.2026 12:00",
 				PlanName:           "Free",
+				Available:          true,
 			},
 			want: "📋 *Ваша подписка*\n\n" +
 				"✌️ Статус: *активна*\n" +
@@ -331,6 +427,7 @@ func TestFormatSubscriptionMessage_Golden(t *testing.T) {
 				CreatedAtFormatted: "01.10.2026 12:00",
 				ExpiresAtFormatted: "31.10.2026 12:00",
 				PlanName:           "Free",
+				Available:          true,
 			},
 			want: "📋 *Ваша подписка*\n\n" +
 				"✌️ Статус: *активна*\n" +
@@ -354,6 +451,7 @@ func TestFormatSubscriptionMessage_Golden(t *testing.T) {
 				CreatedAtFormatted: "01.10.2026 12:00",
 				ExpiresAtFormatted: "31.10.2026 12:00",
 				PlanName:           "Free",
+				Available:          true,
 			},
 			want: "📋 *Ваша подписка*\n\n" +
 				"✌️ Статус: *активна*\n" +

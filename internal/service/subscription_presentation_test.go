@@ -16,6 +16,7 @@ func TestFormatSubscriptionMessage_UsesCanonicalFields(t *testing.T) {
 		CreatedAtFormatted: "01.01.2026 12:00",
 		ExpiresAtFormatted: "31.01.2026 12:00",
 		ResetInfo:          "через 5 дн.",
+		Available:          true,
 	}
 
 	got := FormatSubscriptionMessage("📋 *Ваша подписка*", "активна", traffic, "https://example.test/sub/abc")
