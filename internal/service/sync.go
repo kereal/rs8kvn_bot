@@ -12,6 +12,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
+	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -437,51 +438,19 @@ func (s *SyncService) retryUnavailableNode(ctx context.Context, sn *database.Sub
 
 // processPendingUpdate updates an existing VPN subscription client configuration.
 // Used when a plan change requires updating traffic limits or expiry on an active node.
+// The auto-renew profile is preserved from the panel (read-modify-write):
+// manual admin edits must not be overwritten by product defaults.
 func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription) error {
 	client, ok := s.clients.Provision(sn.NodeID)
 	if !ok {
 		return s.retryUnavailableNode(ctx, sn, sub, "pending_update")
 	}
 
-	plan, err := s.db.GetPlanByID(ctx, sub.PlanID)
+	provision, err := s.buildNodeProvision(ctx, sub, sn.NodeID, profilePreserve)
 	if err != nil {
 		s.handleSyncError(ctx, sn, err)
-		return fmt.Errorf("load plan for subscription sync: %w", err)
-	}
 
-	comment, err := referrerComment(ctx, s.db, sub)
-	if err != nil {
-		s.handleSyncError(ctx, sn, err)
-		return fmt.Errorf("load referrer comment: %w", err)
-	}
-
-	provision := vpn.SubscriptionProvision{
-		ClientID:     sub.ClientID,
-		Username:     syncIdentifier(sub),
-		CurrentEmail: syncIdentifier(sub),
-		SubID:        sub.SubscriptionID,
-		TrafficBytes: plan.TrafficLimit,
-		TgID:         sub.TelegramID,
-		Comment:      comment,
-	}
-	if plan.TrafficLimit > 0 {
-		if plan.Name == database.TrialPlanName {
-			provision.ResetDays = 0
-		} else {
-			provision.ResetDays = -1
-			provision.ResetMax = 0
-			provision.TrafficReset = "monthly"
-			provision.TrafficResetDay = 1
-		}
-
-		if sub.ExpiresAt != nil {
-			provision.ExpiryTime = *sub.ExpiresAt
-		} else {
-			provision.ExpiryTime = time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, config.SubscriptionResetDay)
-		}
-		// NB: recovery of an already-expired free client (move expiry to the
-		// next cycle) happens in the xui layer (doUpdateClient), guarded by
-		// resetDays > 0 so trials are never extended here.
+		return fmt.Errorf("build provision for pending update node %d: %w", sn.NodeID, err)
 	}
 
 	logger.Debug("updating VPN subscription",
@@ -517,24 +486,45 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 	return nil
 }
 
-// processPendingAdd creates a VPN subscription on the target node.
-// Handles idempotent "already exists" errors by synchronizing config and only then marking active.
-func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription) error {
-	client, ok := s.clients.Provision(sn.NodeID)
-	if !ok {
-		return s.retryUnavailableNode(ctx, sn, sub, "pending_add")
-	}
+// profilePolicy selects the auto-renew profile policy of the provision build.
+type profilePolicy int
 
+const (
+	// profileDefault writes the product default profile: monthly traffic
+	// reset on day 1, renewal interval config.SubscriptionResetDay,
+	// unlimited renewals. Used by the add path.
+	profileDefault profilePolicy = iota
+	// profilePreserve copies the current panel profile into the provision
+	// (read-modify-write), so manual admin edits survive a plan change.
+	profilePreserve
+)
+
+// buildNodeProvision is the single assembly point of vpn.SubscriptionProvision
+// for the sync add and update paths: common client fields plus an auto-renew
+// profile chosen by policy. Previously both paths carried a copy of this
+// build, which already produced a production drift (create wrote reset=-1).
+//
+// A trial always gets a profile without a reset cycle (reset=0,
+// trafficReset=never): the trial quota never renews, regardless of the path
+// policy or the client's current panel profile. The profile is sent explicitly
+// because the panel does not merge profiles on write — an omitted trafficReset
+// is normalized to "never" (doc/panel-api-contract.md, §4.2).
+//
+// With profilePreserve the profile is read from the panel
+// (GET /clients/get/{email}) — the only source of the full profile. A missing
+// client yields the sentinel vpn.ErrSubscriptionNotFound (no fallback to
+// create); any other read error fails the item, because writing the default
+// profile would erase manual admin edits. Nodes without a readable panel
+// (proxman, fetch) have no profile to preserve and get the product default.
+func (s *SyncService) buildNodeProvision(ctx context.Context, sub *database.Subscription, nodeID uint, policy profilePolicy) (vpn.SubscriptionProvision, error) {
 	plan, err := s.db.GetPlanByID(ctx, sub.PlanID)
 	if err != nil {
-		s.handleSyncError(ctx, sn, err)
-		return fmt.Errorf("load plan for subscription sync: %w", err)
+		return vpn.SubscriptionProvision{}, fmt.Errorf("load plan for subscription sync: %w", err)
 	}
 
 	comment, err := referrerComment(ctx, s.db, sub)
 	if err != nil {
-		s.handleSyncError(ctx, sn, err)
-		return fmt.Errorf("load referrer comment: %w", err)
+		return vpn.SubscriptionProvision{}, fmt.Errorf("load referrer comment: %w", err)
 	}
 
 	provision := vpn.SubscriptionProvision{
@@ -546,16 +536,38 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 		TgID:         sub.TelegramID,
 		Comment:      comment,
 	}
+
 	if plan.TrafficLimit > 0 {
 		// Trials must never auto-renew even though the trial plan carries a
 		// traffic limit (which would otherwise enable it via reset=-1 → 30).
+		// The trial profile is sent explicitly (never) because the panel does
+		// not merge profiles on write — see buildNodeProvision.
 		if plan.Name == database.TrialPlanName {
 			provision.ResetDays = 0
+			provision.TrafficReset = "never"
 		} else {
-			provision.ResetDays = -1
-			provision.ResetMax = 0
-			provision.TrafficReset = "monthly"
-			provision.TrafficResetDay = 1
+			switch policy {
+			case profileDefault:
+				defaultRenewProfile(&provision)
+			case profilePreserve:
+				reader, hasReader := s.clients.Reader(nodeID)
+				if !hasReader {
+					defaultRenewProfile(&provision)
+
+					break
+				}
+
+				profile, profErr := panelRenewProfile(ctx, reader, syncIdentifier(sub))
+				if profErr != nil {
+					return vpn.SubscriptionProvision{}, fmt.Errorf("node %d: %w", nodeID, profErr)
+				}
+
+				provision.ResetDays = profile.Reset
+				provision.ResetDay = profile.ResetDay
+				provision.ResetMax = profile.ResetMax
+				provision.TrafficReset = profile.TrafficReset
+				provision.TrafficResetDay = profile.TrafficResetDay
+			}
 		}
 
 		if sub.ExpiresAt != nil {
@@ -563,8 +575,56 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 		} else {
 			provision.ExpiryTime = time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, config.SubscriptionResetDay)
 		}
-		// Recovery of an already-expired free client is the xui layer's job
-		// (doUpdateClient, resetDays > 0 only); trials must keep their expiry.
+		// NB: recovery of an already-expired free client (move expiry to the
+		// next cycle) happens in the xui layer (doUpdateClient), guarded by
+		// resetDays > 0 so trials are never extended here.
+	}
+
+	return provision, nil
+}
+
+// defaultRenewProfile writes the product default auto-renew profile:
+// monthly traffic reset on day 1, renewal interval
+// config.SubscriptionResetDay, unlimited renewals.
+func defaultRenewProfile(provision *vpn.SubscriptionProvision) {
+	provision.ResetDays = config.SubscriptionResetDay
+	provision.ResetMax = 0
+	provision.TrafficReset = "monthly"
+	provision.TrafficResetDay = 1
+}
+
+// panelRenewProfile reads the client's current auto-renew profile from the
+// panel. The panel base is the source of truth: a read failure (including a
+// missing client, mapped to vpn.ErrSubscriptionNotFound) aborts the build so
+// an update never overwrites manual admin edits with the default profile.
+func panelRenewProfile(ctx context.Context, reader interfaces.XUIClientReader, email string) (xui.ClientConfig, error) {
+	record, err := reader.GetClientByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, xui.ErrClientNotFound) {
+			err = fmt.Errorf("%w: %w", vpn.ErrSubscriptionNotFound, err)
+		}
+
+		return xui.ClientConfig{}, fmt.Errorf("read panel profile: %w", err)
+	}
+
+	return record.Client, nil
+}
+
+// processPendingAdd creates a VPN subscription on the target node.
+// Handles idempotent "already exists" errors by synchronizing config and only then marking active.
+// The auto-renew profile is the product default written explicitly (monthly/1,
+// reset=config.SubscriptionResetDay, resetMax=0), not the panel-side profile.
+func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription) error {
+	client, ok := s.clients.Provision(sn.NodeID)
+	if !ok {
+		return s.retryUnavailableNode(ctx, sn, sub, "pending_add")
+	}
+
+	provision, err := s.buildNodeProvision(ctx, sub, sn.NodeID, profileDefault)
+	if err != nil {
+		s.handleSyncError(ctx, sn, err)
+
+		return fmt.Errorf("build provision for pending add node %d: %w", sn.NodeID, err)
 	}
 
 	logger.Debug("creating VPN subscription",

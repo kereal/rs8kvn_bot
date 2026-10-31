@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -47,7 +48,12 @@ func TestSyncService_SyncSubscription_PendingUpdate_SendsProvisionAndActivates(t
 	assert.Equal(t, sub.SubscriptionID, client.updateProvision.SubID)
 	assert.Equal(t, sub.TelegramID, client.updateProvision.TgID, "update must carry the Telegram id")
 	assert.Equal(t, plan.TrafficLimit, client.updateProvision.TrafficBytes)
-	assert.Equal(t, -1, client.updateProvision.ResetDays)
+	// Node has no panel reader in this setup, so the update path writes the
+	// product default profile explicitly (no readerless -1 sentinel anymore).
+	assert.Equal(t, config.SubscriptionResetDay, client.updateProvision.ResetDays)
+	assert.Equal(t, "monthly", client.updateProvision.TrafficReset)
+	assert.Equal(t, 1, client.updateProvision.TrafficResetDay)
+	assert.Equal(t, 0, client.updateProvision.ResetMax)
 	assert.Equal(t, expiresAt, client.updateProvision.ExpiryTime)
 	assert.True(t, client.resetTrafficCalled, "ResetTraffic must be called after UpdateSubscription")
 }
