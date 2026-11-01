@@ -557,7 +557,8 @@ const (
 // trafficReset=never): the trial quota never renews, regardless of the path
 // policy or the client's current panel profile. The profile is sent explicitly
 // because the panel does not merge profiles on write — an omitted trafficReset
-// is normalized to "never" (doc/panel-api-contract.md, §4.2).
+// is normalized to "never" (doc/architecture.md, «Контракт API панели
+// 3x-ui», §4.2).
 //
 // With profilePreserve the profile is read from the panel
 // (GET /clients/get/{email}) — the only source of the full profile. A missing

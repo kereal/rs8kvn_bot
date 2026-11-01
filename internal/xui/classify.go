@@ -9,7 +9,8 @@ import (
 // Тексты ошибок панели 3x-ui. Все клиентские эндпоинты панели отвечают
 // HTTP 200 и конвертом {success, msg, obj}; структурных кодов ошибок нет,
 // поэтому классификация опирается на подстроки msg. Тексты зафиксированы
-// в doc/panel-api-contract.md (раздел 3, проверено на живой панели).
+// в doc/architecture.md, раздел «Контракт API панели 3x-ui» (раздел 3,
+// проверено на живой панели).
 const (
 	// del: Something went wrong (client "<email>" not found in any inbound or client record\n)
 	msgNotFoundInAnyInbound = "not found in any inbound"

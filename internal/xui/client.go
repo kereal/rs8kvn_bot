@@ -476,7 +476,8 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, req Cl
 	// (normalizeClientTrafficReset в internal/web/service/client_crud.go;
 	// проверено на живой панели — клиенты с trafficReset=never существуют).
 	// Поэтому профиль либо шлётся целиком, как настроен вызывающим, либо
-	// панель запишет "never" — см. doc/panel-api-contract.md, §4.2.
+	// панель запишет "never" — см. doc/architecture.md,
+	// «Контракт API панели 3x-ui», §4.2.
 	if req.TrafficReset != "" {
 		clientObj["resetDay"] = req.ResetDay
 		clientObj["resetMax"] = req.ResetMax
@@ -703,7 +704,8 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 
 // ClientRecord — ответ GET /panel/api/clients/get/{email}: карточка клиента
 // (включая полный профиль авто-renew) плюс список inbound'ов, к которым
-// клиент привязан. См. doc/panel-api-contract.md, раздел 2.1.
+// клиент привязан. См. doc/architecture.md, «Контракт API панели 3x-ui»,
+// раздел 2.1.
 type ClientRecord struct {
 	Client     ClientConfig `json:"client"`
 	InboundIDs []int        `json:"inboundIds"`
