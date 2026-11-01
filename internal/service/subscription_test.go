@@ -2178,9 +2178,12 @@ func TestDescribeTrafficReset(t *testing.T) {
 			wantDays: 30,
 		},
 		{
-			name:     "monthly day today counts zero",
+			// The reset fires at midnight: a matching day today has already
+			// passed, so the countdown rolls forward. Nov has no 31st.
+			name:     "monthly day today already fired rolls forward",
 			profile:  xui.ClientConfig{TrafficReset: "monthly", TrafficResetDay: 31},
-			wantText: "сегодня",
+			wantText: "через 61 дн.",
+			wantDays: 61,
 		},
 		{
 			name:     "monthly day 0 normalizes to 1 like the panel",
@@ -2217,9 +2220,12 @@ func TestDescribeTrafficReset(t *testing.T) {
 			wantDays: 1,
 		},
 		{
-			name:     "weekly on the current weekday is today",
+			// referenceNow is a Saturday: the weekday reset already fired at
+			// midnight, so the cycle rolls to the next Saturday.
+			name:     "weekly on the current weekday rolls to next week",
 			profile:  xui.ClientConfig{TrafficReset: "weekly", ResetWeekday: 6},
-			wantText: "сегодня",
+			wantText: "через 7 дн.",
+			wantDays: 7,
 		},
 		{
 			name:     "weekly without weekday is unknown",
@@ -2289,10 +2295,10 @@ func TestNextMonthlyReset(t *testing.T) {
 			want: time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC),
 		},
 		{
-			name: "day today returns today",
+			name: "day today already fired rolls to next month",
 			now:  time.Date(2026, 3, 5, 23, 0, 0, 0, time.UTC),
 			day:  5,
-			want: time.Date(2026, 3, 5, 0, 0, 0, 0, time.UTC),
+			want: time.Date(2026, 4, 5, 0, 0, 0, 0, time.UTC),
 		},
 	}
 
@@ -2332,10 +2338,10 @@ func TestNextWeeklyReset(t *testing.T) {
 			want:    time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
-			name:    "same weekday counts today",
+			name:    "same weekday already fired rolls to next week",
 			now:     saturday,
 			weekday: 6,
-			want:    time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC),
+			want:    time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC),
 		},
 		{
 			name:    "saturday from sunday",

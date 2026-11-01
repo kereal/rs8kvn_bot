@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
+	"github.com/mattn/go-sqlite3"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -802,10 +804,11 @@ func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.Sub
 //     the scan is shutting down — no retry metadata is written, the background
 //     worker will pick the record up on the next pass (R3).
 //   - A retryable error (network timeout per utils.IsRetryable, transient node
-//     unavailability per errNodeUnavailable) ladders with exponential backoff
-//     until maxSyncRetries.
-//   - Anything else (the panel answered and refused, a non-200 front response)
-//     is parked immediately: retrying cannot succeed.
+//     unavailability per errNodeUnavailable, SQLite write-lock contention per
+//     isTransientDBError) ladders with exponential backoff until maxSyncRetries.
+//   - Anything else (the panel answered and refused, a non-200 front response,
+//     a terminal DB error such as a constraint violation) is parked
+//     immediately: retrying cannot succeed.
 //   - An exhausted ladder (retry_count reached maxSyncRetries) parks too.
 //
 // A parked node keeps its pending status, holds the terminal cause in
@@ -824,7 +827,11 @@ func (s *SyncService) handleSyncError(ctx context.Context, sn *database.Subscrip
 	}
 
 	errMsg := err.Error()
-	retryable := utils.IsRetryable(err) || errors.Is(err, errNodeUnavailable)
+	// Lock contention is only retried when the request never reached a
+	// decision point: a non-200 front response may quote "database is locked"
+	// in its body, and a refused request stays refused on retry.
+	retryable := utils.IsRetryable(err) || errors.Is(err, errNodeUnavailable) ||
+		(!errors.Is(err, utils.ErrNon200Response) && isTransientDBError(err))
 
 	if !retryable || sn.RetryCount >= maxSyncRetries {
 		switch {
@@ -880,6 +887,29 @@ func (s *SyncService) handleSyncError(ctx context.Context, sn *database.Subscrip
 			zap.Uint("node_id", sn.NodeID),
 			zap.Error(dbErr))
 	}
+}
+
+// isTransientDBError reports SQLite write-lock contention (SQLITE_BUSY /
+// SQLITE_LOCKED): the condition clears on its own, so such failures must climb
+// the retry ladder instead of parking the node on a momentary writer
+// collision. Terminal DB failures (constraint violations, schema problems)
+// return false — retrying cannot fix them. GORM and the service wrappers keep
+// the driver error with %w, so the typed check sees the concrete
+// sqlite3.Error; the text fallback covers layers that flattened it (the
+// driver's own message is exactly the busy text).
+func isTransientDBError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var serr sqlite3.Error
+	if errors.As(err, &serr) {
+		return serr.Code == sqlite3.ErrBusy || serr.Code == sqlite3.ErrLocked
+	}
+
+	msg := strings.ToLower(err.Error())
+
+	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "database table is locked")
 }
 
 // clearRetry сбрасывает retry-состояние биндинга: любой легитимный переход

@@ -16,6 +16,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
+	"github.com/mattn/go-sqlite3"
 	"gorm.io/gorm"
 
 	"github.com/stretchr/testify/assert"
@@ -890,6 +891,155 @@ func TestSyncService_handleSyncError_RetryableClimbsThenParks(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, maxSyncRetries, rows[0].RetryCount, "parking does not grow the counter")
+	require.NotNil(t, rows[0].RetryAt)
+	assert.True(t, rows[0].RetryAt.After(time.Now().UTC().AddDate(1, 0, 0)), "parked retry_at is beyond every planning horizon")
+
+	pending, err := db.GetPendingSync(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+}
+
+// TestSyncService_handleSyncError_TransientDBLockRetries checks that SQLite
+// write-lock contention — typed SQLITE_BUSY/SQLITE_LOCKED or flattened to
+// text — climbs the ladder like a network timeout, that the backed-off record
+// stays invisible to the worker until retry_at elapses and is picked up after,
+// and that a terminal DB error (constraint violation) parks immediately.
+func TestSyncService_handleSyncError_TransientDBLockRetries(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-lock", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-lock-node", IsActive: true, Host: "http://slk", APIToken: "tslk", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     7780,
+		Username:       "synclockuser",
+		ClientID:       "c-synclock",
+		SubscriptionID: "s-synclock",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	sn := &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd, RetryCount: 0}
+	require.NoError(t, db.CreateSubscriptionNode(ctx, sn))
+
+	svc := NewSyncService(db, nil, []database.Node{*node1})
+
+	steps := []struct {
+		name      string
+		err       error
+		wantInErr string
+	}{
+		{
+			name:      "typed SQLITE_BUSY",
+			err:       fmt.Errorf("update subscription node: %w", sqlite3.Error{Code: sqlite3.ErrBusy}),
+			wantInErr: "database is locked",
+		},
+		{
+			name:      "flattened lock text",
+			err:       errors.New("callback failed: database is locked"),
+			wantInErr: "database is locked",
+		},
+		{
+			name:      "typed SQLITE_LOCKED",
+			err:       fmt.Errorf("update subscription node: %w", sqlite3.Error{Code: sqlite3.ErrLocked}),
+			wantInErr: "database table is locked",
+		},
+	}
+
+	for i, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			svc.handleSyncError(ctx, sn, step.err)
+
+			rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			assert.Equal(t, i+1, rows[0].RetryCount, "lock contention must climb the ladder")
+			require.NotNil(t, rows[0].RetryAt)
+			assert.True(t, rows[0].RetryAt.After(time.Now().UTC()), "the ladder schedules a near-future retry")
+			require.NotNil(t, rows[0].LastError)
+			assert.Contains(t, *rows[0].LastError, step.wantInErr)
+
+			// Backoff is honoured: the worker must not pick the row yet.
+			pending, err := db.GetPendingSync(ctx)
+			require.NoError(t, err)
+			assert.Empty(t, pending, "retry_at in the future hides the row from the scan")
+		})
+	}
+
+	// Simulate the backoff elapsing: the same ladder record becomes
+	// selectable again — exactly what the worker consumes on its next pass.
+	past := time.Now().UTC().Add(-time.Minute)
+	require.NoError(t, db.UpdateRetry(ctx, sub.ID, node1.ID, sn.RetryCount, &past, sn.LastError))
+
+	pending, err := db.GetPendingSync(ctx)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, node1.ID, pending[0].NodeID)
+
+	// A terminal DB error must park: constraint violations do not fix
+	// themselves on retry.
+	svc.handleSyncError(ctx, sn, fmt.Errorf("insert: %w", sqlite3.Error{Code: sqlite3.ErrConstraint}))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, len(steps), rows[0].RetryCount, "parking does not grow the counter")
+	require.NotNil(t, rows[0].RetryAt)
+	assert.True(t, rows[0].RetryAt.After(time.Now().UTC().AddDate(1, 0, 0)), "parked retry_at is beyond every planning horizon")
+
+	pending, err = db.GetPendingSync(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+}
+
+// TestSyncService_handleSyncError_Non200WithLockTextStillParks checks the
+// guard: a refused front response quoting "database is locked" in its body is
+// still terminal — retrying a refused request cannot succeed.
+func TestSyncService_handleSyncError_Non200WithLockTextStillParks(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-non200lock", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-non200lock-node", IsActive: true, Host: "http://snl", APIToken: "tsnl", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     7781,
+		Username:       "syncnon200lock",
+		ClientID:       "c-syncnon200lock",
+		SubscriptionID: "s-syncnon200lock",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	sn := &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd, RetryCount: 0}
+	require.NoError(t, db.CreateSubscriptionNode(ctx, sn))
+
+	svc := NewSyncService(db, nil, []database.Node{*node1})
+	svc.handleSyncError(ctx, sn, fmt.Errorf("%w: database is locked", utils.ErrNon200Response))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, 0, rows[0].RetryCount, "a non-200 body quoting lock text must not climb the ladder")
 	require.NotNil(t, rows[0].RetryAt)
 	assert.True(t, rows[0].RetryAt.After(time.Now().UTC().AddDate(1, 0, 0)), "parked retry_at is beyond every planning horizon")
 
@@ -1815,6 +1965,34 @@ func TestSyncService_buildNodeProvision(t *testing.T) {
 				assert.Equal(t, 2, provision.ResetMax)
 				assert.Equal(t, "weekly", provision.TrafficReset)
 				assert.Equal(t, 5, provision.TrafficResetDay)
+			},
+		},
+		{
+			// A client provisioned on the free (unlimited) plan carries no
+			// auto-renew profile: the panel normalizes the empty write to
+			// Reset=0/"never". Upgrading such a client keeps that profile —
+			// preserve copies it verbatim, so the new paid plan starts
+			// without an auto-renew cycle.
+			name:    "paid_update_carries_never_profile_from_unlimited_predecessor",
+			plan:    paidPlan,
+			clients: withReader(xui.ClientConfig{Reset: 0, TrafficReset: "never"}),
+			policy:  profilePreserve,
+			check: func(t *testing.T, provision vpn.SubscriptionProvision) {
+				assert.Equal(t, 0, provision.ResetDays)
+				assert.Equal(t, "never", provision.TrafficReset)
+			},
+		},
+		{
+			// A deliberate manual admin edit ("never" while keeping the
+			// renewal interval) must survive the plan-change update.
+			name:    "paid_update_preserves_manual_never_setting",
+			plan:    paidPlan,
+			clients: withReader(xui.ClientConfig{Reset: 7, ResetDay: 3, ResetMax: 2, TrafficReset: "never"}),
+			policy:  profilePreserve,
+			check: func(t *testing.T, provision vpn.SubscriptionProvision) {
+				assert.Equal(t, "never", provision.TrafficReset,
+					"a manual never must not be replaced by the product default")
+				assert.Equal(t, 7, provision.ResetDays)
 			},
 		},
 		{

@@ -149,18 +149,19 @@ func countdown(now, next time.Time) resetDisplay {
 }
 
 // nextMonthlyReset returns the next occurrence of day-of-month day at local
-// midnight, today included. Months shorter than the day are skipped (Feb has
-// no 31st — the loop advances to the first month that does), matching
-// "ближайшая будущая дата с числом D". Month arithmetic is done on
-// (year, month) pairs: now.AddDate(0, k, 0) would normalize day-overflow
-// (Oct 31 + 1 month → Dec 1) and silently skip months.
+// midnight strictly after today: the reset fires at panel-local midnight, so
+// when the day matches today it has already passed. Months shorter than the
+// day are skipped (Feb has no 31st — the loop advances to the first month
+// that does), matching "ближайшая будущая дата с числом D". Month arithmetic
+// is done on (year, month) pairs: now.AddDate(0, k, 0) would normalize
+// day-overflow (Oct 31 + 1 month → Dec 1) and silently skip months.
 func nextMonthlyReset(now time.Time, day int) time.Time {
 	today := truncateDay(now)
 	year, month, _ := now.Date()
 
 	for range 13 {
 		candidate := time.Date(year, month, day, 0, 0, 0, 0, now.Location())
-		if candidate.Day() == day && !candidate.Before(today) {
+		if candidate.Day() == day && candidate.After(today) {
 			return candidate
 		}
 
@@ -176,11 +177,16 @@ func nextMonthlyReset(now time.Time, day int) time.Time {
 }
 
 // nextWeeklyReset returns the next occurrence of the panel weekday at local
-// midnight, today included. weekday is 1=Monday..7=Sunday (panel numbering).
+// midnight strictly after today: the reset fires at midnight, so when the
+// weekday is today it has already fired and the cycle rolls to next week
+// (delta == 0 → 7). weekday is 1=Monday..7=Sunday (panel numbering).
 func nextWeeklyReset(now time.Time, weekday int) time.Time {
 	// time.Weekday is 0=Sunday..6=Saturday; panel 7=Sunday maps to 0.
 	target := time.Weekday(weekday % 7)
 	delta := (int(target) - int(now.Weekday()) + 7) % 7
+	if delta == 0 {
+		delta = 7
+	}
 
 	return truncateDay(now).AddDate(0, 0, delta)
 }

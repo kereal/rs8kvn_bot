@@ -855,8 +855,8 @@ subscription). Parity is pinned by `TestApplyPlan_Parity_BackgroundAndTxSameEndS
 
 ### Retry Behavior
 - Caller-ctx cancellation (`context.Canceled`/`DeadlineExceeded`) writes no retry metadata — the scan aborts early, the next pass picks the record up
-- Retryable (network timeouts per `utils.IsRetryable`, transient node unavailability `errNodeUnavailable`): `retry_count` incremented, `retry_at` set with exponential backoff, capped at `maxSyncRetries` (10, ~5.6h)
-- Non-retryable (the panel answered and refused: non-200, record not found, already in use) — parked immediately, no ladder
+- Retryable (network timeouts per `utils.IsRetryable`, transient node unavailability `errNodeUnavailable`, SQLite write-lock contention per `isTransientDBError` — `SQLITE_BUSY`/`SQLITE_LOCKED`, typed or by text, but never inside a non-200 body): `retry_count` incremented, `retry_at` set with exponential backoff, capped at `maxSyncRetries` (10, ~5.6h)
+- Non-retryable (the panel answered and refused: non-200, record not found, already in use; terminal DB errors such as constraint violations) — parked immediately, no ladder
 - Exhausted ladder parks the node: `retry_at` set far-future (`parkedRetryAt`), the terminal cause stays in `last_error`; any legitimate status re-transition resets retry metadata and releases the node (no fifth state, no migration)
 - `last_error` column stores the last error message
 - `SyncPendingNodes` returns aggregate error (`errors.Join`) on partial failures

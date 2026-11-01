@@ -350,6 +350,10 @@ func (m *ServiceStoreFake) DeleteSubscriptionNodesBySubscriptionID(ctx context.C
 }
 
 func (m *ServiceStoreFake) ExpireSubscription(ctx context.Context, id uint, freePlanID uint) error {
+	if m.ExpireSubscriptionFunc != nil {
+		return m.ExpireSubscriptionFunc(ctx, id, freePlanID)
+	}
+
 	return nil
 }
 
@@ -932,7 +936,9 @@ func (f *ReferralInviteStoreFake) GetInviteByReferrer(_ context.Context, referre
 
 	invite, ok := f.Invites[referrerTGID]
 	if !ok {
-		return nil, ErrRecordNotFound
+		// Handlers branch on this sentinel to offer invite creation; a plain
+		// record-not-found would hide the distinction.
+		return nil, database.ErrInviteNotFound
 	}
 
 	return invite, nil
@@ -1067,6 +1073,10 @@ func (m *SubscriptionRepositoryFake) GetTelegramIDsBatch(ctx context.Context, of
 	for id := range m.Subscriptions {
 		ids = append(ids, id)
 	}
+
+	// The production query orders by telegram_id; sorting keeps batches stable
+	// so pagination skips and repeats nothing.
+	slices.Sort(ids)
 
 	if offset >= len(ids) {
 		return []int64{}, nil
@@ -1482,6 +1492,10 @@ func (m *BotStoreFake) GetTelegramIDsBatch(ctx context.Context, offset, limit in
 	for id := range m.Subscriptions {
 		ids = append(ids, id)
 	}
+
+	// The production query orders by telegram_id; sorting keeps batches stable
+	// so pagination skips and repeats nothing.
+	slices.Sort(ids)
 
 	if offset >= len(ids) {
 		return []int64{}, nil
