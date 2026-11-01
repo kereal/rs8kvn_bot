@@ -191,10 +191,15 @@ func nextWeeklyReset(now time.Time, weekday int) time.Time {
 	return truncateDay(now).AddDate(0, 0, delta)
 }
 
-// fullDays counts whole calendar days between two moments, truncating both to
-// local midnight.
+// fullDays counts whole calendar days between two moments. The distance is
+// measured between UTC midnights of the dates' calendar days (not local
+// midnights): across a DST transition two local days can span 23 or 25 hours,
+// and integer division of that duration would round to the wrong day count.
 func fullDays(from, to time.Time) int {
-	return int(truncateDay(to).Sub(truncateDay(from)).Hours() / 24)
+	f := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
+	t := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC)
+
+	return int(t.Sub(f).Hours() / 24)
 }
 
 // truncateDay floors a moment to local midnight.

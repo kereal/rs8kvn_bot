@@ -2261,6 +2261,38 @@ func TestDescribeTrafficReset(t *testing.T) {
 	}
 }
 
+func TestFullDaysAcrossDST(t *testing.T) {
+	t.Parallel()
+
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("tzdata unavailable: %v", err)
+	}
+
+	// 2026-03-08 02:00 local springs forward: 03-07 → 03-08 spans 23 local
+	// hours. 2026-11-01 02:00 falls back: 10-31 → 11-01 spans 25. The
+	// calendar-day distance must stay correct in both directions.
+	tests := []struct {
+		name string
+		from time.Time
+		to   time.Time
+		want int
+	}{
+		{"spring forward one day", time.Date(2026, 3, 7, 12, 0, 0, 0, loc), time.Date(2026, 3, 8, 0, 0, 0, 0, loc), 1},
+		{"spring forward two days", time.Date(2026, 3, 6, 12, 0, 0, 0, loc), time.Date(2026, 3, 8, 0, 0, 0, 0, loc), 2},
+		{"fall back one day", time.Date(2026, 10, 31, 12, 0, 0, 0, loc), time.Date(2026, 11, 1, 0, 0, 0, 0, loc), 1},
+		{"same day is zero", time.Date(2026, 3, 7, 1, 0, 0, 0, loc), time.Date(2026, 3, 7, 23, 0, 0, 0, loc), 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, fullDays(tt.from, tt.to))
+		})
+	}
+}
+
 func TestNextMonthlyReset(t *testing.T) {
 	t.Parallel()
 
