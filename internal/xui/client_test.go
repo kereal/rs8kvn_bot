@@ -1557,3 +1557,47 @@ func TestPanelContract_Non200IsNotRetriedAndNotClassified(t *testing.T) {
 	assert.NotErrorIs(t, err, ErrClientNotFound)
 	assert.Equal(t, 1, calls, "non-200 panel response must not be retried — current retry decision")
 }
+
+// doGetInbound обязан разбирать конверт так же, как остальные эндпоинты:
+// success=true с obj=null не должен превращаться в ошибку json.Unmarshal,
+// а панельный "record not found" — в sentinel (classify.go).
+func TestGetInbound_EmptyObjAndClassification(t *testing.T) {
+	t.Parallel()
+
+	t.Run("success with null obj", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"success":true,"msg":"","obj":null}`)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(server.URL, testAPIToken)
+		require.NoError(t, err)
+
+		defer client.Close()
+
+		_, err = client.GetInbound(context.Background(), 1)
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "unexpected end of JSON input")
+		assert.Contains(t, err.Error(), "empty obj")
+	})
+
+	t.Run("panel record not found", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"success":false,"msg":"Something went wrong (record not found)"}`)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(server.URL, testAPIToken)
+		require.NoError(t, err)
+
+		defer client.Close()
+
+		_, err = client.GetInbound(context.Background(), 1)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrClientNotFound)
+	})
+}

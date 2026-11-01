@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -773,20 +772,20 @@ func (c *Client) doGetInbound(ctx context.Context, inboundID int) (*Inbound, err
 		return nil, err
 	}
 
-	var apiResp APIResponse
-
-	err = json.Unmarshal(respBody, &apiResp)
+	obj, err := parseEnvelope(opGet, respBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		return nil, err
 	}
 
-	if !apiResp.Success {
-		return nil, fmt.Errorf("failed to get inbound: %s", apiResp.Msg)
+	// success=true с obj=null панель отдаёт, когда инбаунда нет: без гварда
+	// json.Unmarshal("null") молча вернул бы нулевой Inbound.
+	if isNullObj(obj) {
+		return nil, fmt.Errorf("get inbound %d: unexpected empty obj", inboundID)
 	}
 
 	var inbound Inbound
 
-	err = json.Unmarshal(apiResp.Obj, &inbound)
+	err = json.Unmarshal(obj, &inbound)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse inbound data: %w", err)
 	}
@@ -806,7 +805,7 @@ func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, er
 		logger.Debug("Failed to get inbound for flow",
 			zap.Error(err))
 
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if utils.IsCtxErr(err) {
 			return "", err
 		}
 
