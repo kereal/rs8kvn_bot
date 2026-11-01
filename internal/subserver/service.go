@@ -18,6 +18,7 @@ var xrayTemplate = template.Must(template.ParseFS(xrayTemplateFS, "templates/xra
 // body so cache hits can be replayed verbatim.
 type Service struct {
 	*Cache
+
 	// analyticsLocks serializes the per-subscription analytics read-modify-write
 	// (devices/IPs) only across requests for the SAME subID, so cache misses for
 	// different subscriptions do not block each other.

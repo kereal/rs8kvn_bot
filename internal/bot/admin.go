@@ -129,13 +129,11 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 	}
 
 	// Parse the ID - use int64 to properly detect negative numbers
-	var (
-		parsedID int64
-		err      error
-	)
+	var parsedID int64
 
-	parsedID, err = strconv.ParseInt(strings.TrimSpace(args), 10, 64)
-	if err != nil {
+	parsedID, parseErr := strconv.ParseInt(strings.TrimSpace(args), 10, 64)
+	if parseErr != nil {
+		logger.Debug("Invalid /del argument", zap.String("args", args), zap.Error(parseErr))
 		h.SendMessage(ctx, chatID, "❌ Неверный формат ID. Использование: /del <id>\n\nПример: /del 5")
 		return nil
 	}
@@ -220,30 +218,35 @@ func (h *Handler) HandleSetPlan(ctx context.Context, update tgbotapi.Update) err
 		return nil
 	}
 
-	subID, err := strconv.ParseUint(fields[0], 10, 64)
-	if err != nil || subID == 0 {
+	subID, subErr := strconv.ParseUint(fields[0], 10, 64)
+	if subErr != nil || subID == 0 {
+		logger.Debug("Invalid /setplan subscription id", zap.Strings("fields", fields), zap.Error(subErr))
 		h.SendMessage(ctx, chatID, "❌ Неверный ID подписки. Использование: /setplan <id_подписки> <id_тарифа> [дней]")
 		return nil
 	}
 
-	planID, err := strconv.ParseUint(fields[1], 10, 64)
-	if err != nil || planID == 0 {
+	planID, planErr := strconv.ParseUint(fields[1], 10, 64)
+	if planErr != nil || planID == 0 {
+		logger.Debug("Invalid /setplan plan id", zap.Strings("fields", fields), zap.Error(planErr))
 		h.SendMessage(ctx, chatID, "❌ Неверный ID тарифа. Использование: /setplan <id_подписки> <id_тарифа> [дней]")
 		return nil
 	}
 
 	var days int
 	if len(fields) >= 3 {
-		days, err = strconv.Atoi(fields[2])
-		if err != nil || days <= 0 {
+		d, dErr := strconv.Atoi(fields[2])
+		if dErr != nil || d <= 0 {
+			logger.Debug("Invalid /setplan days", zap.String("days_arg", fields[2]), zap.Error(dErr))
 			h.SendMessage(ctx, chatID, "❌ Количество дней должно быть положительным числом")
 			return nil
 		}
 
-		if days > service.AdminSetPlanMaxDays {
+		if d > service.AdminSetPlanMaxDays {
 			h.SendMessage(ctx, chatID, fmt.Sprintf("❌ Количество дней не может превышать %d", service.AdminSetPlanMaxDays))
 			return nil
 		}
+
+		days = d
 	}
 
 	updated, err := h.subscriptionService.AdminSetPlan(ctx, uint(subID), uint(planID), days)
