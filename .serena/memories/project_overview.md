@@ -63,7 +63,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Hysteria2 → современный `hysteria` outbound (`settings{version,address,port}` + `streamSettings{network:"hysteria", hysteriaSettings{version,auth}, security:"tls", tlsSettings}`). При заданном obfs маска передаётся в `streamSettings.finalmask.udp`: `[{type:obfs,settings:{password:obfsPassword}}]`.
 - **КРИТИЧНО**: `geosite:category-ru`, НЕ `geosite:ru` — последнего нет в `geosite.dat`, Xray отказывается стартовать ("illegal domain rule"). `geoip:ru` валиден. Каждый элемент массива проверять `xray -test -config`.
 - Неподдерживаемые протоколы (например TUIC) пропускаются; если не осталось ни одного — 404 (`ErrNoSubscriptionItems`).
-- Проверено: 12 профилей из живого fetch-источника (`fetch.example.net:4433/sfetch/all.yaml`) проходят `xray -test -config` на Xray 26.10.21.
+- Проверено: 12 профилей из живого fetch-источника (`<fetch-node-host>/sfetch/all.yaml`) проходят `xray -test -config` на Xray 26.10.21.
 
 ## Subserver share-link conversion (legacy, Clash → share links)
 - Поддерживаемые схемы: `vmess://`, `trojan://`, `ss://`, `hysteria://`, `hysteria2://`, `hy2://`, `tuic://`

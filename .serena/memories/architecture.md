@@ -89,7 +89,7 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - Hysteria2 maps to the modern Xray `hysteria` outbound: `settings{version,address,port}` plus `streamSettings{network:"hysteria", hysteriaSettings{version,auth}, security:"tls", tlsSettings}`. When obfuscation is configured, it is emitted as `streamSettings.finalmask.udp: [{type: obfs, settings: {password: obfsPassword}}]`.
 - CRITICAL: use `geosite:category-ru`, NOT `geosite:ru`. `geosite:ru` is absent from geosite.dat and makes Xray refuse to start ("illegal domain rule"). `geoip:ru` IS valid. Validate every array element with `xray -test -config`.
 - Unsupported protocols (e.g. TUIC) are skipped; if nothing converts, the endpoint returns 404 (`ErrNoSubscriptionItems`).
-- Verified: all 12 profiles from the live fetch node (`fetch.example.net:4433/sfetch/all.yaml`) pass `xray -test -config` on Xray 26.10.21.
+- Verified: all 12 profiles from the live fetch node (`<fetch-node-host>/sfetch/all.yaml`) pass `xray -test -config` on Xray 26.10.21.
 - Legacy share-link builders (`ConvertSingleJSONToLink` + `build*ServerLink`) stay for Clash normalization tests but are no longer used by the subscription response path.
 
 ## Subserver share-link normalization (Clash → share links, legacy)
