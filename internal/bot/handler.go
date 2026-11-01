@@ -653,6 +653,11 @@ func (h *Handler) ClearAdminSendRateLimit(chatID int64) {
 
 // HandleUpdate routes incoming Telegram updates through the bot handlers.
 func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
+	// Единый дедлайн на диспетчеризации: каждый handler получает контекст
+	// с HandlerTimeout, копировать пролог в каждый handler не нужно.
+	ctx, cancel := h.withTimeout(ctx)
+	defer cancel()
+
 	start := time.Now()
 
 	// Rate limiting: extract chat ID and check for non-admin users

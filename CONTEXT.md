@@ -58,11 +58,14 @@ Telegram-бот для раздачи VPN-подписок (VLESS+Reality+Vision
 - Кандидат 3 — вынос представления трафика в `internal/service/subscription_traffic.go`.
 - Кандидат 4 — классификация ошибок VPN за швом `Client` (3x-ui + proxman).
 
-### Открыто (обзор 2026-07-09)
-- Кандидат 1 — подключить или удалить осиротевший circuit breaker XUI (`internal/xui/breaker.go`, 153 строки, 0 вызывающих в prod).
-- Кандидат 2 — объединить trial/reconcile/traffic через шов `vpn.Client`, убрать параллельную карту `xuiClients` (латентный баг: proxman trial-ноды молча падают).
-- Кандидат 3 — общий HTTP-транспорт для `xui`/`proxman` адаптеров (`httpx`: Bearer + лимит размера + retry); у proxman сейчас нет ни того, ни другого.
-- Кандидат 4 — один `buildProvision(sub, plan)` в SyncService (дублируется в `processPendingAdd`/`processPendingUpdate`).
-- Кандидат 5 — `reconcileAndSyncNodes` для fan-out при смене плана (дублируется в `ActivateProduct`/`Renew`/`Expire`).
-- Кандидат 6 — `subserver.Service` как pass-through над `Cache` (углубить или убрать).
-- Кандидат 7 — timeout пролог применять один раз на диспетчеризации, а не копировать в каждый handler.
+### Открыто (обзор 2026-07-09) — закрыто 2026-11-01
+- Кандидат 1 — circuit breaker XUI удалён (мёртвый код, 0 prod-вызовов; коммит 406995b).
+- Кандидат 2 — закрыт единым реестром `service.NodeClients` (коммит 580e65a).
+- Кандидат 3 — proxman получил Bearer + лимит размера ранее; retry сетевых сбоев добавлен
+  (`utils.RetryWithBackoff`, идемпотентные EventID; коммит d744abc). Отдельный общий пакет `httpx`
+  не заведён — дублирование конфигурации транспорта в двух адаптерах сознательно принято.
+- Кандидат 4 — закрыт единым `SyncService.buildNodeProvision` (коммит 11297e7).
+- Кандидат 5 — закрыт `reconcilePlanNodesCore` (`ApplyPlanToSubscription`/`InTx`).
+- Кандидат 6 — `*Cache` встроен в `subserver.Service`, pass-through методы удалены (коммит e723650).
+- Кандидат 7 — timeout применяется один раз в `HandleUpdate` на диспетчеризации
+  (`withTimeout`), прологи в admin/command handlers снесены (см. `dispatch_timeout_test.go`).

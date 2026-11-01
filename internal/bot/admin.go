@@ -105,9 +105,6 @@ func (h *Handler) sendLastRegNewMessage(ctx context.Context, chatID int64, text 
 // Deletes a subscription by database ID from both 3x-ui panel and database.
 // Usage: /del <id>
 func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
-	ctx, cancel := h.withTimeout(ctx)
-	defer cancel()
-
 	if update.Message == nil {
 		logger.Error("HandleDel called with nil Message")
 		return fmt.Errorf("nil message")
@@ -200,9 +197,6 @@ func (h *Handler) HandleDel(ctx context.Context, update tgbotapi.Update) error {
 // (pending_add/pending_update/pending_remove), and VPN panels are synced
 // best-effort. Usage: /setplan <subscription_id> <plan_id> [days]
 func (h *Handler) HandleSetPlan(ctx context.Context, update tgbotapi.Update) error {
-	ctx, cancel := h.withTimeout(ctx)
-	defer cancel()
-
 	if update.Message == nil {
 		logger.Error("HandleSetPlan called with nil Message")
 		return fmt.Errorf("nil message")
@@ -481,9 +475,6 @@ func (h *Handler) broadcastSessionActive(chatID int64) bool {
 
 // HandleSend handles the /send command for admins to send a message to a specific user.
 func (h *Handler) HandleSend(ctx context.Context, update tgbotapi.Update) error {
-	ctx, cancel := h.withTimeout(ctx)
-	defer cancel()
-
 	if update.Message == nil {
 		logger.Error("HandleSend called with nil Message")
 		return fmt.Errorf("nil message")
