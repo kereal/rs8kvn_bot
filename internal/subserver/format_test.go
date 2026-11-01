@@ -672,12 +672,12 @@ func TestHandleSubscription_PerFormatCacheKeys(t *testing.T) {
 
 	// Revision check: without the per-format key the sing-box body would have
 	// overwritten (or been served by) the Xray entry.
-	bodyXray, _, _ := svc.GetCache("sub-fmt")
-	bodySB, _, _ := svc.GetCache("sub-fmt:singbox")
+	bodyXray, _, _ := svc.Get("sub-fmt")
+	bodySB, _, _ := svc.Get("sub-fmt:singbox")
 	require.NotEqual(t, bodyXray, bodySB)
 }
 
 func cacheHas(svc *Service, key string) bool {
-	body, _, ok := svc.GetCache(key)
+	body, _, ok := svc.Get(key)
 	return ok && len(body) > 0
 }

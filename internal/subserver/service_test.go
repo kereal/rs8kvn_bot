@@ -24,20 +24,20 @@ func TestService_CacheIntegration(t *testing.T) {
 	defer svc.Stop()
 
 	// Set then Get round-trips through the Service.
-	svc.SetCache("key1", []byte("hello"), nil)
-	body, headers, ok := svc.GetCache("key1")
+	svc.Set("key1", []byte("hello"), nil)
+	body, headers, ok := svc.Get("key1")
 	require.True(t, ok)
 	require.Equal(t, []byte("hello"), body)
 	require.Nil(t, headers)
 
 	// An unknown key is a miss.
-	missBody, _, miss := svc.GetCache("nonexistent")
+	missBody, _, miss := svc.Get("nonexistent")
 	require.False(t, miss)
 	require.Nil(t, missBody)
 
 	// Invalidate removes the entry so the next Get misses again.
-	svc.InvalidateCache("key1")
-	_, _, gone := svc.GetCache("key1")
+	svc.Delete("key1")
+	_, _, gone := svc.Get("key1")
 	require.False(t, gone)
 }
 
