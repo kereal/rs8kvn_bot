@@ -27,6 +27,8 @@ type ProxmanClient struct {
 	host       string
 	apiToken   string
 	httpClient *http.Client
+	retryMax   int
+	retryDelay time.Duration
 }
 
 // NewProxmanClient creates a client that sends HTTP requests to a proxman node.
@@ -35,6 +37,8 @@ func NewProxmanClient(host, apiToken string) *ProxmanClient {
 		host:       host,
 		apiToken:   apiToken,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
+		retryMax:   config.XUIMaxRetries,
+		retryDelay: config.XUIInitialRetryDelay,
 	}
 }
 
@@ -53,7 +57,7 @@ func (c *ProxmanClient) CreateSubscription(ctx context.Context, provision Subscr
 		SubscriptionID: provision.SubID,
 	}
 
-	return classifyCreateSubscriptionError(c.sendEvent(ctx, event))
+	return c.sendEvent(ctx, event)
 }
 
 // UpdateSubscription is a no-op for proxman: the webhook payload carries no
@@ -77,7 +81,7 @@ func (c *ProxmanClient) DeleteSubscription(ctx context.Context, provision Subscr
 		SubscriptionID: provision.SubID,
 	}
 
-	return classifyDeleteSubscriptionError(c.sendEvent(ctx, event))
+	return c.sendEvent(ctx, event)
 }
 
 func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error {
@@ -86,6 +90,14 @@ func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error
 		return fmt.Errorf("marshal proxman event: %w", err)
 	}
 
+	// События идемпотентны (EventID), повтор безопасен. Ретраятся только
+	// сетевые сбои (IsRetryable); не-200 — финальный ответ узла, не повторяется.
+	return utils.RetryWithBackoff(ctx, c.retryMax, c.retryDelay, func() error {
+		return c.postEvent(ctx, body)
+	})
+}
+
+func (c *ProxmanClient) postEvent(ctx context.Context, body []byte) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.host, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create proxman request: %w", err)
@@ -110,6 +122,9 @@ func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error
 
 	bodyStr := string(bytes.TrimSpace(respBody))
 
+	// Семантика узла маппится напрямую в sentinel'ы vpn; строковых
+	// классификаторов нет. "duplicate" — собственная семантика proxman
+	// (идемпотентный повтор subscription.create).
 	switch resp.StatusCode {
 	case http.StatusOK:
 		if bodyStr == "duplicate" {
@@ -117,6 +132,8 @@ func (c *ProxmanClient) sendEvent(ctx context.Context, event ProxmanEvent) error
 		}
 
 		return nil
+	case http.StatusNotFound:
+		return fmt.Errorf("proxman client not found: %s: %w", bodyStr, ErrSubscriptionNotFound)
 	case http.StatusBadRequest:
 		return fmt.Errorf("proxman bad request: %s", bodyStr)
 	case http.StatusUnauthorized:

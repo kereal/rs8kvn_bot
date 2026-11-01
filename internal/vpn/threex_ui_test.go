@@ -3,7 +3,9 @@ package vpn
 import (
 	"context"
 	"errors"
-	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -81,7 +83,7 @@ func (f *fakeXUIClient) GetClientTraffic(ctx context.Context, email string) (*xu
 	return nil, nil
 }
 
-func (f *fakeXUIClient) GetClientByEmail(ctx context.Context, inboundID int, email string) (*xui.ClientConfig, error) {
+func (f *fakeXUIClient) GetClientByEmail(ctx context.Context, email string) (*xui.ClientRecord, error) {
 	return nil, nil
 }
 
@@ -142,10 +144,12 @@ func TestThreeXUIClient_DeleteSubscription_CallsDeleteClient(t *testing.T) {
 	assert.Equal(t, provision.Username, fake.deleteCapture.email)
 }
 
-func TestThreeXUIClient_CreateSubscription_WrapsError(t *testing.T) {
+// Sentinel'ы панели маппятся в семантику vpn напрямую (mapPanelError);
+// поведение продублировано тестами в client_test.go на все три операции.
+func TestThreeXUIClient_CreateSubscription_WrapsAlreadyExists(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeXUIClient{addErr: fmt.Errorf("client already exists")}
+	fake := &fakeXUIClient{addErr: xui.ErrClientAlreadyExists}
 	client := NewThreeXUIClient(fake, []int{1})
 
 	err := client.CreateSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
@@ -153,13 +157,69 @@ func TestThreeXUIClient_CreateSubscription_WrapsError(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrSubscriptionAlreadyExists))
 }
 
-func TestThreeXUIClient_DeleteSubscription_WrapsError(t *testing.T) {
+func TestThreeXUIClient_DeleteSubscription_WrapsNotFound(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeXUIClient{deleteErr: fmt.Errorf("client not found")}
+	fake := &fakeXUIClient{deleteErr: xui.ErrClientNotFound}
 	client := NewThreeXUIClient(fake, []int{1})
 
 	err := client.DeleteSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, ErrSubscriptionNotFound))
+}
+
+// Поведение: сетевой сбой proxman (обрыв соединения) ретраится с бэкоффом,
+// клиент в итоге получает успешный результат. События идемпотентны (EventID),
+// поэтому повтор безопасен.
+func TestProxmanClient_RetriesNetworkFailures(t *testing.T) {
+	t.Parallel()
+
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) < 3 {
+			// обрываем соединение без ответа — сетевая ошибка на клиенте
+			hj, ok := w.(http.Hijacker)
+			require.True(t, ok)
+			conn, _, err := hj.Hijack()
+			require.NoError(t, err)
+			_ = conn.Close()
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	client := NewProxmanClient(srv.URL, "token")
+	client.retryMax = 3
+	client.retryDelay = time.Millisecond
+
+	err := client.CreateSubscription(context.Background(), SubscriptionProvision{
+		ClientID: "uuid", Username: "user", SubID: "sub",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int32(3), attempts.Load())
+}
+
+// Не-сетевые ошибки (не-200 ответ) не ретраятся: один запрос — один отказ.
+func TestProxmanClient_DoesNotRetryHTTPStatusErrors(t *testing.T) {
+	t.Parallel()
+
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("bad"))
+	}))
+	defer srv.Close()
+
+	client := NewProxmanClient(srv.URL, "token")
+	client.retryMax = 3
+	client.retryDelay = time.Millisecond
+
+	err := client.CreateSubscription(context.Background(), SubscriptionProvision{
+		ClientID: "uuid", Username: "user", SubID: "sub",
+	})
+	require.Error(t, err)
+	assert.Equal(t, int32(1), attempts.Load())
 }

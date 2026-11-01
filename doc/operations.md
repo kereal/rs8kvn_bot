@@ -124,6 +124,32 @@ Migrations run automatically on startup. If migration fails:
 - Database remains in previous state (safe)
 - Check `data/rs8kvn.db` integrity
 
+**Before upgrading a database that is below migration 034:** that migration
+rebuilds `orders` with `ON DELETE CASCADE` and deliberately aborts when orphaned
+orders exist (left behind by admin `/del` in the FK-off era). On a real
+pre-034 snapshot all 19 orders were orphans and the bot refused to start,
+leaving `schema_migrations` dirty. Check and clean first:
+
+```bash
+sqlite3 data/rs8kvn.db "select max(version), sum(dirty) from schema_migrations;"
+sqlite3 data/rs8kvn.db "select count(*) from orders
+  where subscription_id not in (select id from subscriptions);"
+# До миграции 039 история платежей существует только в orders (audit_log
+# создаётся в 039 пустой), поэтому удалять строки можно ТОЛЬКО после
+# подтверждения offline backup из раздела 3.2.
+# orphans > 0 → backup подтверждён → удалите их (они указывают на уже
+# удалённые подписки), затем позвольте боту мигрировать:
+sqlite3 data/rs8kvn.db "delete from orders
+  where subscription_id not in (select id from subscriptions);"
+```
+
+A dirty database left by the aborted run needs `schema_migrations` reset to the
+last clean version before retrying:
+
+```bash
+sqlite3 data/rs8kvn.db "update schema_migrations set version = 33, dirty = 0;"
+```
+
 **Manual migration:**
 ```bash
 # Apply migrations using golang-migrate CLI
@@ -645,7 +671,7 @@ sqlite3 ./data/rs8kvn.db "PRAGMA journal_mode=WAL;"
 
 **Log:** `"XUI API error"`, `"retrying after backoff"`, or similar.
 
-**Note:** The system uses `RetryWithBackoff` with exponential backoff + jitter (up to 3 total attempts (2 retries)). The circuit breaker implementation is tested but is not currently wired into the live XUI client path.
+**Note:** The system uses `RetryWithBackoff` with exponential backoff + jitter (up to 3 total attempts (2 retries)).
 
 **Fix:**
 1. Check 3x-ui panel is up: `curl -H "Authorization: Bearer <api_token>" "<panel_host>/panel/api/server/status"`

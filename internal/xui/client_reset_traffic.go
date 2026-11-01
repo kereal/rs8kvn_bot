@@ -2,7 +2,6 @@ package xui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -36,15 +35,9 @@ func (c *Client) doResetTraffic(ctx context.Context, email string) error {
 		return err
 	}
 
-	var apiResp APIResponse
-
-	err = json.Unmarshal(respBody, &apiResp)
+	_, err = parseEnvelope(opResetTraffic, respBody)
 	if err != nil {
-		return fmt.Errorf("failed to parse resetTraffic response: %w", err)
-	}
-
-	if !apiResp.Success {
-		return fmt.Errorf("failed to reset traffic: %s", apiResp.Msg)
+		return err
 	}
 
 	logger.Info("Successfully reset client traffic",

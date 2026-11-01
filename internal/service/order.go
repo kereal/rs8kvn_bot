@@ -58,7 +58,7 @@ var (
 
 // OrderService handles order creation and activation flows.
 type OrderService struct {
-	db          interfaces.DatabaseService
+	db          interfaces.OrderStore
 	subSvc      *SubscriptionService
 	syncSvc     *SyncService
 	payment     PaymentProvider
@@ -232,7 +232,7 @@ func truncatePaymentMessage(value string) string {
 }
 
 // NewOrderService wires the order service dependencies explicitly.
-func NewOrderService(db interfaces.DatabaseService, subSvc *SubscriptionService, syncSvc *SyncService, payment PaymentProvider, botUsername string, cfg *config.Config) *OrderService {
+func NewOrderService(db interfaces.OrderStore, subSvc *SubscriptionService, syncSvc *SyncService, payment PaymentProvider, botUsername string, cfg *config.Config) *OrderService {
 	return &OrderService{
 		db:                 db,
 		subSvc:             subSvc,

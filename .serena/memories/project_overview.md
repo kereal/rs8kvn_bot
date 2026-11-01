@@ -2,7 +2,7 @@
 
 ## Назначение
 Telegram-бот для продажи и управления VLESS+Reality+Vision подписками через панели 3x-ui.
-Production-grade: миграции, мониторинг, rate-limiting, circuit breaker, graceful shutdown.
+Production-grade: миграции, мониторинг, rate-limiting, graceful shutdown.
 
 ## Subscription expiry reminders
 - Окна: 3 дня, 1 день, 3 часа до истечения подписки (`internal/service/subscription_reminders.go`)
@@ -47,7 +47,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Админ-уведомления, heartbeat, health endpoints (`/healthz`, `/readyz`)
 - Hysteria2/Clash port-hopping нормализация: `firstPortFromPorts` берёт первый конкретный порт из `ports`/диапазона
 - Ротация логов (zap), ежедневные бэкапы БД (имя `rs8kvn.db.backup.YYYYMMDD_HHMMSS`)
-- Sentry, rate-limiting per-user, circuit breaker для x-ui
+- Sentry, rate-limiting per-user, классификация ошибок панели (`internal/xui/classify.go`)
 - O(1) LRU кэш подписок (RLock для concurrent reads)
 - Subscription status check в `/sub/{subID}` — revoked/expired → 404
 - Subscription expiration хранится в БД на момент Create
@@ -63,7 +63,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Hysteria2 → современный `hysteria` outbound (`settings{version,address,port}` + `streamSettings{network:"hysteria", hysteriaSettings{version,auth}, security:"tls", tlsSettings}`). При заданном obfs маска передаётся в `streamSettings.finalmask.udp`: `[{type:obfs,settings:{password:obfsPassword}}]`.
 - **КРИТИЧНО**: `geosite:category-ru`, НЕ `geosite:ru` — последнего нет в `geosite.dat`, Xray отказывается стартовать ("illegal domain rule"). `geoip:ru` валиден. Каждый элемент массива проверять `xray -test -config`.
 - Неподдерживаемые протоколы (например TUIC) пропускаются; если не осталось ни одного — 404 (`ErrNoSubscriptionItems`).
-- Проверено: 12 профилей из живого fetch-источника (`fetch.example.net:4433/sfetch/all.yaml`) проходят `xray -test -config` на Xray 26.10.21.
+- Проверено: 12 профилей из живого fetch-источника (`<fetch-node-host>/sfetch/all.yaml`) проходят `xray -test -config` на Xray 26.10.21.
 
 ## Subserver share-link conversion (legacy, Clash → share links)
 - Поддерживаемые схемы: `vmess://`, `trojan://`, `ss://`, `hysteria://`, `hysteria2://`, `hy2://`, `tuic://`
@@ -145,7 +145,7 @@ internal/bot/                — handlers, commands, callbacks, referral cache, 
 internal/database/           — GORM-модели, embedded migrations, транзакции
 internal/service/            — SubscriptionService + SyncService + reminders
 internal/vpn/                — VPN client abstraction (3x-ui, proxman, fetch)
-internal/xui/                — 3x-ui HTTP-клиент + circuit breaker
+internal/xui/                — 3x-ui HTTP-клиент + классификация ошибок панели
 internal/interfaces/         — контракты (XUIClient, SubscriptionRepository, reminder repr.)
 internal/testutil/           — моки (db slice fakes, testutil helpers)
 internal/utils/              — time, UUID, QR, Markdown EscapeMarkdownV2/EscapeMarkdown

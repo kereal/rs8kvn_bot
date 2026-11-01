@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -54,6 +53,7 @@ type ClientConfig struct {
 	Reset           int    `json:"reset,omitempty"`
 	ResetDay        int    `json:"resetDay,omitempty"`
 	ResetMax        int    `json:"resetMax,omitempty"`
+	ResetWeekday    int    `json:"resetWeekday,omitempty"`
 	TrafficReset    string `json:"trafficReset,omitempty"`
 	TrafficResetDay int    `json:"trafficResetDay,omitempty"`
 
@@ -307,7 +307,7 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 
 	if resp.StatusCode != http.StatusOK {
 		result = "error"
-		return respBody, fmt.Errorf("upstream returned non-200: %w", ErrNon200Response)
+		return respBody, fmt.Errorf("upstream returned non-200: %w", utils.ErrNon200Response)
 	}
 
 	return respBody, nil
@@ -446,6 +446,16 @@ func (c *Client) AddClientWithID(ctx context.Context, req ClientRequest) (*Clien
 // doAddClientWithID выполняет реальный POST /panel/api/clients/add
 // с уже вычисленным flow для группы inboundIDs.
 func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, req ClientRequest, flow string, tgID int64) (*ClientConfig, error) {
+	// Нормализация негативного ResetDays ровно та же, что в doUpdateClient:
+	// контракт поля — «negative = use default». Без этого add и update дали бы
+	// одному и тому же клиенту разный профиль (add отправлял бы reset=-1).
+	// В проде дефект не проявлялся (панель нормализует значение при записи;
+	// проверено 2026-10-31: reset=-1 среди клиентов не встречается).
+	resetDays := req.ResetDays
+	if resetDays < 0 {
+		resetDays = config.SubscriptionResetDay
+	}
+
 	clientObj := map[string]any{
 		"id":         req.ClientID,
 		"email":      req.Email,
@@ -455,14 +465,18 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, req Cl
 		"enable":     true,
 		"flow":       flow,
 		"subId":      req.SubID,
-		"reset":      req.ResetDays,
+		"reset":      resetDays,
 		"tgId":       tgID,
 	}
 	// 3x-ui v3.7.0 auto-renew profile (resetDay/resetMax/trafficReset/
-	// trafficResetDay) is sent only when the caller configured it
-	// (TrafficReset != ""). Sending zero/empty values unconditionally would
-	// overwrite panel settings of clients provisioned without this profile
-	// (trials, unlimited plans) and risks an invalid empty trafficReset.
+	// trafficResetDay) is sent as a complete profile only when the caller
+	// configured it (TrafficReset != ""). The panel does NOT merge profiles
+	// on write: an omitted/empty trafficReset is normalized to "never"
+	// (normalizeClientTrafficReset в internal/web/service/client_crud.go;
+	// проверено на живой панели — клиенты с trafficReset=never существуют).
+	// Поэтому профиль либо шлётся целиком, как настроен вызывающим, либо
+	// панель запишет "never" — см. doc/architecture.md,
+	// «Контракт API панели 3x-ui», §4.2.
 	if req.TrafficReset != "" {
 		clientObj["resetDay"] = req.ResetDay
 		clientObj["resetMax"] = req.ResetMax
@@ -481,19 +495,9 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, req Cl
 		zap.Int("body_length", len(respBody)),
 		zap.String("response_preview", utils.TruncateString(string(respBody), 200)))
 
-	var simpleResp struct {
-		Success bool   `json:"success"`
-		Msg     string `json:"msg"`
-		Obj     any    `json:"obj,omitempty"`
-	}
-
-	err = json.Unmarshal(respBody, &simpleResp)
+	_, err = parseEnvelope(opAdd, respBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if !simpleResp.Success {
-		return nil, fmt.Errorf("add client failed: %s", simpleResp.Msg)
+		return nil, err
 	}
 
 	return &ClientConfig{
@@ -503,7 +507,7 @@ func (c *Client) doAddClientWithID(ctx context.Context, inboundIDs []int, req Cl
 		ExpiresAt: getExpiresAtMillis(req.ExpiryTime),
 		Enable:    true,
 		SubID:     req.SubID,
-		Reset:     req.ResetDays,
+		Reset:     resetDays,
 	}, nil
 }
 
@@ -531,15 +535,9 @@ func (c *Client) doDeleteClient(ctx context.Context, email string) error {
 		return err
 	}
 
-	var apiResp APIResponse
-
-	err = json.Unmarshal(respBody, &apiResp)
+	_, err = parseEnvelope(opDel, respBody)
 	if err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if !apiResp.Success {
-		return fmt.Errorf("failed to delete client: %s", apiResp.Msg)
+		return err
 	}
 
 	logger.Info("Successfully deleted client",
@@ -642,15 +640,9 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, req Clien
 		return err
 	}
 
-	var apiResp APIResponse
-
-	err = json.Unmarshal(respBody, &apiResp)
+	_, err = parseEnvelope(opUpdate, respBody)
 	if err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if !apiResp.Success {
-		return fmt.Errorf("failed to update client: %s", apiResp.Msg)
+		return err
 	}
 
 	logger.Info("Successfully updated client via new API",
@@ -675,9 +667,6 @@ func (c *Client) GetClientTraffic(ctx context.Context, email string) (*ClientTra
 	return result, err
 }
 
-// ErrClientNotFound возвращается, когда панель не может найти клиента по email.
-var ErrClientNotFound = errors.New("client not found")
-
 // doGetClientTraffic выполняет GET /panel/api/clients/traffic/{email}.
 func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientTraffic, error) {
 	trafficURL := fmt.Sprintf("%s/panel/api/clients/traffic/%s", c.host, url.PathEscape(email))
@@ -687,19 +676,9 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 		return nil, err
 	}
 
-	var apiResp APIResponse
-
-	err = json.Unmarshal(respBody, &apiResp)
+	obj, err := parseEnvelope(opTraffic, respBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if !apiResp.Success {
-		if strings.Contains(strings.ToLower(apiResp.Msg), "client not found") {
-			return nil, ErrClientNotFound
-		}
-
-		return nil, fmt.Errorf("failed to get client traffic: %s", apiResp.Msg)
+		return nil, err
 	}
 
 	// 3x-ui v3.10 answers an unknown email with success=true and obj=null
@@ -708,13 +687,13 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 	// input", which callers cannot tell apart from an infrastructure failure —
 	// the traffic worker then logs a parse error instead of "client not found"
 	// and silently skips the subscription. Map it to the typed sentinel.
-	if len(apiResp.Obj) == 0 || string(apiResp.Obj) == "null" {
+	if isNullObj(obj) {
 		return nil, ErrClientNotFound
 	}
 
 	var traffic ClientTraffic
 
-	err = json.Unmarshal(apiResp.Obj, &traffic)
+	err = json.Unmarshal(obj, &traffic)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse traffic data: %w", err)
 	}
@@ -722,18 +701,51 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 	return &traffic, nil
 }
 
-// GetClientByEmail возвращает конфигурацию клиента по email, ища его в
-// settings указанного inbound. /panel/api/clients/traffic не отдаёт
-// auto-renew профиль (resetDay/resetMax/trafficReset/trafficResetDay),
-// поэтому единственный способ прочитать эти поля — inbound settings.
+// UnmarshalJSON разбирает профиль клиента, принимая id и числом, и строкой:
+// панель v3.11 отдаёт числовой внутренний id в GET /clients/get, а в ответе на
+// создание — строку. Жёсткий string валил разбор всего профиля на живых данных.
+func (c *ClientConfig) UnmarshalJSON(data []byte) error {
+	type plain ClientConfig
+
+	aux := struct {
+		*plain
+
+		ID json.RawMessage `json:"id"`
+	}{plain: (*plain)(c)}
+
+	err := json.Unmarshal(data, &aux)
+	if err != nil {
+		return err
+	}
+
+	if len(aux.ID) > 0 && string(aux.ID) != "null" {
+		c.ID = strings.Trim(string(aux.ID), `"`)
+	}
+
+	return nil
+}
+
+// ClientRecord — ответ GET /panel/api/clients/get/{email}: карточка клиента
+// (включая полный профиль авто-renew) плюс список inbound'ов, к которым
+// клиент привязан. См. doc/architecture.md, «Контракт API панели 3x-ui»,
+// раздел 2.1.
+type ClientRecord struct {
+	Client     ClientConfig `json:"client"`
+	InboundIDs []int        `json:"inboundIds"`
+}
+
+// GetClientByEmail возвращает полную карточку клиента по email через
+// выделенный эндпоинт GET /panel/api/clients/get/{email}. Эндпоинт отдаёт
+// полный профиль авто-renew (reset/resetDay/resetMax/resetWeekday/
+// trafficReset/trafficResetDay), который /clients/traffic не отдаёт.
 // Возвращает ErrClientNotFound, если клиент не найден.
-func (c *Client) GetClientByEmail(ctx context.Context, inboundID int, email string) (*ClientConfig, error) {
-	var result *ClientConfig
+func (c *Client) GetClientByEmail(ctx context.Context, email string) (*ClientRecord, error) {
+	var result *ClientRecord
 
 	err := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
 		var innerErr error
 
-		result, innerErr = c.doGetClientByEmail(ctx, inboundID, email)
+		result, innerErr = c.doGetClientByEmail(ctx, email)
 
 		return innerErr
 	})
@@ -741,39 +753,33 @@ func (c *Client) GetClientByEmail(ctx context.Context, inboundID int, email stri
 	return result, err
 }
 
-// doGetClientByEmail выполняет поиск клиента в settings инбаунда.
-func (c *Client) doGetClientByEmail(ctx context.Context, inboundID int, email string) (*ClientConfig, error) {
-	inbound, err := c.doGetInbound(ctx, inboundID)
+// doGetClientByEmail выполняет GET /panel/api/clients/get/{email} и разбирает
+// obj.client и obj.inboundIds.
+func (c *Client) doGetClientByEmail(ctx context.Context, email string) (*ClientRecord, error) {
+	getURL := fmt.Sprintf("%s/panel/api/clients/get/%s", c.host, url.PathEscape(email))
+
+	respBody, err := c.doHTTPRequest(ctx, http.MethodGet, getURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("get client %s on inbound %d: %w", email, inboundID, err)
+		return nil, err
 	}
 
-	var settings struct {
-		Clients []ClientConfig `json:"clients"`
-	}
-	// Try modern format: settings is already a JSON object.
-	err = json.Unmarshal(inbound.Settings, &settings)
+	obj, err := parseEnvelope(opGet, respBody)
 	if err != nil {
-		// Fallback for old format: settings is a JSON-encoded string (legacy panel).
-		var rawStr string
-		uErr := json.Unmarshal(inbound.Settings, &rawStr)
-		if uErr != nil {
-			return nil, fmt.Errorf("parse inbound settings for client %s on inbound %d: %w", email, inboundID, uErr)
-		}
-		cleaned := strings.ReplaceAll(rawStr, "\\n", "\n")
-		uErr = json.Unmarshal([]byte(cleaned), &settings)
-		if uErr != nil {
-			return nil, fmt.Errorf("parse inbound settings for client %s on inbound %d: %w", email, inboundID, uErr)
-		}
+		return nil, err
 	}
 
-	for i := range settings.Clients {
-		if strings.EqualFold(settings.Clients[i].Email, email) {
-			return &settings.Clients[i], nil
-		}
+	if isNullObj(obj) {
+		return nil, fmt.Errorf("get client %s: unexpected empty obj", email)
 	}
 
-	return nil, fmt.Errorf("search client %s in inbound %d: %w", email, inboundID, ErrClientNotFound)
+	var record ClientRecord
+
+	err = json.Unmarshal(obj, &record)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse client record for %s: %w", email, err)
+	}
+
+	return &record, nil
 }
 
 // GetInbound запрашивает данные inbound по его ID у панели.
@@ -790,20 +796,20 @@ func (c *Client) doGetInbound(ctx context.Context, inboundID int) (*Inbound, err
 		return nil, err
 	}
 
-	var apiResp APIResponse
-
-	err = json.Unmarshal(respBody, &apiResp)
+	obj, err := parseEnvelope(opGetInbound, respBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		return nil, err
 	}
 
-	if !apiResp.Success {
-		return nil, fmt.Errorf("failed to get inbound: %s", apiResp.Msg)
+	// success=true с obj=null панель отдаёт, когда инбаунда нет: без гварда
+	// json.Unmarshal("null") молча вернул бы нулевой Inbound.
+	if isNullObj(obj) {
+		return nil, fmt.Errorf("get inbound %d: unexpected empty obj", inboundID)
 	}
 
 	var inbound Inbound
 
-	err = json.Unmarshal(apiResp.Obj, &inbound)
+	err = json.Unmarshal(obj, &inbound)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse inbound data: %w", err)
 	}
@@ -823,7 +829,7 @@ func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, er
 		logger.Debug("Failed to get inbound for flow",
 			zap.Error(err))
 
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if utils.IsCtxErr(err) {
 			return "", err
 		}
 

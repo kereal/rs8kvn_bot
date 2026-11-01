@@ -40,7 +40,7 @@ func TestSubscriptionService_SendExpiryReminder_SendsMessageAndMarksBit(t *testi
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 
 	cfg := &config.Config{GlobalSubURL: "https://vpn.example.com/sub/"}
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+	svc := NewSubscriptionService(db, nil, nil, cfg)
 	bot := testutil.NewBotAPI()
 	svc.SetBot(bot)
 
@@ -100,7 +100,7 @@ func TestSubscriptionService_SendExpiryReminder_NilBotNoop(t *testing.T) {
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 
 	cfg := &config.Config{GlobalSubURL: "https://vpn.example.com/sub/"}
-	svc := NewSubscriptionService(db, nil, nil, nil, cfg)
+	svc := NewSubscriptionService(db, nil, nil, cfg)
 	// svc.SetBot is intentionally not called.
 
 	err = svc.SendExpiryReminder(ctx, sub, ExpiryReminderWindows()[1])
@@ -116,7 +116,7 @@ func TestSubscriptionService_SendExpiryReminder_NilBotNoop(t *testing.T) {
 func TestSubscriptionService_SendExpiryReminder_ClaimErrorPropagates(t *testing.T) {
 	t.Parallel()
 
-	db := &testutil.DatabaseService{}
+	db := &testutil.ServiceStoreFake{}
 	ctx := context.Background()
 	expiry := time.Now().UTC().Add(3 * time.Hour)
 	sub := &database.Subscription{
@@ -134,7 +134,7 @@ func TestSubscriptionService_SendExpiryReminder_ClaimErrorPropagates(t *testing.
 		return false, claimErr
 	}
 
-	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{GlobalSubURL: "https://vpn.example.com/sub/"})
+	svc := NewSubscriptionService(db, nil, nil, &config.Config{GlobalSubURL: "https://vpn.example.com/sub/"})
 	bot := testutil.NewBotAPI()
 	svc.SetBot(bot)
 
@@ -156,7 +156,7 @@ func TestSubscriptionService_SendExpiryReminder_HoursOnlyText(t *testing.T) {
 	sub := &database.Subscription{TelegramID: 888, Username: "hour_user", ClientID: "client-hour", SubscriptionID: "sub-hour", Status: "active", PlanID: 1, ExpiresAt: &expiry}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 
-	svc := NewSubscriptionService(db, nil, nil, nil, &config.Config{GlobalSubURL: "https://vpn.example.com/sub/"})
+	svc := NewSubscriptionService(db, nil, nil, &config.Config{GlobalSubURL: "https://vpn.example.com/sub/"})
 	bot := testutil.NewBotAPI()
 	svc.SetBot(bot)
 

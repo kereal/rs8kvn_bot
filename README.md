@@ -20,7 +20,7 @@
 - 💳 **Platega payments** — in-bot purchase flow (💎 Купить Premium), provider payment links, authenticated webhook (`X-MerchantId`/`X-Secret`) with atomic confirmation, renewals, and chargeback auto-downgrade to the free plan
 - 🔗 Subscription server endpoint (`/sub/{subID}`) with multi-source aggregation, devices/IPs tracking, and profile headers, node-state synchronization via subscription_nodes table
 - 🌐 Multi-node VPN abstraction — `internal/vpn/` with `Client` interface, 3x-ui, proxman, and fetch support, per-node client provisioning
-- 📈 Prometheus metrics — `/metrics` endpoint with HTTP, bot, XUI, DB, cache, circuit breaker, subscription metrics
+- 📈 Prometheus metrics — `/metrics` endpoint with HTTP, bot, XUI, DB, cache, subscription metrics
 - 🗄️ Daily database backups with rotation, embedded SQLite migrations
 - 🐛 Sentry error tracking (+ performance traces)
 - 🐳 Docker support with health checks, non-root user, UPX compression

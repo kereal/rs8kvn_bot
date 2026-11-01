@@ -57,7 +57,7 @@ type Handler struct {
 	noCopy              noCopy
 	bot                 interfaces.BotAPI
 	cfg                 *config.Config
-	db                  interfaces.DatabaseService
+	db                  interfaces.BotStore
 	rateLimiter         *ratelimiter.PerUserRateLimiter
 	cache               *SubscriptionCache
 	inProgressSyncMap   sync.Map                // atomic tracking of subscription creation
@@ -99,7 +99,7 @@ type Handler struct {
 }
 
 // NewHandler creates a new Handler with all sub-handlers initialized.
-func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.DatabaseService, botConfig *BotConfig, subService *service.SubscriptionService, version string) *Handler {
+func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.BotStore, botConfig *BotConfig, subService *service.SubscriptionService, version string) *Handler {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
@@ -653,6 +653,11 @@ func (h *Handler) ClearAdminSendRateLimit(chatID int64) {
 
 // HandleUpdate routes incoming Telegram updates through the bot handlers.
 func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
+	// Единый дедлайн на диспетчеризации: каждый handler получает контекст
+	// с HandlerTimeout, копировать пролог в каждый handler не нужно.
+	ctx, cancel := h.withTimeout(ctx)
+	defer cancel()
+
 	start := time.Now()
 
 	// Rate limiting: extract chat ID and check for non-admin users

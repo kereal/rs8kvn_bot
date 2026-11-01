@@ -2,12 +2,13 @@ package service
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
+	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	"go.uber.org/zap"
 )
@@ -16,12 +17,16 @@ import (
 // It carries already-formatted strings so callers can render a Telegram message
 // without re-deriving presentation logic.
 type TrafficInfo struct {
-	UsedGB             float64
-	LimitGB            int
-	Percentage         float64
-	ProgressBar        string
-	DaysUntilReset     int
-	ResetInfo          string
+	UsedGB      float64
+	LimitGB     int
+	Percentage  float64
+	ProgressBar string
+	ResetInfo   string
+	// Available reports that the traffic figure is actually measured. False
+	// means no active node of the subscription has a panel reader (proxman,
+	// fetch) — the card shows an honest "unavailable" line instead of a
+	// misleading 0 ГБ.
+	Available          bool
 	CreatedAtFormatted string
 	ExpiresAtFormatted string
 	PlanName           string
@@ -83,11 +88,13 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		}
 	}
 
-	// Если лимит трафика нулевой — не опрашиваем серверы
+	// Если лимит трафика нулевой — не опрашиваем серверы: сброс трафика ни на
+	// что не влияет, поэтому профиль панели не читается (best-effort договорённость).
 	if limitGB == 0 {
 		return sub, &TrafficInfo{
 			UsedGB:             0,
 			LimitGB:            0,
+			ResetInfo:          resetNeverText,
 			PlanName:           planName,
 			CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
 			ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
@@ -98,45 +105,43 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 
 	// Опрашиваем только ноды, на которых подписка фактически активна (active в subscription_nodes).
 	// Это исключает ноды других планов и ноды в состоянии pending_*.
-	subNodes, err := s.db.GetBySubscriptionID(ctx, sub.ID)
-	if err != nil {
+	activeSubNodeIDs, nodeErr := s.activeBindingNodeIDs(ctx, sub.ID)
+	if nodeErr != nil {
 		logger.Warn("GetWithTraffic: failed to load subscription nodes, falling back to all active nodes",
 			zap.Uint("subscription_id", sub.ID),
-			zap.Error(err))
+			zap.Error(nodeErr))
 
-		subNodes = nil
-	}
-
-	activeSubNodeIDs := make(map[uint]struct{}, len(subNodes))
-	for _, sn := range subNodes {
-		if sn.Status == database.SyncStatusActive {
-			activeSubNodeIDs[sn.NodeID] = struct{}{}
-		}
+		activeSubNodeIDs = nil
 	}
 
 	var (
 		totalUp, totalDown int64
 		anySuccess         bool
-		panelResetExpiry   int64
-		panelResetDays     int
+		profileSource      readerTarget
 	)
 
-	for _, node := range s.activeNodes() {
-		if len(activeSubNodeIDs) > 0 {
-			if _, ok := activeSubNodeIDs[node.ID]; !ok {
-				continue
-			}
-		}
+	readers := s.activeReaders(activeSubNodeIDs, email)
 
-		client, ok := s.xuiClients[node.ID]
-		if !ok {
-			continue
-		}
+	// Все активные привязки на узлах без читателя (proxman, fetch): трафик
+	// измерить нечем. Карточка показывает честное «недоступен», а не вводящие
+	// в заблуждение 0 ГБ. Пустой набор активных привязок (подписка нигде не
+	// активна) и деградация чтения БД сохраняют прежнее поведение.
+	if len(activeSubNodeIDs) > 0 && len(readers) == 0 {
+		return sub, &TrafficInfo{
+			LimitGB:            limitGB,
+			ResetInfo:          resetUnknownText,
+			Available:          false,
+			CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
+			ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
+			PlanName:           planName,
+		}, nil
+	}
 
-		traffic, err := client.GetClientTraffic(ctx, email)
+	for _, target := range readers {
+		traffic, err := target.reader.GetClientTraffic(ctx, email)
 		if err != nil {
 			logger.Debug("GetClientTraffic failed on source",
-				zap.Uint("node_id", node.ID),
+				zap.Uint("node_id", target.nodeID),
 				zap.Error(err))
 
 			continue
@@ -144,18 +149,22 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 
 		totalUp += traffic.Up
 		totalDown += traffic.Down
-		panelResetExpiry = traffic.ExpiresAt
-		panelResetDays = traffic.Reset
 		anySuccess = true
+		if profileSource.reader == nil {
+			profileSource = target
+		}
 	}
 
-	// не получилось опросить серверы
+	// не получилось опросить серверы: читатели есть, но ответили ошибкой —
+	// трафик существует, просто не измерен (деградация, не отсутствие данных).
 	if !anySuccess {
 		return sub, &TrafficInfo{
 			UsedGB:             0,
 			LimitGB:            limitGB,
 			Percentage:         0,
 			ProgressBar:        utils.GenerateProgressBar(0, float64(limitGB)),
+			ResetInfo:          resetUnknownText,
+			Available:          len(readers) > 0,
 			CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
 			ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
 			PlanName:           planName,
@@ -175,28 +184,30 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 	// Progress bar
 	progressBar := utils.GenerateProgressBar(usedGB, float64(limitGB))
 
-	// Calculate reset time from panel: expiryTime + reset days
-	var (
-		resetInfo      string
-		daysUntilReset int
-	)
+	// «🔄 Сброс» показывает настоящий сброс трафика из профиля панели
+	// (trafficReset/trafficResetDay через GET /clients/get), а не дни до
+	// истечения подписки. Профиль читается best-effort с первой успешно
+	// опрошенной ноды: ошибка не ломает карточку.
+	var resetInfo string
 
-	if panelResetExpiry > 0 && panelResetDays > 0 {
-		resetTime := time.UnixMilli(panelResetExpiry)
-		daysUntilReset = utils.DaysUntilReset(time.Now(), resetTime)
-
-		var resetText string
-
-		switch {
-		case daysUntilReset < 0:
-			resetText = "отключен"
-		case daysUntilReset == 0:
-			resetText = "сегодня"
-		default:
-			resetText = fmt.Sprintf("через %d дн.", daysUntilReset)
+	profile, pErr := profileSource.reader.GetClientByEmail(ctx, email)
+	switch {
+	case pErr == nil && profile != nil:
+		resetInfo = describeTrafficReset(time.Now(), profile.Client).Text
+	case errors.Is(pErr, xui.ErrClientNotFound):
+		// Клиента на панели больше нет — сбрасывать нечего.
+		resetInfo = resetNeverText
+	default:
+		if pErr != nil {
+			logger.Debug("GetWithTraffic: failed to load client reset profile",
+				zap.Uint("node_id", profileSource.nodeID),
+				zap.Error(pErr))
+		} else {
+			logger.Debug("GetWithTraffic: client reset profile was nil without error",
+				zap.Uint("node_id", profileSource.nodeID))
 		}
 
-		resetInfo = resetText
+		resetInfo = resetUnknownText
 	}
 
 	return sub, &TrafficInfo{
@@ -204,8 +215,8 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		LimitGB:            limitGB,
 		Percentage:         percentage,
 		ProgressBar:        progressBar,
-		DaysUntilReset:     daysUntilReset,
 		ResetInfo:          resetInfo,
+		Available:          true,
 		CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
 		ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
 		PlanName:           planName,

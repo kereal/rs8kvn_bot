@@ -140,14 +140,13 @@ func TestRenderTrialPage(t *testing.T) {
 			var srv *Server
 
 			if tt.mockDB {
-				mockDB := testutil.NewDatabaseService()
+				mockDB := testutil.NewSubscriptionRepositoryFake()
 				cfg := &config.Config{SiteURL: "https://example.com", TrialDurationHours: 24}
 				mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
 					return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
 				}
 
 				srv = NewServer(":8880", mockDB, cfg, "testbot", nil, nil)
-				defer mockDB.Close()
 			} else {
 				cfg := &config.Config{SiteURL: "https://vpn.site", TrialDurationHours: 3}
 				srv = NewServer(":8880", nil, cfg, "testbot", nil, nil)

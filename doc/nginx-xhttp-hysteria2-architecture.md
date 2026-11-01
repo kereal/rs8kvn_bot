@@ -6,7 +6,7 @@
    2. UDP (порт 443): Принимает hysteria 2 напрямую. Работает параллельно с nginx, не конфликтуя с ним, и используется для максимальной скорости. [1] 
 
 ------------------------------
-## 1. Конфигурация Nginx (/etc/nginx/sites-available/panel.example.net)
+## 1. Конфигурация Nginx (/etc/nginx/sites-available/<panel-host>)
 Веб-сервер работает как «щит» и обратный прокси. Настроен на обработку больших буферов в оперативной памяти (без сброса на диск) и удержание долгих соединений. [2] 
 
 ```
@@ -18,11 +18,11 @@ upstream xray_xhttp {
 server {
 
     listen              443 ssl;
-    server_name         panel.example.net;
+    server_name         <panel-host>;
     http2               on;
 
-    ssl_certificate     /etc/letsencrypt/live/panel.example.net/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/panel.example.net/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/<panel-host>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<panel-host>/privkey.pem;
 
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
@@ -33,8 +33,8 @@ server {
     ssl_stapling on;
     ssl_stapling_verify on;
 
-    access_log /var/log/nginx/panel.example.net.log;
-    error_log  /var/log/nginx/panel.example.net.error.log warn;
+    access_log /var/log/nginx/<panel-host>.log;
+    error_log  /var/log/nginx/<panel-host>.error.log warn;
 
     large_client_header_buffers 4 8k;
     client_header_buffer_size 1k;
@@ -82,7 +82,7 @@ server {
 
     # Маскировка: корневая директория вашего реального сайта
     location / {
-        root /var/www/panel.example.net/html;
+        root /var/www/<panel-host>/html;
         index index.html index.htm;
         try_files $uri $uri/ =404;
     }
@@ -119,11 +119,11 @@ server {
     },
     "xhttpSettings": {
       "headers": {
-        "Origin": "https://panel.example.net",
-        "Referer": "https://panel.example.net/",
+        "Origin": "https://<panel-host>",
+        "Referer": "https://<panel-host>/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
       },
-      "host": "panel.example.net",
+      "host": "<panel-host>",
       "mode": "packet-up",
       "path": "/api/v2/stream/",
       "scMaxBufferedPosts": 90,
@@ -137,16 +137,16 @@ server {
 Чтобы панель при генерации подписки выдавала клиенту правильный конфиг, включен External Proxy со следующими параметрами:
 
 * Force TLS: Включить (TLS)
-* Внешний хост: panel.example.net
+* Внешний хост: <panel-host>
 * Внешний порт: 443
 
 ------------------------------
 ## 3. Настройка клиента (Приложение HApp на устройстве)
 Благодаря правильной настройке External Proxy, параметры прилетают через подписку автоматически. Профиль в happ содержит:
 
-* Адрес и порт: panel.example.net : 443
+* Адрес и порт: <panel-host> : 443
 * Безопасность (security): TLS (включен)
-* SNI: panel.example.net (строго ваш домен!)
+* SNI: <panel-host> (строго ваш домен!)
 * ALPN: h2, http/1.1 (принудительный HTTP/2 для работы xmux)
 * Fingerprint: chrome или safari (маскировка под обычный браузер)
 * Mux / xmux: Включен (с теми же параметрами, что и на сервере)

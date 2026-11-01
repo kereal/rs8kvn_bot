@@ -13,13 +13,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Live-shaped data: reproduces subscription 0000000000000000 — a Hysteria2 node
-// with SALAMANDER obfuscation and a VLESS Reality node, both carrying emoji
-// remarks. The sing-box and Clash renderers must preserve every node, its
-// readable name and its credentials.
+// Synthetic data shaped like a real panel response: a Hysteria2 node with
+// SALAMANDER obfuscation and a VLESS Reality node, both carrying emoji
+// remarks. Never paste live share links here — the repo is public. The
+// sing-box and Clash renderers must preserve every node, its readable name
+// and its credentials.
 const (
-	liveHy2Link   = "hysteria2://REDACTED-HY2-AUTH@node1.example.net:443?sni=node1.example.net&fp=firefox&alpn=h3&obfs=salamander&obfs-password=REDACTED-HY2-OBFS#%F0%9F%87%AB%F0%9F%87%AE%20Finland%20Hysteria%20%F0%9F%94%A5"
-	liveVLESSLink = "vless://00000000-0000-0000-0000-000000000000@node1.example.net:443?security=reality&pbk=REDACTED-REALITY-PBK&sid=0000000000000000&sni=www.github.com&fp=firefox#🇫🇮%20Finland%20vless%20🎈"
+	liveHy2Link   = "hysteria2://11111111-1111-1111-1111-111111111111@node1.example.net:443?sni=node1.example.net&fp=firefox&alpn=h3&obfs=salamander&obfs-password=example-obfs-pass#%F0%9F%87%AB%F0%9F%87%AE%20Finland%20Hysteria%20%F0%9F%94%A5"
+	liveVLESSLink = "vless://22222222-2222-2222-2222-222222222222@node1.example.net:443?security=reality&pbk=EXAMPLE_REALITY_PUBLIC_KEY_0000000000000000000&sid=0000000000000000&sni=www.github.com&fp=firefox#🇫🇮%20Finland%20vless%20🎈"
 
 	liveHy2Tag   = "🇫🇮 Finland Hysteria 🔥"
 	liveVLESSTag = "🇫🇮 Finland vless 🎈"
@@ -27,7 +28,7 @@ const (
 
 // newMultiNodeSub spins a backend serving the two live-shaped share links and
 // mocks the DB for the given subscription id.
-func newMultiNodeSub(t *testing.T, subID string) (*Service, *testutil.DatabaseService) {
+func newMultiNodeSub(t *testing.T, subID string) (*Service, *testutil.SubscriptionRepositoryFake) {
 	t.Helper()
 
 	body := liveHy2Link + "\n" + liveVLESSLink
@@ -36,7 +37,7 @@ func newMultiNodeSub(t *testing.T, subID string) (*Service, *testutil.DatabaseSe
 	}))
 	t.Cleanup(backend.Close)
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, id string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, SubscriptionID: id, Status: "active"},
@@ -94,11 +95,11 @@ func TestHandleSubscription_SingboxParity_MultiNode(t *testing.T) {
 	require.NotEqual(t, "proxy-1", hy2["tag"], "node tag must be the upstream remark")
 
 	// Hysteria2 credentials survive: auth password, SALAMANDER obfs, TLS.
-	require.Equal(t, "REDACTED-HY2-AUTH", hy2["password"])
+	require.Equal(t, "11111111-1111-1111-1111-111111111111", hy2["password"])
 	hy2Obfs, ok := hy2["obfs"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "salamander", hy2Obfs["type"])
-	require.Equal(t, "REDACTED-HY2-OBFS", hy2Obfs["password"])
+	require.Equal(t, "example-obfs-pass", hy2Obfs["password"])
 	hy2TLS, ok := hy2["tls"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "node1.example.net", hy2TLS["server_name"])
@@ -106,13 +107,13 @@ func TestHandleSubscription_SingboxParity_MultiNode(t *testing.T) {
 	require.Equal(t, true, hy2TLS["enabled"])
 
 	// VLESS Reality credentials survive: uuid + pbk + sid + sni.
-	require.Equal(t, "00000000-0000-0000-0000-000000000000", vless["uuid"])
+	require.Equal(t, "22222222-2222-2222-2222-222222222222", vless["uuid"])
 	vlessTLS, ok := vless["tls"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, true, vlessTLS["enabled"])
 	reality, ok := vlessTLS["reality"].(map[string]any)
 	require.True(t, ok, "reality block must survive the round-trip")
-	require.Equal(t, "REDACTED-REALITY-PBK", reality["public_key"])
+	require.Equal(t, "EXAMPLE_REALITY_PUBLIC_KEY_0000000000000000000", reality["public_key"])
 	require.Equal(t, "0000000000000000", reality["short_id"])
 	require.Equal(t, "www.github.com", vlessTLS["server_name"])
 
@@ -204,15 +205,15 @@ func TestHandleSubscription_ClashParity_MultiNode(t *testing.T) {
 
 	hy2, ok := byType["hysteria2"]
 	require.True(t, ok)
-	require.Equal(t, "REDACTED-HY2-AUTH", hy2["password"])
+	require.Equal(t, "11111111-1111-1111-1111-111111111111", hy2["password"])
 	require.Equal(t, "salamander", hy2["obfs"])
-	require.Equal(t, "REDACTED-HY2-OBFS", hy2["obfs-password"])
+	require.Equal(t, "example-obfs-pass", hy2["obfs-password"])
 
 	vless, ok := byType["vless"]
 	require.True(t, ok)
 	require.Equal(t, liveVLESSTag, vless["name"])
-	require.Equal(t, "00000000-0000-0000-0000-000000000000", vless["uuid"])
+	require.Equal(t, "22222222-2222-2222-2222-222222222222", vless["uuid"])
 	reality, ok := vless["reality-opts"].(map[string]any)
 	require.True(t, ok, "reality-opts must survive the round-trip")
-	require.Equal(t, "REDACTED-REALITY-PBK", reality["public-key"])
+	require.Equal(t, "EXAMPLE_REALITY_PUBLIC_KEY_0000000000000000000", reality["public-key"])
 }

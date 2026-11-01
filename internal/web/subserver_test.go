@@ -19,7 +19,6 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
-	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
@@ -27,8 +26,8 @@ import (
 	"gorm.io/gorm"
 )
 
-func testServer(t *testing.T, db interfaces.DatabaseService, cfg *config.Config) *Server {
-	subSvc := service.NewSubscriptionService(db, nil, nil, nil, cfg)
+func testServer(t *testing.T, db *testutil.SubscriptionRepositoryFake, cfg *config.Config) *Server {
+	subSvc := service.NewSubscriptionService(db, nil, nil, cfg)
 	srv := NewServer(":0", db, cfg, "testbot", subSvc, subserver.NewService(config.SubServerCacheTTL))
 
 	return srv
@@ -37,7 +36,7 @@ func testServer(t *testing.T, db interfaces.DatabaseService, cfg *config.Config)
 func TestHandleSubscription_MethodNotAllowed(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewSubscriptionRepositoryFake()
 	srv := testServer(t, db, &config.Config{})
 
 	w := httptest.NewRecorder()
@@ -65,7 +64,7 @@ func TestHandleSubscription_SubServerNil(t *testing.T) {
 func TestHandleSubscription_InvalidCode(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewSubscriptionRepositoryFake()
 	srv := testServer(t, db, &config.Config{})
 
 	tests := []string{
@@ -86,7 +85,7 @@ func TestHandleSubscription_InvalidCode(t *testing.T) {
 func TestHandleSubscription_AccessLog(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewSubscriptionRepositoryFake()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return nil, gorm.ErrRecordNotFound
 	}
@@ -103,7 +102,7 @@ func TestHandleSubscription_AccessLog(t *testing.T) {
 func TestHandleSubscription_NoServersAvailable(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewSubscriptionRepositoryFake()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -141,7 +140,7 @@ func TestHandleSubscription_SourceVariants(t *testing.T) {
 				_, _ = w.Write([]byte(tt.body))
 			}))
 			defer backend.Close()
-			db := testutil.NewDatabaseService()
+			db := testutil.NewSubscriptionRepositoryFake()
 			db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 				return &database.SubscriptionFull{
 					Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -209,7 +208,7 @@ func TestHandleSubscription_AccessLogVariants(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := testutil.NewDatabaseService()
+			db := testutil.NewSubscriptionRepositoryFake()
 			srv := testServer(t, db, &config.Config{})
 			logPath := filepath.Join(t.TempDir(), "subserver.log")
 			accessLogger, err := subserver.NewAccessLogger(logPath)
@@ -304,7 +303,7 @@ func TestHandleSubscription_SourceFetchError(t *testing.T) {
 	}))
 	defer b.Close()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewSubscriptionRepositoryFake()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -330,7 +329,7 @@ func TestHandleSubscription_SourceFetchError(t *testing.T) {
 func TestHandleSubscription_DatabaseError_Returns500GenericBody(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewSubscriptionRepositoryFake()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return nil, gorm.ErrInvalidDB // arbitrary non-not-found infra error
 	}
@@ -358,7 +357,7 @@ func TestHandleSubscription_CacheSubscriptionResult(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewSubscriptionRepositoryFake()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -398,7 +397,7 @@ func TestHandleSubscription_DevicesTracking(t *testing.T) {
 
 	var savedDevices string
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewSubscriptionRepositoryFake()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -436,7 +435,7 @@ func TestHandleSubscription_DevicesTracking(t *testing.T) {
 func TestHandleSubscription_SourceWithoutSubURL(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewSubscriptionRepositoryFake()
 	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},

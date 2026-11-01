@@ -2,12 +2,12 @@ package bot
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	"go.uber.org/zap"
 )
@@ -24,13 +24,13 @@ type referralEntry struct {
 
 type ReferralCache struct {
 	noCopy noCopy
-	db     interfaces.DatabaseService
+	db     interfaces.ReferralCountSource
 	data   map[int64]*referralEntry
 	mu     sync.RWMutex
 	sendMu sync.Map
 }
 
-func NewReferralCache(db interfaces.DatabaseService) *ReferralCache {
+func NewReferralCache(db interfaces.ReferralCountSource) *ReferralCache {
 	return &ReferralCache{
 		db:   db,
 		data: make(map[int64]*referralEntry),
@@ -130,7 +130,7 @@ func (rc *ReferralCache) StartSync(ctx context.Context) {
 
 	err := rc.Load(ctx)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if utils.IsCtxErr(err) {
 			logger.Info("Referral cache load skipped (context ending)")
 		} else {
 			logger.Error("Failed to load referral cache", zap.Error(err))

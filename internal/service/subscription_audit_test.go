@@ -23,14 +23,14 @@ import (
 
 // auditTestSvc собирает SubscriptionService с фейком, накапливающим
 // audit-события в m.AuditLogs.
-func auditTestSvc(m *testutil.DatabaseService) *SubscriptionService {
-	return NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+func auditTestSvc(m *testutil.ServiceStoreFake) *SubscriptionService {
+	return NewSubscriptionService(m, nil, nil, &config.Config{})
 }
 
 func TestSubscriptionService_Create_WritesCreatedAudit(t *testing.T) {
 	t.Parallel()
 
-	m := &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return nil, gorm.ErrRecordNotFound
 		},
@@ -66,7 +66,7 @@ func TestSubscriptionService_Create_WritesCreatedAudit(t *testing.T) {
 func TestSubscriptionService_Create_AuditFailureDoesNotBreakFlow(t *testing.T) {
 	t.Parallel()
 
-	m := &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return nil, gorm.ErrRecordNotFound
 		},
@@ -96,7 +96,7 @@ func TestSubscriptionService_Create_AuditFailureDoesNotBreakFlow(t *testing.T) {
 func TestSubscriptionService_Reanimate_WritesReanimatedAudit(t *testing.T) {
 	t.Parallel()
 
-	m := &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return nil, gorm.ErrRecordNotFound
 		},
@@ -133,7 +133,7 @@ func TestSubscriptionService_Reanimate_WritesReanimatedAudit(t *testing.T) {
 func TestSubscriptionService_Downgrade_WritesDowngradedAudit(t *testing.T) {
 	t.Parallel()
 
-	m := &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		GetPlanByNameFunc: func(ctx context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: database.FreePlanName}, nil
 		},
@@ -160,7 +160,7 @@ func TestSubscriptionService_Downgrade_WritesDowngradedAudit(t *testing.T) {
 func TestSubscriptionService_AdminSetPlan_WritesPlanChangedWithAdminActor(t *testing.T) {
 	t.Parallel()
 
-	m := &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
 			expiry := time.Now().UTC().Add(24 * time.Hour)
 			return &database.Subscription{ID: id, Status: string(database.SubscriptionStatusActive), PlanID: 2, ExpiresAt: &expiry}, nil
@@ -193,7 +193,7 @@ func TestSubscriptionService_AdminSetPlan_WritesPlanChangedWithAdminActor(t *tes
 func TestSubscriptionService_AdminSetPlan_WithoutAdminContextUsesZeroActor(t *testing.T) {
 	t.Parallel()
 
-	m := &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: id, Status: string(database.SubscriptionStatusActive), PlanID: 2}, nil
 		},
@@ -219,7 +219,7 @@ func TestSubscriptionService_AdminSetPlan_WithoutAdminContextUsesZeroActor(t *te
 func TestSubscriptionService_DeleteByID_WritesDeletedAudit(t *testing.T) {
 	t.Parallel()
 
-	m := &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: id, TelegramID: 123456, SubscriptionID: "sub-del", Status: string(database.SubscriptionStatusActive)}, nil
 		},
@@ -246,7 +246,7 @@ func TestSubscriptionService_DeleteByID_WritesDeletedAudit(t *testing.T) {
 func TestSubscriptionService_ExpireSubscription_WritesExpiredAndDowngradedAudits(t *testing.T) {
 	t.Parallel()
 
-	m := &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		GetByIDFunc: func(ctx context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: id, Status: string(database.SubscriptionStatusActive), PlanID: 2, SubscriptionID: "sub-exp"}, nil
 		},
@@ -268,7 +268,7 @@ func TestSubscriptionService_ExpireSubscription_WritesExpiredAndDowngradedAudits
 func TestSubscriptionService_GetOrCreateSubscription_WritesCreatedAudit(t *testing.T) {
 	t.Parallel()
 
-	m := &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		GetByTelegramIDFunc: func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 			return nil, gorm.ErrRecordNotFound
 		},
@@ -304,7 +304,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_WritesRevokedAndSummaryAud
 		Status:         string(database.SubscriptionStatusActive),
 	}
 
-	m := &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
 			return []database.Subscription{orphan}, nil
 		},
@@ -331,7 +331,7 @@ func TestSubscriptionService_ReconcileOrphanedClients_WritesRevokedAndSummaryAud
 func TestSubscriptionService_ReconcileOrphanedClients_NoRevocations_NoSummaryEvent(t *testing.T) {
 	t.Parallel()
 
-	m := &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		GetAllSubscriptionsFunc: func(ctx context.Context) ([]database.Subscription, error) {
 			return nil, nil
 		},

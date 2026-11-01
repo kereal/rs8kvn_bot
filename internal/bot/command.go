@@ -26,11 +26,6 @@ func NewCommandHandler(parent *Handler) *CommandHandler {
 
 // HandleStart processes /start command.
 func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update) error {
-	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
-	defer cancel()
-
-	ctx = ctxWithTimeout
-
 	if update.Message == nil {
 		logger.Error("HandleStart called with nil Message")
 		return fmt.Errorf("nil message")
@@ -72,11 +67,6 @@ func (c *CommandHandler) HandleStart(ctx context.Context, update tgbotapi.Update
 // no message to edit (unlike the 🚀 Подписка button), so messageID=0 makes
 // handleMySubscription send a fresh message instead of editing an existing one.
 func (c *CommandHandler) HandleMySub(ctx context.Context, update tgbotapi.Update) error {
-	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
-	defer cancel()
-
-	ctx = ctxWithTimeout
-
 	if update.Message == nil {
 		logger.Error("HandleMySub called with nil Message")
 		return fmt.Errorf("nil message")
@@ -101,11 +91,6 @@ func (c *CommandHandler) HandleMySub(ctx context.Context, update tgbotapi.Update
 
 // HandleHelp sends help message.
 func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update) error {
-	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
-	defer cancel()
-
-	ctx = ctxWithTimeout
-
 	if update.Message == nil {
 		logger.Error("HandleHelp called with nil Message")
 		return fmt.Errorf("nil message")
@@ -149,11 +134,6 @@ func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update)
 
 // HandleInvite processes /invite command.
 func (c *CommandHandler) HandleInvite(ctx context.Context, update tgbotapi.Update) error {
-	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
-	defer cancel()
-
-	ctx = ctxWithTimeout
-
 	if update.Message == nil {
 		logger.Error("HandleInvite called with nil Message")
 		return fmt.Errorf("nil message")
@@ -263,11 +243,6 @@ func (c *CommandHandler) handleShareStart(ctx context.Context, chatID int64, use
 
 // handleBindTrial binds a trial subscription from a deep link.
 func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, username, subscriptionID string) error {
-	ctxWithTimeout, cancel := c.h.withTimeout(ctx)
-	defer cancel()
-
-	ctx = ctxWithTimeout
-
 	logger.Info("User binding trial subscription",
 		zap.Int64("chat_id", chatID),
 		zap.String("username", username),

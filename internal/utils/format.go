@@ -89,25 +89,6 @@ func GenerateProgressBar(usedGB, limitGB float64) string {
 	return bar.String()
 }
 
-// DaysUntilReset calculates the number of days until the next traffic reset.
-// Returns -1 if auto-reset is not configured (expiryTime is zero).
-// Returns 0 if already expired (reset should happen now).
-// Returns positive number of days until reset otherwise.
-func DaysUntilReset(now, expiryTime time.Time) int {
-	if expiryTime.IsZero() {
-		return -1 // Auto-reset not configured
-	}
-
-	if now.After(expiryTime) || now.Equal(expiryTime) {
-		return 0 // Already expired, reset should happen now
-	}
-
-	duration := expiryTime.Sub(now)
-	days := max(int(duration.Hours()/24), 0)
-
-	return days
-}
-
 // FormatDateRu formats a date in Russian locale (e.g., "15 января 2025").
 // Returns "--" for zero time.
 func FormatDateRu(t time.Time) string {

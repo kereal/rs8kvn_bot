@@ -51,10 +51,13 @@ func TestResetTraffic_Success(t *testing.T) {
 func TestResetTraffic_PanelErrorSurfacesMsg(t *testing.T) {
 	t.Parallel()
 
+	// Контракт панели: resetTraffic отсутствующего клиента —
+	// "Something went wrong (record not found)". Классификация — sentinel,
+	// а не текст ошибки (см. panel_contract_test.go).
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"success":false,"msg":"client not found"}`)
+		fmt.Fprint(w, `{"success":false,"msg":"Something went wrong (record not found)"}`)
 	}))
 	defer server.Close()
 
@@ -64,8 +67,7 @@ func TestResetTraffic_PanelErrorSurfacesMsg(t *testing.T) {
 
 	err = client.ResetTraffic(context.Background(), "missing@example.com")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to reset traffic")
-	assert.Contains(t, err.Error(), "client not found")
+	assert.ErrorIs(t, err, ErrClientNotFound)
 }
 
 func TestResetTraffic_InvalidJSON(t *testing.T) {

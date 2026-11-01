@@ -11,6 +11,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
@@ -186,6 +187,23 @@ func TestE2E_SetPlanCommand_Success(t *testing.T) {
 	premiumPlan := &database.Plan{Name: "e2e-premium", DevicesLimit: 2, TrafficLimit: 1024}
 	require.NoError(t, env.db.GetDB().WithContext(ctx).Create(premiumPlan).Error)
 	require.NoError(t, env.db.LinkNodeToPlan(ctx, premiumPlan.Name, 1), "link node to premium plan")
+
+	// The client was provisioned by Create's best-effort sync, but the stateless
+	// fake does not remember it. The update path now reads the panel profile
+	// before writing (it must preserve admin edits), so teach the fake to
+	// answer that read the way a real panel would for an existing client.
+	env.xui.GetClientByEmailFunc = func(ctx context.Context, email string) (*xui.ClientRecord, error) {
+		return &xui.ClientRecord{
+			Client: xui.ClientConfig{
+				Email:           email,
+				Enable:          true,
+				Reset:           30,
+				TrafficReset:    "monthly",
+				TrafficResetDay: 1,
+			},
+			InboundIDs: []int{1},
+		}, nil
+	}
 
 	resetBotAPI(env.botAPI)
 

@@ -2,8 +2,12 @@ package e2e
 
 import (
 	"context"
+	"fmt"
+	"io/fs"
 	"net/http"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +22,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -133,11 +138,10 @@ func setupE2EEnv(t *testing.T) *e2eTestEnv {
 	require.NoError(t, db.LinkNodeToPlan(ctx, "trial", node.ID), "link node to trial plan")
 	require.NoError(t, db.LinkNodeToPlan(ctx, "free", node.ID), "link node to free plan")
 
-	xuiClients := map[uint]interfaces.XUIClient{1: mockXUI}
+	clients := e2eNodeClients(map[uint]interfaces.XUIClient{1: mockXUI})
 	nodes := e2eNodes("https://panel.example.com")
-	vpnClients := e2eVPNClients(xuiClients)
-	syncService := service.NewSyncService(db, vpnClients, nodes)
-	subService := service.NewSubscriptionService(db, xuiClients, vpnClients, nodes, cfg)
+	syncService := service.NewSyncService(db, clients, nodes)
+	subService := service.NewSubscriptionService(db, clients, nodes, cfg)
 	subService.SetSyncService(syncService)
 	handler := bot.NewHandler(mockBotAPI, cfg, db, botCfg, subService, "")
 
@@ -212,14 +216,86 @@ func newCommandMessage(chatID int64, userID int64, username, text string, cmdLen
 	}
 }
 
-// e2eVPNClients builds a vpn.Client map mirroring the given XUI clients map so
-// that SubscriptionService can provision/deprovision trials and subscriptions in
-// tests the same way production wiring does (cmd/bot/main.go buildRuntimeNodeClients).
-func e2eVPNClients(xuiClients map[uint]interfaces.XUIClient) map[uint]vpn.Client {
-	m := make(map[uint]vpn.Client, len(xuiClients))
-	for id, xc := range xuiClients {
-		m[id] = vpn.NewThreeXUIClient(xc, []int{1})
+// e2eNodeClients builds a service.NodeClients value from the given XUI reader
+// clients so that SubscriptionService can provision/deprovision trials and
+// subscriptions in tests the same way production wiring does
+// (cmd/bot/main.go buildRuntimeNodeClients).
+func e2eNodeClients(readers map[uint]interfaces.XUIClient) service.NodeClients {
+	clients := make(service.NodeClients, len(readers))
+	for id, xc := range readers {
+		clients[id] = service.NodeAccess{Provision: vpn.NewThreeXUIClient(xc, []int{1}), Reader: xc}
 	}
 
-	return m
+	return clients
+}
+
+// TestRepoContainsNoLiveInfraSecrets — сторож против повторной утечки.
+// Репозиторий публичный: живые адреса инфраструктуры и рабочие share-ссылки
+// попадать в него не должны. Если тест упал — не «чини тест», а убирай данные
+// и ротируй креды: они уже в истории git.
+func TestRepoContainsNoLiveInfraSecrets(t *testing.T) {
+	root := repoRoot(t)
+
+	// Паттерн собран из частей, чтобы этот файл не совпал с ним самим.
+	// Проверяем именно доменный суффикс: он и был утечкой (хост панели, узла,
+	// подписки и fetch-источника). Отдельные share-ссылки не проверяем —
+	// фикстуры в тестах полны example/заглушек, шум съест сигнал.
+	domainSuffix := regexp.MustCompile(`[a-z0-9-]+\.` + "qzz" + `\.io`)
+
+	var offenders []string
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
+			if d.Name() == ".git" || d.Name() == "node_modules" || d.Name() == "data" || d.Name() == "tmp" {
+				return filepath.SkipDir
+			}
+
+			return nil
+		}
+
+		switch filepath.Ext(path) {
+		case ".go", ".md", ".yml", ".yaml", ".json", ".html", ".sh":
+		default:
+			return nil
+		}
+
+		body, readErr := os.ReadFile(path)
+		if readErr == nil {
+			rel, _ := filepath.Rel(root, path)
+
+			for _, m := range domainSuffix.FindAll(body, -1) {
+				offenders = append(offenders, fmt.Sprintf("%s: live domain %s", rel, m))
+			}
+		}
+
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Empty(t, offenders, "live infrastructure data found in a public repo")
+}
+
+// repoRoot поднимается от рабочего каталога теста до корня модуля.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.Getwd()
+	require.NoError(t, err)
+
+	for {
+		_, statErr := os.Stat(filepath.Join(dir, "go.mod"))
+		if statErr == nil {
+			return dir
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("go.mod not found above test directory")
+		}
+
+		dir = parent
+	}
 }

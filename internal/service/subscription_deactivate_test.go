@@ -11,14 +11,13 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
-	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // newDeactivationDatabase builds a mock database with one completed broadcast
 // whose recipients are all blocked.
-func newDeactivationDatabase(telegramIDs []int64) *testutil.DatabaseService {
+func newDeactivationDatabase(telegramIDs []int64) *testutil.ServiceStoreFake {
 	recipients := make([]string, 0, len(telegramIDs))
 	for i, id := range telegramIDs {
 		recipients = append(recipients, fmt.Sprintf(`{"id":%d,"telegram_id":%d,"status":"blocked","attempts":1}`, i+1, id))
@@ -36,9 +35,18 @@ func newDeactivationDatabase(telegramIDs []int64) *testutil.DatabaseService {
 		UpdatedAt:        time.Now().UTC(),
 	}
 
-	return &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		Broadcasts: map[uint]*database.Broadcast{1: &broadcast},
 	}
+	// The fake does not mirror the recipients-snapshot aggregation; provide the
+	// stats this fixture encodes (every recipient blocked).
+	m.GetBroadcastRecipientsStatsFunc = func(context.Context, uint) (int64, int64, int64, int64, int64, database.BroadcastDeliveryReport, error) {
+		report := database.BroadcastDeliveryReport{Blocked: append([]int64(nil), telegramIDs...)}
+
+		return int64(len(telegramIDs)), 0, int64(len(telegramIDs)), 0, 0, report, nil
+	}
+
+	return m
 }
 
 // TestDeactivateBlockedBroadcastRecipients_RevokesAndDeprovisions covers the
@@ -115,10 +123,10 @@ func TestDeactivateBlockedBroadcastRecipients_RevokesAndDeprovisions(t *testing.
 	}
 
 	client := &mockVPNClient{}
-	vpnClients := map[uint]vpn.Client{node.ID: client}
+	clients := NodeClients{node.ID: {Provision: client}}
 
-	svc := NewSubscriptionService(m, nil, vpnClients, []database.Node{node}, &config.Config{})
-	svc.SetSyncService(NewSyncService(m, vpnClients, []database.Node{node}))
+	svc := NewSubscriptionService(m, clients, []database.Node{node}, &config.Config{})
+	svc.SetSyncService(NewSyncService(m, clients, []database.Node{node}))
 
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.NoError(t, err)
@@ -177,7 +185,7 @@ func TestDeactivateBlockedBroadcastRecipients_ReportsPartialFailure(t *testing.T
 		return nil
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.Error(t, err)
@@ -234,7 +242,7 @@ func TestDeactivateBlockedBroadcastRecipients_RetriesFailedDeprovision(t *testin
 			}
 			// Leave queued removals to the background worker.
 			m.GetPendingBySubscriptionIDFunc = func(context.Context, uint) ([]database.SubscriptionNode, error) { return nil, nil }
-			svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+			svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 			svc.SetSyncService(NewSyncService(m, nil, nil))
 
 			result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
@@ -268,13 +276,13 @@ func TestDeactivateBlockedBroadcastRecipients_StatsError(t *testing.T) {
 
 	ctx := context.Background()
 
-	m := &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		GetBroadcastRecipientsStatsFunc: func(context.Context, uint) (int64, int64, int64, int64, int64, database.BroadcastDeliveryReport, error) {
 			return 0, 0, 0, 0, 0, database.BroadcastDeliveryReport{}, errors.New("stats db down")
 		},
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get broadcast stats")
@@ -289,13 +297,13 @@ func TestDeactivateBlockedBroadcastRecipients_NoTargets(t *testing.T) {
 
 	ctx := context.Background()
 
-	m := &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		GetBroadcastRecipientsStatsFunc: func(context.Context, uint) (int64, int64, int64, int64, int64, database.BroadcastDeliveryReport, error) {
 			return 3, 3, 0, 0, 0, database.BroadcastDeliveryReport{}, nil
 		},
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -319,7 +327,7 @@ func TestDeactivateBlockedBroadcastRecipients_SkipsTelegramWithoutSubscription(t
 		return nil, database.ErrSubscriptionNotFound
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -340,7 +348,7 @@ func TestDeactivateBlockedBroadcastRecipients_SubscriptionReadErrorCountsFailed(
 		return nil, errors.New("db read error")
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.Error(t, err)
 	require.NotNil(t, result)
@@ -379,8 +387,13 @@ func TestDeactivateBlockedBroadcastRecipients_UnreachableAdressees(t *testing.T)
 		UpdatedAt:        time.Now().UTC(),
 	}
 
-	m := &testutil.DatabaseService{
+	m := &testutil.ServiceStoreFake{
 		Broadcasts: map[uint]*database.Broadcast{1: &broadcast},
+	}
+	m.GetBroadcastRecipientsStatsFunc = func(context.Context, uint) (int64, int64, int64, int64, int64, database.BroadcastDeliveryReport, error) {
+		report := database.BroadcastDeliveryReport{Unreachable: []int64{sub.TelegramID}}
+
+		return 1, 0, 0, 1, 0, report, nil
 	}
 	m.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		if telegramID == sub.TelegramID {
@@ -395,7 +408,7 @@ func TestDeactivateBlockedBroadcastRecipients_UnreachableAdressees(t *testing.T)
 		return nil
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -487,10 +500,10 @@ func TestDeactivateBlockedBroadcastRecipients_ImmediateSyncCapped(t *testing.T) 
 	}
 
 	client := &mockVPNClient{}
-	vpnClients := map[uint]vpn.Client{node.ID: client}
+	clients := NodeClients{node.ID: {Provision: client}}
 
-	svc := NewSubscriptionService(m, nil, vpnClients, []database.Node{node}, &config.Config{})
-	svc.SetSyncService(NewSyncService(m, vpnClients, []database.Node{node}))
+	svc := NewSubscriptionService(m, clients, []database.Node{node}, &config.Config{})
+	svc.SetSyncService(NewSyncService(m, clients, []database.Node{node}))
 
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.NoError(t, err)
@@ -535,7 +548,7 @@ func TestDeactivateBlockedBroadcastRecipients_InvalidatesSubscriberCache(t *test
 		return nil
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 	svc.SetInvalidateBySubIDFunc(func(subID string) {
 		invalidated = append(invalidated, subID)
 	})
@@ -594,7 +607,7 @@ func TestDeactivateBlockedBroadcastRecipients_RefreshesMetrics(t *testing.T) {
 		return 0, nil
 	}
 
-	svc := NewSubscriptionService(m, nil, nil, nil, &config.Config{})
+	svc := NewSubscriptionService(m, nil, nil, &config.Config{})
 
 	result, err := svc.DeactivateBlockedBroadcastRecipients(ctx, 1)
 	require.NoError(t, err)

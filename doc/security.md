@@ -74,7 +74,6 @@ Instead, contact us privately:
 - **Graceful shutdown** — in-flight requests allowed to complete
 - **RetryWithBackoff** retries VPN panel calls on transient errors (exponential backoff + jitter, up to 3 retries)
 - **Fail-closed cache revalidation** for the Subscription server: cached access is not served when subscription status cannot be checked
-- **Circuit breaker:** implemented and tested, but not wired into the live XUI client path; production resilience currently relies on timeout and retry/backoff
 
 ### 6. Code Quality
 
@@ -148,7 +147,7 @@ Instead, contact us privately:
 
 - [ ] **Rotate secrets** every 90 days (panel API tokens)
 - [ ] Monitor `/healthz` with external service (UptimeRobot, healthchecks.io)
-- [ ] Monitor Prometheus metrics for anomalies (XUI errors, payment issues, error-rate spikes; circuit-breaker trips if the breaker is enabled in the live path)
+- [ ] Monitor Prometheus metrics for anomalies (XUI errors, payment issues, error-rate spikes)
 - [ ] Review logs daily for `error`/`warn` level
 - [ ] Watch for `401` / `XUI API error` patterns indicating token issues
 - [ ] Backup verification: monthly restore test

@@ -8,31 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestDaysUntilReset(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now()
-
-	tests := []struct {
-		name       string
-		expiryTime time.Time
-		want       int
-	}{
-		{"zero expiry", time.Time{}, -1},
-		{"future expiry", now.Add(24 * time.Hour), 1},
-		{"past expiry", now.Add(-1 * time.Hour), 0},
-		{"exactly now", now, 0},
-		{"3 days", now.Add(3 * 24 * time.Hour), 3},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := DaysUntilReset(now, tt.expiryTime)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestFormatDateRu(t *testing.T) {
 	t.Parallel()
 

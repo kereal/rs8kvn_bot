@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -55,44 +54,6 @@ var (
 	ErrSubscriptionNotFound      = errors.New("vpn subscription not found")
 	ErrNotImplemented            = errors.New("vpn operation not implemented")
 )
-
-// classifyCreateSubscriptionError wraps the underlying error with ErrSubscriptionAlreadyExists
-// when the error message indicates the client is already present on the node.
-// Idempotent: a value already carrying the sentinel is returned unchanged.
-func classifyCreateSubscriptionError(err error) error {
-	if err == nil || errors.Is(err, ErrSubscriptionAlreadyExists) {
-		return err
-	}
-
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "already exists") ||
-		strings.Contains(msg, "client already exists") ||
-		strings.Contains(msg, "duplicate") ||
-		strings.Contains(msg, "already added") ||
-		strings.Contains(msg, "already in use") {
-		return fmt.Errorf("%w: %w", ErrSubscriptionAlreadyExists, err)
-	}
-
-	return err
-}
-
-// classifyDeleteSubscriptionError wraps the underlying error with ErrSubscriptionNotFound
-// when the error message indicates the client does not exist on the node.
-// Idempotent: a value already carrying the sentinel is returned unchanged.
-func classifyDeleteSubscriptionError(err error) error {
-	if err == nil || errors.Is(err, ErrSubscriptionNotFound) {
-		return err
-	}
-
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "not found") ||
-		strings.Contains(msg, "does not exist") ||
-		strings.Contains(msg, "client not found") {
-		return fmt.Errorf("%w: %w", ErrSubscriptionNotFound, err)
-	}
-
-	return err
-}
 
 var _ Client = (*FetchClient)(nil)
 

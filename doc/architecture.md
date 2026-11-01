@@ -1,5 +1,30 @@
 # Architecture — rs8kvn_bot
 
+## Карта документации
+
+Документ без строки в этой таблице считается неактуальным. Новый документ
+добавляется сюда же — иначе он просто ляжет и умрёт. Источник истины по
+взаимодействию с панелью — раздел «Контракт API панели 3x-ui» в конце этого
+документа + contract-тесты `internal/xui/panel_contract_test.go`.
+
+| Документ | О чём | Когда читать |
+|---|---|---|
+| `architecture.md` | устройство системы, модули, потоки | перед изменением архитектуры |
+| `operations.md` | эксплуатация: деплой, логи, health, инциденты | при инциденте или релизе |
+| `installation.md` | развёртывание с нуля | при первичной установке |
+| `api.md` | HTTP-эндпоинты бота и веба | при работе с API |
+| `audit-log.md` | модель аудита и правила событий | при изменении `internal/database/audit_log.go` |
+| `security.md` | требования безопасности | перед изменением auth/секретов |
+| `broadcast.md`, `broadcast-deactivation.md` | рассылки и деактивация получателей | при работе с broadcast-флоу |
+| `platega-T3.md` | платёжный провайдер Platega | при работе с оплатой |
+| `doc/adr/` | принятые архитектурные решения | **до** предложения рефакторинга: не переоткрывать |
+| `CONTEXT.md` (корень) | историческая очередь рефакторинга — закрыта 2026-11-01, см. «История рефакторинга» ниже | архив, не источник истины |
+| `handover.md`, `subscription_sync_technical_spec.md`, `reports/`, `diagrams/` | исторические отчёты и визуализации | только по прямой необходимости, не как источник истины |
+
+По правилам `AGENTS.md` не читать и не писать: `bypass_clients_comparison.md`,
+`bypass_research.md`, `marketing_strategy.md`, `nginx-xhttp-hysteria2-architecture.md`,
+`task-bot-integration.md`.
+
 ## Multi-outbounds per node
 
 A single 3x-ui node can now expose multiple inbounds. Inbound IDs are stored as a JSON array in `nodes.inbound_ids` and sent to the panel as `inboundIds` during client creation/update.
@@ -8,7 +33,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 
 **Key characteristics:**
 - Event-driven with bounded concurrency (worker pool)
-- Retry with exponential backoff for external dependencies (the circuit breaker implementation is currently not wired into the live XUI path)
+- Retry with exponential backoff for external dependencies
 - Comprehensive caching (in-memory LRU, TTL)
 - Graceful shutdown with coordinated cleanup
 - 66.2% aggregate test coverage in the latest documented run (unit, e2e, fuzz, leak detection)
@@ -151,8 +176,11 @@ internal/
 ├── service/          # Business logic
 │   ├── subscription.go      # Use cases: Create, Delete, DeleteByID, Renew; unified two-phase teardown (revokeAndDeprovisionThenDelete)
 │   ├── subscription_reminders.go # Reminder window model and Telegram delivery
-│   ├── subscription_traffic.go # Presentation: TrafficInfo, GetWithTraffic, formatExpiresAt
+│   ├── subscription_traffic.go # Presentation: TrafficInfo, GetWithTraffic
+│   ├── subscription_reset.go # «🔄 Сброс» card line: next traffic reset from the panel profile
+│   ├── node_clients.go       # NodeClients registry: per-node Provision + Reader slots, built in cmd/bot
 │   ├── sync.go              # Multi-node subscription sync (Reconcile, SyncPendingNodes)
+│   ├── plan_reconcile.go     # Single subscription_nodes transition core + db/tx planNodeStore adapters
 │   ├── order.go             # Order lifecycle (Create, Activate, Expire)
 │   └── subscription_nodes.go # Subscription-node join table CRUD
 ├── vpn/                # VPN client abstraction (multi-node, multi-type)
@@ -161,9 +189,9 @@ internal/
 │   ├── proxman.go           # proxman client implementation (classifies Create/Delete)
 │   └── fetch.go             # fetch client (read-only HTTP, no-op provisioning)
 ├── xui/              # Legacy 3x-ui API client (used by vpn/threex_ui.go)
-│   ├── client.go            # 3x-ui REST API + RetryWithBackoff (Bearer auth, multi-outbound flow grouping)
-│   ├── breaker.go           # Circuit breaker (5/30s/3-half-open)
-│   └── errors.go            # Sentinel errors (ErrClientNotFound)
+│   ├── client.go            # 3x-ui REST API + RetryWithBackoff (Bearer auth, multi-outbound flow grouping; reads client profile via GET /clients/get/{email})
+│   ├── classify.go          # Single panel-response classifier: {success,msg,obj} envelope → sentinel errors
+│   └── errors.go            # Sentinel errors (ErrClientNotFound, ErrClientAlreadyExists)
 ├── database/         # Persistence
 │   ├── service.go           # GORM service + connection pool
 │   ├── migrations.go        # Embedded migration runner
@@ -183,7 +211,7 @@ internal/
 ├── flag/             # Typed environment variable registry
 │   └── flag.go              # Registry, typed flags (string, int, int64)
 ├── metrics/          # Prometheus metrics
-│   └── metrics.go           # HTTP, bot, XUI, DB, cache, circuit breaker metrics
+│   └── metrics.go           # HTTP, bot, XUI, DB, cache metrics
 ├── logger/           # Logging
 │   └── logger.go            # Zap + Sentry + lumberjack
 ├── ratelimiter/      # Rate limiting
@@ -200,7 +228,7 @@ internal/
 ├── heartbeat/        # External monitoring
 │   └── heartbeat.go         # Periodic POST to HEARTBEAT_URL
 ├── interfaces/       # DI interfaces
-│   └── interfaces.go        # BotAPI, DatabaseService (composition root), XUIClient; per-slice seams SubscriptionRepository/InviteRepository/TrialRepository/PlanRepository and composed WebRepository
+│   └── interfaces.go        # BotAPI, XUIClient; composition-root DatabaseService; per-consumer seams (ADR-0001): SubscriptionStore, SyncStore, OrderStore, BotStore, ReferralCountSource, ReferralInviteStore, AuditLogWriter, WebRepository
 ├── utils/            # Utilities
 │   ├── uuid.go              # Crypto-random UUID v4, SubID, invite code
 │   ├── qr.go                # QR code generation
@@ -208,7 +236,11 @@ internal/
 │   ├── format.go            # Progress bar, date formatting
 │   └── markdown.go          # Markdown sanitization
 └── testutil/         # Test helpers
-    └── testutil.go          # Mock DB, XUI, Bot (flat DatabaseService fake)
+    ├── testutil.go          # Config/XUI/Bot fakes + real-SQLite helper
+    ├── fake_service_store.go # ServiceStoreFake: SubscriptionStore+SyncStore+OrderStore (no domain mirroring)
+    ├── fake_bot_store.go     # BotStoreFake: *ServiceStoreFake + BotStore surface
+    ├── fake_web_repository.go # SubscriptionRepositoryFake: *ServiceStoreFake + WebRepository
+    └── fake_small.go         # ReferralCountSourceFake, ReferralInviteStoreFake, AuditLogWriterFake
 ```
 
 ---
@@ -277,9 +309,6 @@ resp, err := c.httpClient.Do(req)
   `utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, fn)` (3 attempts, 2s base,
   exponential ×2 with ±50% jitter). Only network-level errors are retried (`IsRetryable`); DNS errors and
   non-200 responses are treated as **non-retryable**. Context cancellation aborts immediately.
-- **Circuit breaker** — `internal/xui/breaker.go` defines a `CircuitBreaker` (closed → open after `maxFailures`
-  → half-open with up to 3 test reqs), but it is **currently not wired into the client path** (no live caller;
-  only exercised by tests). Resilience today relies solely on `RetryWithBackoff`.
 
 **Multi-outbound flow grouping:**
 `groupInboundIDsByFlow` fetches each inbound's transport (`GET /panel/api/inbounds/get/{id}` → `GetRequiredFlow`)
@@ -408,51 +437,7 @@ CREATE INDEX idx_orders_created_at             ON orders(created_at);
 
 ---
 
-### 6. Circuit Breaker (internal/xui/breaker.go)
-
-**State machine:**
-
-```
-      ┌─────────────┐
-      │   CLOSED    │ ← Normal operation
-      └──────┬──────┘
-             │ 5 consecutive failures
-             ▼
-      ┌─────────────┐
-      │    OPEN     │ ← Reject requests for 30s
-      └──────┬──────┘
-             │ Timeout (30s) expires
-             ▼
-      ┌─────────────┐
-      │  HALF_OPEN  │ ← Allow up to 3 test requests
-      └──────┬──────┘
-             │ If all 3 succeed → CLOSED
-             │ If any fail    → OPEN (reset timeout)
-             ▼
-      ┌─────────────┐
-      │   CLOSED    │ (back to normal)
-      └─────────────┘
-```
-
-**Implementation:**
-```go
-type CircuitBreaker struct {
-    state            CircuitState // closed, open, halfOpen
-    failures         int
-    maxFailures      int // 5
-    timeout          time.Duration // 30s
-    lastFailure      time.Time
-    halfOpenMax      int // 3
-    halfOpenAttempts int
-    mu               sync.RWMutex
-}
-```
-
-**Used by:** Defined in `internal/xui/breaker.go` but currently **not wired into the XUI client path** — there is no live caller (only tests exercise it). Resilience today relies on `utils.RetryWithBackoff` (see §2).
-
----
-
-### 7. Graceful Shutdown
+### 6. Graceful Shutdown
 
 **Signal handling:**
 ```bash
@@ -843,6 +828,14 @@ The `SyncService` manages synchronization of subscriptions with VPN nodes via a 
 | `ReconcilePlanNodes` | Add/remove nodes when plan changes |
 | `ReconcileOrphanedClients` | Recover missing node queues and revoke fully deprovisioned subscriptions |
 
+The transition rules (mark / add / remove over `subscription_nodes`) live in one
+implementation — `plan_reconcile.go` (`reconcilePlanNodesCore` + `planNodeStore`
+seam with a `DatabaseService` adapter and a `*gorm.DB` adapter). The background
+path runs it best-effort with a revoked guard and `errors.Join`; the payment CAS
+path (`ApplyPlanToSubscriptionInTx`) runs it fail-fast without the guard (the CAS
+already set the subscription `active` — paying reactivates a revoked
+subscription). Parity is pinned by `TestApplyPlan_Parity_BackgroundAndTxSameEndState`.
+
 ### Concurrency
 - Per-subscription locking via `lockSubscription(subscriptionID)` — prevents concurrent sync of the same subscription
 - Lock entries cleaned up when last waiter releases (prevents unbounded map growth)
@@ -861,10 +854,13 @@ The `SyncService` manages synchronization of subscriptions with VPN nodes via a 
 | `Heartbeat` | Configured interval, default 5m | Sends optional external monitoring heartbeat |
 
 ### Retry Behavior
-- Transient failures: `retry_count` incremented, `retry_at` set with exponential backoff
+- Caller-ctx cancellation (`context.Canceled`/`DeadlineExceeded`) writes no retry metadata — the scan aborts early, the next pass picks the record up
+- Retryable (network timeouts per `utils.IsRetryable`, transient node unavailability `errNodeUnavailable`, SQLite write-lock contention per `isTransientDBError` — `SQLITE_BUSY`/`SQLITE_LOCKED`, typed or by text, but never inside a non-200 body): `retry_count` incremented, `retry_at` set with exponential backoff, capped at `maxSyncRetries` (10, ~5.6h)
+- Non-retryable (the panel answered and refused: non-200, record not found, already in use; terminal DB errors such as constraint violations) — parked immediately, no ladder
+- Exhausted ladder parks the node: `retry_at` set far-future (`parkedRetryAt`), the terminal cause stays in `last_error`; any legitimate status re-transition resets retry metadata and releases the node (no fifth state, no migration)
 - `last_error` column stores the last error message
 - `SyncPendingNodes` returns aggregate error (`errors.Join`) on partial failures
-- Only `context.Cancelled`/`DeadlineExceeded` abort the scan early
+- A `pending_update` whose panel client is gone (`vpn.ErrSubscriptionNotFound`) is re-queued as `pending_add` (create path) instead of retrying an impossible update
 
 ---
 
@@ -898,7 +894,7 @@ The bot exposes a `/metrics` endpoint (via `promhttp.Handler()`) on the HTTP ser
 | 2026-02 | Long polling vs Webhook | Easier deployment (no public HTTPS needed), single instance ok |
 | 2026-02 | GORM vs sqlx | Faster dev, migrations built-in, relationship support |
 | 2026-03 | Separate subserver package | Reusable subscription server logic, clean separation |
-| 2026-03 | Circuit breaker on XUI | Prevent cascade failures if panel down |
+| 2026-03 | Circuit breaker on XUI | Prevent cascade failures if panel down (removed as dead code in 406995b, 2026-11) |
 | 2026-04 | 5-min subserver reload | Balance between config freshness and file I/O |
 | 2026-04 | Token bucket rate limiting | Standard algorithm, per-user isolation, tunable |
 | 2026-04 | Daily backup at 03:00 | Low-traffic period, WAL checkpoint ensures consistency |
@@ -1028,5 +1024,241 @@ Worker каждые 60 минут обрабатывает активные по
 3. **Сброшен + включён** — счётчик трафика сброшен (`used < limit`), но панель оставила клиента выключенным: воркер **включает клиента** через `UpdateClient(Enable=true)` и шлёт простое сообщение «трафик сброшен — ты снова в сети» без продажи (без кнопки Premium).
 
 При ошибке Telegram claim освобождается для повторной попытки (best-effort; по-нодные сбои логируются как `Warn` и обработка продолжается). На клиентов без traffic-лимита и на free/trial планы воркер не действует. Метрики: `traffic_notifications_total{kind,result}` и `traffic_notification_runs_total`. Миграция: `internal/database/migrations/038_add_traffic_reminders_sent.{up,down}.sql`.
+
+---
+
+## История рефакторинга
+
+Очередь кандидатов из `CONTEXT.md` (обзор 2026-07-09) закрыта 2026-11-01:
+
+- кандидат 1 — circuit breaker XUI удалён как мёртвый код (коммит `406995b`);
+- кандидат 2 — закрыт единым реестром `service.NodeClients` (`580e65a`);
+- кандидат 3 — proxman получил Bearer + лимит размера ранее, retry сетевых сбоев
+  добавлен (`utils.RetryWithBackoff`, идемпотентные EventID; `d744abc`). Отдельный
+  общий пакет `httpx` не заведён — дублирование конфигурации транспорта в двух
+  адаптерах сознательно принято;
+- кандидат 4 — закрыт единым `SyncService.buildNodeProvision` (`11297e7`);
+- кандидат 5 — закрыт `reconcilePlanNodesCore` (`ApplyPlanToSubscription`/`InTx`);
+- кандидат 6 — `*Cache` встроен в `subserver.Service`, pass-through методы
+  удалены (`e723650`);
+- кандидат 7 — timeout применяется один раз в `HandleUpdate` на диспетчеризации
+  (`withTimeout`), прологи в admin/command handlers снесены
+  (см. `internal/bot/dispatch_timeout_test.go`).
+
+---
+
+## Контракт API панели 3x-ui (v3.11.0)
+
+Проверенные факты о панели, с которой работает бот. Источники: живая панель
+(`<panel-host>/pnl`, доступ через Bearer-токен ноды) и исходники
+панели `MHSanaei/3x-ui` **тега `v3.11.0`** (`internal/web/service/client_crud.go`,
+`internal/web/controller/api.go`, `internal/web/controller/client.go`,
+`internal/web/service/inbound_traffic.go`, `internal/web/service/panel/api_token.go`).
+Дата проверки: **2026-10-31**. Живая панель: `currentVersion: 3.11.0`
+(`GET /panel/api/server/getPanelUpdateInfo`, Xray `26.10.21`) — проверка шла
+прямо на целевой версии.
+
+Документ существует, чтобы контракт не пришлось выяснять заново по живому
+доступу к панели. Всё, что ниже помечено «проверено», воспроизводится
+read-only запросами или из исходников панели.
+
+## 1. Конверт ответа
+
+Все клиентские эндпоинты отвечают **HTTP 200**, включая ошибки. Тела ответа:
+
+```json
+{ "success": true|false, "msg": "текст ошибки", "obj": {} | null }
+```
+
+Структурных кодов ошибок (`code`, `status`, тип ошибки) **нет** — только
+`success` + `msg`. Поэтому классификация ошибок в боте опирается на текст `msg`;
+это осознанный контракт, а не временная заглушка. Соответствующие строки
+перечислены в разделе 3 и закреплены тестами в `internal/xui`.
+
+## 2. Эндпоинты, которые использует бот
+
+| Эндпоинт | Метод | Назначение в боте |
+|---|---|---|
+| `/panel/api/clients/add` | POST | создание клиента (`xui.Client.AddClientWithID`) |
+| `/panel/api/clients/update/{email}` | POST | обновление клиента (`xui.Client.UpdateClient`) |
+| `/panel/api/clients/del/{email}` | POST | удаление клиента (`xui.Client.DeleteClient`) |
+| `/panel/api/clients/resetTraffic/{email}` | POST | сброс счётчика трафика (`xui.Client.ResetTraffic`) |
+| `/panel/api/clients/traffic/{email}` | GET | чтение трафика (`xui.Client.GetClientTraffic`) |
+| `/panel/api/clients/get/{email}` | GET | **полная карточка клиента**, включая профиль авто-renew (`xui.Client.GetClientByEmail`) |
+| `/panel/api/inbounds/get/{id}` | GET | чтение инбаунда (`xui.Client.GetInbound`) |
+| `/panel/api/server/status` | GET | проверка живости панели (`xui.Client.Ping`) |
+
+### 2.1. Форма `GET /panel/api/clients/get/{email}` (проверено)
+
+```json
+{
+  "success": true,
+  "msg": "",
+  "obj": {
+    "client": { "email": "...", "reset": 30, "resetDay": 0, "resetMax": 0,
+                "resetWeekday": 0, "trafficReset": "monthly", "trafficResetDay": 1,
+                "enable": true, "totalGB": 128849018880, "expiryTime": 1795899600000,
+                "subId": "...", "uuid": "...", "tgId": 0, "comment": "..." },
+    "externalLinks": [],
+    "inboundIds": [2, 4, 5],
+    "tunnelAllowedIPs": null,
+    "usedTraffic": null
+  }
+}
+```
+
+Клиент лежит **внутри `obj.client`**, не в `obj` — это обязательно к учёту при
+разборе ответа.
+
+**`client.id` приходит числом** (внутренний id записи в панели), а не строкой:
+на этом ломался разбор любого реального профиля (`cannot unmarshal number into
+Go struct field ClientConfig.client.id of type string`) — фикстуры с
+`"id": "uuid-1"` этого не показывали. Идентичность клиента — `uuid`, не `id`;
+`xui.ClientConfig` принимает оба представления через `UnmarshalJSON`.
+
+Эндпоинт отдаёт **полный профиль авто-renew**, поэтому
+`GET /clients/get/{email}` — единственный правильный способ прочитать
+`trafficReset`/`trafficResetDay`; знать `inboundId` для этого не требуется.
+
+## 3. Точные тексты ошибок
+
+Отсутствующий инбаунд и отсутствующий клиент панель описывает одинаково:
+`{"success":false,"msg":"Obtain (record not found)","obj":null}` (проверено на
+живой панели v3.11.0 для `/inbounds/get/{id}` и `/clients/get/{email}`). Поэтому
+операция разбора различает их по вызывающему: инбаундный путь отдаёт
+`xui.ErrInboundNotFound`, клиентский — `xui.ErrClientNotFound`. Смешивать
+нельзя: клиентский sentinel уходит в `vpn.ErrSubscriptionNotFound`, а на нём
+`pending_update` переходит в `pending_add` — отсутствующий инбаунд выглядел бы
+как исчезнувший клиент.
+
+Проверено на живой панели 2026-10-31 (для несуществующего email) и по
+исходникам панели.
+
+| Операция | Условие | `msg` | HTTP |
+|---|---|---|---|
+| `del/{email}` | клиента нет | `Something went wrong (client "<email>" not found in any inbound or client record\n)` | 200 |
+| `update/{email}` | клиента нет | `Something went wrong (record not found)` | 200 |
+| `resetTraffic/{email}` | клиента нет | `Something went wrong (record not found)` | 200 |
+| `get/{email}` | клиента нет | `Obtain (record not found)` | 200 |
+| `traffic/{email}` | клиента нет | `success=true`, `obj=null`, `msg=""` | 200 |
+| `add` | email занят | `email already in use: <email>` (из исходников панели) | 200 |
+| `add` | subId занят | `subId already in use: <subId>` (из исходников панели) | 200 |
+
+**Особый случай `traffic/{email}`:** панель отвечает `success=true` и `obj=null`,
+а не `success=false`. Отсутствие клиента выражается пустым `obj`, поэтому
+`xui.doGetClientTraffic` обязан трактовать `obj == null` как «клиента нет»
+(`xui.ErrClientNotFound`) — иначе вызывающий получит nil-указатель или нули
+трафика вместо ошибки.
+
+## 4. Особенности поведения панели
+
+### 4.1. `add` идемпотентен при совпадающем subId
+
+`ClientService.Create` (исходник панели) при уже существующем email:
+
+- если `subId` **совпадает** — ошибки нет: панель переиспользует сохранённые
+  `uuid`/`password`/`auth` и переписывает настройки клиента;
+- если `subId` **отличается** — `email already in use: <email>`.
+
+Бот всегда шлёт стабильный `subId` подписки, поэтому повторный `add` того же
+клиента на той же ноде **не является ошибкой панели**. Ветка
+`vpn.ErrSubscriptionAlreadyExists` в `SyncService.processPendingAdd` срабатывает
+тогда, когда `subId` разошёлся (например, после ручной правки на панели) — и
+это правильный сигнал «синхронизируй конфигурацию через update».
+
+### 4.2. Профиль авто-renew и его нормализация
+
+Панель валидирует и нормализует профиль (`client_crud.go`):
+
+- `trafficReset` ∈ {`""`, `never`, `hourly`, `daily`, `weekly`, `monthly`};
+  пустое значение нормализуется в `never`;
+- `trafficResetDay` ∈ [0, 31], `resetDay` ∈ [0, 31], `resetMax` ≥ 0;
+- недельное продление (`resetWeekday > 0`) несовместимо с `reset > 0` или
+  `resetDay > 0`.
+
+`GET /clients/traffic/{email}` **не отдаёт** `trafficReset` и
+`trafficResetDay` (в ответе есть `reset`, `resetDay`, `resetMax`,
+`resetWeekday`, но не `trafficReset*`). Поэтому перед `UpdateClient` профиль
+обязательно перечитывается через `GET /clients/get/{email}` — иначе панель
+затрёт его значением `never`, и месячный сброс трафика перестанет срабатывать.
+
+### 4.3. Валидация на стороне панели
+
+Панель отклоняет некорректные значения (`common.NewError`), а не чинит их:
+пустой email, запрещённые символы в email/subId (`/`, `\`, пробелы, управляющие),
+`resetMax < 0`, `trafficResetDay` вне [0, 31]. Ошибки приходят в `msg` с
+HTTP 200 — поэтому панельный адаптер обязан разбирать `msg`, а не полагаться на
+код ответа.
+
+## 4.4. Скоупы API-токенов (v3.11.0)
+
+Bearer-токены панели имеют скоуп: `admin` (по умолчанию, `gorm default:admin`),
+`monitor`, `node-sync`, `node-admin`. Скоупы кроме `admin` режут запросы по
+allowlist'у (`nodeSyncScopeAllow`/`monitorScopeAllow` в
+`internal/web/controller/api.go`); путь вне allowlist'а → **HTTP 403** с
+`msg: "this API token is not permitted to access this endpoint"`.
+
+**В allowlist `node-sync` НЕ входят** `/clients/get/{email}` и
+`/clients/traffic/{email}` — чтение карточки и трафика клиента на этих скоупах
+невозможно. Бот читает профиль и трафик (группа B), поэтому:
+
+- токен ноды в базе бота должен иметь скоуп `admin` (дефолт `NormalizeScope`);
+  проверено живой пробой на v3.11.0: `clients/get` с токеном ноды отвечает 200;
+- при смене скоупа на `node-sync`/`monitor` бот получит 403 на все операции с
+  клиентами; адаптер классифицирует не-200 как `utils.ErrNon200Response`
+  (не ретрабельный — раздел 5), синхронизация узла деградирует с Warn в логе.
+
+## 5. Как это реализовано в боте
+
+1. `xui.Client.GetClientByEmail(ctx, email) (*xui.ClientRecord, error)` читает
+   `GET /panel/api/clients/get/{email}` и разбирает `obj.client` и
+   `obj.inboundIds` (тип `xui.ClientRecord{Client ClientConfig; InboundIDs []int}`).
+   Сканирования `settings` инбаунда больше нет; параметр `inboundID` из
+   сигнатуры (`interfaces.XUIClientReader`) удалён.
+2. Классификация ошибок панели живёт в одном месте — `internal/xui/classify.go`
+   (функция `classifyFailure` + разбор конверта `parseEnvelope`), применяется
+   на всех операциях add/update/del/resetTraffic/traffic/get и возвращает
+   sentinel-ошибки `xui.ErrClientNotFound` и `xui.ErrClientAlreadyExists`.
+   `internal/vpn` маппит sentinel'ы в `vpn.ErrSubscriptionNotFound` /
+   `vpn.ErrSubscriptionAlreadyExists` (`mapPanelError` в `threex_ui.go`);
+   proxman маппит статусы webhook напрямую, без строковой классификации.
+3. Мёртвые sentinel-ошибки (`ErrUnauthorized`, `ErrForbidden`, `ErrBadRequest`,
+   `ErrNotFound`, `ErrServerError`) из `internal/xui/errors.go` удалены.
+   Sentinel не-200 ответа один: `utils.ErrNon200Response` (владелец —
+   `internal/utils`; `internal/xui` импортирует utils, обратной зависимости
+   нет). `utils.IsRetryable` возвращает для него `false` — не-200 не
+   ретраится (решение о ретраях закреплено тестом).
+
+## 6. Как читать профиль авто-renew
+
+Профиль авто-renew (`reset`, `resetDay`, `resetMax`, `resetWeekday`,
+`trafficReset`, `trafficResetDay`) отдаёт **только** `GET /clients/get/{email}`
+(в `obj.client`, см. раздел 2.1).
+
+`GET /clients/traffic/{email}` профиль **не отдаёт**: в `ClientTraffic` есть
+`reset`, `resetDay`, `resetMax`, `resetWeekday`, но нет `trafficReset*`.
+Правило чтения:
+
+- для обновления клиента (`UpdateClient`) профиль всегда перечитывается через
+  `GET /clients/get/{email}` и передаётся в запрос целиком; список inbound'ов
+  для обновления берётся из `obj.inboundIds` этого же ответа;
+- пропуск профиля недопустим: панель не мержит профиль, отсутствующий
+  `trafficReset` записывается как `never` (раздел 4.2), и периодический сброс
+  трафика перестаёт срабатывать.
+
+В коде это `xui.ClientRecord` и путь восстановления после сброса трафика
+`SubscriptionService.reenableResetClients` (internal/service/
+subscription_traffic_notifications.go): профиль — из `record.Client`,
+inbound'ы для `UpdateClient` — из `record.InboundIDs` с фолбэком на
+сконфигурированные inbound'ы узла, если панель вернула пустой список.
+
+## 7. Как проверить контракт без доступа к панели
+
+Контракт закреплён тестами `internal/xui` на фикстурах-ответах панели
+(`httptest`), см. `internal/xui/panel_contract_test.go`. Живая панель нужна
+только для перепроверки при обновлении панели.
+
+
+---
 
 *End of architecture documentation.*

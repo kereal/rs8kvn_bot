@@ -10,13 +10,11 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
-	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
-	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
 	"github.com/getsentry/sentry-go"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -62,9 +60,8 @@ func initLogger(cfg *config.Config) (*logger.Service, error) {
 
 // runtimeDeps holds the initialized runtime node clients.
 type runtimeDeps struct {
-	nodes      []database.Node
-	xuiClients map[uint]interfaces.XUIClient
-	vpnClients map[uint]vpn.Client
+	nodes   []database.Node
+	clients service.NodeClients
 }
 
 // initDatabase initializes the database service and loads runtime node clients.
@@ -88,20 +85,26 @@ func initDatabase(cfg *config.Config) (dbService *database.Service, deps *runtim
 		return nil, nil, fmt.Errorf("no nodes configured")
 	}
 
-	runtimeNodes, xuiClients, vpnClients, err := buildRuntimeNodeClients(nodes, defaultOptions())
+	runtimeNodes, clients, err := buildRuntimeNodeClients(nodes, defaultOptions())
 	if err != nil {
 		_ = dbService.Close()
 		return nil, nil, fmt.Errorf("initialize node clients: %w", err)
 	}
 
-	if len(xuiClients) == 0 {
+	readers := 0
+	for _, access := range clients {
+		if access.Reader != nil {
+			readers++
+		}
+	}
+
+	if readers == 0 {
 		logger.Warn("No active 3x-ui node found — /ping xui health check will report not configured")
 	}
 
 	return dbService, &runtimeDeps{
-		nodes:      runtimeNodes,
-		xuiClients: xuiClients,
-		vpnClients: vpnClients,
+		nodes:   runtimeNodes,
+		clients: clients,
 	}, nil
 }
 
@@ -116,8 +119,8 @@ type appServices struct {
 // initServices wires the subscription service, subserver, bot handler,
 // and cache invalidation composition.
 func initServices(cfg *config.Config, dbService *database.Service, deps *runtimeDeps, botAPI *tgbotapi.BotAPI, botConfig *bot.BotConfig) *appServices {
-	syncSvc := service.NewSyncService(dbService, deps.vpnClients, deps.nodes)
-	subService := service.NewSubscriptionService(dbService, deps.xuiClients, deps.vpnClients, deps.nodes, cfg)
+	syncSvc := service.NewSyncService(dbService, deps.clients, deps.nodes)
+	subService := service.NewSubscriptionService(dbService, deps.clients, deps.nodes, cfg)
 	subService.SetBot(botAPI)
 	subService.SetSyncService(syncSvc)
 
@@ -127,7 +130,7 @@ func initServices(cfg *config.Config, dbService *database.Service, deps *runtime
 
 	subService.SetInvalidateBySubIDFunc(func(subID string) {
 		botCache.InvalidateBySubID(subID)
-		subServer.InvalidateCache(subID)
+		subServer.Delete(subID)
 	})
 
 	var payment service.PaymentProvider

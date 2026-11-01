@@ -21,7 +21,7 @@ func TestHandleBackToStart_WithActiveSubscription(t *testing.T) {
 	ctx := context.Background()
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
 			ID:             1,
@@ -54,7 +54,7 @@ func TestHandleBackToStart_NoSubscription(t *testing.T) {
 	ctx := context.Background()
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
 	}
@@ -80,7 +80,7 @@ func TestHandleBackToStart_InactiveSubscription(t *testing.T) {
 	ctx := context.Background()
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
 			ID:         1,
@@ -111,7 +111,7 @@ func TestHandleBackToStart_DatabaseError(t *testing.T) {
 	ctx := context.Background()
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, errors.New("database connection failed")
 	}
@@ -136,7 +136,7 @@ func TestHandleBackToStart_NilSubscription(t *testing.T) {
 	ctx := context.Background()
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, nil
 	}
@@ -158,7 +158,7 @@ func TestHandleMenuDonate(t *testing.T) {
 	ctx := context.Background()
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
@@ -183,7 +183,7 @@ func TestHandleMenuDonate_WithDifferentUsernames(t *testing.T) {
 	ctx := context.Background()
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 
 	cfg := &config.Config{
 		TelegramBotToken: "test:token",
@@ -217,7 +217,7 @@ func TestHandleMenuHelp_WithSubscription(t *testing.T) {
 	ctx := context.Background()
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return &database.Subscription{
 			ID:             1,
@@ -251,7 +251,7 @@ func TestHandleMenuHelp_NoSubscription(t *testing.T) {
 	ctx := context.Background()
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
 	}
@@ -276,7 +276,7 @@ func TestHandleMenuHelp_DatabaseError(t *testing.T) {
 	ctx := context.Background()
 
 	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, errors.New("database connection failed")
 	}
@@ -316,7 +316,7 @@ func TestHandleMenuHelp_VariousTrafficLimits(t *testing.T) {
 			t.Parallel()
 
 			mockBot := testutil.NewBotAPI()
-			mockDB := testutil.NewDatabaseService()
+			mockDB := testutil.NewBotStoreFake()
 			mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 				return &database.Subscription{
 					ID:             1,
@@ -359,7 +359,7 @@ func TestHandleBackToStart_VariousMessageIDs(t *testing.T) {
 			t.Parallel()
 
 			mockBot := testutil.NewBotAPI()
-			mockDB := testutil.NewDatabaseService()
+			mockDB := testutil.NewBotStoreFake()
 			mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 				return &database.Subscription{
 					ID:         1,
@@ -403,7 +403,7 @@ func TestHandleBackToStart_VariousChatIDs(t *testing.T) {
 			t.Parallel()
 
 			mockBot := testutil.NewBotAPI()
-			mockDB := testutil.NewDatabaseService()
+			mockDB := testutil.NewBotStoreFake()
 			mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 				return nil, gorm.ErrRecordNotFound
 			}

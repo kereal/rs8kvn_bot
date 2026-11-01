@@ -70,11 +70,9 @@ func TestConstants_Validation(t *testing.T) {
 	assert.Equal(t, 2<<20, MaxResponseSize)
 }
 
-func TestConstants_CircuitBreaker(t *testing.T) {
+func TestConstants_Shutdown(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, 5, CircuitBreakerMaxFailures)
-	assert.Equal(t, 30*time.Second, CircuitBreakerTimeout)
 	assert.Equal(t, 90*time.Second, ShutdownTimeout)
 }
 

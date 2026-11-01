@@ -355,7 +355,6 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **API Token auth:** Bearer token via `Authorization` header (no session/login/CSRF/cookiejar)
 - **Node configuration:** Managed entirely via the `nodes` DB table (host, API token, inbound IDs, type, subscription URL). Multi-node support via `nodes` table.
 - **VPN client abstraction:** `internal/vpn/` package provides `Client` interface with `NewClient` factory routing by `NodeType` (3x-ui, proxman, fetch). Each node gets its own VPN client instance. Fetch nodes use no-op client — subscription_url fetched directly by subserver.
-- **Circuit breaker:** implementation is covered by tests but is not currently wired into the live XUI client path; production resilience currently relies on retry/backoff. Monitor the retry/error metrics.
 - **RetryWithBackoff:** 3 retries with exponential backoff + jitter. DNS errors fast-fail.
 - **Subscription defaults:** `reset: 30` (days from creation), `expiresAt: now + 30 days`
 - **Auto-reset:** Only works when `expiresAt` > 0. Traffic resets every 30 days, expiry extends (3x-ui auto-renew logic)

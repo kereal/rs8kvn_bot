@@ -4,13 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"testing"
 	"time"
 
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
+	"github.com/kereal/rs8kvn_bot/internal/xui"
+	"github.com/mattn/go-sqlite3"
+	"gorm.io/gorm"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,15 +68,15 @@ func (m *mockVPNClient) Close() error {
 	return nil
 }
 
-func newTestSyncService(t *testing.T, db interfaces.DatabaseService, nodes []database.Node) *SyncService {
+func newTestSyncService(t *testing.T, db interfaces.SyncStore, nodes []database.Node) *SyncService {
 	t.Helper()
 
-	vpnClients := make(map[uint]vpn.Client)
+	clients := make(NodeClients)
 	for _, n := range nodes {
-		vpnClients[n.ID] = &mockVPNClient{}
+		clients[n.ID] = NodeAccess{Provision: &mockVPNClient{}}
 	}
 
-	return NewSyncService(db, vpnClients, nodes)
+	return NewSyncService(db, clients, nodes)
 }
 
 func TestSyncService_ReconcilePlanNodes_AddMissing(t *testing.T) {
@@ -131,7 +138,7 @@ func TestSyncService_ReconcilePlanNodes_ContinuesAfterNodeFailure(t *testing.T) 
 	firstErr := errors.New("node one upsert failed")
 	processed := make([]uint, 0, 2)
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewServiceStoreFake()
 	db.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
 		return &database.Subscription{ID: 42, PlanID: 7}, nil
 	}
@@ -271,7 +278,7 @@ func TestSyncService_SyncNodes_SkipsUnknownNodeType(t *testing.T) {
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: unknownNode.ID, Status: database.SyncStatusPendingAdd}))
 
-	svc := NewSyncService(db, map[uint]vpn.Client{}, []database.Node{*unknownNode})
+	svc := NewSyncService(db, NodeClients{}, []database.Node{*unknownNode})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err, "unknown node type should be skipped without error")
@@ -313,7 +320,7 @@ func TestSyncService_SyncNodes_FetchType_PendingAddBecomesActive(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: fetchNode.ID, Status: database.SyncStatusPendingAdd}))
 
 	fetchClient := vpn.NewFetchClient()
-	svc := NewSyncService(db, map[uint]vpn.Client{fetchNode.ID: fetchClient}, []database.Node{*fetchNode})
+	svc := NewSyncService(db, NodeClients{fetchNode.ID: {Provision: fetchClient}}, []database.Node{*fetchNode})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err)
@@ -471,8 +478,8 @@ func TestSyncService_SyncSubscription_PendingAdd(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
 	mockVPN := &mockVPNClient{}
-	vpnClients := map[uint]vpn.Client{node1.ID: mockVPN}
-	svc := NewSyncService(db, vpnClients, []database.Node{*node1})
+	clients := NodeClients{node1.ID: {Provision: mockVPN}}
+	svc := NewSyncService(db, clients, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
@@ -515,8 +522,8 @@ func TestSyncService_SyncSubscription_PendingAdd_UnlimitedPlan(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
 	mockVPN := &mockVPNClient{}
-	vpnClients := map[uint]vpn.Client{node1.ID: mockVPN}
-	svc := NewSyncService(db, vpnClients, []database.Node{*node1})
+	clients := NodeClients{node1.ID: {Provision: mockVPN}}
+	svc := NewSyncService(db, clients, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
@@ -564,7 +571,7 @@ func TestSyncService_SyncPendingAdd_KeepsExpiredExpiry(t *testing.T) {
 		require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
 		mockVPN := &mockVPNClient{}
-		svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+		svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 		require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 		assert.True(t, mockVPN.createCalled)
@@ -592,7 +599,7 @@ func TestSyncService_SyncPendingAdd_KeepsExpiredExpiry(t *testing.T) {
 		require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
 		mockVPN := &mockVPNClient{}
-		svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+		svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 		require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 		assert.True(t, mockVPN.createCalled)
@@ -629,8 +636,8 @@ func TestSyncService_SyncSubscription_PendingRemove(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
 
 	mockVPN := &mockVPNClient{}
-	vpnClients := map[uint]vpn.Client{node1.ID: mockVPN}
-	svc := NewSyncService(db, vpnClients, []database.Node{*node1})
+	clients := NodeClients{node1.ID: {Provision: mockVPN}}
+	svc := NewSyncService(db, clients, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
@@ -670,7 +677,7 @@ func TestSyncService_SyncSubscription_UsesFallbackXUIIdentifier(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
 	mockVPN := &mockVPNClient{}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 	assert.Equal(t, "tgId_777000", mockVPN.createProvision.Username)
@@ -713,7 +720,7 @@ func TestSyncService_SyncPendingNodes_ProcessesOnlyDueNodes(t *testing.T) {
 
 	dueClient := &mockVPNClient{}
 	laterClient := &mockVPNClient{}
-	svc := NewSyncService(db, map[uint]vpn.Client{nodeDue.ID: dueClient, nodeLater.ID: laterClient}, []database.Node{*nodeDue, *nodeLater})
+	svc := NewSyncService(db, NodeClients{nodeDue.ID: {Provision: dueClient}, nodeLater.ID: {Provision: laterClient}}, []database.Node{*nodeDue, *nodeLater})
 
 	require.NoError(t, svc.SyncPendingNodes(ctx))
 	assert.True(t, dueClient.createCalled)
@@ -761,14 +768,327 @@ func TestSyncService_handleSyncError_IncrementsRetry(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, sn))
 
 	svc := NewSyncService(db, nil, []database.Node{*node1})
-	svc.handleSyncError(ctx, sn, assert.AnError)
+	// A network timeout is retryable: the node climbs the ladder once.
+	svc.handleSyncError(ctx, sn, &url.Error{Op: "Post", URL: "http://panel/api", Err: errors.New("i/o timeout")})
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, 1, rows[0].RetryCount)
-	assert.Contains(t, *rows[0].LastError, "assert.AnError")
+	assert.Contains(t, *rows[0].LastError, "i/o timeout")
 	assert.NotNil(t, rows[0].RetryAt)
+}
+
+// TestSyncService_handleSyncError_NonRetryableParksImmediately checks that an
+// error the panel answered with (non-200) parks the node on the first hit:
+// retrying cannot succeed, retry_at moves beyond every planning horizon, the
+// pending status and the terminal cause stay visible.
+func TestSyncService_handleSyncError_NonRetryableParksImmediately(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-park-nonretry", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-park-nonretry-node", IsActive: true, Host: "http://spnr", APIToken: "tspnr", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     7778,
+		Username:       "syncparknonretry",
+		ClientID:       "c-syncparknonretry",
+		SubscriptionID: "s-syncparknonretry",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	sn := &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd, RetryCount: 0}
+	require.NoError(t, db.CreateSubscriptionNode(ctx, sn))
+
+	svc := NewSyncService(db, nil, []database.Node{*node1})
+	svc.handleSyncError(ctx, sn, fmt.Errorf("upstream returned non-200: %w", utils.ErrNon200Response))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusPendingAdd, rows[0].Status, "parking keeps the pending status")
+	assert.Equal(t, 0, rows[0].RetryCount, "non-retryable errors must not climb the ladder")
+	require.NotNil(t, rows[0].RetryAt)
+	assert.True(t, rows[0].RetryAt.After(time.Now().UTC().AddDate(1, 0, 0)), "parked retry_at is beyond every planning horizon")
+	require.NotNil(t, rows[0].LastError)
+	assert.Contains(t, *rows[0].LastError, utils.ErrNon200Response.Error())
+
+	// The parked record is invisible to both pending scans.
+	pending, err := db.GetPendingSync(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+}
+
+// TestSyncService_handleSyncError_RetryableClimbsThenParks checks that a
+// network timeout retries with backoff, and that once retry_count reaches
+// maxSyncRetries the node parks instead of climbing forever.
+func TestSyncService_handleSyncError_RetryableClimbsThenParks(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-park-climb", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-park-climb-node", IsActive: true, Host: "http://spc", APIToken: "tspc", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     7779,
+		Username:       "syncparkclimb",
+		ClientID:       "c-syncparkclimb",
+		SubscriptionID: "s-syncparkclimb",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	sn := &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd, RetryCount: 0}
+	require.NoError(t, db.CreateSubscriptionNode(ctx, sn))
+
+	// A network timeout surfaces as url.Error, which implements net.Error.
+	timeoutErr := &url.Error{Op: "Post", URL: "http://panel/api", Err: errors.New("i/o timeout")}
+	require.True(t, utils.IsRetryable(timeoutErr), "precondition: url.Error timeout is retryable")
+
+	svc := NewSyncService(db, nil, []database.Node{*node1})
+
+	// Climb the ladder: each hit schedules a near-future retry.
+	for range maxSyncRetries {
+		svc.handleSyncError(ctx, sn, timeoutErr)
+
+		rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		require.True(t, rows[0].RetryAt.Before(time.Now().UTC().Add(2*time.Hour)), "ladder retries stay in the near future")
+	}
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, maxSyncRetries, rows[0].RetryCount)
+	require.NotNil(t, rows[0].RetryAt)
+	assert.True(t, rows[0].RetryAt.After(time.Now().UTC()) && rows[0].RetryAt.Before(time.Now().UTC().Add(2*time.Hour)), "ladder retries stay in the near future")
+
+	// Next hit parks.
+	svc.handleSyncError(ctx, sn, timeoutErr)
+
+	rows, err = db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, maxSyncRetries, rows[0].RetryCount, "parking does not grow the counter")
+	require.NotNil(t, rows[0].RetryAt)
+	assert.True(t, rows[0].RetryAt.After(time.Now().UTC().AddDate(1, 0, 0)), "parked retry_at is beyond every planning horizon")
+
+	pending, err := db.GetPendingSync(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+}
+
+// TestSyncService_handleSyncError_TransientDBLockRetries checks that SQLite
+// write-lock contention — typed SQLITE_BUSY/SQLITE_LOCKED or flattened to
+// text — climbs the ladder like a network timeout, that the backed-off record
+// stays invisible to the worker until retry_at elapses and is picked up after,
+// and that a terminal DB error (constraint violation) parks immediately.
+func TestSyncService_handleSyncError_TransientDBLockRetries(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-lock", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-lock-node", IsActive: true, Host: "http://slk", APIToken: "tslk", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     7780,
+		Username:       "synclockuser",
+		ClientID:       "c-synclock",
+		SubscriptionID: "s-synclock",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	sn := &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd, RetryCount: 0}
+	require.NoError(t, db.CreateSubscriptionNode(ctx, sn))
+
+	svc := NewSyncService(db, nil, []database.Node{*node1})
+
+	steps := []struct {
+		name      string
+		err       error
+		wantInErr string
+	}{
+		{
+			name:      "typed SQLITE_BUSY",
+			err:       fmt.Errorf("update subscription node: %w", sqlite3.Error{Code: sqlite3.ErrBusy}),
+			wantInErr: "database is locked",
+		},
+		{
+			name:      "flattened lock text",
+			err:       errors.New("callback failed: database is locked"),
+			wantInErr: "database is locked",
+		},
+		{
+			name:      "typed SQLITE_LOCKED",
+			err:       fmt.Errorf("update subscription node: %w", sqlite3.Error{Code: sqlite3.ErrLocked}),
+			wantInErr: "database table is locked",
+		},
+	}
+
+	for i, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			svc.handleSyncError(ctx, sn, step.err)
+
+			rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			assert.Equal(t, i+1, rows[0].RetryCount, "lock contention must climb the ladder")
+			require.NotNil(t, rows[0].RetryAt)
+			assert.True(t, rows[0].RetryAt.After(time.Now().UTC()), "the ladder schedules a near-future retry")
+			require.NotNil(t, rows[0].LastError)
+			assert.Contains(t, *rows[0].LastError, step.wantInErr)
+
+			// Backoff is honoured: the worker must not pick the row yet.
+			pending, err := db.GetPendingSync(ctx)
+			require.NoError(t, err)
+			assert.Empty(t, pending, "retry_at in the future hides the row from the scan")
+		})
+	}
+
+	// Simulate the backoff elapsing: the same ladder record becomes
+	// selectable again — exactly what the worker consumes on its next pass.
+	past := time.Now().UTC().Add(-time.Minute)
+	require.NoError(t, db.UpdateRetry(ctx, sub.ID, node1.ID, sn.RetryCount, &past, sn.LastError))
+
+	pending, err := db.GetPendingSync(ctx)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, node1.ID, pending[0].NodeID)
+
+	// A terminal DB error must park: constraint violations do not fix
+	// themselves on retry.
+	svc.handleSyncError(ctx, sn, fmt.Errorf("insert: %w", sqlite3.Error{Code: sqlite3.ErrConstraint}))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, len(steps), rows[0].RetryCount, "parking does not grow the counter")
+	require.NotNil(t, rows[0].RetryAt)
+	assert.True(t, rows[0].RetryAt.After(time.Now().UTC().AddDate(1, 0, 0)), "parked retry_at is beyond every planning horizon")
+
+	pending, err = db.GetPendingSync(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+}
+
+// TestSyncService_handleSyncError_Non200WithLockTextStillParks checks the
+// guard: a refused front response quoting "database is locked" in its body is
+// still terminal — retrying a refused request cannot succeed.
+func TestSyncService_handleSyncError_Non200WithLockTextStillParks(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-non200lock", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-non200lock-node", IsActive: true, Host: "http://snl", APIToken: "tsnl", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     7781,
+		Username:       "syncnon200lock",
+		ClientID:       "c-syncnon200lock",
+		SubscriptionID: "s-syncnon200lock",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	sn := &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd, RetryCount: 0}
+	require.NoError(t, db.CreateSubscriptionNode(ctx, sn))
+
+	svc := NewSyncService(db, nil, []database.Node{*node1})
+	svc.handleSyncError(ctx, sn, fmt.Errorf("%w: database is locked", utils.ErrNon200Response))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, 0, rows[0].RetryCount, "a non-200 body quoting lock text must not climb the ladder")
+	require.NotNil(t, rows[0].RetryAt)
+	assert.True(t, rows[0].RetryAt.After(time.Now().UTC().AddDate(1, 0, 0)), "parked retry_at is beyond every planning horizon")
+
+	pending, err := db.GetPendingSync(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+}
+
+// TestSyncService_handleSyncError_ContextCancelDoesNotRetry checks R3: a
+// caller-ctx cancellation aborts the scan and must not write retry metadata
+// for the node.
+func TestSyncService_handleSyncError_ContextCancelDoesNotRetry(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "test-plan-sync-ctx", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node1 := &database.Node{Name: "sync-ctx-node", IsActive: true, Host: "http://scn", APIToken: "tscn", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node1).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node1.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     7780,
+		Username:       "syncctx",
+		ClientID:       "c-syncctx",
+		SubscriptionID: "s-syncctx",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	sn := &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd, RetryCount: 0}
+	require.NoError(t, db.CreateSubscriptionNode(ctx, sn))
+
+	svc := NewSyncService(db, nil, []database.Node{*node1})
+	svc.handleSyncError(ctx, sn, context.Canceled)
+	svc.handleSyncError(ctx, sn, context.DeadlineExceeded)
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Zero(t, rows[0].RetryCount, "cancellation must not climb the ladder")
+	assert.Nil(t, rows[0].RetryAt)
+	assert.Nil(t, rows[0].LastError)
 }
 
 func TestCalculateRetryAt(t *testing.T) {
@@ -870,7 +1190,7 @@ func TestSyncService_SyncSubscription_PendingAdd_AlreadyExists(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
 	mockVPN := &mockVPNClient{createError: fmt.Errorf("%w: %w", vpn.ErrSubscriptionAlreadyExists, fmt.Errorf("client already exists"))}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
@@ -913,8 +1233,8 @@ func TestSyncService_SyncSubscription_PendingAdd_AlreadyExistsUpdateFails(t *tes
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
-	mockVPN := &mockVPNClient{createError: fmt.Errorf("%w: %w", vpn.ErrSubscriptionAlreadyExists, fmt.Errorf("client already exists")), updateError: fmt.Errorf("update refused")}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+	mockVPN := &mockVPNClient{createError: fmt.Errorf("%w: %w", vpn.ErrSubscriptionAlreadyExists, fmt.Errorf("client already exists")), updateError: &url.Error{Op: "Post", URL: "http://panel/api", Err: errors.New("update refused")}}
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err, "background-style sync: missing VPN client must not propagate")
@@ -925,7 +1245,7 @@ func TestSyncService_SyncSubscription_PendingAdd_AlreadyExistsUpdateFails(t *tes
 	assert.Equal(t, database.SyncStatusPendingAdd, rows[0].Status)
 	assert.Equal(t, 1, rows[0].RetryCount)
 	assert.NotNil(t, rows[0].LastError)
-	assert.Equal(t, "update refused", *rows[0].LastError)
+	assert.Contains(t, *rows[0].LastError, "update refused")
 	assert.True(t, mockVPN.updateCalled)
 }
 
@@ -957,7 +1277,7 @@ func TestSyncService_SyncSubscription_PendingRemove_NotFound(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
 
 	mockVPN := &mockVPNClient{deleteError: fmt.Errorf("%w: %w", vpn.ErrSubscriptionNotFound, fmt.Errorf("client not found"))}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
@@ -993,8 +1313,10 @@ func TestSyncService_SyncSubscription_PendingAdd_RetryOnOtherError(t *testing.T)
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
-	mockVPN := &mockVPNClient{createError: fmt.Errorf("connection refused")}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+	// net.OpError("connection refused") is retryable by the policy, so the
+	// item ladders: RetryCount 1 and a near-future retry_at.
+	mockVPN := &mockVPNClient{createError: &net.OpError{Op: "dial", Err: errors.New("connection refused")}}
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err, "background-style sync: per-node failure must not propagate")
@@ -1033,7 +1355,7 @@ func TestSyncService_SyncSubscription_PendingAdd_NoVPNClientKeepsPending(t *test
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingAdd}))
 
-	svc := NewSyncService(db, map[uint]vpn.Client{}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err, "background-style sync: missing VPN client must not propagate")
@@ -1073,7 +1395,7 @@ func TestSyncService_SyncSubscription_PendingUpdate_NoVPNClientKeepsPending(t *t
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingUpdate}))
 
-	svc := NewSyncService(db, map[uint]vpn.Client{}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err, "background-style sync: missing VPN client must not propagate")
@@ -1113,7 +1435,7 @@ func TestSyncService_SyncSubscription_PendingUpdate_ResetsTraffic(t *testing.T) 
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingUpdate}))
 
 	mock := &mockVPNClient{}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mock}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mock}}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err)
@@ -1155,7 +1477,7 @@ func TestSyncService_SyncSubscription_PendingUpdate_ResetTrafficBestEffort(t *te
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingUpdate}))
 
 	mock := &mockVPNClient{resetTrafficError: errors.New("panel reset failed")}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mock}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mock}}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err, "reset traffic failure is best-effort and must not fail the sync")
@@ -1195,7 +1517,7 @@ func TestSyncService_SyncSubscription_PendingRemove_NoVPNClientKeepsPending(t *t
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
 
-	svc := NewSyncService(db, map[uint]vpn.Client{}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{}, []database.Node{*node1})
 
 	err = svc.SyncSubscription(ctx, sub.ID)
 	require.NoError(t, err, "background-style sync: missing VPN client must not propagate")
@@ -1238,7 +1560,7 @@ func TestSyncService_SyncSubscription_PendingRemove_InactiveNodeDropsBinding(t *
 
 	// Inactive nodes are not loaded into the runtime snapshot, so there is no
 	// VPN client — the stale binding must be dropped, not retried forever.
-	svc := NewSyncService(db, map[uint]vpn.Client{}, nil)
+	svc := NewSyncService(db, NodeClients{}, nil)
 
 	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
 
@@ -1290,7 +1612,7 @@ func TestSyncService_SyncPendingNodes_RevokedSubscriptionNotReprovisioned(t *tes
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node1.ID, Status: database.SyncStatusPendingRemove}))
 
 	mockVPN := &mockVPNClient{}
-	svc := NewSyncService(db, map[uint]vpn.Client{node1.ID: mockVPN}, []database.Node{*node1})
+	svc := NewSyncService(db, NodeClients{node1.ID: {Provision: mockVPN}}, []database.Node{*node1})
 
 	require.NoError(t, svc.SyncPendingNodes(ctx))
 
@@ -1331,9 +1653,11 @@ func TestSyncService_SyncPendingNodes_ContinuesAfterNodeFailure(t *testing.T) {
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: subOne.ID, NodeID: nodeOne.ID, Status: database.SyncStatusPendingAdd}))
 	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: subTwo.ID, NodeID: nodeTwo.ID, Status: database.SyncStatusPendingAdd}))
 
-	failedClient := &mockVPNClient{createError: errors.New("node one unavailable")}
+	// A retryable network failure on node one: the item ladders and the run
+	// is still reported as degraded via the aggregate error.
+	failedClient := &mockVPNClient{createError: &net.OpError{Op: "dial", Err: errors.New("node one unavailable")}}
 	successClient := &mockVPNClient{}
-	svc := NewSyncService(db, map[uint]vpn.Client{nodeOne.ID: failedClient, nodeTwo.ID: successClient}, []database.Node{*nodeOne, *nodeTwo})
+	svc := NewSyncService(db, NodeClients{nodeOne.ID: {Provision: failedClient}, nodeTwo.ID: {Provision: successClient}}, []database.Node{*nodeOne, *nodeTwo})
 
 	err = svc.SyncPendingNodes(ctx)
 	require.Error(t, err, "a per-node failure must surface as an aggregate error so the caller can observe degraded runs")
@@ -1361,7 +1685,7 @@ func TestSyncService_SyncNodes_ReferrerErrorRetriesAndContinues(t *testing.T) {
 
 	referrerErr := errors.New("referrer lookup failed")
 	retryNodes := make([]uint, 0, 2)
-	db := testutil.NewDatabaseService()
+	db := testutil.NewServiceStoreFake()
 	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
 		return &database.Plan{ID: 7, Name: database.FreePlanName, TrafficLimit: 1024}, nil
 	}
@@ -1373,10 +1697,7 @@ func TestSyncService_SyncNodes_ReferrerErrorRetriesAndContinues(t *testing.T) {
 		return nil
 	}
 
-	clients := map[uint]vpn.Client{
-		1: &mockVPNClient{},
-		2: &mockVPNClient{},
-	}
+	clients := NodeClients{1: {Provision: &mockVPNClient{}}, 2: {Provision: &mockVPNClient{}}}
 	svc := NewSyncService(db, clients, []database.Node{
 		{ID: 1, Type: database.NodeType3xUI, IsActive: true},
 		{ID: 2, Type: database.NodeType3xUI, IsActive: true},
@@ -1399,8 +1720,8 @@ func TestSyncService_SyncNodes_ReferrerErrorRetriesAndContinues(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, referrerErr)
 	assert.ElementsMatch(t, []uint{1, 2}, retryNodes)
-	assert.False(t, clients[1].(*mockVPNClient).createCalled)
-	assert.False(t, clients[2].(*mockVPNClient).createCalled)
+	assert.False(t, clients[1].Provision.(*mockVPNClient).createCalled)
+	assert.False(t, clients[2].Provision.(*mockVPNClient).createCalled)
 }
 
 func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {
@@ -1415,7 +1736,7 @@ func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {
 		{SubscriptionID: 20, NodeID: 2, Status: database.SyncStatusPendingAdd},
 	}
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewServiceStoreFake()
 	db.GetPendingSyncFunc = func(ctx context.Context) ([]database.SubscriptionNode, error) {
 		return pending, nil
 	}
@@ -1445,7 +1766,7 @@ func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {
 		return []database.SubscriptionNode{}, nil
 	}
 
-	svc := NewSyncService(db, map[uint]vpn.Client{}, nil)
+	svc := NewSyncService(db, NodeClients{}, nil)
 
 	err := svc.SyncPendingNodes(ctx)
 	require.Error(t, err)
@@ -1456,7 +1777,7 @@ func TestSyncService_SyncPendingNodes_JoinsErrors(t *testing.T) {
 func TestSyncService_lockSubscription_Timeout(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewServiceStoreFake()
 	svc := newTestSyncService(t, db, nil)
 	// Pin the production timeout so the elapsed-time assertion is stable.
 	svc.lockTimeout = 2 * time.Minute
@@ -1485,7 +1806,7 @@ func TestSyncService_lockSubscription_Timeout(t *testing.T) {
 func TestSyncService_lockSubscription_TimeoutWhenAlreadyHeld(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.NewDatabaseService()
+	db := testutil.NewServiceStoreFake()
 	svc := newTestSyncService(t, db, nil)
 	// Override the production two-minute timeout so the already-held case is
 	// bounded to a short duration in this test.
@@ -1521,7 +1842,7 @@ func TestSyncService_ReconcilePlanNodes_RevokedIsUntouched(t *testing.T) {
 
 			planRead := false
 			bindingsRead := false
-			db := &testutil.DatabaseService{
+			db := &testutil.ServiceStoreFake{
 				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 					return &database.Subscription{ID: 42, PlanID: 1, Status: status}, nil
 				},
@@ -1556,4 +1877,1166 @@ func TestSyncService_ReconcilePlanNodes_RevokedIsUntouched(t *testing.T) {
 			require.Equal(t, wantChanges, added)
 		})
 	}
+}
+
+// TestSyncService_buildNodeProvision covers the single provision assembly in a
+// table: paid create (product default), trial (never), update with a panel
+// profile (preserved) and the readerless fallback (default).
+func TestSyncService_buildNodeProvision(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	expiresAt := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Minute)
+
+	paidPlan := &database.Plan{Name: "prov-build-paid", DevicesLimit: 1, TrafficLimit: 4096}
+	trialPlan := &database.Plan{Name: database.TrialPlanName, DevicesLimit: 1, TrafficLimit: 1024}
+	// Free plan: no traffic limit — no profile and no expiry are written.
+	freePlan := &database.Plan{Name: "prov-build-free", DevicesLimit: 1, TrafficLimit: 0}
+
+	panelProfile := xui.ClientConfig{
+		Reset:           7,
+		ResetDay:        3,
+		ResetMax:        2,
+		TrafficReset:    "weekly",
+		TrafficResetDay: 5,
+	}
+
+	// panelAdminEdits simulate manual admin edits in the panel: reset interval
+	// 7 days, weekly reset on Friday, capped renewals. The update path must
+	// carry them into the provision untouched.
+	withReader := func(profile xui.ClientConfig) NodeClients {
+		reader := &testutil.XUIClient{}
+		reader.GetClientByEmailFunc = func(_ context.Context, _ string) (*xui.ClientRecord, error) {
+			return &xui.ClientRecord{Client: profile}, nil
+		}
+
+		return NodeClients{1: {Reader: reader}}
+	}
+
+	tests := []struct {
+		name    string
+		plan    *database.Plan
+		clients NodeClients
+		policy  profilePolicy
+		check   func(t *testing.T, provision vpn.SubscriptionProvision)
+	}{
+		{
+			name:    "paid_create_writes_default_profile",
+			plan:    paidPlan,
+			clients: NodeClients{1: {}},
+			policy:  profileDefault,
+			check: func(t *testing.T, provision vpn.SubscriptionProvision) {
+				assert.Equal(t, config.SubscriptionResetDay, provision.ResetDays)
+				assert.Equal(t, 1, provision.TrafficResetDay)
+				assert.Equal(t, 0, provision.ResetMax)
+				assert.Equal(t, "monthly", provision.TrafficReset)
+			},
+		},
+		{
+			name:    "trial_create_writes_never_profile",
+			plan:    trialPlan,
+			clients: NodeClients{1: {}},
+			policy:  profileDefault,
+			check: func(t *testing.T, provision vpn.SubscriptionProvision) {
+				assert.Equal(t, 0, provision.ResetDays, "trial must not auto-renew")
+				assert.Equal(t, "never", provision.TrafficReset, "trial quota must not renew")
+				assert.Equal(t, 0, provision.ResetMax)
+			},
+		},
+		{
+			name:    "trial_update_overrides_panel_profile_with_never",
+			plan:    trialPlan,
+			clients: withReader(panelProfile),
+			policy:  profilePreserve,
+			check: func(t *testing.T, provision vpn.SubscriptionProvision) {
+				assert.Equal(t, 0, provision.ResetDays, "trial must not inherit the panel reset interval")
+				assert.Equal(t, "never", provision.TrafficReset, "trial must never keep a panel reset cycle")
+			},
+		},
+		{
+			name:    "paid_update_preserves_panel_profile",
+			plan:    paidPlan,
+			clients: withReader(panelProfile),
+			policy:  profilePreserve,
+			check: func(t *testing.T, provision vpn.SubscriptionProvision) {
+				assert.Equal(t, 7, provision.ResetDays)
+				assert.Equal(t, 3, provision.ResetDay)
+				assert.Equal(t, 2, provision.ResetMax)
+				assert.Equal(t, "weekly", provision.TrafficReset)
+				assert.Equal(t, 5, provision.TrafficResetDay)
+			},
+		},
+		{
+			// A client provisioned on the free (unlimited) plan carries no
+			// auto-renew profile: the panel normalizes the empty write to
+			// Reset=0/"never". Upgrading such a client keeps that profile —
+			// preserve copies it verbatim, so the new paid plan starts
+			// without an auto-renew cycle.
+			name:    "paid_update_carries_never_profile_from_unlimited_predecessor",
+			plan:    paidPlan,
+			clients: withReader(xui.ClientConfig{Reset: 0, TrafficReset: "never"}),
+			policy:  profilePreserve,
+			check: func(t *testing.T, provision vpn.SubscriptionProvision) {
+				assert.Equal(t, 0, provision.ResetDays)
+				assert.Equal(t, "never", provision.TrafficReset)
+			},
+		},
+		{
+			// A deliberate manual admin edit ("never" while keeping the
+			// renewal interval) must survive the plan-change update.
+			name:    "paid_update_preserves_manual_never_setting",
+			plan:    paidPlan,
+			clients: withReader(xui.ClientConfig{Reset: 7, ResetDay: 3, ResetMax: 2, TrafficReset: "never"}),
+			policy:  profilePreserve,
+			check: func(t *testing.T, provision vpn.SubscriptionProvision) {
+				assert.Equal(t, "never", provision.TrafficReset,
+					"a manual never must not be replaced by the product default")
+				assert.Equal(t, 7, provision.ResetDays)
+			},
+		},
+		{
+			name:    "paid_update_without_reader_falls_back_to_default",
+			plan:    paidPlan,
+			clients: NodeClients{1: {}},
+			policy:  profilePreserve,
+			check: func(t *testing.T, provision vpn.SubscriptionProvision) {
+				assert.Equal(t, config.SubscriptionResetDay, provision.ResetDays)
+				assert.Equal(t, "monthly", provision.TrafficReset)
+			},
+		},
+		{
+			name:    "free_plan_gets_no_profile_and_no_expiry",
+			plan:    freePlan,
+			clients: withReader(panelProfile),
+			policy:  profilePreserve,
+			check: func(t *testing.T, provision vpn.SubscriptionProvision) {
+				assert.Zero(t, provision.ResetDays)
+				assert.Empty(t, provision.TrafficReset)
+				assert.True(t, provision.ExpiryTime.IsZero())
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := testutil.NewServiceStoreFake()
+			db.GetPlanByIDFunc = func(_ context.Context, _ uint) (*database.Plan, error) {
+				return tt.plan, nil
+			}
+
+			sub := &database.Subscription{
+				TelegramID:     4242,
+				Username:       "provuser",
+				ClientID:       "c-prov",
+				SubscriptionID: "s-prov",
+				Status:         "active",
+				PlanID:         tt.plan.ID,
+				ExpiresAt:      testutil.PtrTime(expiresAt),
+			}
+
+			svc := NewSyncService(db, tt.clients, nil)
+
+			provision, err := svc.buildNodeProvision(ctx, sub, 1, tt.policy)
+			require.NoError(t, err)
+
+			// Common client fields are identical for both paths.
+			assert.Equal(t, sub.ClientID, provision.ClientID)
+			assert.Equal(t, sub.Username, provision.Username)
+			assert.Equal(t, sub.SubscriptionID, provision.SubID)
+			assert.Equal(t, tt.plan.TrafficLimit, provision.TrafficBytes)
+			assert.Equal(t, sub.TelegramID, provision.TgID)
+			if tt.plan.TrafficLimit > 0 {
+				assert.Equal(t, expiresAt, provision.ExpiryTime, "existing expiry must be carried as-is")
+			}
+
+			tt.check(t, provision)
+		})
+	}
+}
+
+// TestSyncService_buildNodeProvision_AddUpdateParity checks that both paths
+// build the identical client (golden comparison of the whole provision) when
+// only the profile policy differs and the panel profile equals the default.
+func TestSyncService_buildNodeProvision_AddUpdateParity(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	db := testutil.NewServiceStoreFake()
+
+	expiresAt := time.Now().UTC().Add(72 * time.Hour).Truncate(time.Minute)
+
+	plan := &database.Plan{Name: "prov-parity", DevicesLimit: 2, TrafficLimit: 8192}
+	db.GetPlanByIDFunc = func(_ context.Context, _ uint) (*database.Plan, error) {
+		return plan, nil
+	}
+
+	sub := &database.Subscription{
+		TelegramID:     4243,
+		Username:       "parityuser",
+		ClientID:       "c-parity",
+		SubscriptionID: "s-parity",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(expiresAt),
+	}
+
+	reader := &testutil.XUIClient{}
+	reader.GetClientByEmailFunc = func(_ context.Context, _ string) (*xui.ClientRecord, error) {
+		return &xui.ClientRecord{Client: xui.ClientConfig{
+			Reset:           config.SubscriptionResetDay,
+			ResetMax:        0,
+			TrafficReset:    "monthly",
+			TrafficResetDay: 1,
+		}}, nil
+	}
+
+	svc := NewSyncService(db, NodeClients{1: {Reader: reader}}, nil)
+
+	addProvision, err := svc.buildNodeProvision(ctx, sub, 1, profileDefault)
+	require.NoError(t, err)
+
+	updateProvision, err := svc.buildNodeProvision(ctx, sub, 1, profilePreserve)
+	require.NoError(t, err)
+
+	assert.Equal(t, addProvision, updateProvision,
+		"add and update must build the identical client when the panel profile matches the default")
+}
+
+// TestSyncService_buildNodeProvision_DefaultExpiryWhenNone checks the fallback
+// expiry for a subscription without ExpiresAt: now (minute-truncated) plus
+// config.SubscriptionResetDay.
+func TestSyncService_buildNodeProvision_DefaultExpiryWhenNone(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	db := testutil.NewServiceStoreFake()
+
+	plan := &database.Plan{Name: "prov-default-expiry", DevicesLimit: 1, TrafficLimit: 1024}
+	db.GetPlanByIDFunc = func(_ context.Context, _ uint) (*database.Plan, error) {
+		return plan, nil
+	}
+
+	sub := &database.Subscription{
+		TelegramID:     4244,
+		Username:       "noexpiry",
+		ClientID:       "c-noexpiry",
+		SubscriptionID: "s-noexpiry",
+		Status:         "active",
+		PlanID:         plan.ID,
+	}
+
+	svc := NewSyncService(db, NodeClients{1: {}}, nil)
+
+	provision, err := svc.buildNodeProvision(ctx, sub, 1, profileDefault)
+	require.NoError(t, err)
+
+	want := time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, config.SubscriptionResetDay)
+	assert.True(t, provision.ExpiryTime.Equal(want),
+		"fallback expiry must be minute-truncated now plus SubscriptionResetDay")
+}
+
+// TestSyncService_buildNodeProvision_UpdateMissingClient checks that the
+// preserve policy fails with the sentinel vpn.ErrSubscriptionNotFound when the
+// client is gone from the panel — without falling back to a default profile or
+// a create.
+func TestSyncService_buildNodeProvision_UpdateMissingClient(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	db := testutil.NewServiceStoreFake()
+
+	plan := &database.Plan{Name: "prov-missing", DevicesLimit: 1, TrafficLimit: 1024}
+	db.GetPlanByIDFunc = func(_ context.Context, _ uint) (*database.Plan, error) {
+		return plan, nil
+	}
+
+	sub := &database.Subscription{
+		TelegramID:     4245,
+		Username:       "missinguser",
+		ClientID:       "c-missing",
+		SubscriptionID: "s-missing",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().UTC().Add(24 * time.Hour)),
+	}
+
+	reader := &testutil.XUIClient{}
+	reader.GetClientByEmailFunc = func(_ context.Context, _ string) (*xui.ClientRecord, error) {
+		return nil, xui.ErrClientNotFound
+	}
+
+	svc := NewSyncService(db, NodeClients{1: {Reader: reader}}, nil)
+
+	_, err := svc.buildNodeProvision(ctx, sub, 1, profilePreserve)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, vpn.ErrSubscriptionNotFound,
+		"a missing panel client must surface the sentinel instead of a default profile")
+	assert.NotErrorIs(t, err, vpn.ErrSubscriptionAlreadyExists)
+}
+
+// TestSyncService_buildNodeProvision_UpdateProfileReadError checks that a
+// panel read failure (other than "not found") fails the build: an update must
+// not silently overwrite manual admin edits with the default profile.
+func TestSyncService_buildNodeProvision_UpdateProfileReadError(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	db := testutil.NewServiceStoreFake()
+
+	plan := &database.Plan{Name: "prov-read-err", DevicesLimit: 1, TrafficLimit: 1024}
+	db.GetPlanByIDFunc = func(_ context.Context, _ uint) (*database.Plan, error) {
+		return plan, nil
+	}
+
+	sub := &database.Subscription{
+		TelegramID:     4246,
+		Username:       "readerruser",
+		ClientID:       "c-readerr",
+		SubscriptionID: "s-readerr",
+		Status:         "active",
+		PlanID:         plan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().UTC().Add(24 * time.Hour)),
+	}
+
+	reader := &testutil.XUIClient{}
+	reader.GetClientByEmailFunc = func(_ context.Context, _ string) (*xui.ClientRecord, error) {
+		return nil, errors.New("panel unreachable")
+	}
+
+	svc := NewSyncService(db, NodeClients{1: {Reader: reader}}, nil)
+
+	_, err := svc.buildNodeProvision(ctx, sub, 1, profilePreserve)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read panel profile")
+}
+
+// TestSyncService_SyncSubscription_PendingUpdate_PreservesPanelProfile runs the
+// full update path end-to-end: a plan change must not erase non-default admin
+// edits of the auto-renew profile on the panel.
+func TestSyncService_SyncSubscription_PendingUpdate_PreservesPanelProfile(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "prov-e2e-preserve", IsActive: true, DevicesLimit: 1, TrafficLimit: 2048}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node := &database.Node{Name: "prov-preserve-node", Type: database.NodeType3xUI, IsActive: true, Host: "http://pp", APIToken: "t", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node.ID}).Error)
+
+	expiresAt := time.Now().UTC().Add(12 * time.Hour).Truncate(time.Minute)
+	sub := &database.Subscription{TelegramID: 994002, Username: "preserve-user", ClientID: "preserve-client", SubscriptionID: "preserve-sub", Status: "active", PlanID: plan.ID, ExpiresAt: &expiresAt}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusPendingUpdate}))
+
+	reader := &testutil.XUIClient{}
+	reader.GetClientByEmailFunc = func(_ context.Context, email string) (*xui.ClientRecord, error) {
+		require.Equal(t, XUIEmail(sub.Username, sub.TelegramID), email)
+
+		return &xui.ClientRecord{Client: xui.ClientConfig{
+			Reset:           14,
+			ResetDay:        20,
+			ResetMax:        5,
+			TrafficReset:    "daily",
+			TrafficResetDay: 15,
+		}}, nil
+	}
+
+	mockVPN := &mockVPNClient{}
+	svc := NewSyncService(db, NodeClients{node.ID: {Provision: mockVPN, Reader: reader}}, []database.Node{*node})
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	require.True(t, mockVPN.updateCalled)
+	assert.Equal(t, 14, mockVPN.updateProvision.ResetDays, "admin-edited reset interval must survive the update")
+	assert.Equal(t, 20, mockVPN.updateProvision.ResetDay)
+	assert.Equal(t, 5, mockVPN.updateProvision.ResetMax)
+	assert.Equal(t, "daily", mockVPN.updateProvision.TrafficReset, "admin-edited reset period must survive the update")
+	assert.Equal(t, 15, mockVPN.updateProvision.TrafficResetDay)
+	assert.Equal(t, plan.TrafficLimit, mockVPN.updateProvision.TrafficBytes)
+	assert.Equal(t, expiresAt, mockVPN.updateProvision.ExpiryTime)
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
+}
+
+// TestSyncService_SyncSubscription_PendingUpdate_MissingClientFallsBackToCreate
+// checks the full update path when the client is gone from the panel: the item
+// is re-queued as pending_add (create path) in the same pass — no update
+// attempted, no retry ladder, next worker pass provisions the client.
+func TestSyncService_SyncSubscription_PendingUpdate_MissingClientFallsBackToCreate(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "prov-e2e-missing", IsActive: true, DevicesLimit: 1, TrafficLimit: 2048}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node := &database.Node{Name: "prov-missing-node", Type: database.NodeType3xUI, IsActive: true, Host: "http://pm", APIToken: "t", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node.ID}).Error)
+
+	sub := &database.Subscription{TelegramID: 994003, Username: "gone-user", ClientID: "gone-client", SubscriptionID: "gone-sub", Status: "active", PlanID: plan.ID, ExpiresAt: testutil.PtrTime(time.Now().UTC().Add(12 * time.Hour))}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusPendingUpdate}))
+
+	reader := &testutil.XUIClient{}
+	reader.GetClientByEmailFunc = func(context.Context, string) (*xui.ClientRecord, error) {
+		return nil, xui.ErrClientNotFound
+	}
+
+	mockVPN := &mockVPNClient{}
+	svc := NewSyncService(db, NodeClients{node.ID: {Provision: mockVPN, Reader: reader}}, []database.Node{*node})
+
+	// SyncSubscription swallows per-node failures by contract (best-effort
+	// external sync); the outcome is observable in the node status.
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+	assert.False(t, mockVPN.updateCalled, "update must not run without the panel profile")
+	assert.False(t, mockVPN.createCalled, "create runs on the next pass, not in the same one")
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusPendingAdd, rows[0].Status, "the item must be re-queued for create")
+	assert.Zero(t, rows[0].RetryCount, "the status transition resets retry metadata")
+	assert.Nil(t, rows[0].RetryAt)
+	assert.Nil(t, rows[0].LastError)
+}
+
+// TestSyncService_SyncSubscription_PendingUpdate_MissingClientThenCreate
+// runs the fallback end-to-end: after the pending_add re-queue the next pass
+// creates the client and marks the node active.
+func TestSyncService_SyncSubscription_PendingUpdate_MissingClientThenCreate(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "prov-e2e-fallback", IsActive: true, DevicesLimit: 1, TrafficLimit: 2048}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node := &database.Node{Name: "prov-fallback-node", Type: database.NodeType3xUI, IsActive: true, Host: "http://pf", APIToken: "t", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node.ID}).Error)
+
+	sub := &database.Subscription{TelegramID: 994004, Username: "fb-user", ClientID: "fb-client", SubscriptionID: "fb-sub", Status: "active", PlanID: plan.ID, ExpiresAt: testutil.PtrTime(time.Now().UTC().Add(12 * time.Hour))}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusPendingUpdate}))
+
+	clientGone := true
+	reader := &testutil.XUIClient{}
+	reader.GetClientByEmailFunc = func(context.Context, string) (*xui.ClientRecord, error) {
+		if clientGone {
+			return nil, xui.ErrClientNotFound
+		}
+
+		return &xui.ClientRecord{Client: xui.ClientConfig{Reset: 30, TrafficReset: "monthly", TrafficResetDay: 1}}, nil
+	}
+
+	mockVPN := &mockVPNClient{}
+	svc := NewSyncService(db, NodeClients{node.ID: {Provision: mockVPN, Reader: reader}}, []database.Node{*node})
+
+	// Pass 1: update discovers the missing client, re-queues pending_add.
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, database.SyncStatusPendingAdd, rows[0].Status)
+
+	// Pass 2: the create path provisions the client fresh.
+	clientGone = false
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	assert.True(t, mockVPN.createCalled, "the re-queued node must be provisioned by the create path")
+
+	rows, err = db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
+	assert.Zero(t, rows[0].RetryCount)
+}
+
+func TestSyncService_RevokedPendingProvisioningIsRemoved(t *testing.T) {
+	t.Parallel()
+
+	for _, status := range []database.SyncStatus{database.SyncStatusPendingAdd, database.SyncStatusPendingUpdate} {
+		for _, background := range []bool{false, true} {
+			name := string(status) + "/immediate"
+			if background {
+				name = string(status) + "/background"
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				ctx := context.Background()
+				db, err := testutil.NewTestDatabaseService(t)
+				require.NoError(t, err)
+				node := &database.Node{Name: "revoked-node", Type: database.NodeType3xUI, IsActive: true, Host: "http://revoked", InboundIDs: `[1]`}
+				require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
+				plan := &database.Plan{Name: "revoked-plan", DevicesLimit: 1}
+				require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+				sub := &database.Subscription{
+					TelegramID: 9201, Username: "revoked-user", ClientID: "revoked-client",
+					SubscriptionID: "revoked-sub", Status: string(database.SubscriptionStatusRevoked), PlanID: plan.ID,
+				}
+				require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+				due := time.Now().UTC().Add(-time.Minute)
+				require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{
+					SubscriptionID: sub.ID, NodeID: node.ID, Status: status, RetryCount: 4, RetryAt: &due,
+				}))
+
+				// A transient network failure at deletion: retryable by the
+				// policy, so the removal ladders (fresh retry sequence from 0).
+				deleteErr := &net.OpError{Op: "dial", Err: errors.New("VPN node temporarily unavailable")}
+				client := &mockVPNClient{deleteError: deleteErr}
+				// Removal must use the current DB node even without a runtime snapshot.
+				svc := NewSyncService(db, NodeClients{node.ID: {Provision: client}}, nil)
+				sync := func() error {
+					if background {
+						return svc.SyncPendingNodes(ctx)
+					}
+					return svc.SyncSubscription(ctx, sub.ID)
+				}
+				err = sync()
+				if background {
+					require.ErrorIs(t, err, deleteErr)
+				} else {
+					require.NoError(t, err, "immediate external sync remains best-effort")
+				}
+				assert.True(t, client.deleteCalled)
+				assert.Equal(t, sub.ClientID, client.deleteProvision.ClientID)
+				assert.False(t, client.createCalled)
+				assert.False(t, client.updateCalled)
+				assert.False(t, client.resetTrafficCalled)
+
+				bindings, err := db.GetBySubscriptionID(ctx, sub.ID)
+				require.NoError(t, err)
+				require.Len(t, bindings, 1)
+				assert.Equal(t, database.SyncStatusPendingRemove, bindings[0].Status)
+				assert.Equal(t, 1, bindings[0].RetryCount, "removal starts a fresh retry sequence")
+				require.NotNil(t, bindings[0].RetryAt)
+				require.NotNil(t, bindings[0].LastError)
+				assert.Contains(t, *bindings[0].LastError, deleteErr.Error())
+
+				// Make the persisted deletion due and let the next scan finish it.
+				require.NoError(t, db.UpdateRetry(ctx, sub.ID, node.ID, bindings[0].RetryCount, &due, bindings[0].LastError))
+				client.deleteError = nil
+				client.deleteCalled = false
+				require.NoError(t, sync())
+				assert.True(t, client.deleteCalled)
+				assert.False(t, client.createCalled)
+				assert.False(t, client.updateCalled)
+				bindings, err = db.GetBySubscriptionID(ctx, sub.ID)
+				require.NoError(t, err)
+				assert.Empty(t, bindings)
+				stored, err := db.GetByID(ctx, sub.ID)
+				require.NoError(t, err)
+				assert.Equal(t, string(database.SubscriptionStatusRevoked), stored.Status)
+			})
+		}
+	}
+}
+
+func TestSyncService_RevokedRemovalQueueFailure(t *testing.T) {
+	t.Parallel()
+
+	for _, queueErr := range []error{errors.New("DB write failed"), context.Canceled, context.DeadlineExceeded} {
+		t.Run(queueErr.Error(), func(t *testing.T) {
+			t.Parallel()
+
+			var queued, retried, deleted []uint
+			db := testutil.NewServiceStoreFake()
+			db.UpdateSubscriptionNodeStatusFunc = func(_ context.Context, _ uint, nodeID uint, status database.SyncStatus) error {
+				assert.Equal(t, database.SyncStatusPendingRemove, status)
+				queued = append(queued, nodeID)
+				if nodeID == 1 {
+					return queueErr
+				}
+				return nil
+			}
+			db.UpdateRetryFunc = func(_ context.Context, _, nodeID uint, _ int, _ *time.Time, _ *string) error {
+				retried = append(retried, nodeID)
+				return nil
+			}
+			db.GetNodeByIDFunc = func(_ context.Context, nodeID uint) (*database.Node, error) {
+				assert.Equal(t, uint(2), nodeID, "a failed queue write must prevent external sync")
+				return &database.Node{ID: nodeID, IsActive: true}, nil
+			}
+			db.DeleteSubscriptionNodeFunc = func(_ context.Context, _, nodeID uint) error {
+				deleted = append(deleted, nodeID)
+				return nil
+			}
+			failedClient, nextClient := &mockVPNClient{}, &mockVPNClient{}
+			svc := NewSyncService(db, NodeClients{1: {Provision: failedClient}, 2: {Provision: nextClient}}, []database.Node{
+				{ID: 1, Type: database.NodeType3xUI}, {ID: 2, Type: database.NodeType3xUI},
+			})
+			sub := &database.Subscription{ID: 42, Status: string(database.SubscriptionStatusRevoked)}
+			err := svc.syncNodes(context.Background(), sub, []database.SubscriptionNode{
+				{SubscriptionID: sub.ID, NodeID: 1, Status: database.SyncStatusPendingAdd},
+				{SubscriptionID: sub.ID, NodeID: 2, Status: database.SyncStatusPendingUpdate},
+			})
+			require.ErrorIs(t, err, queueErr)
+			assert.False(t, failedClient.createCalled)
+			assert.False(t, failedClient.updateCalled)
+			assert.False(t, failedClient.deleteCalled)
+			assert.False(t, nextClient.createCalled)
+			assert.False(t, nextClient.updateCalled)
+			if errors.Is(queueErr, context.Canceled) || errors.Is(queueErr, context.DeadlineExceeded) {
+				assert.Equal(t, []uint{1}, queued)
+				assert.Empty(t, retried)
+				assert.Empty(t, deleted)
+				assert.False(t, nextClient.deleteCalled)
+			} else {
+				assert.Equal(t, []uint{1, 2}, queued)
+				assert.Equal(t, []uint{1}, retried)
+				assert.Equal(t, []uint{2}, deleted)
+				assert.True(t, nextClient.deleteCalled)
+			}
+		})
+	}
+}
+
+func TestSyncService_SyncSubscription_PendingUpdate_SendsProvisionAndActivates(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "premium-update-plan", IsActive: true, DevicesLimit: 2, TrafficLimit: 8192}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node := &database.Node{Name: "pending-update-node", Type: database.NodeType3xUI, IsActive: true, Host: "http://update", APIToken: "token", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node.ID}).Error)
+
+	expiresAt := time.Now().UTC().Add(12 * time.Hour).Truncate(time.Minute)
+	sub := &database.Subscription{TelegramID: 994001, Username: "update-user", ClientID: "update-client", SubscriptionID: "update-sub", Status: "active", PlanID: plan.ID, ExpiresAt: &expiresAt}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusPendingUpdate}))
+
+	client := &mockVPNClient{}
+	svc := NewSyncService(db, NodeClients{node.ID: {Provision: client}}, []database.Node{*node})
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
+	assert.Equal(t, 0, rows[0].RetryCount)
+	require.True(t, client.updateCalled)
+	assert.Equal(t, sub.ClientID, client.updateProvision.ClientID)
+	assert.Equal(t, XUIEmail(sub.Username, sub.TelegramID), client.updateProvision.Username)
+	assert.Equal(t, XUIEmail(sub.Username, sub.TelegramID), client.updateProvision.CurrentEmail, "CurrentEmail must identify the existing client on the panel")
+	assert.Equal(t, sub.SubscriptionID, client.updateProvision.SubID)
+	assert.Equal(t, sub.TelegramID, client.updateProvision.TgID, "update must carry the Telegram id")
+	assert.Equal(t, plan.TrafficLimit, client.updateProvision.TrafficBytes)
+	// Node has no panel reader in this setup, so the update path writes the
+	// product default profile explicitly (no readerless -1 sentinel anymore).
+	assert.Equal(t, config.SubscriptionResetDay, client.updateProvision.ResetDays)
+	assert.Equal(t, "monthly", client.updateProvision.TrafficReset)
+	assert.Equal(t, 1, client.updateProvision.TrafficResetDay)
+	assert.Equal(t, 0, client.updateProvision.ResetMax)
+	assert.Equal(t, expiresAt, client.updateProvision.ExpiryTime)
+	assert.True(t, client.resetTrafficCalled, "ResetTraffic must be called after UpdateSubscription")
+}
+
+func TestSyncService_ApplyPlanToSubscription_MarksUpdatesAndReconcilesMembership(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "apply-plan", IsActive: true, DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	oldNode := &database.Node{Name: "apply-old", Type: database.NodeType3xUI, IsActive: true, Host: "http://old", APIToken: "old", InboundIDs: `[1]`}
+	targetNode := &database.Node{Name: "apply-target", Type: database.NodeType3xUI, IsActive: true, Host: "http://target", APIToken: "target", InboundIDs: `[1]`}
+
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(oldNode).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(targetNode).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: targetNode.ID}).Error)
+
+	expiresAt := time.Now().UTC().Add(24 * time.Hour)
+	sub := &database.Subscription{TelegramID: 994002, Username: "apply-user", ClientID: "apply-client", SubscriptionID: "apply-sub", Status: "active", PlanID: plan.ID, ExpiresAt: &expiresAt}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: oldNode.ID, Status: database.SyncStatusActive}))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: targetNode.ID, Status: database.SyncStatusActive}))
+
+	svc := NewSyncService(db, NodeClients{}, []database.Node{*oldNode, *targetNode})
+	require.NoError(t, svc.ApplyPlanToSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+
+	statusByNode := make(map[uint]database.SyncStatus, len(rows))
+	for _, row := range rows {
+		statusByNode[row.NodeID] = row.Status
+	}
+
+	assert.Equal(t, database.SyncStatusPendingRemove, statusByNode[oldNode.ID])
+	assert.Equal(t, database.SyncStatusPendingUpdate, statusByNode[targetNode.ID])
+}
+
+// TestSyncService_PendingUpdate_FreeToPremium_ResetTraffic verifies that
+// upgrading from free (TrafficLimit=1GB) to premium (TrafficLimit=0, unlimited)
+// calls ResetTraffic so the panel clears the free-tier usage.
+func TestSyncService_PendingUpdate_FreeToPremium_ResetTraffic(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	premiumPlan := &database.Plan{Name: "premium", IsActive: true, DevicesLimit: 2, TrafficLimit: 0}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(premiumPlan).Error)
+
+	node := &database.Node{Name: "upgrade-node", Type: database.NodeType3xUI, IsActive: true, Host: "http://up", APIToken: "tok", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: premiumPlan.ID, NodeID: node.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     995001,
+		Username:       "upgrade-user",
+		ClientID:       "upgrade-client",
+		SubscriptionID: "upgrade-sub",
+		Status:         "active",
+		PlanID:         premiumPlan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().UTC().Add(30 * 24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{
+		SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusPendingUpdate,
+	}))
+
+	client := &mockVPNClient{}
+	svc := NewSyncService(db, NodeClients{node.ID: {Provision: client}}, []database.Node{*node})
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
+
+	// UpdateSubscription must be called with unlimited traffic (totalGB=0)
+	require.True(t, client.updateCalled)
+	assert.Equal(t, int64(0), client.updateProvision.TrafficBytes, "premium must have unlimited traffic")
+
+	// ResetTraffic must be called to clear free-tier usage
+	assert.True(t, client.resetTrafficCalled, "ResetTraffic must be called on free→premium upgrade")
+}
+
+// TestSyncService_PendingUpdate_PremiumToFree_ResetTraffic verifies that
+// downgrading from premium (TrafficLimit=0) to free (TrafficLimit=1GB) on a
+// shared node calls ResetTraffic so the panel clears premium usage and the
+// user is not blocked by the 1GB limit.
+func TestSyncService_PendingUpdate_PremiumToFree_ResetTraffic(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	freePlan, planErr := db.GetPlanByName(ctx, database.FreePlanName)
+	require.NoError(t, planErr)
+
+	node := &database.Node{Name: "downgrade-node", Type: database.NodeType3xUI, IsActive: true, Host: "http://down", APIToken: "tok", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: freePlan.ID, NodeID: node.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     995002,
+		Username:       "downgrade-user",
+		ClientID:       "downgrade-client",
+		SubscriptionID: "downgrade-sub",
+		Status:         "active",
+		PlanID:         freePlan.ID,
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{
+		SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusPendingUpdate,
+	}))
+
+	client := &mockVPNClient{}
+	svc := NewSyncService(db, NodeClients{node.ID: {Provision: client}}, []database.Node{*node})
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
+
+	// UpdateSubscription must be called with 1GB limit
+	require.True(t, client.updateCalled)
+	assert.Equal(t, freePlan.TrafficLimit, client.updateProvision.TrafficBytes, "free plan traffic limit must match")
+
+	// ResetTraffic must be called to clear premium usage
+	assert.True(t, client.resetTrafficCalled, "ResetTraffic must be called on premium→free downgrade")
+}
+
+// Tests for the shared subscription_nodes reconciliation core
+// (plan_reconcile.go) across both entry points:
+//   - background best-effort: ApplyPlanToSubscription (plan from sub.PlanID);
+//   - transactional fail-fast: ApplyPlanToSubscriptionInTx (explicit planID).
+//
+// The parity test pins the invariant that both paths produce identical
+// subscription_nodes end states for the same fixture. The tx tests close the
+// historical coverage gap: ApplyPlanToSubscriptionInTx previously had a
+// duplicated state machine exercised only indirectly via CAS tests.
+
+type parityFixture struct {
+	plan  *database.Plan
+	nodes map[string]*database.Node
+}
+
+// createParityFixture creates a plan with three target nodes and three
+// out-of-plan nodes.
+func createParityFixture(t *testing.T, db *database.Service, planName string) parityFixture {
+	t.Helper()
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: planName, IsActive: true, DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	nodes := make(map[string]*database.Node, 7)
+	for i, name := range []string{"in1", "in2", "in3", "in4", "out1", "out2", "out3"} {
+		node := &database.Node{
+			Name:       planName + "-" + name,
+			Type:       database.NodeType3xUI,
+			IsActive:   true,
+			Host:       "http://" + name,
+			APIToken:   name,
+			InboundIDs: fmt.Sprintf(`[%d]`, i+1),
+		}
+		require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
+		nodes[name] = node
+	}
+
+	for _, name := range []string{"in1", "in2", "in3", "in4"} {
+		require.NoError(t, db.GetDB().WithContext(ctx).
+			Create(&database.PlanNode{PlanID: plan.ID, NodeID: nodes[name].ID}).Error)
+	}
+
+	return parityFixture{plan: plan, nodes: nodes}
+}
+
+// createParitySubscription creates an active subscription on the fixture plan
+// with the full pre-state covering every transition of the table:
+//
+//	in1 active          ∈ target → mark step → pending_update (retry reset)
+//	in2 pending_remove  ∈ target → reactivated → pending_add (retry reset)
+//	in3 pending_add     ∈ target → no transition (retry fields KEPT dirty)
+//	in4 (no record)     ∈ target → INSERT pending_add
+//	out1 active         ∉ target → pending_remove (retry reset)
+//	out2 pending_add    ∉ target → pending_remove (retry reset)
+//	out3 pending_update ∉ target → pending_remove (retry reset)
+//
+// out3 needs an extra node because the fixture only wires in1..in4 into the plan.
+func createParitySubscription(t *testing.T, db *database.Service, fx parityFixture, telegramID int64, status string) *database.Subscription {
+	t.Helper()
+
+	ctx := context.Background()
+
+	expiresAt := time.Now().UTC().Add(24 * time.Hour)
+	sub := &database.Subscription{
+		TelegramID:     telegramID,
+		Username:       fmt.Sprintf("parity-user-%d", telegramID),
+		ClientID:       fmt.Sprintf("parity-client-%d", telegramID),
+		SubscriptionID: fmt.Sprintf("parity-sub-%d", telegramID),
+		Status:         status,
+		PlanID:         fx.plan.ID,
+		ExpiresAt:      &expiresAt,
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+
+	dirtyRetryAt := time.Now().UTC().Add(-time.Hour)
+	dirtyLastError := "stale provisioning error"
+
+	// out3 pending_update also carries dirty retry fields.
+	dirty := func(status database.SyncStatus, node *database.Node) *database.SubscriptionNode {
+		retryAt := dirtyRetryAt
+		lastError := dirtyLastError
+
+		return &database.SubscriptionNode{
+			SubscriptionID: sub.ID,
+			NodeID:         node.ID,
+			Status:         status,
+			RetryCount:     3,
+			RetryAt:        &retryAt,
+			LastError:      &lastError,
+		}
+	}
+
+	require.NoError(t, db.CreateSubscriptionNode(ctx, dirty(database.SyncStatusActive, fx.nodes["in1"])))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, dirty(database.SyncStatusPendingRemove, fx.nodes["in2"])))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, dirty(database.SyncStatusPendingAdd, fx.nodes["in3"])))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, dirty(database.SyncStatusActive, fx.nodes["out1"])))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, dirty(database.SyncStatusPendingAdd, fx.nodes["out2"])))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, dirty(database.SyncStatusPendingUpdate, fx.nodes["out3"])))
+
+	return sub
+}
+
+// loadNodeStates reads subscription_nodes rows for a subscription keyed by node ID.
+func loadNodeStates(t *testing.T, db *database.Service, subscriptionID uint) map[uint]database.SubscriptionNode {
+	t.Helper()
+
+	rows, err := db.GetBySubscriptionID(context.Background(), subscriptionID)
+	require.NoError(t, err)
+
+	states := make(map[uint]database.SubscriptionNode, len(rows))
+	for _, row := range rows {
+		states[row.NodeID] = row
+	}
+
+	return states
+}
+
+// assertParityEndState asserts the expected end state of the shared fixture:
+// identical transitions for both entry points, retry fields reset on every
+// transition and preserved where no transition happened.
+func assertParityEndState(t *testing.T, states map[uint]database.SubscriptionNode, fx parityFixture) {
+	t.Helper()
+
+	want := map[string]database.SyncStatus{
+		"in1":  database.SyncStatusPendingUpdate, // mark: active ∈ target
+		"in2":  database.SyncStatusPendingAdd,    // pending_remove ∈ target → reactivated
+		"in3":  database.SyncStatusPendingAdd,    // pending_add ∈ target → no transition
+		"in4":  database.SyncStatusPendingAdd,    // no record → INSERT pending_add
+		"out1": database.SyncStatusPendingRemove, // active ∉ target
+		"out2": database.SyncStatusPendingRemove, // pending_add ∉ target
+		"out3": database.SyncStatusPendingRemove, // pending_update ∉ target
+	}
+	for name, status := range want {
+		node := fx.nodes[name]
+		row, ok := states[node.ID]
+		require.True(t, ok, "node %s must have a subscription_nodes row", name)
+		assert.Equal(t, status, row.Status, "node %s", name)
+	}
+
+	// Retry fields reset on every transition.
+	transitioned := []string{"in1", "in2", "in4", "out1", "out2", "out3"}
+	for _, name := range transitioned {
+		row := states[fx.nodes[name].ID]
+		assert.Zero(t, row.RetryCount, "node %s retry_count must be reset", name)
+		assert.Nil(t, row.RetryAt, "node %s retry_at must be reset", name)
+		assert.Nil(t, row.LastError, "node %s last_error must be reset", name)
+	}
+
+	// in3 keeps its dirty retry fields: pending_add ∈ target is NOT a transition.
+	in3 := states[fx.nodes["in3"].ID]
+	assert.Equal(t, 3, in3.RetryCount, "pending_add in target must keep retry_count")
+	assert.NotNil(t, in3.RetryAt, "pending_add in target must keep retry_at")
+	assert.NotNil(t, in3.LastError, "pending_add in target must keep last_error")
+}
+
+// TestApplyPlan_Parity_BackgroundAndTxSameEndState runs the same fixture
+// through both entry points and requires identical subscription_nodes end
+// states, including the retry-field resets.
+func TestApplyPlan_Parity_BackgroundAndTxSameEndState(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	fx := createParityFixture(t, db, "parity-plan")
+
+	bgSub := createParitySubscription(t, db, fx, 990001, "active")
+	txSub := createParitySubscription(t, db, fx, 990002, "active")
+
+	svc := NewSyncService(db, NodeClients{}, nil)
+
+	// Background path: lock + revoked guard + joined errors; plan from sub.PlanID.
+	require.NoError(t, svc.ApplyPlanToSubscription(ctx, bgSub.ID))
+
+	// Tx path: fail-fast; plan passed explicitly.
+	require.NoError(t, svc.ApplyPlanToSubscriptionInTx(ctx, db.GetDB(), txSub.ID, fx.plan.ID))
+
+	bgStates := loadNodeStates(t, db, bgSub.ID)
+	txStates := loadNodeStates(t, db, txSub.ID)
+
+	assertParityEndState(t, bgStates, fx)
+	assertParityEndState(t, txStates, fx)
+
+	// Both paths must land on the exact same state per node.
+	require.Len(t, txStates, len(bgStates))
+	for nodeID, bgRow := range bgStates {
+		txRow, ok := txStates[nodeID]
+		require.True(t, ok, "tx path is missing node %d", nodeID)
+		assert.Equal(t, bgRow.Status, txRow.Status, "node %d", nodeID)
+		assert.Equal(t, bgRow.RetryCount, txRow.RetryCount, "node %d", nodeID)
+		// The two subscriptions hold independent pre-state timestamps, so
+		// no-transition nodes (dirty retry fields kept) can only be compared
+		// by nil-ness, not by value.
+		assert.Equal(t, bgRow.RetryAt == nil, txRow.RetryAt == nil, "node %d retry_at nil-ness", nodeID)
+		assert.Equal(t, bgRow.LastError == nil, txRow.LastError == nil, "node %d last_error nil-ness", nodeID)
+	}
+}
+
+// TestApplyPlanToSubscriptionInTx_Transitions pins the tx-side behavior of
+// every transition in the shared table (the historical coverage gap).
+func TestApplyPlanToSubscriptionInTx_Transitions(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	fx := createParityFixture(t, db, "tx-transitions-plan")
+	sub := createParitySubscription(t, db, fx, 990003, "active")
+
+	svc := NewSyncService(db, NodeClients{}, nil)
+	require.NoError(t, svc.ApplyPlanToSubscriptionInTx(ctx, db.GetDB(), sub.ID, fx.plan.ID))
+
+	assertParityEndState(t, loadNodeStates(t, db, sub.ID), fx)
+}
+
+// TestApplyPlanToSubscriptionInTx_AddCreatesPendingAddWithCleanRetry isolates
+// the ADD branch for a node without an existing record.
+func TestApplyPlanToSubscriptionInTx_AddCreatesPendingAddWithCleanRetry(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	fx := createParityFixture(t, db, "tx-add-plan")
+
+	sub := &database.Subscription{
+		TelegramID: 990011, Username: "tx-add-user", ClientID: "tx-add-client",
+		SubscriptionID: "tx-add-sub", Status: "active", PlanID: fx.plan.ID,
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+
+	svc := NewSyncService(db, NodeClients{}, nil)
+	require.NoError(t, svc.ApplyPlanToSubscriptionInTx(ctx, db.GetDB(), sub.ID, fx.plan.ID))
+
+	states := loadNodeStates(t, db, sub.ID)
+	for _, name := range []string{"in1", "in2", "in3", "in4"} {
+		row, ok := states[fx.nodes[name].ID]
+		require.True(t, ok, "node %s must exist", name)
+		assert.Equal(t, database.SyncStatusPendingAdd, row.Status, "node %s", name)
+		assert.Zero(t, row.RetryCount)
+		assert.Nil(t, row.RetryAt)
+		assert.Nil(t, row.LastError)
+	}
+}
+
+// TestApplyPlanToSubscriptionInTx_FailFastRollsBackAll pins the fail-fast
+// contract: the first write error aborts reconciliation, and the outer
+// transaction rollback leaves subscription_nodes completely unchanged.
+func TestApplyPlanToSubscriptionInTx_FailFastRollsBackAll(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	fx := createParityFixture(t, db, "tx-failfast-plan")
+	sub := createParitySubscription(t, db, fx, 990012, "active")
+
+	before := loadNodeStates(t, db, sub.ID)
+
+	// Fail the only ADD-path create: node in4 has no record, so the core
+	// issues an INSERT (Create) for it. All other transitions go through
+	// UPDATEs (mark step, reactivation, pending_remove).
+	err = db.GetDB().Callback().Create().Before("gorm:create").Register("test_fail_tx_create", func(tx *gorm.DB) {
+		dest, ok := tx.Statement.Dest.(*database.SubscriptionNode)
+		if ok && dest.NodeID == fx.nodes["in4"].ID {
+			_ = tx.AddError(fmt.Errorf("boom: injected create failure"))
+		}
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { db.GetDB().Callback().Create().Remove("test_fail_tx_create") })
+
+	outer := db.GetDB().Begin()
+	require.NoError(t, outer.Error)
+
+	svc := NewSyncService(db, NodeClients{}, nil)
+	err = svc.ApplyPlanToSubscriptionInTx(ctx, outer, sub.ID, fx.plan.ID)
+	require.Error(t, err, "fail-fast must surface the first write error")
+	assert.Contains(t, err.Error(), "boom: injected create failure")
+
+	require.NoError(t, outer.Rollback().Error)
+
+	after := loadNodeStates(t, db, sub.ID)
+	require.Len(t, after, len(before), "rollback must leave no new rows")
+	for nodeID, beforeRow := range before {
+		afterRow, ok := after[nodeID]
+		require.True(t, ok, "rollback must not delete existing rows (node %d)", nodeID)
+		assert.Equal(t, beforeRow.Status, afterRow.Status, "node %d", nodeID)
+		assert.Equal(t, beforeRow.RetryCount, afterRow.RetryCount, "node %d", nodeID)
+		assert.Equal(t, beforeRow.RetryAt, afterRow.RetryAt, "node %d", nodeID)
+		assert.Equal(t, beforeRow.LastError, afterRow.LastError, "node %d", nodeID)
+	}
+}
+
+// TestApplyPlanToSubscriptionInTx_RevokedSubscriptionIsStillReconciled pins
+// the deliberate asymmetry: the tx path has NO revoked guard. A payment CAS
+// moves the subscription to active before applyPlan, so paying reactivates a
+// revoked subscription and the tx path must still reconcile it.
+func TestApplyPlanToSubscriptionInTx_RevokedSubscriptionIsStillReconciled(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	fx := createParityFixture(t, db, "tx-revoked-plan")
+	sub := createParitySubscription(t, db, fx, 990013, string(database.SubscriptionStatusRevoked))
+
+	svc := NewSyncService(db, NodeClients{}, nil)
+	require.NoError(t, svc.ApplyPlanToSubscriptionInTx(ctx, db.GetDB(), sub.ID, fx.plan.ID))
+
+	// Behavior check: revoked subscription still gets the full transition
+	// set, including pending_remove for nodes outside the plan.
+	states := loadNodeStates(t, db, sub.ID)
+	for _, name := range []string{"out1", "out2", "out3"} {
+		row, ok := states[fx.nodes[name].ID]
+		require.True(t, ok, "node %s must exist", name)
+		assert.Equal(t, database.SyncStatusPendingRemove, row.Status, "node %s", name)
+	}
+	assert.Equal(t, database.SyncStatusPendingAdd, states[fx.nodes["in2"].ID].Status)
+	assert.Equal(t, database.SyncStatusPendingAdd, states[fx.nodes["in4"].ID].Status)
+}
+
+// TestApplyPlanToSubscriptionInTx_NilTransaction pins the nil-tx guard.
+func TestApplyPlanToSubscriptionInTx_NilTransaction(t *testing.T) {
+	t.Parallel()
+
+	svc := NewSyncService(nil, NodeClients{}, nil)
+
+	err := svc.ApplyPlanToSubscriptionInTx(context.Background(), nil, 1, 2)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nil transaction")
 }

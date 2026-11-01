@@ -10,7 +10,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
-	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,7 +26,7 @@ func newTestSubService(t testing.TB, db *database.Service) *service.Subscription
 		TrialDurationHours: 1,
 	}
 
-	return service.NewSubscriptionService(db, nil, nil, nil, cfg)
+	return service.NewSubscriptionService(db, nil, nil, cfg)
 }
 
 func TestTrialCleanupScheduler_New(t *testing.T) {
@@ -148,19 +147,18 @@ func TestTrialCleanupScheduler_FallbackDeprovisionEvenWithSyncService(t *testing
 	// SubscriptionService.CleanupExpiredTrials is unreachable: expired trial
 	// clients must still be deprovisioned via the direct fallback even when a
 	// sync service is wired (the wiring in main.go must not break this).
-	db := &testutil.DatabaseService{
-		CleanupExpiredTrialsFunc: func(context.Context, int) ([]database.Subscription, error) {
-			return []database.Subscription{
-				{ID: 1, ClientID: "c1", SubscriptionID: "exp1"},
-				{ID: 2, ClientID: "c2", SubscriptionID: "exp2"},
-			}, nil
-		},
+	db := testutil.NewSubscriptionRepositoryFake()
+	db.CleanupExpiredTrialsFunc = func(context.Context, int) ([]database.Subscription, error) {
+		return []database.Subscription{
+			{ID: 1, ClientID: "c1", SubscriptionID: "exp1"},
+			{ID: 2, ClientID: "c2", SubscriptionID: "exp2"},
+		}, nil
 	}
 	mockVPN := &mockVPNClientForExpire{}
-	vpnClients := map[uint]vpn.Client{1: mockVPN}
+	clients := service.NodeClients{1: {Provision: mockVPN}}
 	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://node"}}
 
-	subService := service.NewSubscriptionService(db, nil, vpnClients, nodes, &config.Config{TrialDurationHours: 24})
+	subService := service.NewSubscriptionService(db, clients, nodes, &config.Config{TrialDurationHours: 24})
 	subService.SetSyncService(service.NewSyncService(db, nil, nodes))
 	scheduler := NewTrialCleanupScheduler(subService)
 

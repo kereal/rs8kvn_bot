@@ -553,10 +553,10 @@ func TestHandleSubscription_FormatByUA(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	withBackend := func(t *testing.T, subID string) (*Service, *testutil.DatabaseService, string) {
+	withBackend := func(t *testing.T, subID string) (*Service, *testutil.SubscriptionRepositoryFake, string) {
 		t.Helper()
 
-		mockDB := testutil.NewDatabaseService()
+		mockDB := testutil.NewSubscriptionRepositoryFake()
 		mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, id string) (*database.SubscriptionFull, error) {
 			return &database.SubscriptionFull{
 				Subscription: database.Subscription{ID: 1, SubscriptionID: id, Status: "active"},
@@ -644,7 +644,7 @@ func TestHandleSubscription_PerFormatCacheKeys(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	mockDB := testutil.NewDatabaseService()
+	mockDB := testutil.NewSubscriptionRepositoryFake()
 	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, SubscriptionID: subID, Status: "active"},
@@ -672,12 +672,12 @@ func TestHandleSubscription_PerFormatCacheKeys(t *testing.T) {
 
 	// Revision check: without the per-format key the sing-box body would have
 	// overwritten (or been served by) the Xray entry.
-	bodyXray, _, _ := svc.GetCache("sub-fmt")
-	bodySB, _, _ := svc.GetCache("sub-fmt:singbox")
+	bodyXray, _, _ := svc.Get("sub-fmt")
+	bodySB, _, _ := svc.Get("sub-fmt:singbox")
 	require.NotEqual(t, bodyXray, bodySB)
 }
 
 func cacheHas(svc *Service, key string) bool {
-	body, _, ok := svc.GetCache(key)
+	body, _, ok := svc.Get(key)
 	return ok && len(body) > 0
 }

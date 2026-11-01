@@ -16,7 +16,6 @@ var (
 	ErrXUITLS             = errors.New("xui: TLS/SSL error")
 	ErrXUIServer          = errors.New("xui: server error")
 	ErrXUIRollbackFailed  = errors.New("xui: rollback failed")
-	ErrXUICircuitOpen     = errors.New("xui: circuit breaker open")
 )
 
 // classifyXUIError wraps the given error with an appropriate sentinel error
@@ -45,8 +44,6 @@ func classifyXUIError(err error) error {
 		return ErrXUITLS
 	case strings.Contains(msg, "inbound") || strings.Contains(msg, "client"):
 		return ErrXUIServer
-	case strings.Contains(msg, "circuit breaker is open"):
-		return ErrXUICircuitOpen
 	}
 
 	return err

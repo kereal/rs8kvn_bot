@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,17 +12,20 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
+	"github.com/kereal/rs8kvn_bot/internal/xui"
 
+	"github.com/mattn/go-sqlite3"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
 // SyncService manages the synchronization of subscriptions with VPN nodes.
 type SyncService struct {
-	db         interfaces.DatabaseService
-	vpnClients map[uint]vpn.Client
-	nodes      []database.Node
+	db      interfaces.SyncStore
+	clients NodeClients
+	nodes   []database.Node
 
 	locksMu     sync.Mutex
 	locks       map[uint]*subscriptionSyncLock
@@ -39,10 +43,10 @@ func syncIdentifier(sub *database.Subscription) string {
 }
 
 // NewSyncService creates a new SyncService.
-func NewSyncService(db interfaces.DatabaseService, vpnClients map[uint]vpn.Client, nodes []database.Node) *SyncService {
+func NewSyncService(db interfaces.SyncStore, clients NodeClients, nodes []database.Node) *SyncService {
 	return &SyncService{
 		db:          db,
-		vpnClients:  vpnClients,
+		clients:     clients,
 		nodes:       nodes,
 		locks:       make(map[uint]*subscriptionSyncLock),
 		lockTimeout: 2 * time.Minute,
@@ -127,191 +131,38 @@ func (s *SyncService) ReconcilePlanNodes(ctx context.Context, subscriptionID uin
 }
 
 // reconcilePlanNodesLocked is the lock-free body of ReconcilePlanNodes.
-// The caller must hold lockSubscription(subscriptionID). Revoked subscriptions
-// are left unchanged. Load errors return immediately; node mutation errors are
-// joined after processing, except cancellation or deadline errors, which abort.
+// The caller must hold lockSubscription(subscriptionID). It delegates to the
+// shared reconciliation core (plan_reconcile.go) with the background error
+// policy: per-node failures are logged and joined via errors.Join, while
+// cancellation or deadline errors abort immediately. Revoked subscriptions
+// are left unchanged by the core's readSubscription option.
 func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscriptionID uint) error {
 	logger.Debug("reconcile plan nodes",
 		zap.Uint("subscription_id", subscriptionID))
 
-	sub, err := s.db.GetByID(ctx, subscriptionID)
-	if err != nil {
-		return fmt.Errorf("reconcile plan nodes: load subscription: %w", err)
-	}
-	if sub.Status == string(database.SubscriptionStatusRevoked) {
-		return nil
-	}
-
-	targetNodes, err := s.db.GetNodesByPlanID(ctx, sub.PlanID)
-	if err != nil {
-		return fmt.Errorf("reconcile plan nodes: load plan nodes: %w", err)
-	}
-
-	currentNodes, err := s.db.GetBySubscriptionID(ctx, subscriptionID)
-	if err != nil {
-		return fmt.Errorf("reconcile plan nodes: load current nodes: %w", err)
-	}
-
-	targetSet := make(map[uint]struct{}, len(targetNodes))
-	for _, n := range targetNodes {
-		if n.IsActive {
-			targetSet[n.ID] = struct{}{}
-		}
-	}
-
-	currentActive := make(map[uint]database.SubscriptionNode)
-	currentPendingAdd := make(map[uint]database.SubscriptionNode)
-	currentPendingRemove := make(map[uint]database.SubscriptionNode)
-	currentPendingUpdate := make(map[uint]database.SubscriptionNode)
-
 	var errs []error
 
-	recordNodeError := func(operation string, nodeID uint, err error) error {
-		wrappedErr := fmt.Errorf("reconcile plan nodes: %s node %d: %w", operation, nodeID, err)
-		logger.Warn("reconcile plan nodes: node operation failed",
-			zap.Uint("subscription_id", subscriptionID),
-			zap.Uint("node_id", nodeID),
-			zap.String("operation", operation),
-			zap.Error(wrappedErr))
-
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return wrappedErr
-		}
-
-		errs = append(errs, wrappedErr)
-
-		return nil
-	}
-
-	for _, sn := range currentNodes {
-		switch sn.Status {
-		case database.SyncStatusActive:
-			currentActive[sn.NodeID] = sn
-		case database.SyncStatusPendingAdd:
-			currentPendingAdd[sn.NodeID] = sn
-		case database.SyncStatusPendingRemove:
-			currentPendingRemove[sn.NodeID] = sn
-		case database.SyncStatusPendingUpdate:
-			currentPendingUpdate[sn.NodeID] = sn
-		}
-	}
-
-	for _, target := range targetNodes {
-		if !target.IsActive {
-			continue
-		}
-
-		if _, exists := currentActive[target.ID]; exists {
-			continue
-		}
-
-		if _, exists := currentPendingAdd[target.ID]; exists {
-			continue
-		}
-
-		if _, exists := currentPendingUpdate[target.ID]; exists {
-			logger.Debug("pending_update node in target plan, leaving as-is",
+	err := reconcilePlanNodesCore(ctx, dbServicePlanStore{db: s.db}, subscriptionID, planReconcileOptions{
+		readSubscription: true,
+		onNodeError: func(operation string, nodeID uint, err error) error {
+			wrappedErr := fmt.Errorf("reconcile plan nodes: %s node %d: %w", operation, nodeID, err)
+			logger.Warn("reconcile plan nodes: node operation failed",
 				zap.Uint("subscription_id", subscriptionID),
-				zap.Uint("node_id", target.ID))
+				zap.Uint("node_id", nodeID),
+				zap.String("operation", operation),
+				zap.Error(wrappedErr))
 
-			continue
-		}
-
-		if pending, ok := currentPendingRemove[target.ID]; ok {
-			err := s.db.UpdateSubscriptionNodeStatus(ctx, pending.SubscriptionID, pending.NodeID, database.SyncStatusPendingAdd)
-			if err != nil {
-				stopErr := recordNodeError("reactivate pending_remove", target.ID, err)
-				if stopErr != nil {
-					return stopErr
-				}
-
-				continue
+			if utils.IsCtxErr(err) {
+				return wrappedErr
 			}
 
-			logger.Debug("reactivated pending_remove to pending_add",
-				zap.Uint("subscription_id", subscriptionID),
-				zap.Uint("node_id", target.ID))
+			errs = append(errs, wrappedErr)
 
-			continue
-		}
-
-		err := s.db.UpsertSubscriptionNode(ctx, &database.SubscriptionNode{
-			SubscriptionID: subscriptionID,
-			NodeID:         target.ID,
-			Status:         database.SyncStatusPendingAdd,
-		})
-		if err != nil {
-			stopErr := recordNodeError("upsert pending_add", target.ID, err)
-			if stopErr != nil {
-				return stopErr
-			}
-
-			continue
-		}
-
-		logger.Debug("created pending_add node",
-			zap.Uint("subscription_id", subscriptionID),
-			zap.Uint("node_id", target.ID))
-	}
-
-	for nodeID, sn := range currentActive {
-		if _, inTarget := targetSet[nodeID]; inTarget {
-			continue
-		}
-
-		err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
-		if err != nil {
-			stopErr := recordNodeError("set pending_remove", nodeID, err)
-			if stopErr != nil {
-				return stopErr
-			}
-
-			continue
-		}
-
-		logger.Debug("set pending_remove for active node not in target",
-			zap.Uint("subscription_id", subscriptionID),
-			zap.Uint("node_id", nodeID))
-	}
-
-	for nodeID, sn := range currentPendingAdd {
-		if _, inTarget := targetSet[nodeID]; inTarget {
-			continue
-		}
-
-		err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
-		if err != nil {
-			stopErr := recordNodeError("set pending_remove for stale pending_add", nodeID, err)
-			if stopErr != nil {
-				return stopErr
-			}
-
-			continue
-		}
-
-		logger.Debug("set pending_remove for stale pending_add node",
-			zap.Uint("subscription_id", subscriptionID),
-			zap.Uint("node_id", nodeID))
-	}
-
-	for nodeID, sn := range currentPendingUpdate {
-		if _, inTarget := targetSet[nodeID]; inTarget {
-			continue
-		}
-
-		err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
-		if err != nil {
-			stopErr := recordNodeError("set pending_remove for stale pending_update", nodeID, err)
-			if stopErr != nil {
-				return stopErr
-			}
-
-			continue
-		}
-
-		logger.Debug("set pending_remove for stale pending_update node",
-			zap.Uint("subscription_id", subscriptionID),
-			zap.Uint("node_id", nodeID))
+			return nil
+		},
+	})
+	if err != nil {
+		return err
 	}
 
 	logger.Debug("reconcile plan nodes completed",
@@ -396,7 +247,7 @@ func (s *SyncService) SyncSubscription(ctx context.Context, subscriptionID uint)
 
 	err = s.syncNodes(ctx, sub, pending)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if utils.IsCtxErr(err) {
 			return err
 		}
 
@@ -442,7 +293,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 			err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
 			if err != nil {
 				err = fmt.Errorf("mark revoked subscription node %d pending_remove: %w", sn.NodeID, err)
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				if utils.IsCtxErr(err) {
 					return err
 				}
 
@@ -453,9 +304,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 			}
 
 			sn.Status = database.SyncStatusPendingRemove
-			sn.RetryCount = 0
-			sn.RetryAt = nil
-			sn.LastError = nil
+			clearRetry(&sn)
 		}
 
 		// pending_remove is dispatched before the runtime node-type check: a
@@ -470,7 +319,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 
 			err := s.processPendingRemove(ctx, &sn, sub)
 			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				if utils.IsCtxErr(err) {
 					return err
 				}
 
@@ -489,7 +338,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 			logger.Warn("node not found in runtime clients, skipping",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID))
-			s.handleSyncError(ctx, &sn, fmt.Errorf("node not found in runtime clients"))
+			s.handleSyncError(ctx, &sn, fmt.Errorf("%w: node not found in runtime clients", errNodeUnavailable))
 
 			continue
 		}
@@ -501,7 +350,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", sn.NodeID),
 				zap.String("node_type", string(nodeType)))
-			s.handleSyncError(ctx, &sn, fmt.Errorf("unsupported node type %s", nodeType))
+			s.handleSyncError(ctx, &sn, fmt.Errorf("%w: unsupported node type %s", errNodeUnavailable, nodeType))
 
 			continue
 		}
@@ -514,7 +363,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 
 			err := s.processPendingAdd(ctx, &sn, sub)
 			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				if utils.IsCtxErr(err) {
 					return err
 				}
 
@@ -531,7 +380,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 
 			err := s.processPendingUpdate(ctx, &sn, sub)
 			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				if utils.IsCtxErr(err) {
 					return err
 				}
 
@@ -554,10 +403,16 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 // retryUnavailableNode reports a node that cannot serve the given sync
 // operation (missing config, inactive, or no VPN client) and keeps the
 // subscription_node record pending for the background worker to retry.
+//
+// Unavailability is a transient condition: the runtime registry is a startup
+// snapshot, the node may re-enter the fleet or gain a client later. The error
+// is wrapped in errNodeUnavailable so the retry policy treats it as retryable
+// (it ladders up to maxSyncRetries instead of parking on the first hit),
+// while still parking eventually if the node never recovers.
 func (s *SyncService) retryUnavailableNode(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription, operation string) error {
 	node, nodeErr := s.db.GetNodeByID(ctx, sn.NodeID)
 	if nodeErr != nil {
-		err := fmt.Errorf("%s node %d unavailable: load node: %w", operation, sn.NodeID, nodeErr)
+		err := fmt.Errorf("%w: %s node %d unavailable: load node: %w", errNodeUnavailable, operation, sn.NodeID, nodeErr)
 		logger.Warn("node unavailable for sync operation, keeping pending record",
 			zap.String("operation", operation),
 			zap.Uint("subscription_id", sub.ID),
@@ -569,7 +424,7 @@ func (s *SyncService) retryUnavailableNode(ctx context.Context, sn *database.Sub
 	}
 
 	if !node.IsActive {
-		err := fmt.Errorf("%s node %d unavailable: inactive=%t type=%s", operation, sn.NodeID, node.IsActive, node.Type)
+		err := fmt.Errorf("%w: %s node %d unavailable: inactive=%t type=%s", errNodeUnavailable, operation, sn.NodeID, node.IsActive, node.Type)
 		logger.Warn("node unsuitable for sync operation, keeping pending record",
 			zap.String("operation", operation),
 			zap.Uint("subscription_id", sub.ID),
@@ -582,59 +437,65 @@ func (s *SyncService) retryUnavailableNode(ctx context.Context, sn *database.Sub
 		return err
 	}
 
-	err := fmt.Errorf("%s node %d unavailable: no VPN client", operation, sn.NodeID)
+	err := fmt.Errorf("%w: %s node %d unavailable: no VPN client", errNodeUnavailable, operation, sn.NodeID)
 	s.handleSyncError(ctx, sn, err)
 
 	return err
 }
 
+// errNodeUnavailable marks node-unavailability errors as retryable: the
+// condition is transient (startup registry snapshot, node may come back), so
+// the retry policy ladders instead of parking on the first hit. It is wrapped
+// with %w by every retryUnavailableNode error and checked by errors.Is in the
+// policy.
+var errNodeUnavailable = errors.New("node unavailable")
+
+// fallbackUpdateToCreate re-queues an update whose target client is gone from
+// the panel (vpn.ErrSubscriptionNotFound): an update cannot succeed, the
+// create path can. The node moves to pending_add — a legitimate status
+// transition, so UpdateSubscriptionNodeStatus resets retry metadata and the
+// next worker pass provisions the client fresh. The re-queue is not a scan
+// failure: nil is returned and the outcome is visible in the node status and
+// the Warn log.
+func (s *SyncService) fallbackUpdateToCreate(ctx context.Context, sn *database.SubscriptionNode, cause error) error {
+	err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingAdd)
+	if err != nil {
+		err = fmt.Errorf("fallback pending_update to pending_add node %d: %w", sn.NodeID, err)
+		logger.Warn("update fallback to create failed",
+			zap.Uint("subscription_id", sn.SubscriptionID),
+			zap.Uint("node_id", sn.NodeID),
+			zap.Error(err))
+
+		return err
+	}
+
+	logger.Warn("panel client is gone, update re-queued as create",
+		zap.Uint("subscription_id", sn.SubscriptionID),
+		zap.Uint("node_id", sn.NodeID),
+		zap.Error(cause))
+
+	return nil
+}
+
 // processPendingUpdate updates an existing VPN subscription client configuration.
 // Used when a plan change requires updating traffic limits or expiry on an active node.
+// The auto-renew profile is preserved from the panel (read-modify-write):
+// manual admin edits must not be overwritten by product defaults.
 func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription) error {
-	client, ok := s.vpnClients[sn.NodeID]
+	client, ok := s.clients.Provision(sn.NodeID)
 	if !ok {
 		return s.retryUnavailableNode(ctx, sn, sub, "pending_update")
 	}
 
-	plan, err := s.db.GetPlanByID(ctx, sub.PlanID)
+	provision, err := s.buildNodeProvision(ctx, sub, sn.NodeID, profilePreserve)
 	if err != nil {
-		s.handleSyncError(ctx, sn, err)
-		return fmt.Errorf("load plan for subscription sync: %w", err)
-	}
-
-	comment, err := referrerComment(ctx, s.db, sub)
-	if err != nil {
-		s.handleSyncError(ctx, sn, err)
-		return fmt.Errorf("load referrer comment: %w", err)
-	}
-
-	provision := vpn.SubscriptionProvision{
-		ClientID:     sub.ClientID,
-		Username:     syncIdentifier(sub),
-		CurrentEmail: syncIdentifier(sub),
-		SubID:        sub.SubscriptionID,
-		TrafficBytes: plan.TrafficLimit,
-		TgID:         sub.TelegramID,
-		Comment:      comment,
-	}
-	if plan.TrafficLimit > 0 {
-		if plan.Name == database.TrialPlanName {
-			provision.ResetDays = 0
-		} else {
-			provision.ResetDays = -1
-			provision.ResetMax = 0
-			provision.TrafficReset = "monthly"
-			provision.TrafficResetDay = 1
+		if errors.Is(err, vpn.ErrSubscriptionNotFound) {
+			return s.fallbackUpdateToCreate(ctx, sn, err)
 		}
 
-		if sub.ExpiresAt != nil {
-			provision.ExpiryTime = *sub.ExpiresAt
-		} else {
-			provision.ExpiryTime = time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, config.SubscriptionResetDay)
-		}
-		// NB: recovery of an already-expired free client (move expiry to the
-		// next cycle) happens in the xui layer (doUpdateClient), guarded by
-		// resetDays > 0 so trials are never extended here.
+		s.handleSyncError(ctx, sn, err)
+
+		return fmt.Errorf("build provision for pending update node %d: %w", sn.NodeID, err)
 	}
 
 	logger.Debug("updating VPN subscription",
@@ -643,6 +504,10 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 
 	err = client.UpdateSubscription(ctx, provision)
 	if err != nil {
+		if errors.Is(err, vpn.ErrSubscriptionNotFound) {
+			return s.fallbackUpdateToCreate(ctx, sn, err)
+		}
+
 		s.handleSyncError(ctx, sn, err)
 		return fmt.Errorf("update VPN subscription node %d: %w", sn.NodeID, err)
 	}
@@ -670,24 +535,46 @@ func (s *SyncService) processPendingUpdate(ctx context.Context, sn *database.Sub
 	return nil
 }
 
-// processPendingAdd creates a VPN subscription on the target node.
-// Handles idempotent "already exists" errors by synchronizing config and only then marking active.
-func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription) error {
-	client, ok := s.vpnClients[sn.NodeID]
-	if !ok {
-		return s.retryUnavailableNode(ctx, sn, sub, "pending_add")
-	}
+// profilePolicy selects the auto-renew profile policy of the provision build.
+type profilePolicy int
 
+const (
+	// profileDefault writes the product default profile: monthly traffic
+	// reset on day 1, renewal interval config.SubscriptionResetDay,
+	// unlimited renewals. Used by the add path.
+	profileDefault profilePolicy = iota
+	// profilePreserve copies the current panel profile into the provision
+	// (read-modify-write), so manual admin edits survive a plan change.
+	profilePreserve
+)
+
+// buildNodeProvision is the single assembly point of vpn.SubscriptionProvision
+// for the sync add and update paths: common client fields plus an auto-renew
+// profile chosen by policy. Previously both paths carried a copy of this
+// build, which already produced a production drift (create wrote reset=-1).
+//
+// A trial always gets a profile without a reset cycle (reset=0,
+// trafficReset=never): the trial quota never renews, regardless of the path
+// policy or the client's current panel profile. The profile is sent explicitly
+// because the panel does not merge profiles on write — an omitted trafficReset
+// is normalized to "never" (doc/architecture.md, «Контракт API панели
+// 3x-ui», §4.2).
+//
+// With profilePreserve the profile is read from the panel
+// (GET /clients/get/{email}) — the only source of the full profile. A missing
+// client yields the sentinel vpn.ErrSubscriptionNotFound (no fallback to
+// create); any other read error fails the item, because writing the default
+// profile would erase manual admin edits. Nodes without a readable panel
+// (proxman, fetch) have no profile to preserve and get the product default.
+func (s *SyncService) buildNodeProvision(ctx context.Context, sub *database.Subscription, nodeID uint, policy profilePolicy) (vpn.SubscriptionProvision, error) {
 	plan, err := s.db.GetPlanByID(ctx, sub.PlanID)
 	if err != nil {
-		s.handleSyncError(ctx, sn, err)
-		return fmt.Errorf("load plan for subscription sync: %w", err)
+		return vpn.SubscriptionProvision{}, fmt.Errorf("load plan for subscription sync: %w", err)
 	}
 
 	comment, err := referrerComment(ctx, s.db, sub)
 	if err != nil {
-		s.handleSyncError(ctx, sn, err)
-		return fmt.Errorf("load referrer comment: %w", err)
+		return vpn.SubscriptionProvision{}, fmt.Errorf("load referrer comment: %w", err)
 	}
 
 	provision := vpn.SubscriptionProvision{
@@ -699,16 +586,38 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 		TgID:         sub.TelegramID,
 		Comment:      comment,
 	}
+
 	if plan.TrafficLimit > 0 {
 		// Trials must never auto-renew even though the trial plan carries a
 		// traffic limit (which would otherwise enable it via reset=-1 → 30).
+		// The trial profile is sent explicitly (never) because the panel does
+		// not merge profiles on write — see buildNodeProvision.
 		if plan.Name == database.TrialPlanName {
 			provision.ResetDays = 0
+			provision.TrafficReset = "never"
 		} else {
-			provision.ResetDays = -1
-			provision.ResetMax = 0
-			provision.TrafficReset = "monthly"
-			provision.TrafficResetDay = 1
+			switch policy {
+			case profileDefault:
+				defaultRenewProfile(&provision)
+			case profilePreserve:
+				reader, hasReader := s.clients.Reader(nodeID)
+				if !hasReader {
+					defaultRenewProfile(&provision)
+
+					break
+				}
+
+				profile, profErr := panelRenewProfile(ctx, reader, syncIdentifier(sub))
+				if profErr != nil {
+					return vpn.SubscriptionProvision{}, fmt.Errorf("node %d: %w", nodeID, profErr)
+				}
+
+				provision.ResetDays = profile.Reset
+				provision.ResetDay = profile.ResetDay
+				provision.ResetMax = profile.ResetMax
+				provision.TrafficReset = profile.TrafficReset
+				provision.TrafficResetDay = profile.TrafficResetDay
+			}
 		}
 
 		if sub.ExpiresAt != nil {
@@ -716,8 +625,56 @@ func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.Subscr
 		} else {
 			provision.ExpiryTime = time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, config.SubscriptionResetDay)
 		}
-		// Recovery of an already-expired free client is the xui layer's job
-		// (doUpdateClient, resetDays > 0 only); trials must keep their expiry.
+		// NB: recovery of an already-expired free client (move expiry to the
+		// next cycle) happens in the xui layer (doUpdateClient), guarded by
+		// resetDays > 0 so trials are never extended here.
+	}
+
+	return provision, nil
+}
+
+// defaultRenewProfile writes the product default auto-renew profile:
+// monthly traffic reset on day 1, renewal interval
+// config.SubscriptionResetDay, unlimited renewals.
+func defaultRenewProfile(provision *vpn.SubscriptionProvision) {
+	provision.ResetDays = config.SubscriptionResetDay
+	provision.ResetMax = 0
+	provision.TrafficReset = "monthly"
+	provision.TrafficResetDay = 1
+}
+
+// panelRenewProfile reads the client's current auto-renew profile from the
+// panel. The panel base is the source of truth: a read failure (including a
+// missing client, mapped to vpn.ErrSubscriptionNotFound) aborts the build so
+// an update never overwrites manual admin edits with the default profile.
+func panelRenewProfile(ctx context.Context, reader interfaces.XUIClientReader, email string) (xui.ClientConfig, error) {
+	record, err := reader.GetClientByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, xui.ErrClientNotFound) {
+			err = fmt.Errorf("%w: %w", vpn.ErrSubscriptionNotFound, err)
+		}
+
+		return xui.ClientConfig{}, fmt.Errorf("read panel profile: %w", err)
+	}
+
+	return record.Client, nil
+}
+
+// processPendingAdd creates a VPN subscription on the target node.
+// Handles idempotent "already exists" errors by synchronizing config and only then marking active.
+// The auto-renew profile is the product default written explicitly (monthly/1,
+// reset=config.SubscriptionResetDay, resetMax=0), not the panel-side profile.
+func (s *SyncService) processPendingAdd(ctx context.Context, sn *database.SubscriptionNode, sub *database.Subscription) error {
+	client, ok := s.clients.Provision(sn.NodeID)
+	if !ok {
+		return s.retryUnavailableNode(ctx, sn, sub, "pending_add")
+	}
+
+	provision, err := s.buildNodeProvision(ctx, sub, sn.NodeID, profileDefault)
+	if err != nil {
+		s.handleSyncError(ctx, sn, err)
+
+		return fmt.Errorf("build provision for pending add node %d: %w", sn.NodeID, err)
 	}
 
 	logger.Debug("creating VPN subscription",
@@ -793,7 +750,7 @@ func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.Sub
 		return nil
 	}
 
-	client, ok := s.vpnClients[sn.NodeID]
+	client, ok := s.clients.Provision(sn.NodeID)
 	if !ok {
 		return s.retryUnavailableNode(ctx, sn, sub, "pending_remove")
 	}
@@ -841,17 +798,86 @@ func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.Sub
 }
 
 // handleSyncError updates retry metadata for a failed sync operation.
-// Increments RetryCount and schedules next attempt via exponential backoff.
+//
+// Policy:
+//   - context.Canceled / context.DeadlineExceeded from the caller's ctx mean
+//     the scan is shutting down — no retry metadata is written, the background
+//     worker will pick the record up on the next pass (R3).
+//   - A retryable error (network timeout per utils.IsRetryable, transient node
+//     unavailability per errNodeUnavailable, SQLite write-lock contention per
+//     isTransientDBError) ladders with exponential backoff until maxSyncRetries.
+//   - Anything else (the panel answered and refused, a non-200 front response,
+//     a terminal DB error such as a constraint violation) is parked
+//     immediately: retrying cannot succeed.
+//   - An exhausted ladder (retry_count reached maxSyncRetries) parks too.
+//
+// A parked node keeps its pending status, holds the terminal cause in
+// last_error, and carries a far-future retry_at so GetPendingSync stops
+// selecting it. It is not a new state: any legitimate re-transition
+// (UpdateSubscriptionNodeStatus, UpsertSubscriptionNode,
+// MarkActiveNodesPendingUpdate) resets retry metadata and releases the node.
 func (s *SyncService) handleSyncError(ctx context.Context, sn *database.SubscriptionNode, err error) {
+	if utils.IsCtxErr(err) {
+		logger.Debug("sync aborted by context, retry metadata untouched",
+			zap.Uint("subscription_id", sn.SubscriptionID),
+			zap.Uint("node_id", sn.NodeID),
+			zap.Error(err))
+
+		return
+	}
+
+	errMsg := err.Error()
+	// Lock contention is only retried when the request never reached a
+	// decision point: a non-200 front response may quote "database is locked"
+	// in its body, and a refused request stays refused on retry.
+	retryable := utils.IsRetryable(err) || errors.Is(err, errNodeUnavailable) ||
+		(!errors.Is(err, utils.ErrNon200Response) && isTransientDBError(err))
+
+	if !retryable || sn.RetryCount >= maxSyncRetries {
+		switch {
+		case !retryable:
+			logger.Warn("sync error is not retryable, parking node",
+				zap.Uint("subscription_id", sn.SubscriptionID),
+				zap.Uint("node_id", sn.NodeID),
+				zap.Int("retry_count", sn.RetryCount),
+				zap.Error(err))
+		case errors.Is(err, errNodeUnavailable):
+			logger.Warn("node unavailability retries exhausted, parking node",
+				zap.Uint("subscription_id", sn.SubscriptionID),
+				zap.Uint("node_id", sn.NodeID),
+				zap.Int("retry_count", sn.RetryCount),
+				zap.Error(err))
+		default:
+			logger.Warn("sync retries exhausted, parking node",
+				zap.Uint("subscription_id", sn.SubscriptionID),
+				zap.Uint("node_id", sn.NodeID),
+				zap.Int("retry_count", sn.RetryCount),
+				zap.Error(err))
+		}
+
+		sn.RetryAt = &parkedRetryAt
+		sn.LastError = &errMsg
+
+		dbErr := s.db.UpdateRetry(ctx, sn.SubscriptionID, sn.NodeID, sn.RetryCount, sn.RetryAt, sn.LastError)
+		if dbErr != nil {
+			logger.Warn("failed to update retry metadata",
+				zap.Uint("subscription_id", sn.SubscriptionID),
+				zap.Uint("node_id", sn.NodeID),
+				zap.Error(dbErr))
+		}
+
+		return
+	}
+
 	logger.Warn("sync error, scheduling retry",
 		zap.Uint("subscription_id", sn.SubscriptionID),
 		zap.Uint("node_id", sn.NodeID),
 		zap.Int("retry_count", sn.RetryCount),
 		zap.Error(err))
+
 	retryAt := CalculateRetryAt(sn.RetryCount)
 	sn.RetryAt = &retryAt
 	sn.RetryCount++
-	errMsg := err.Error()
 	sn.LastError = &errMsg
 
 	dbErr := s.db.UpdateRetry(ctx, sn.SubscriptionID, sn.NodeID, sn.RetryCount, sn.RetryAt, sn.LastError)
@@ -862,6 +888,51 @@ func (s *SyncService) handleSyncError(ctx context.Context, sn *database.Subscrip
 			zap.Error(dbErr))
 	}
 }
+
+// isTransientDBError reports SQLite write-lock contention (SQLITE_BUSY /
+// SQLITE_LOCKED): the condition clears on its own, so such failures must climb
+// the retry ladder instead of parking the node on a momentary writer
+// collision. Terminal DB failures (constraint violations, schema problems)
+// return false — retrying cannot fix them. GORM and the service wrappers keep
+// the driver error with %w, so the typed check sees the concrete
+// sqlite3.Error; the text fallback covers layers that flattened it (the
+// driver's own message is exactly the busy text).
+func isTransientDBError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var serr sqlite3.Error
+	if errors.As(err, &serr) {
+		return serr.Code == sqlite3.ErrBusy || serr.Code == sqlite3.ErrLocked
+	}
+
+	msg := strings.ToLower(err.Error())
+
+	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "database table is locked")
+}
+
+// clearRetry сбрасывает retry-состояние биндинга: любой легитимный переход
+// статуса освобождает ноду из бэкофф-лестницы и снимает парковку.
+func clearRetry(sn *database.SubscriptionNode) {
+	sn.RetryCount = 0
+	sn.RetryAt = nil
+	sn.LastError = nil
+}
+
+// maxSyncRetries caps the retry ladder of a pending node. With the backoff
+// intervals below it spans ~5.6h of retrying (1m+2m+5m+15m+30m+45m+60m×4)
+// before the node parks. Production showed unbounded growth (retry_count
+// reached 1373 — ~57 days of hourly retries against a permanently refusing
+// panel), so the cap is deliberate.
+const maxSyncRetries = 10
+
+// parkedRetryAt parks a node beyond every planning horizon once its retries
+// are exhausted or its error is not retryable: GetPendingSync selects records
+// with retry_at IS NULL OR retry_at <= now, so a far-future timestamp removes
+// the node from every scan. The cause stays visible in last_error. Any
+// legitimate status re-transition resets retry metadata and releases the node.
+var parkedRetryAt = time.Date(9999, 12, 31, 23, 59, 0, 0, time.UTC)
 
 // retryBackoffIntervals defines exponential-ish backoff for sync retries.
 // Index = retryCount; beyond the last entry, the final interval is reused (capped).
@@ -921,7 +992,7 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 				zap.Uint("subscription_id", subID),
 				zap.Error(err))
 
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			if utils.IsCtxErr(err) {
 				break
 			}
 
@@ -1055,4 +1126,109 @@ func (s *SyncService) applyPlanToSubscriptionLocked(ctx context.Context, subscri
 	}
 
 	return nil
+}
+
+// NodeAccess is the single runtime entry point to one node, built once in the
+// composition root (cmd/bot). Provisioning and reading are separate slots: a
+// node type without a readable panel (proxman, fetch) simply has no Reader,
+// instead of pretending every adapter can read.
+type NodeAccess struct {
+	// Provision creates, updates and removes VPN subscriptions on the node.
+	// Present for every node type with provisioning support.
+	Provision vpn.Client
+	// Reader reads live panel state (traffic counters, client card). Non-nil
+	// only for node types with a readable panel (3x-ui).
+	Reader interfaces.XUIClientReader
+	// Type is the node type this access was built for.
+	Type database.NodeType
+}
+
+// NodeClients is the runtime registry of per-node access, keyed by node ID.
+// SubscriptionService and SyncService share one instance.
+type NodeClients map[uint]NodeAccess
+
+// Reader returns the panel reader for the node. ok is false both for unknown
+// node IDs and for node types without read capability. This is the single
+// place that decides whether a node can be read from.
+func (nc NodeClients) Reader(nodeID uint) (interfaces.XUIClientReader, bool) {
+	access, ok := nc[nodeID]
+	if !ok || access.Reader == nil {
+		return nil, false
+	}
+
+	return access.Reader, true
+}
+
+// Provision returns the VPN provisioning client for the node. ok is false for
+// unknown node IDs and for nodes without provisioning support.
+func (nc NodeClients) Provision(nodeID uint) (vpn.Client, bool) {
+	access, ok := nc[nodeID]
+	if !ok || access.Provision == nil {
+		return nil, false
+	}
+
+	return access.Provision, true
+}
+
+// readerTarget is one node with a panel reader, scoped to a subscription's
+// client email. It is the shared unit of work for traffic aggregation and
+// traffic notifications.
+type readerTarget struct {
+	nodeID  uint
+	inbound []int
+	reader  interfaces.XUIClientReader
+	email   string
+}
+
+// activeReaders returns the panel readers of active nodes, optionally
+// restricted to the nodes the subscription is actively bound to
+// (database.SyncStatusActive). Nodes without a reader (proxman, fetch) are
+// skipped silently. A nil activeNodeIDs disables the binding filter — the
+// caller could not load subscription_nodes and falls back to polling every
+// readable active node, matching the legacy best-effort aggregation behaviour.
+// The binding filter itself lives here and nowhere else, so aggregation and
+// notifications can not drift apart.
+func (s *SubscriptionService) activeReaders(activeNodeIDs map[uint]struct{}, email string) []readerTarget {
+	var targets []readerTarget
+
+	for _, node := range s.activeNodes() {
+		if activeNodeIDs != nil {
+			if _, ok := activeNodeIDs[node.ID]; !ok {
+				continue
+			}
+		}
+
+		reader, ok := s.clients.Reader(node.ID)
+		if !ok {
+			continue
+		}
+
+		targets = append(targets, readerTarget{
+			nodeID:  node.ID,
+			inbound: node.ResolveInboundIDs(),
+			reader:  reader,
+			email:   email,
+		})
+	}
+
+	return targets
+}
+
+// activeBindingNodeIDs builds the set of node IDs a subscription is actively
+// bound to. On load failure it returns nil so callers can fall back to no
+// filtering; the caller decides whether that fallback is allowed.
+func (s *SubscriptionService) activeBindingNodeIDs(ctx context.Context, subscriptionID uint) (map[uint]struct{}, error) {
+	subNodes, err := s.db.GetBySubscriptionID(ctx, subscriptionID)
+	if err != nil {
+		return nil, err
+	}
+
+	active := make(map[uint]struct{}, len(subNodes))
+	for _, sn := range subNodes {
+		if sn.Status == database.SyncStatusActive {
+			active[sn.NodeID] = struct{}{}
+		}
+	}
+
+	return active, nil
 }

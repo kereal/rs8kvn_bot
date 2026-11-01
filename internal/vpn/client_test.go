@@ -19,83 +19,62 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestClassifyCreateSubscriptionError_AlreadyExists(t *testing.T) {
-	err := classifyCreateSubscriptionError(errors.New("client ALREADY EXISTS"))
-	assert.ErrorIs(t, err, ErrSubscriptionAlreadyExists)
-	assert.ErrorContains(t, err, "client ALREADY EXISTS")
-}
+// Sentinel-классификация теперь живёт в internal/xui (classify.go): тексты
+// панели распознаются адаптером, а vpn маппит sentinel'ы (mapPanelError).
+// Эти тесты проверяют поведение — какой sentinel получается, — а не текст
+// классификатора; контрактные тексты панели закреплены в
+// internal/xui/panel_contract_test.go.
+func TestThreeXUIClient_CreateSubscription_AlreadyExists(t *testing.T) {
+	t.Parallel()
 
-func TestClassifyCreateSubscriptionError_Duplicate(t *testing.T) {
-	err := classifyCreateSubscriptionError(errors.New("duplicate entry"))
-	assert.ErrorIs(t, err, ErrSubscriptionAlreadyExists)
-}
+	fake := &fakeXUIClient{addErr: fmt.Errorf("add client failed: %w", xui.ErrClientAlreadyExists)}
+	client := NewThreeXUIClient(fake, []int{1})
 
-func TestClassifyCreateSubscriptionError_AlreadyAdded(t *testing.T) {
-	err := classifyCreateSubscriptionError(errors.New("already added to inbound"))
-	assert.ErrorIs(t, err, ErrSubscriptionAlreadyExists)
-}
-
-// 3x-ui v3.10 panel reports duplicate identifiers as
-// "Something went wrong (subId already in use: <subId>)" /
-// "email already in use: <email>" instead of the older
-// "A client with this email already exists" wording. The classifier must
-// recognize it, otherwise the sync worker treats the duplicate as a
-// non-retryable error and loops forever (the retry_count > 1000 symptom).
-func TestClassifyCreateSubscriptionError_AlreadyInUse(t *testing.T) {
-	err := classifyCreateSubscriptionError(fmt.Errorf("add client failed: Something went wrong (subId already in use: fb9de073cb\n)"))
-	assert.ErrorIs(t, err, ErrSubscriptionAlreadyExists)
-
-	err = classifyCreateSubscriptionError(errors.New("add client failed: Something went wrong (email already in use: omp_probe_1\n)"))
+	err := client.CreateSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
 	assert.ErrorIs(t, err, ErrSubscriptionAlreadyExists)
 }
 
-func TestClassifyCreateSubscriptionError_OtherError(t *testing.T) {
+func TestThreeXUIClient_UpdateSubscription_NotFound(t *testing.T) {
+	t.Parallel()
+
+	// Панель отвечает на update отсутствующего клиента "record not found";
+	// классификатор xui обязан дать ErrClientNotFound, а маппинг vpn —
+	// ErrSubscriptionNotFound (раньше update промахивался мимо not-found).
+	fake := &fakeXUIClient{updateErr: fmt.Errorf("update client failed: %w", xui.ErrClientNotFound)}
+	client := NewThreeXUIClient(fake, []int{1})
+
+	err := client.UpdateSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
+	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
+}
+
+func TestThreeXUIClient_DeleteSubscription_NotFound(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeXUIClient{deleteErr: fmt.Errorf("delete client failed: %w", xui.ErrClientNotFound)}
+	client := NewThreeXUIClient(fake, []int{1})
+
+	err := client.DeleteSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
+	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
+}
+
+func TestThreeXUIClient_OtherError_PassesThrough(t *testing.T) {
+	t.Parallel()
+
 	original := errors.New("connection refused")
-	err := classifyCreateSubscriptionError(original)
+	fake := &fakeXUIClient{addErr: original, deleteErr: original, updateErr: original}
+	client := NewThreeXUIClient(fake, []int{1})
+
+	err := client.CreateSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
 	assert.ErrorIs(t, err, original)
-	assert.Nil(t, errors.Unwrap(err))
-}
+	assert.NotErrorIs(t, err, ErrSubscriptionAlreadyExists)
 
-func TestClassifyCreateSubscriptionError_Nil(t *testing.T) {
-	err := classifyCreateSubscriptionError(nil)
-	assert.NoError(t, err)
-}
-
-func TestClassifyDeleteSubscriptionError_NotFound(t *testing.T) {
-	err := classifyDeleteSubscriptionError(errors.New("client NOT FOUND"))
-	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
-}
-
-func TestClassifyDeleteSubscriptionError_DoesNotExist(t *testing.T) {
-	err := classifyDeleteSubscriptionError(errors.New("does not exist"))
-	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
-}
-
-func TestClassifyCreateSubscriptionError_AddClientMsg(t *testing.T) {
-	// After the fix, xui/client.go surfaces the panel msg, so the
-	// error is "add client failed: <msg>". The classifier must
-	// detect "already exists" and wrap it as ErrSubscriptionAlreadyExists,
-	// which lets the sync worker resolve the duplicate idempotently.
-	newErr := classifyCreateSubscriptionError(fmt.Errorf("add client failed: %s", "A client with this email already exists"))
-	assert.ErrorIs(t, newErr, ErrSubscriptionAlreadyExists)
-
-	// Before the fix, xui discarded the panel msg and returned a bare
-	// "add client failed". The classifier could not detect it, so the sync
-	// worker treated it as a permanent (non-retryable) error and looped
-	// forever (the 164-167 symptom).
-	oldErr := classifyCreateSubscriptionError(fmt.Errorf("add client failed"))
-	assert.NotErrorIs(t, oldErr, ErrSubscriptionAlreadyExists)
-}
-
-func TestClassifyDeleteSubscriptionError_OtherError(t *testing.T) {
-	original := errors.New("connection timeout")
-	err := classifyDeleteSubscriptionError(original)
+	err = client.UpdateSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
 	assert.ErrorIs(t, err, original)
-}
+	assert.NotErrorIs(t, err, ErrSubscriptionNotFound)
 
-func TestClassifyDeleteSubscriptionError_Nil(t *testing.T) {
-	err := classifyDeleteSubscriptionError(nil)
-	assert.NoError(t, err)
+	err = client.DeleteSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
+	assert.ErrorIs(t, err, original)
+	assert.NotErrorIs(t, err, ErrSubscriptionNotFound)
 }
 
 func TestNewClient_3xUI_RequiresXUIClient(t *testing.T) {
@@ -178,7 +157,7 @@ func (m *mockXUIClient) GetClientTraffic(ctx context.Context, email string) (*xu
 	return nil, nil
 }
 
-func (m *mockXUIClient) GetClientByEmail(ctx context.Context, inboundID int, email string) (*xui.ClientConfig, error) {
+func (m *mockXUIClient) GetClientByEmail(ctx context.Context, email string) (*xui.ClientRecord, error) {
 	return nil, nil
 }
 
