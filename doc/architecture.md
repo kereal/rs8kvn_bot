@@ -1050,7 +1050,7 @@ Worker каждые 60 минут обрабатывает активные по
 ## Контракт API панели 3x-ui (v3.11.0)
 
 Проверенные факты о панели, с которой работает бот. Источники: живая панель
-(`https://panel.example.net/pnl`, доступ через Bearer-токен ноды) и исходники
+(`<panel-host>/pnl`, доступ через Bearer-токен ноды) и исходники
 панели `MHSanaei/3x-ui` **тега `v3.11.0`** (`internal/web/service/client_crud.go`,
 `internal/web/controller/api.go`, `internal/web/controller/client.go`,
 `internal/web/service/inbound_traffic.go`, `internal/web/service/panel/api_token.go`).

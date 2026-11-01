@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"sync"
@@ -951,4 +952,682 @@ func (f *AuditLogWriterFake) InsertAuditLog(_ context.Context, e *database.Audit
 	f.AuditLogs = append(f.AuditLogs, *e)
 
 	return nil
+}
+
+// SubscriptionRepositoryFake is the in-memory fake for the already-narrowed read seams:
+// it implements interfaces.WebRepository (SubscriptionRepository + Invite/Trial/Plan
+// reads) and therefore satisfies the subserver, web and scheduler expire-worker seams
+// structurally. The embedded ServiceStoreFake carries the subscription storage.
+
+type SubscriptionRepositoryFake struct {
+	*ServiceStoreFake
+
+	Plans                                      map[uint]*database.Plan
+	CountAllSubscriptionsFunc                  func(ctx context.Context) (int64, error)
+	CountTrialRequestsByIPLastHourFunc         func(ctx context.Context, ip string) (int, error)
+	CreateTrialRequestFunc                     func(ctx context.Context, ip string) error
+	GetActiveSubscriptionsWithTrafficLimitFunc func(ctx context.Context) ([]database.SubscriptionTrafficTarget, error)
+	GetAllReferralCountsFunc                   func(ctx context.Context) (map[int64]int64, error)
+	GetExpiredPaidSubscriptionsFunc            func(ctx context.Context, now time.Time) ([]database.Subscription, error)
+	GetFilteredTelegramIDCountFunc             func(ctx context.Context, filter database.BroadcastFilter) (int64, error)
+	GetInviteByReferrerFunc                    func(ctx context.Context, referrerTGID int64) (*database.Invite, error)
+	GetLatestSubscriptionsFunc                 func(ctx context.Context, limit int) ([]database.Subscription, error)
+	GetOrCreateInviteFunc                      func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
+	GetReferralCountFunc                       func(ctx context.Context, referrerTGID int64) (int64, error)
+	GetSubscriptionStatusFunc                  func(ctx context.Context, subscriptionID string) (string, time.Time, error)
+	GetSubscriptionsExpiringInRangeFunc        func(ctx context.Context, from, to time.Time) ([]database.Subscription, error)
+	GetTelegramIDByUsernameFunc                func(ctx context.Context, username string) (int64, error)
+	GetTelegramIDsBatchFunc                    func(ctx context.Context, offset, limit int) ([]int64, error)
+	GetTotalTelegramIDCountFunc                func(ctx context.Context) (int64, error)
+	GetWithPlanAndNodesFunc                    func(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error)
+	UpdateDevicesFunc                          func(ctx context.Context, id uint, devicesJSON string) error
+	UpdateIPsFunc                              func(ctx context.Context, id uint, ipsJSON string) error
+	UpdateLastRequestFunc                      func(ctx context.Context, subscriptionID string) error
+}
+
+// NewSubscriptionRepositoryFake returns an empty SubscriptionRepositoryFake; the embedded ServiceStoreFake
+// provides the shared subscription storage.
+func NewSubscriptionRepositoryFake() *SubscriptionRepositoryFake {
+	return &SubscriptionRepositoryFake{
+		ServiceStoreFake: NewServiceStoreFake(),
+		Plans:            make(map[uint]*database.Plan),
+	}
+}
+
+var _ interfaces.WebRepository = (*SubscriptionRepositoryFake)(nil)
+
+func (m *SubscriptionRepositoryFake) GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error) {
+	if m.GetLatestSubscriptionsFunc != nil {
+		return m.GetLatestSubscriptionsFunc(ctx, limit)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var result []database.Subscription
+
+	for _, sub := range m.Subscriptions {
+		if sub.Status == string(database.SubscriptionStatusActive) {
+			result = append(result, *sub)
+		}
+	}
+
+	if len(result) > limit {
+		result = result[:limit]
+	}
+
+	return result, nil
+}
+
+func (m *SubscriptionRepositoryFake) GetWithPlanAndNodes(ctx context.Context, subscriptionID string) (*database.SubscriptionFull, error) {
+	if m.GetWithPlanAndNodesFunc != nil {
+		return m.GetWithPlanAndNodesFunc(ctx, subscriptionID)
+	}
+
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *SubscriptionRepositoryFake) CountAllSubscriptions(ctx context.Context) (int64, error) {
+	if m.CountAllSubscriptionsFunc != nil {
+		return m.CountAllSubscriptionsFunc(ctx)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return int64(len(m.Subscriptions)), nil
+}
+
+func (m *SubscriptionRepositoryFake) GetTelegramIDByUsername(ctx context.Context, username string) (int64, error) {
+	if m.GetTelegramIDByUsernameFunc != nil {
+		return m.GetTelegramIDByUsernameFunc(ctx, username)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, sub := range m.Subscriptions {
+		if sub.Username == username {
+			return sub.TelegramID, nil
+		}
+	}
+
+	return 0, gorm.ErrRecordNotFound
+}
+
+func (m *SubscriptionRepositoryFake) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error) {
+	if m.GetTelegramIDsBatchFunc != nil {
+		return m.GetTelegramIDsBatchFunc(ctx, offset, limit)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var ids []int64
+	for id := range m.Subscriptions {
+		ids = append(ids, id)
+	}
+
+	if offset >= len(ids) {
+		return []int64{}, nil
+	}
+
+	end := min(offset+limit, len(ids))
+
+	return ids[offset:end], nil
+}
+
+func (m *SubscriptionRepositoryFake) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
+	if m.GetTotalTelegramIDCountFunc != nil {
+		return m.GetTotalTelegramIDCountFunc(ctx)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return int64(len(m.Subscriptions)), nil
+}
+
+func (m *SubscriptionRepositoryFake) GetFilteredTelegramIDCount(ctx context.Context, filter database.BroadcastFilter) (int64, error) {
+	if m.GetFilteredTelegramIDCountFunc != nil {
+		return m.GetFilteredTelegramIDCountFunc(ctx, filter)
+	}
+
+	return m.GetTotalTelegramIDCount(ctx)
+}
+
+func (m *SubscriptionRepositoryFake) GetSubscriptionStatus(ctx context.Context, subscriptionID string) (string, time.Time, error) {
+	if m.GetSubscriptionStatusFunc != nil {
+		return m.GetSubscriptionStatusFunc(ctx, subscriptionID)
+	}
+
+	return "", time.Time{}, gorm.ErrRecordNotFound
+}
+
+func (m *SubscriptionRepositoryFake) GetExpiredPaidSubscriptions(ctx context.Context, now time.Time) ([]database.Subscription, error) {
+	if m.GetExpiredPaidSubscriptionsFunc != nil {
+		return m.GetExpiredPaidSubscriptionsFunc(ctx, now)
+	}
+
+	return nil, nil
+}
+
+func (m *SubscriptionRepositoryFake) UpdateDevices(ctx context.Context, id uint, devicesJSON string) error {
+	if m.UpdateDevicesFunc != nil {
+		return m.UpdateDevicesFunc(ctx, id, devicesJSON)
+	}
+
+	return nil
+}
+
+func (m *SubscriptionRepositoryFake) UpdateIPs(ctx context.Context, id uint, ipsJSON string) error {
+	if m.UpdateIPsFunc != nil {
+		return m.UpdateIPsFunc(ctx, id, ipsJSON)
+	}
+
+	return nil
+}
+
+func (m *SubscriptionRepositoryFake) GetSubscriptionsExpiringInRange(ctx context.Context, from, to time.Time) ([]database.Subscription, error) {
+	if m.GetSubscriptionsExpiringInRangeFunc != nil {
+		return m.GetSubscriptionsExpiringInRangeFunc(ctx, from, to)
+	}
+
+	return nil, nil
+}
+
+// GetActiveSubscriptionsWithTrafficLimit returns active subscriptions with
+// their respective positive plan traffic limits from the shared fake.
+func (m *SubscriptionRepositoryFake) GetActiveSubscriptionsWithTrafficLimit(ctx context.Context) ([]database.SubscriptionTrafficTarget, error) {
+	if m.GetActiveSubscriptionsWithTrafficLimitFunc != nil {
+		return m.GetActiveSubscriptionsWithTrafficLimitFunc(ctx)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var out []database.SubscriptionTrafficTarget
+	for _, sub := range m.Subscriptions {
+		if sub.Status != string(database.SubscriptionStatusActive) {
+			continue
+		}
+		plan, ok := m.Plans[sub.PlanID]
+		if !ok {
+			plan, _ = m.GetPlanByID(ctx, sub.PlanID)
+		}
+		if plan == nil || plan.TrafficLimit <= 0 {
+			continue
+		}
+		out = append(out, database.SubscriptionTrafficTarget{Subscription: *sub, TrafficLimit: plan.TrafficLimit})
+	}
+
+	return out, nil
+}
+
+func (m *SubscriptionRepositoryFake) UpdateLastRequest(ctx context.Context, subscriptionID string) error {
+	if m.UpdateLastRequestFunc != nil {
+		return m.UpdateLastRequestFunc(ctx, subscriptionID)
+	}
+
+	return nil
+}
+
+func (m *SubscriptionRepositoryFake) GetReferralCount(ctx context.Context, referrerTGID int64) (int64, error) {
+	if m.GetReferralCountFunc != nil {
+		return m.GetReferralCountFunc(ctx, referrerTGID)
+	}
+
+	return 0, nil
+}
+
+func (m *SubscriptionRepositoryFake) GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
+	if m.GetOrCreateInviteFunc != nil {
+		return m.GetOrCreateInviteFunc(ctx, referrerTGID, code)
+	}
+
+	return &database.Invite{Code: code, ReferrerTGID: referrerTGID}, nil
+}
+
+func (m *SubscriptionRepositoryFake) GetInviteByReferrer(ctx context.Context, referrerTGID int64) (*database.Invite, error) {
+	if m.GetInviteByReferrerFunc != nil {
+		return m.GetInviteByReferrerFunc(ctx, referrerTGID)
+	}
+
+	return nil, database.ErrInviteNotFound
+}
+
+func (m *SubscriptionRepositoryFake) GetAllReferralCounts(ctx context.Context) (map[int64]int64, error) {
+	if m.GetAllReferralCountsFunc != nil {
+		return m.GetAllReferralCountsFunc(ctx)
+	}
+
+	return make(map[int64]int64), nil
+}
+
+func (m *SubscriptionRepositoryFake) CountTrialRequestsByIPLastHour(ctx context.Context, ip string) (int, error) {
+	if m.CountTrialRequestsByIPLastHourFunc != nil {
+		return m.CountTrialRequestsByIPLastHourFunc(ctx, ip)
+	}
+
+	return 0, nil
+}
+
+func (m *SubscriptionRepositoryFake) CreateTrialRequest(ctx context.Context, ip string) error {
+	if m.CreateTrialRequestFunc != nil {
+		return m.CreateTrialRequestFunc(ctx, ip)
+	}
+
+	return nil
+}
+
+// BotStoreFake is the in-memory fake for bot-package tests. Bot tests wire the handler
+// together with SubscriptionService/OrderService over a single instance, so it embeds
+// ServiceStoreFake (interfaces.SubscriptionStore + SyncStore + OrderStore) and adds the
+// interfaces.BotStore surface (broadcast management, menu lookups, referral reads,
+// audit writes).
+
+type BotStoreFake struct {
+	*ServiceStoreFake
+
+	Products                             map[uint]*database.Product
+	CancelBroadcastFunc                  func(ctx context.Context, id uint, now time.Time) (bool, error)
+	ClaimBroadcastFunc                   func(ctx context.Context, id uint, now time.Time) (bool, error)
+	ClaimBroadcastRecipientsFunc         func(ctx context.Context, broadcastID uint, now time.Time, limit int) ([]database.BroadcastRecipient, error)
+	CountAllSubscriptionsFunc            func(ctx context.Context) (int64, error)
+	CreateBroadcastFunc                  func(ctx context.Context, b *database.Broadcast) error
+	FinishBroadcastRecipientFunc         func(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, status database.BroadcastRecipientStatus, lastError string, now time.Time) error
+	GetAllReferralCountsFunc             func(ctx context.Context) (map[int64]int64, error)
+	GetBroadcastFunc                     func(ctx context.Context, id uint) (*database.Broadcast, error)
+	GetFilteredTelegramIDCountFunc       func(ctx context.Context, filter database.BroadcastFilter) (int64, error)
+	GetInviteByReferrerFunc              func(ctx context.Context, referrerTGID int64) (*database.Invite, error)
+	GetLatestSubscriptionsFunc           func(ctx context.Context, limit int) ([]database.Subscription, error)
+	GetOrCreateInviteFunc                func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
+	GetRunnableBroadcastsFunc            func(ctx context.Context, now time.Time) ([]database.Broadcast, error)
+	GetTelegramIDByUsernameFunc          func(ctx context.Context, username string) (int64, error)
+	GetTelegramIDsBatchFunc              func(ctx context.Context, offset, limit int) ([]int64, error)
+	GetTotalTelegramIDCountFunc          func(ctx context.Context) (int64, error)
+	ListActiveProductsFunc               func(ctx context.Context) ([]database.Product, error)
+	ListBroadcastsFunc                   func(ctx context.Context, limit int) ([]database.Broadcast, error)
+	RecoverStaleBroadcastRecipientsFunc  func(ctx context.Context, broadcastID uint, before time.Time) error
+	ResetBroadcastFailedRecipientsFunc   func(ctx context.Context, id uint, now time.Time) error
+	SnapshotBroadcastRecipientsFunc      func(ctx context.Context, broadcastID uint, filter database.BroadcastFilter) (int64, error)
+	UpdateBroadcastFunc                  func(ctx context.Context, b *database.Broadcast) error
+	UpdateBroadcastRecipientProgressFunc func(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, nextChunk int, now time.Time) error
+}
+
+// NewBotStoreFake returns an empty BotStoreFake; the embedded ServiceStoreFake
+// provides the shared subscription storage.
+func NewBotStoreFake() *BotStoreFake {
+	return &BotStoreFake{
+		ServiceStoreFake: NewServiceStoreFake(),
+		Products:         make(map[uint]*database.Product),
+	}
+}
+
+// errBotStoreFakeFuncNotSet is the explicit error a nil Func-field default
+// produces, so tests fail loudly instead of silently passing on missing wiring.
+func errBotStoreFakeFuncNotSet(name string) error {
+	return fmt.Errorf("fake: %s is not set", name)
+}
+
+var (
+	_ interfaces.BotStore          = (*BotStoreFake)(nil)
+	_ interfaces.SubscriptionStore = (*BotStoreFake)(nil)
+	_ interfaces.OrderStore        = (*BotStoreFake)(nil)
+)
+
+func (m *BotStoreFake) CancelBroadcast(ctx context.Context, id uint, now time.Time) (bool, error) {
+	if m.CancelBroadcastFunc != nil {
+		return m.CancelBroadcastFunc(ctx, id, now)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.Broadcasts[id]
+	if !ok {
+		return false, database.ErrBroadcastNotFound
+	}
+	if b.Status != string(database.BroadcastStatusScheduled) && b.Status != string(database.BroadcastStatusRunning) {
+		return false, nil
+	}
+	// Mirrors production: sending leases are left in place so in-flight
+	// deliveries can still record their terminal outcome.
+	b.Status = string(database.BroadcastStatusCanceled)
+	b.FinishedAt = &now
+	return true, nil
+}
+
+func (m *BotStoreFake) ClaimBroadcast(ctx context.Context, id uint, now time.Time) (bool, error) {
+	if m.ClaimBroadcastFunc != nil {
+		return m.ClaimBroadcastFunc(ctx, id, now)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.Broadcasts[id]
+	if !ok {
+		return false, database.ErrBroadcastNotFound
+	}
+	if b.Status != string(database.BroadcastStatusScheduled) {
+		return false, nil
+	}
+	b.Status = string(database.BroadcastStatusRunning)
+	b.StartedAt = &now
+	return true, nil
+}
+
+func (m *BotStoreFake) ClaimBroadcastRecipients(ctx context.Context, broadcastID uint, now time.Time, limit int) ([]database.BroadcastRecipient, error) {
+	if m.ClaimBroadcastRecipientsFunc != nil {
+		return m.ClaimBroadcastRecipientsFunc(ctx, broadcastID, now, limit)
+	}
+	// The recipient lease state machine mirrors production CAS logic; tests that
+	// need it run against the real database (testutil.NewTestDatabaseService).
+	return nil, errBotStoreFakeFuncNotSet("ClaimBroadcastRecipientsFunc")
+}
+
+func (m *BotStoreFake) CountAllSubscriptions(ctx context.Context) (int64, error) {
+	if m.CountAllSubscriptionsFunc != nil {
+		return m.CountAllSubscriptionsFunc(ctx)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return int64(len(m.Subscriptions)), nil
+}
+
+func (m *BotStoreFake) CreateBroadcast(ctx context.Context, b *database.Broadcast) error {
+	if m.CreateBroadcastFunc != nil {
+		return m.CreateBroadcastFunc(ctx, b)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.Broadcasts == nil {
+		m.Broadcasts = make(map[uint]*database.Broadcast)
+	}
+
+	if b.ID == 0 {
+		// #nosec G115 -- map length is non-negative
+		b.ID = uint(len(m.Broadcasts) + 1)
+	}
+
+	stored := *b
+	m.Broadcasts[b.ID] = &stored
+
+	return nil
+}
+
+func (m *BotStoreFake) FinishBroadcastRecipient(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, status database.BroadcastRecipientStatus, lastError string, now time.Time) error {
+	if m.FinishBroadcastRecipientFunc != nil {
+		return m.FinishBroadcastRecipientFunc(ctx, broadcastID, id, expectedAttempts, status, lastError, now)
+	}
+	// Lease CAS mirrors production logic; tests that need it run on real SQLite.
+	return errBotStoreFakeFuncNotSet("FinishBroadcastRecipientFunc")
+}
+
+func (m *BotStoreFake) GetAllReferralCounts(ctx context.Context) (map[int64]int64, error) {
+	if m.GetAllReferralCountsFunc != nil {
+		return m.GetAllReferralCountsFunc(ctx)
+	}
+
+	return make(map[int64]int64), nil
+}
+
+func (m *BotStoreFake) GetBroadcast(ctx context.Context, id uint) (*database.Broadcast, error) {
+	if m.GetBroadcastFunc != nil {
+		return m.GetBroadcastFunc(ctx, id)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if b, ok := m.Broadcasts[id]; ok {
+		copy := *b
+		return &copy, nil
+	}
+
+	return nil, database.ErrBroadcastNotFound
+}
+
+func (m *BotStoreFake) GetFilteredTelegramIDCount(ctx context.Context, filter database.BroadcastFilter) (int64, error) {
+	if m.GetFilteredTelegramIDCountFunc != nil {
+		return m.GetFilteredTelegramIDCountFunc(ctx, filter)
+	}
+
+	return m.GetTotalTelegramIDCount(ctx)
+}
+
+func (m *BotStoreFake) GetInviteByReferrer(ctx context.Context, referrerTGID int64) (*database.Invite, error) {
+	if m.GetInviteByReferrerFunc != nil {
+		return m.GetInviteByReferrerFunc(ctx, referrerTGID)
+	}
+
+	return nil, database.ErrInviteNotFound
+}
+
+func (m *BotStoreFake) GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error) {
+	if m.GetLatestSubscriptionsFunc != nil {
+		return m.GetLatestSubscriptionsFunc(ctx, limit)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var result []database.Subscription
+
+	for _, sub := range m.Subscriptions {
+		if sub.Status == string(database.SubscriptionStatusActive) {
+			result = append(result, *sub)
+		}
+	}
+
+	if len(result) > limit {
+		result = result[:limit]
+	}
+
+	return result, nil
+}
+
+func (m *BotStoreFake) GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
+	if m.GetOrCreateInviteFunc != nil {
+		return m.GetOrCreateInviteFunc(ctx, referrerTGID, code)
+	}
+
+	return &database.Invite{Code: code, ReferrerTGID: referrerTGID}, nil
+}
+
+func (m *BotStoreFake) GetRunnableBroadcasts(ctx context.Context, now time.Time) ([]database.Broadcast, error) {
+	if m.GetRunnableBroadcastsFunc != nil {
+		return m.GetRunnableBroadcastsFunc(ctx, now)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]database.Broadcast, 0)
+	for _, b := range m.Broadcasts {
+		if (b.Status == string(database.BroadcastStatusScheduled) || b.Status == string(database.BroadcastStatusRunning)) &&
+			(b.RetryAt == nil || !b.RetryAt.After(now)) &&
+			(b.PlannedAt == nil || !b.PlannedAt.After(now)) {
+			out = append(out, *b)
+		}
+	}
+	return out, nil
+}
+
+func (m *BotStoreFake) GetTelegramIDByUsername(ctx context.Context, username string) (int64, error) {
+	if m.GetTelegramIDByUsernameFunc != nil {
+		return m.GetTelegramIDByUsernameFunc(ctx, username)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, sub := range m.Subscriptions {
+		if sub.Username == username {
+			return sub.TelegramID, nil
+		}
+	}
+
+	return 0, gorm.ErrRecordNotFound
+}
+
+func (m *BotStoreFake) GetTelegramIDsBatch(ctx context.Context, offset, limit int) ([]int64, error) {
+	if m.GetTelegramIDsBatchFunc != nil {
+		return m.GetTelegramIDsBatchFunc(ctx, offset, limit)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var ids []int64
+	for id := range m.Subscriptions {
+		ids = append(ids, id)
+	}
+
+	if offset >= len(ids) {
+		return []int64{}, nil
+	}
+
+	end := min(offset+limit, len(ids))
+
+	return ids[offset:end], nil
+}
+
+func (m *BotStoreFake) GetTotalTelegramIDCount(ctx context.Context) (int64, error) {
+	if m.GetTotalTelegramIDCountFunc != nil {
+		return m.GetTotalTelegramIDCountFunc(ctx)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return int64(len(m.Subscriptions)), nil
+}
+
+func (m *BotStoreFake) ListActiveProducts(ctx context.Context) ([]database.Product, error) {
+	if m.ListActiveProductsFunc != nil {
+		return m.ListActiveProductsFunc(ctx)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	products := make([]database.Product, 0, len(m.Products))
+	for _, product := range m.Products {
+		if product.IsActive && product.PriceCents > 0 {
+			products = append(products, *product)
+		}
+	}
+
+	return products, nil
+}
+
+func (m *BotStoreFake) ListBroadcasts(ctx context.Context, limit int) ([]database.Broadcast, error) {
+	if m.ListBroadcastsFunc != nil {
+		return m.ListBroadcastsFunc(ctx, limit)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ids := make([]uint, 0, len(m.Broadcasts))
+	for id := range m.Broadcasts {
+		ids = append(ids, id)
+	}
+	// Same order as production: newest first.
+	slices.SortFunc(ids, func(a, b uint) int {
+		switch {
+		case a > b:
+			return -1
+		case a < b:
+			return 1
+		default:
+			return 0
+		}
+	})
+
+	// Negative limit means "no limit", matching the production GORM query
+	// (LIMIT is omitted when limit < 0, returning all broadcasts).
+	capacity := len(ids)
+	if limit >= 0 && limit < capacity {
+		capacity = limit
+	}
+	out := make([]database.Broadcast, 0, capacity)
+	for _, id := range ids {
+		if limit >= 0 && len(out) >= limit {
+			break
+		}
+		out = append(out, *m.Broadcasts[id])
+	}
+
+	return out, nil
+}
+
+func (m *BotStoreFake) RecoverStaleBroadcastRecipients(ctx context.Context, broadcastID uint, before time.Time) error {
+	if m.RecoverStaleBroadcastRecipientsFunc != nil {
+		return m.RecoverStaleBroadcastRecipientsFunc(ctx, broadcastID, before)
+	}
+	// Stale-lease recovery mirrors production state logic; tests that need it
+	// run on real SQLite.
+	return errBotStoreFakeFuncNotSet("RecoverStaleBroadcastRecipientsFunc")
+}
+
+func (m *BotStoreFake) ResetBroadcastFailedRecipients(ctx context.Context, id uint, now time.Time) error {
+	if m.ResetBroadcastFailedRecipientsFunc != nil {
+		return m.ResetBroadcastFailedRecipientsFunc(ctx, id, now)
+	}
+	// Retry reset rewrites recipient lease state; tests that need it run on
+	// real SQLite.
+	return errBotStoreFakeFuncNotSet("ResetBroadcastFailedRecipientsFunc")
+}
+
+func (m *BotStoreFake) SnapshotBroadcastRecipients(ctx context.Context, broadcastID uint, filter database.BroadcastFilter) (int64, error) {
+	if m.SnapshotBroadcastRecipientsFunc != nil {
+		return m.SnapshotBroadcastRecipientsFunc(ctx, broadcastID, filter)
+	}
+	// Audience snapshot materialization mirrors production logic; tests that
+	// need it run on real SQLite or set SnapshotBroadcastRecipientsFunc.
+	return 0, errBotStoreFakeFuncNotSet("SnapshotBroadcastRecipientsFunc")
+}
+
+func (m *BotStoreFake) UpdateBroadcast(ctx context.Context, b *database.Broadcast) error {
+	if m.UpdateBroadcastFunc != nil {
+		return m.UpdateBroadcastFunc(ctx, b)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, ok := m.Broadcasts[b.ID]
+	if !ok {
+		return database.ErrBroadcastNotFound
+	}
+
+	// Merge semantics mirror production: only mutable lifecycle/stats fields
+	// are updated; name/filters/message_text/planned_at/started_at are never
+	// overwritten — started_at is owned exclusively by ClaimBroadcast.
+	existing.Status = b.Status
+	existing.FinishedAt = b.FinishedAt
+	existing.RecipientsTotal = b.RecipientsTotal
+	existing.SentCount = b.SentCount
+	existing.BlockedCount = b.BlockedCount
+	existing.UnreachableCount = b.UnreachableCount
+	existing.FailedCount = b.FailedCount
+	existing.LastError = b.LastError
+	existing.RetryAt = b.RetryAt
+	existing.RetryCount = b.RetryCount
+	existing.DeliveryReport = b.DeliveryReport
+	if b.RecipientsState != "" {
+		existing.RecipientsState = b.RecipientsState
+	}
+	existing.UpdatedAt = b.UpdatedAt
+
+	return nil
+}
+
+func (m *BotStoreFake) UpdateBroadcastRecipientProgress(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, nextChunk int, now time.Time) error {
+	if m.UpdateBroadcastRecipientProgressFunc != nil {
+		return m.UpdateBroadcastRecipientProgressFunc(ctx, broadcastID, id, expectedAttempts, nextChunk, now)
+	}
+	// Lease CAS mirrors production logic; tests that need it run on real SQLite.
+	return errBotStoreFakeFuncNotSet("UpdateBroadcastRecipientProgressFunc")
 }
