@@ -30,7 +30,7 @@ import (
 // with hit true. Other status lookup errors propagate with hit true and retain
 // the cache entry. A valid hit updates last_request on a best-effort basis.
 func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID, cacheKey string) (*SubscriptionResult, bool, error) {
-	cachedBody, cachedHeaders, ok := subSvc.GetCache(cacheKey)
+	cachedBody, cachedHeaders, ok := subSvc.Get(cacheKey)
 	if !ok {
 		return nil, false, nil
 	}
@@ -39,7 +39,7 @@ func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, s
 	status, expiryTime, err := db.GetSubscriptionStatus(ctx, subID)
 	if err != nil {
 		if errors.Is(err, database.ErrSubscriptionNotFound) {
-			subSvc.InvalidateCache(cacheKey)
+			subSvc.Delete(cacheKey)
 			metrics.SubserverCacheInvalidationsTotal.WithLabelValues("not_found").Inc()
 
 			return nil, true, ErrSubscriptionNotFound
@@ -55,7 +55,7 @@ func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, s
 
 	// If the subscription is no longer active or expired, invalidate the cache.
 	if status != string(database.SubscriptionStatusActive) || (!expiryTime.IsZero() && time.Now().After(expiryTime)) {
-		subSvc.InvalidateCache(cacheKey)
+		subSvc.Delete(cacheKey)
 
 		invalidReason := string(database.SubscriptionStatusRevoked)
 		if status == string(database.SubscriptionStatusActive) {
@@ -436,7 +436,7 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 
 	cacheHeaders := ResponseHeaders(agg.firstSourceHeaders, format.ContentType(), userInfo)
 	ApplyProfileTitleSuffix(cacheHeaders, profileTitleSuffix)
-	subSvc.SetCache(cacheKey, responseBody, cacheHeaders)
+	subSvc.Set(cacheKey, responseBody, cacheHeaders)
 	return &SubscriptionResult{Body: responseBody, Headers: cacheHeaders}, nil
 }
 

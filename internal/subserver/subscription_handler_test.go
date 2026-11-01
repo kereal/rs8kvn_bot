@@ -41,7 +41,7 @@ func TestHandleSubscription_CacheHit_Active(t *testing.T) {
 	// Pre-populate cache
 	cachedBody := []byte("cached-content")
 	cachedHeaders := map[string]string{"content-type": "text/plain"}
-	svc.SetCache("sub123", cachedBody, cachedHeaders)
+	svc.Set("sub123", cachedBody, cachedHeaders)
 
 	// Mock: subscription is active
 	mockDB.GetSubscriptionStatusFunc = func(ctx context.Context, subID string) (string, time.Time, error) {
@@ -62,7 +62,7 @@ func TestHandleSubscription_CacheHit_Revoked_InvalidatesCache(t *testing.T) {
 	ctx := context.Background()
 
 	// Pre-populate cache
-	svc.SetCache("sub-revoked", []byte("old-data"), map[string]string{"content-type": "text/plain"})
+	svc.Set("sub-revoked", []byte("old-data"), map[string]string{"content-type": "text/plain"})
 
 	// Mock: subscription is revoked
 	mockDB.GetSubscriptionStatusFunc = func(ctx context.Context, subID string) (string, time.Time, error) {
@@ -75,7 +75,7 @@ func TestHandleSubscription_CacheHit_Revoked_InvalidatesCache(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 
 	// Cache should be invalidated
-	_, _, ok := svc.GetCache("sub-revoked")
+	_, _, ok := svc.Get("sub-revoked")
 	assert.False(t, ok, "cache should be invalidated for revoked subscription")
 }
 
@@ -86,7 +86,7 @@ func TestHandleSubscription_CacheHit_Expired_InvalidatesCache(t *testing.T) {
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
-	svc.SetCache("sub-expired", []byte("old-data"), map[string]string{"content-type": "text/plain"})
+	svc.Set("sub-expired", []byte("old-data"), map[string]string{"content-type": "text/plain"})
 
 	// Subscription is "active" but expiry time is in the past
 	pastTime := time.Now().Add(-1 * time.Hour)
@@ -99,7 +99,7 @@ func TestHandleSubscription_CacheHit_Expired_InvalidatesCache(t *testing.T) {
 	// An expired subscription must read as not found (404), not as a server error.
 	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 
-	_, _, ok := svc.GetCache("sub-expired")
+	_, _, ok := svc.Get("sub-expired")
 	assert.False(t, ok, "cache should be invalidated for expired subscription")
 }
 
@@ -111,7 +111,7 @@ func TestHandleSubscription_CacheHit_StatusCheckError_ReturnsError(t *testing.T)
 	ctx := context.Background()
 
 	cachedBody := []byte("stale-content")
-	svc.SetCache("sub-err", cachedBody, map[string]string{"content-type": "text/plain"})
+	svc.Set("sub-err", cachedBody, map[string]string{"content-type": "text/plain"})
 
 	// A DB error during revalidation must fail closed instead of serving stale
 	// access that may already have been revoked.
@@ -124,7 +124,7 @@ func TestHandleSubscription_CacheHit_StatusCheckError_ReturnsError(t *testing.T)
 	assert.Nil(t, result)
 
 	// Keep the entry so a later successful revalidation can still use it.
-	_, _, ok := svc.GetCache("sub-err")
+	_, _, ok := svc.Get("sub-err")
 	assert.True(t, ok, "cache entry should remain available after a transient DB error")
 }
 
@@ -790,7 +790,7 @@ func TestHandleSubscription_CacheHit_UpdatesLastRequest(t *testing.T) {
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
-	svc.SetCache("sub-lr-hit", []byte("cached"), map[string]string{"content-type": "text/plain"})
+	svc.Set("sub-lr-hit", []byte("cached"), map[string]string{"content-type": "text/plain"})
 
 	mockDB.GetSubscriptionStatusFunc = func(ctx context.Context, subID string) (string, time.Time, error) {
 		return "active", time.Now().Add(24 * time.Hour), nil
@@ -817,7 +817,7 @@ func TestHandleSubscription_CacheHit_LastRequestError_DoesNotBlockResponse(t *te
 	svc := newTestSubSvc(t)
 	ctx := context.Background()
 
-	svc.SetCache("sub-lr-err", []byte("cached"), map[string]string{"content-type": "text/plain"})
+	svc.Set("sub-lr-err", []byte("cached"), map[string]string{"content-type": "text/plain"})
 
 	mockDB.GetSubscriptionStatusFunc = func(ctx context.Context, subID string) (string, time.Time, error) {
 		return "active", time.Now().Add(24 * time.Hour), nil

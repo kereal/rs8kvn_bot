@@ -130,7 +130,7 @@ func initServices(cfg *config.Config, dbService *database.Service, deps *runtime
 
 	subService.SetInvalidateBySubIDFunc(func(subID string) {
 		botCache.InvalidateBySubID(subID)
-		subServer.InvalidateCache(subID)
+		subServer.Delete(subID)
 	})
 
 	var payment service.PaymentProvider

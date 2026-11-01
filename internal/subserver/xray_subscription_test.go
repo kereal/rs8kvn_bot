@@ -131,7 +131,7 @@ func TestBuildResponseAlwaysRendersXrayJSON(t *testing.T) {
 			require.Contains(t, result.Headers["subscription-userinfo"], "download=34")
 			require.Contains(t, result.Headers["subscription-userinfo"], "total=56")
 
-			cached, headers, ok := svc.GetCache("subscription")
+			cached, headers, ok := svc.Get("subscription")
 			require.True(t, ok)
 			require.Equal(t, result.Body, cached)
 			require.Equal(t, result.Headers, headers)
@@ -252,7 +252,7 @@ func TestBuildResponseRejectsUnsupportedOnlySources(t *testing.T) {
 		jsonConfigs: []json.RawMessage{json.RawMessage(`{"type":"tuic","address":"vpn.example","port":443,"uuid":"id","password":"secret"}`)},
 	}, 0, "", OutputXray)
 	require.ErrorIs(t, err, ErrNoSubscriptionItems)
-	_, _, cached := svc.GetCache("unsupported")
+	_, _, cached := svc.Get("unsupported")
 	require.False(t, cached)
 }
 
