@@ -701,6 +701,30 @@ func (c *Client) doGetClientTraffic(ctx context.Context, email string) (*ClientT
 	return &traffic, nil
 }
 
+// UnmarshalJSON разбирает профиль клиента, принимая id и числом, и строкой:
+// панель v3.11 отдаёт числовой внутренний id в GET /clients/get, а в ответе на
+// создание — строку. Жёсткий string валил разбор всего профиля на живых данных.
+func (c *ClientConfig) UnmarshalJSON(data []byte) error {
+	type plain ClientConfig
+
+	aux := struct {
+		*plain
+
+		ID json.RawMessage `json:"id"`
+	}{plain: (*plain)(c)}
+
+	err := json.Unmarshal(data, &aux)
+	if err != nil {
+		return err
+	}
+
+	if len(aux.ID) > 0 && string(aux.ID) != "null" {
+		c.ID = strings.Trim(string(aux.ID), `"`)
+	}
+
+	return nil
+}
+
 // ClientRecord — ответ GET /panel/api/clients/get/{email}: карточка клиента
 // (включая полный профиль авто-renew) плюс список inbound'ов, к которым
 // клиент привязан. См. doc/architecture.md, «Контракт API панели 3x-ui»,

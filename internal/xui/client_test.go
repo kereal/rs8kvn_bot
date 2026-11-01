@@ -1446,7 +1446,7 @@ func TestPanelContract_GetClientByEmail_Card(t *testing.T) {
 		assert.Equal(t, "/panel/api/clients/get/alpha@example.com", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"success":true,"msg":"","obj":{`+
-			`"client":{"id":"uuid-1","email":"alpha@example.com","enable":true,`+
+			`"client":{"id":7,"uuid":"uuid-1","email":"alpha@example.com","enable":true,`+
 			`"totalGB":128849018880,"expiryTime":1795899600000,"subId":"sub-1",`+
 			`"reset":30,"resetDay":5,"resetMax":3,"resetWeekday":0,`+
 			`"trafficReset":"monthly","trafficResetDay":1},`+
@@ -1462,7 +1462,10 @@ func TestPanelContract_GetClientByEmail_Card(t *testing.T) {
 	require.NoError(t, getErr)
 	require.NotNil(t, record)
 
-	assert.Equal(t, "uuid-1", record.Client.ID)
+	// Панель отдаёт id числом (внутренний идентификатор записи), идентичность
+	// клиента — uuid. Проверяем обе ветки разбора: число в id, строка в uuid.
+	assert.Equal(t, "7", record.Client.ID)
+	assert.Equal(t, "uuid-1", record.Client.UUID)
 	assert.Equal(t, "alpha@example.com", record.Client.Email)
 	assert.True(t, record.Client.Enable)
 
