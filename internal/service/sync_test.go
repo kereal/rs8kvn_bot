@@ -2194,3 +2194,326 @@ func TestSyncService_SyncSubscription_PendingUpdate_MissingClientThenCreate(t *t
 	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
 	assert.Zero(t, rows[0].RetryCount)
 }
+
+func TestSyncService_RevokedPendingProvisioningIsRemoved(t *testing.T) {
+	t.Parallel()
+
+	for _, status := range []database.SyncStatus{database.SyncStatusPendingAdd, database.SyncStatusPendingUpdate} {
+		for _, background := range []bool{false, true} {
+			name := string(status) + "/immediate"
+			if background {
+				name = string(status) + "/background"
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				ctx := context.Background()
+				db, err := testutil.NewTestDatabaseService(t)
+				require.NoError(t, err)
+				node := &database.Node{Name: "revoked-node", Type: database.NodeType3xUI, IsActive: true, Host: "http://revoked", InboundIDs: `[1]`}
+				require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
+				plan := &database.Plan{Name: "revoked-plan", DevicesLimit: 1}
+				require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+				sub := &database.Subscription{
+					TelegramID: 9201, Username: "revoked-user", ClientID: "revoked-client",
+					SubscriptionID: "revoked-sub", Status: string(database.SubscriptionStatusRevoked), PlanID: plan.ID,
+				}
+				require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+				due := time.Now().UTC().Add(-time.Minute)
+				require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{
+					SubscriptionID: sub.ID, NodeID: node.ID, Status: status, RetryCount: 4, RetryAt: &due,
+				}))
+
+				// A transient network failure at deletion: retryable by the
+				// policy, so the removal ladders (fresh retry sequence from 0).
+				deleteErr := &net.OpError{Op: "dial", Err: errors.New("VPN node temporarily unavailable")}
+				client := &mockVPNClient{deleteError: deleteErr}
+				// Removal must use the current DB node even without a runtime snapshot.
+				svc := NewSyncService(db, NodeClients{node.ID: {Provision: client}}, nil)
+				sync := func() error {
+					if background {
+						return svc.SyncPendingNodes(ctx)
+					}
+					return svc.SyncSubscription(ctx, sub.ID)
+				}
+				err = sync()
+				if background {
+					require.ErrorIs(t, err, deleteErr)
+				} else {
+					require.NoError(t, err, "immediate external sync remains best-effort")
+				}
+				assert.True(t, client.deleteCalled)
+				assert.Equal(t, sub.ClientID, client.deleteProvision.ClientID)
+				assert.False(t, client.createCalled)
+				assert.False(t, client.updateCalled)
+				assert.False(t, client.resetTrafficCalled)
+
+				bindings, err := db.GetBySubscriptionID(ctx, sub.ID)
+				require.NoError(t, err)
+				require.Len(t, bindings, 1)
+				assert.Equal(t, database.SyncStatusPendingRemove, bindings[0].Status)
+				assert.Equal(t, 1, bindings[0].RetryCount, "removal starts a fresh retry sequence")
+				require.NotNil(t, bindings[0].RetryAt)
+				require.NotNil(t, bindings[0].LastError)
+				assert.Contains(t, *bindings[0].LastError, deleteErr.Error())
+
+				// Make the persisted deletion due and let the next scan finish it.
+				require.NoError(t, db.UpdateRetry(ctx, sub.ID, node.ID, bindings[0].RetryCount, &due, bindings[0].LastError))
+				client.deleteError = nil
+				client.deleteCalled = false
+				require.NoError(t, sync())
+				assert.True(t, client.deleteCalled)
+				assert.False(t, client.createCalled)
+				assert.False(t, client.updateCalled)
+				bindings, err = db.GetBySubscriptionID(ctx, sub.ID)
+				require.NoError(t, err)
+				assert.Empty(t, bindings)
+				stored, err := db.GetByID(ctx, sub.ID)
+				require.NoError(t, err)
+				assert.Equal(t, string(database.SubscriptionStatusRevoked), stored.Status)
+			})
+		}
+	}
+}
+
+func TestSyncService_RevokedRemovalQueueFailure(t *testing.T) {
+	t.Parallel()
+
+	for _, queueErr := range []error{errors.New("DB write failed"), context.Canceled, context.DeadlineExceeded} {
+		t.Run(queueErr.Error(), func(t *testing.T) {
+			t.Parallel()
+
+			var queued, retried, deleted []uint
+			db := testutil.NewServiceStoreFake()
+			db.UpdateSubscriptionNodeStatusFunc = func(_ context.Context, _ uint, nodeID uint, status database.SyncStatus) error {
+				assert.Equal(t, database.SyncStatusPendingRemove, status)
+				queued = append(queued, nodeID)
+				if nodeID == 1 {
+					return queueErr
+				}
+				return nil
+			}
+			db.UpdateRetryFunc = func(_ context.Context, _, nodeID uint, _ int, _ *time.Time, _ *string) error {
+				retried = append(retried, nodeID)
+				return nil
+			}
+			db.GetNodeByIDFunc = func(_ context.Context, nodeID uint) (*database.Node, error) {
+				assert.Equal(t, uint(2), nodeID, "a failed queue write must prevent external sync")
+				return &database.Node{ID: nodeID, IsActive: true}, nil
+			}
+			db.DeleteSubscriptionNodeFunc = func(_ context.Context, _, nodeID uint) error {
+				deleted = append(deleted, nodeID)
+				return nil
+			}
+			failedClient, nextClient := &mockVPNClient{}, &mockVPNClient{}
+			svc := NewSyncService(db, NodeClients{1: {Provision: failedClient}, 2: {Provision: nextClient}}, []database.Node{
+				{ID: 1, Type: database.NodeType3xUI}, {ID: 2, Type: database.NodeType3xUI},
+			})
+			sub := &database.Subscription{ID: 42, Status: string(database.SubscriptionStatusRevoked)}
+			err := svc.syncNodes(context.Background(), sub, []database.SubscriptionNode{
+				{SubscriptionID: sub.ID, NodeID: 1, Status: database.SyncStatusPendingAdd},
+				{SubscriptionID: sub.ID, NodeID: 2, Status: database.SyncStatusPendingUpdate},
+			})
+			require.ErrorIs(t, err, queueErr)
+			assert.False(t, failedClient.createCalled)
+			assert.False(t, failedClient.updateCalled)
+			assert.False(t, failedClient.deleteCalled)
+			assert.False(t, nextClient.createCalled)
+			assert.False(t, nextClient.updateCalled)
+			if errors.Is(queueErr, context.Canceled) || errors.Is(queueErr, context.DeadlineExceeded) {
+				assert.Equal(t, []uint{1}, queued)
+				assert.Empty(t, retried)
+				assert.Empty(t, deleted)
+				assert.False(t, nextClient.deleteCalled)
+			} else {
+				assert.Equal(t, []uint{1, 2}, queued)
+				assert.Equal(t, []uint{1}, retried)
+				assert.Equal(t, []uint{2}, deleted)
+				assert.True(t, nextClient.deleteCalled)
+			}
+		})
+	}
+}
+
+func TestSyncService_SyncSubscription_PendingUpdate_SendsProvisionAndActivates(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "premium-update-plan", IsActive: true, DevicesLimit: 2, TrafficLimit: 8192}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	node := &database.Node{Name: "pending-update-node", Type: database.NodeType3xUI, IsActive: true, Host: "http://update", APIToken: "token", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: node.ID}).Error)
+
+	expiresAt := time.Now().UTC().Add(12 * time.Hour).Truncate(time.Minute)
+	sub := &database.Subscription{TelegramID: 994001, Username: "update-user", ClientID: "update-client", SubscriptionID: "update-sub", Status: "active", PlanID: plan.ID, ExpiresAt: &expiresAt}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusPendingUpdate}))
+
+	client := &mockVPNClient{}
+	svc := NewSyncService(db, NodeClients{node.ID: {Provision: client}}, []database.Node{*node})
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
+	assert.Equal(t, 0, rows[0].RetryCount)
+	require.True(t, client.updateCalled)
+	assert.Equal(t, sub.ClientID, client.updateProvision.ClientID)
+	assert.Equal(t, XUIEmail(sub.Username, sub.TelegramID), client.updateProvision.Username)
+	assert.Equal(t, XUIEmail(sub.Username, sub.TelegramID), client.updateProvision.CurrentEmail, "CurrentEmail must identify the existing client on the panel")
+	assert.Equal(t, sub.SubscriptionID, client.updateProvision.SubID)
+	assert.Equal(t, sub.TelegramID, client.updateProvision.TgID, "update must carry the Telegram id")
+	assert.Equal(t, plan.TrafficLimit, client.updateProvision.TrafficBytes)
+	// Node has no panel reader in this setup, so the update path writes the
+	// product default profile explicitly (no readerless -1 sentinel anymore).
+	assert.Equal(t, config.SubscriptionResetDay, client.updateProvision.ResetDays)
+	assert.Equal(t, "monthly", client.updateProvision.TrafficReset)
+	assert.Equal(t, 1, client.updateProvision.TrafficResetDay)
+	assert.Equal(t, 0, client.updateProvision.ResetMax)
+	assert.Equal(t, expiresAt, client.updateProvision.ExpiryTime)
+	assert.True(t, client.resetTrafficCalled, "ResetTraffic must be called after UpdateSubscription")
+}
+
+func TestSyncService_ApplyPlanToSubscription_MarksUpdatesAndReconcilesMembership(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	plan := &database.Plan{Name: "apply-plan", IsActive: true, DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(plan).Error)
+
+	oldNode := &database.Node{Name: "apply-old", Type: database.NodeType3xUI, IsActive: true, Host: "http://old", APIToken: "old", InboundIDs: `[1]`}
+	targetNode := &database.Node{Name: "apply-target", Type: database.NodeType3xUI, IsActive: true, Host: "http://target", APIToken: "target", InboundIDs: `[1]`}
+
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(oldNode).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(targetNode).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: plan.ID, NodeID: targetNode.ID}).Error)
+
+	expiresAt := time.Now().UTC().Add(24 * time.Hour)
+	sub := &database.Subscription{TelegramID: 994002, Username: "apply-user", ClientID: "apply-client", SubscriptionID: "apply-sub", Status: "active", PlanID: plan.ID, ExpiresAt: &expiresAt}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: oldNode.ID, Status: database.SyncStatusActive}))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{SubscriptionID: sub.ID, NodeID: targetNode.ID, Status: database.SyncStatusActive}))
+
+	svc := NewSyncService(db, NodeClients{}, []database.Node{*oldNode, *targetNode})
+	require.NoError(t, svc.ApplyPlanToSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+
+	statusByNode := make(map[uint]database.SyncStatus, len(rows))
+	for _, row := range rows {
+		statusByNode[row.NodeID] = row.Status
+	}
+
+	assert.Equal(t, database.SyncStatusPendingRemove, statusByNode[oldNode.ID])
+	assert.Equal(t, database.SyncStatusPendingUpdate, statusByNode[targetNode.ID])
+}
+
+// TestSyncService_PendingUpdate_FreeToPremium_ResetTraffic verifies that
+// upgrading from free (TrafficLimit=1GB) to premium (TrafficLimit=0, unlimited)
+// calls ResetTraffic so the panel clears the free-tier usage.
+func TestSyncService_PendingUpdate_FreeToPremium_ResetTraffic(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	premiumPlan := &database.Plan{Name: "premium", IsActive: true, DevicesLimit: 2, TrafficLimit: 0}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(premiumPlan).Error)
+
+	node := &database.Node{Name: "upgrade-node", Type: database.NodeType3xUI, IsActive: true, Host: "http://up", APIToken: "tok", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: premiumPlan.ID, NodeID: node.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     995001,
+		Username:       "upgrade-user",
+		ClientID:       "upgrade-client",
+		SubscriptionID: "upgrade-sub",
+		Status:         "active",
+		PlanID:         premiumPlan.ID,
+		ExpiresAt:      testutil.PtrTime(time.Now().UTC().Add(30 * 24 * time.Hour)),
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{
+		SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusPendingUpdate,
+	}))
+
+	client := &mockVPNClient{}
+	svc := NewSyncService(db, NodeClients{node.ID: {Provision: client}}, []database.Node{*node})
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
+
+	// UpdateSubscription must be called with unlimited traffic (totalGB=0)
+	require.True(t, client.updateCalled)
+	assert.Equal(t, int64(0), client.updateProvision.TrafficBytes, "premium must have unlimited traffic")
+
+	// ResetTraffic must be called to clear free-tier usage
+	assert.True(t, client.resetTrafficCalled, "ResetTraffic must be called on free→premium upgrade")
+}
+
+// TestSyncService_PendingUpdate_PremiumToFree_ResetTraffic verifies that
+// downgrading from premium (TrafficLimit=0) to free (TrafficLimit=1GB) on a
+// shared node calls ResetTraffic so the panel clears premium usage and the
+// user is not blocked by the 1GB limit.
+func TestSyncService_PendingUpdate_PremiumToFree_ResetTraffic(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	freePlan, planErr := db.GetPlanByName(ctx, database.FreePlanName)
+	require.NoError(t, planErr)
+
+	node := &database.Node{Name: "downgrade-node", Type: database.NodeType3xUI, IsActive: true, Host: "http://down", APIToken: "tok", InboundIDs: `[1]`}
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(node).Error)
+	require.NoError(t, db.GetDB().WithContext(ctx).Create(&database.PlanNode{PlanID: freePlan.ID, NodeID: node.ID}).Error)
+
+	sub := &database.Subscription{
+		TelegramID:     995002,
+		Username:       "downgrade-user",
+		ClientID:       "downgrade-client",
+		SubscriptionID: "downgrade-sub",
+		Status:         "active",
+		PlanID:         freePlan.ID,
+	}
+	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
+	require.NoError(t, db.CreateSubscriptionNode(ctx, &database.SubscriptionNode{
+		SubscriptionID: sub.ID, NodeID: node.ID, Status: database.SyncStatusPendingUpdate,
+	}))
+
+	client := &mockVPNClient{}
+	svc := NewSyncService(db, NodeClients{node.ID: {Provision: client}}, []database.Node{*node})
+	require.NoError(t, svc.SyncSubscription(ctx, sub.ID))
+
+	rows, err := db.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, database.SyncStatusActive, rows[0].Status)
+
+	// UpdateSubscription must be called with 1GB limit
+	require.True(t, client.updateCalled)
+	assert.Equal(t, freePlan.TrafficLimit, client.updateProvision.TrafficBytes, "free plan traffic limit must match")
+
+	// ResetTraffic must be called to clear premium usage
+	assert.True(t, client.resetTrafficCalled, "ResetTraffic must be called on premium→free downgrade")
+}

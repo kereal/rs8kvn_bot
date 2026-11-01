@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1456,4 +1457,25 @@ func TestCancelPaymentByProvider_ChargebackOnPendingDoesNotDowngrade(t *testing.
 	_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
 	require.NoError(t, err)
 	require.False(t, wasPaid, "chargeback on pending order collected no money")
+}
+
+func TestFormatPaymentIssue_TruncatesUntrustedFields(t *testing.T) {
+	message := formatPaymentIssue(PaymentIssue{Event: "event", Reason: strings.Repeat("x", 5000), Payload: strings.Repeat("y", 5000)})
+
+	assert.LessOrEqual(t, len(message), 5000)
+	assert.Contains(t, message, "[truncated]")
+}
+
+func TestBuildPaidUserNotification_MissingSubscriptionServiceReturnsError(t *testing.T) {
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440211")
+	db := &testutil.ServiceStoreFake{
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 1, TelegramID: 42}, nil
+		},
+	}
+	o := NewOrderService(db, nil, nil, fakePaymentProvider{}, "", &config.Config{})
+
+	_, _, err := o.BuildPaidUserNotification(context.Background(), &database.Order{ID: 1, SubscriptionID: 1, ProviderPaymentID: providerID.String()})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "subscription service is not configured")
 }
