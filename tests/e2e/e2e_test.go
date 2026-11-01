@@ -2,8 +2,12 @@ package e2e
 
 import (
 	"context"
+	"fmt"
+	"io/fs"
 	"net/http"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +22,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -222,4 +227,75 @@ func e2eNodeClients(readers map[uint]interfaces.XUIClient) service.NodeClients {
 	}
 
 	return clients
+}
+
+// TestRepoContainsNoLiveInfraSecrets — сторож против повторной утечки.
+// Репозиторий публичный: живые адреса инфраструктуры и рабочие share-ссылки
+// попадать в него не должны. Если тест упал — не «чини тест», а убирай данные
+// и ротируй креды: они уже в истории git.
+func TestRepoContainsNoLiveInfraSecrets(t *testing.T) {
+	root := repoRoot(t)
+
+	// Паттерн собран из частей, чтобы этот файл не совпал с ним самим.
+	// Проверяем именно доменный суффикс: он и был утечкой (хост панели, узла,
+	// подписки и fetch-источника). Отдельные share-ссылки не проверяем —
+	// фикстуры в тестах полны example/заглушек, шум съест сигнал.
+	domainSuffix := regexp.MustCompile(`[a-z0-9-]+\.` + "qzz" + `\.io`)
+
+	var offenders []string
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
+			if d.Name() == ".git" || d.Name() == "node_modules" || d.Name() == "data" || d.Name() == "tmp" {
+				return filepath.SkipDir
+			}
+
+			return nil
+		}
+
+		switch filepath.Ext(path) {
+		case ".go", ".md", ".yml", ".yaml", ".json", ".html", ".sh":
+		default:
+			return nil
+		}
+
+		body, readErr := os.ReadFile(path)
+		if readErr == nil {
+			rel, _ := filepath.Rel(root, path)
+
+			for _, m := range domainSuffix.FindAll(body, -1) {
+				offenders = append(offenders, fmt.Sprintf("%s: live domain %s", rel, m))
+			}
+		}
+
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Empty(t, offenders, "live infrastructure data found in a public repo")
+}
+
+// repoRoot поднимается от рабочего каталога теста до корня модуля.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.Getwd()
+	require.NoError(t, err)
+
+	for {
+		_, statErr := os.Stat(filepath.Join(dir, "go.mod"))
+		if statErr == nil {
+			return dir
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("go.mod not found above test directory")
+		}
+
+		dir = parent
+	}
 }

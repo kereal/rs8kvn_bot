@@ -35,6 +35,7 @@ const (
 	opResetTraffic panelOp = "resetTraffic"
 	opTraffic      panelOp = "traffic"
 	opGet          panelOp = "get"
+	opGetInbound   panelOp = "getInbound"
 )
 
 // classifyFailure сопоставляет msg неуспешного ответа панели с sentinel-ошибкой.
@@ -59,6 +60,10 @@ func classifyFailure(op panelOp, msg string) error {
 	case opTraffic:
 		if strings.Contains(m, msgClientNotFoundMsg) {
 			return fmt.Errorf("%w: %s", ErrClientNotFound, msg)
+		}
+	case opGetInbound:
+		if strings.Contains(m, msgRecordNotFound) {
+			return fmt.Errorf("%w: %s", ErrInboundNotFound, msg)
 		}
 	}
 

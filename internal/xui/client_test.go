@@ -1583,7 +1583,7 @@ func TestGetInbound_EmptyObjAndClassification(t *testing.T) {
 		assert.Contains(t, err.Error(), "empty obj")
 	})
 
-	t.Run("panel record not found", func(t *testing.T) {
+	t.Run("panel record not found is an inbound error, not a client one", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -1598,6 +1598,8 @@ func TestGetInbound_EmptyObjAndClassification(t *testing.T) {
 
 		_, err = client.GetInbound(context.Background(), 1)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrClientNotFound)
+		assert.ErrorIs(t, err, ErrInboundNotFound,
+			"missing inbound must not be reported as a missing client: that path falls back to create")
+		assert.NotErrorIs(t, err, ErrClientNotFound)
 	})
 }

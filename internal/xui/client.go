@@ -772,7 +772,7 @@ func (c *Client) doGetInbound(ctx context.Context, inboundID int) (*Inbound, err
 		return nil, err
 	}
 
-	obj, err := parseEnvelope(opGet, respBody)
+	obj, err := parseEnvelope(opGetInbound, respBody)
 	if err != nil {
 		return nil, err
 	}
