@@ -134,8 +134,11 @@ leaving `schema_migrations` dirty. Check and clean first:
 sqlite3 data/rs8kvn.db "select max(version), sum(dirty) from schema_migrations;"
 sqlite3 data/rs8kvn.db "select count(*) from orders
   where subscription_id not in (select id from subscriptions);"
-# orphans > 0 → remove them (they point at deleted subscriptions; payment history
-# lives in audit_log), then let the bot migrate
+# До миграции 039 история платежей существует только в orders (audit_log
+# создаётся в 039 пустой), поэтому удалять строки можно ТОЛЬКО после
+# подтверждения offline backup из раздела 3.2.
+# orphans > 0 → backup подтверждён → удалите их (они указывают на уже
+# удалённые подписки), затем позвольте боту мигрировать:
 sqlite3 data/rs8kvn.db "delete from orders
   where subscription_id not in (select id from subscriptions);"
 ```
