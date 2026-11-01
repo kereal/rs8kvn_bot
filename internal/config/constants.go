@@ -141,11 +141,6 @@ const (
 // MaxResponseSize is the maximum response size to read from upstream responses (2MB).
 const MaxResponseSize = 2 << 20
 
-const (
-	CircuitBreakerMaxFailures = 5
-	CircuitBreakerTimeout     = 30 * time.Second
-)
-
 // Trial & Referral Constants
 const (
 	DefaultSiteURL            = "https://vpn.site"
