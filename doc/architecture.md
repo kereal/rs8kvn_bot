@@ -33,7 +33,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 
 **Key characteristics:**
 - Event-driven with bounded concurrency (worker pool)
-- Retry with exponential backoff for external dependencies (the circuit breaker implementation is currently not wired into the live XUI path)
+- Retry with exponential backoff for external dependencies
 - Comprehensive caching (in-memory LRU, TTL)
 - Graceful shutdown with coordinated cleanup
 - 66.2% aggregate test coverage in the latest documented run (unit, e2e, fuzz, leak detection)
@@ -191,7 +191,6 @@ internal/
 ├── xui/              # Legacy 3x-ui API client (used by vpn/threex_ui.go)
 │   ├── client.go            # 3x-ui REST API + RetryWithBackoff (Bearer auth, multi-outbound flow grouping; reads client profile via GET /clients/get/{email})
 │   ├── classify.go          # Single panel-response classifier: {success,msg,obj} envelope → sentinel errors
-│   ├── breaker.go           # Circuit breaker (5/30s/3-half-open)
 │   └── errors.go            # Sentinel errors (ErrClientNotFound, ErrClientAlreadyExists)
 ├── database/         # Persistence
 │   ├── service.go           # GORM service + connection pool
@@ -212,7 +211,7 @@ internal/
 ├── flag/             # Typed environment variable registry
 │   └── flag.go              # Registry, typed flags (string, int, int64)
 ├── metrics/          # Prometheus metrics
-│   └── metrics.go           # HTTP, bot, XUI, DB, cache, circuit breaker metrics
+│   └── metrics.go           # HTTP, bot, XUI, DB, cache metrics
 ├── logger/           # Logging
 │   └── logger.go            # Zap + Sentry + lumberjack
 ├── ratelimiter/      # Rate limiting
@@ -310,9 +309,6 @@ resp, err := c.httpClient.Do(req)
   `utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, fn)` (3 attempts, 2s base,
   exponential ×2 with ±50% jitter). Only network-level errors are retried (`IsRetryable`); DNS errors and
   non-200 responses are treated as **non-retryable**. Context cancellation aborts immediately.
-- **Circuit breaker** — `internal/xui/breaker.go` defines a `CircuitBreaker` (closed → open after `maxFailures`
-  → half-open with up to 3 test reqs), but it is **currently not wired into the client path** (no live caller;
-  only exercised by tests). Resilience today relies solely on `RetryWithBackoff`.
 
 **Multi-outbound flow grouping:**
 `groupInboundIDsByFlow` fetches each inbound's transport (`GET /panel/api/inbounds/get/{id}` → `GetRequiredFlow`)
@@ -441,51 +437,7 @@ CREATE INDEX idx_orders_created_at             ON orders(created_at);
 
 ---
 
-### 6. Circuit Breaker (internal/xui/breaker.go)
-
-**State machine:**
-
-```
-      ┌─────────────┐
-      │   CLOSED    │ ← Normal operation
-      └──────┬──────┘
-             │ 5 consecutive failures
-             ▼
-      ┌─────────────┐
-      │    OPEN     │ ← Reject requests for 30s
-      └──────┬──────┘
-             │ Timeout (30s) expires
-             ▼
-      ┌─────────────┐
-      │  HALF_OPEN  │ ← Allow up to 3 test requests
-      └──────┬──────┘
-             │ If all 3 succeed → CLOSED
-             │ If any fail    → OPEN (reset timeout)
-             ▼
-      ┌─────────────┐
-      │   CLOSED    │ (back to normal)
-      └─────────────┘
-```
-
-**Implementation:**
-```go
-type CircuitBreaker struct {
-    state            CircuitState // closed, open, halfOpen
-    failures         int
-    maxFailures      int // 5
-    timeout          time.Duration // 30s
-    lastFailure      time.Time
-    halfOpenMax      int // 3
-    halfOpenAttempts int
-    mu               sync.RWMutex
-}
-```
-
-**Used by:** Defined in `internal/xui/breaker.go` but currently **not wired into the XUI client path** — there is no live caller (only tests exercise it). Resilience today relies on `utils.RetryWithBackoff` (see §2).
-
----
-
-### 7. Graceful Shutdown
+### 6. Graceful Shutdown
 
 **Signal handling:**
 ```bash
@@ -942,7 +894,7 @@ The bot exposes a `/metrics` endpoint (via `promhttp.Handler()`) on the HTTP ser
 | 2026-02 | Long polling vs Webhook | Easier deployment (no public HTTPS needed), single instance ok |
 | 2026-02 | GORM vs sqlx | Faster dev, migrations built-in, relationship support |
 | 2026-03 | Separate subserver package | Reusable subscription server logic, clean separation |
-| 2026-03 | Circuit breaker on XUI | Prevent cascade failures if panel down |
+| 2026-03 | Circuit breaker on XUI | Prevent cascade failures if panel down (removed as dead code in 406995b, 2026-11) |
 | 2026-04 | 5-min subserver reload | Balance between config freshness and file I/O |
 | 2026-04 | Token bucket rate limiting | Standard algorithm, per-user isolation, tunable |
 | 2026-04 | Daily backup at 03:00 | Low-traffic period, WAL checkpoint ensures consistency |

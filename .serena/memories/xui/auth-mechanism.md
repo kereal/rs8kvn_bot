@@ -10,16 +10,17 @@
 - **НЕ для логина** (логина нет).
 - Используется в `internal/web/singleflight.go` для дедупликации одновременных DB queries (subserver cache misses).
 
-## Circuit Breaker ✅ ЕСТЬ
-- `internal/xui/breaker.go` — НЕ удалён.
-- 5 failures → 30s Open → Half-Open → Closed.
-- `metrics.CircuitBreakerState` (Prometheus-метрика).
-- **Не** в xui/auth-mechanism ранее было написано "No circuit breaker: Removed" — это была ошибка, исправлено.
+## Circuit Breaker — УДАЛЁН
+- `internal/xui/breaker.go` снесён как мёртвый код (коммит `406995b`, 2026-11).
+- Метрики `CircuitBreakerState` больше нет.
+- Устойчивость держится на `RetryWithBackoff` + `classify.go` (не-200 не ретраится).
 
 ## Retry
 - `RetryWithBackoff(ctx, maxRetries, initialDelay, fn)` — exponential + jitter.
-- `isRetryable(err)`:
+- `utils.IsRetryable(err)`:
   - `net.DNSError` → **false** (fast-fail)
+  - `utils.ErrNon200Response` → **false**
+  - отмена/дедлайн контекста (`utils.IsCtxErr`) → **false**
   - timeout → **true**
   - "no such host" в строке ошибки → **false**
 - HTTP 5xx → retried (response body возвращается с error).
