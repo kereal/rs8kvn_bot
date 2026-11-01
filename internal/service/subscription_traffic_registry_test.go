@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -90,6 +91,11 @@ func newTrafficRegistryHarness(t *testing.T, h *trafficRegistryHarness) func(int
 	}
 }
 
+// TestGetWithTraffic_SkipsNodesWithoutReader checks that only the node with a
+// reader is polled and the reset line is derived from the panel profile. The
+// expected countdown is computed for the same monthly profile, so the test is
+// calendar-independent (a day-1 monthly reset is «сегодня» on the 1st and
+// «через 1 дн.» the day before).
 func TestGetWithTraffic_SkipsNodesWithoutReader(t *testing.T) {
 	t.Parallel()
 
@@ -115,7 +121,8 @@ func TestGetWithTraffic_SkipsNodesWithoutReader(t *testing.T) {
 
 	assert.Equal(t, 1, h.trafficCalls, "only the node with a reader may be polled")
 	assert.InDelta(t, 3.0/1024/1024, info.UsedGB, 1e-9)
-	assert.Equal(t, "через 1 дн.", info.ResetInfo)
+	wantReset := describeTrafficReset(time.Now(), xui.ClientConfig{TrafficReset: "monthly", TrafficResetDay: 1}).Text
+	assert.Equal(t, wantReset, info.ResetInfo)
 }
 
 func TestGetWithTraffic_ReaderErrorDoesNotBreakAggregation(t *testing.T) {
@@ -153,9 +160,12 @@ func TestGetWithTraffic_ResetLineScenarios(t *testing.T) {
 		wantProfiles int
 	}{
 		{
+			// The expectation is computed for the same profile, so the case is
+			// calendar-independent (a day-1 monthly reset is «сегодня» on the
+			// 1st, «через 1 дн.» the day before).
 			name:         "monthly profile shows real reset countdown",
 			profile:      &xui.ClientRecord{Client: xui.ClientConfig{TrafficReset: "monthly", TrafficResetDay: 1}},
-			wantReset:    "через 1 дн.",
+			wantReset:    describeTrafficReset(time.Now(), xui.ClientConfig{TrafficReset: "monthly", TrafficResetDay: 1}).Text,
 			wantProfiles: 1,
 		},
 		{
