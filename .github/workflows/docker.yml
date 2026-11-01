@@ -39,6 +39,16 @@ jobs:
               env:
                   RUN_SMOKE: "1"
 
+            - name: Upload coverage reports to Codecov
+              if: env.CODECOV_TOKEN != ''  # пропускаем на PR от Dependabot: у них нет доступа к secrets
+              uses: codecov/codecov-action@v5
+              env:
+                  CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+              with:
+                  files: ./coverage.out
+                  flags: unittests
+                  fail_ci_if_error: false  # недоступность Codecov не валит CI
+
             - name: Run go vet
               run: go vet ./...
 
