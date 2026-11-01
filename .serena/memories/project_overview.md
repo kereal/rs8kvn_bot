@@ -2,7 +2,7 @@
 
 ## Назначение
 Telegram-бот для продажи и управления VLESS+Reality+Vision подписками через панели 3x-ui.
-Production-grade: миграции, мониторинг, rate-limiting, circuit breaker, graceful shutdown.
+Production-grade: миграции, мониторинг, rate-limiting, graceful shutdown.
 
 ## Subscription expiry reminders
 - Окна: 3 дня, 1 день, 3 часа до истечения подписки (`internal/service/subscription_reminders.go`)
@@ -47,7 +47,7 @@ Production-grade: миграции, мониторинг, rate-limiting, circuit
 - Админ-уведомления, heartbeat, health endpoints (`/healthz`, `/readyz`)
 - Hysteria2/Clash port-hopping нормализация: `firstPortFromPorts` берёт первый конкретный порт из `ports`/диапазона
 - Ротация логов (zap), ежедневные бэкапы БД (имя `rs8kvn.db.backup.YYYYMMDD_HHMMSS`)
-- Sentry, rate-limiting per-user, circuit breaker для x-ui
+- Sentry, rate-limiting per-user, классификация ошибок панели (`internal/xui/classify.go`)
 - O(1) LRU кэш подписок (RLock для concurrent reads)
 - Subscription status check в `/sub/{subID}` — revoked/expired → 404
 - Subscription expiration хранится в БД на момент Create
@@ -145,7 +145,7 @@ internal/bot/                — handlers, commands, callbacks, referral cache, 
 internal/database/           — GORM-модели, embedded migrations, транзакции
 internal/service/            — SubscriptionService + SyncService + reminders
 internal/vpn/                — VPN client abstraction (3x-ui, proxman, fetch)
-internal/xui/                — 3x-ui HTTP-клиент + circuit breaker
+internal/xui/                — 3x-ui HTTP-клиент + классификация ошибок панели
 internal/interfaces/         — контракты (XUIClient, SubscriptionRepository, reminder repr.)
 internal/testutil/           — моки (db slice fakes, testutil helpers)
 internal/utils/              — time, UUID, QR, Markdown EscapeMarkdownV2/EscapeMarkdown

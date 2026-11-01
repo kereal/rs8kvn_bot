@@ -124,6 +124,29 @@ Migrations run automatically on startup. If migration fails:
 - Database remains in previous state (safe)
 - Check `data/rs8kvn.db` integrity
 
+**Before upgrading a database that is below migration 034:** that migration
+rebuilds `orders` with `ON DELETE CASCADE` and deliberately aborts when orphaned
+orders exist (left behind by admin `/del` in the FK-off era). On a real
+pre-034 snapshot all 19 orders were orphans and the bot refused to start,
+leaving `schema_migrations` dirty. Check and clean first:
+
+```bash
+sqlite3 data/rs8kvn.db "select max(version), sum(dirty) from schema_migrations;"
+sqlite3 data/rs8kvn.db "select count(*) from orders
+  where subscription_id not in (select id from subscriptions);"
+# orphans > 0 → remove them (they point at deleted subscriptions; payment history
+# lives in audit_log), then let the bot migrate
+sqlite3 data/rs8kvn.db "delete from orders
+  where subscription_id not in (select id from subscriptions);"
+```
+
+A dirty database left by the aborted run needs `schema_migrations` reset to the
+last clean version before retrying:
+
+```bash
+sqlite3 data/rs8kvn.db "update schema_migrations set version = 33, dirty = 0;"
+```
+
 **Manual migration:**
 ```bash
 # Apply migrations using golang-migrate CLI

@@ -136,7 +136,7 @@ Telegram Bot API  3x-ui / proxman panels  Sentry
 - Singleflight for hot endpoints.
 
 ## Observability
-- `/metrics`: HTTP, bot, subscription, reminders, DB/GORM, cache, subserver, circuit breaker.
+- `/metrics`: HTTP, bot, subscription, reminders, DB/GORM, cache, subserver.
 - `/healthz` + `/readyz`.
 
 ## Operational notes
