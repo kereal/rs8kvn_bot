@@ -37,10 +37,22 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// statusUpdate builds the columns of one status transition. Every transition
+// resets retry state: otherwise a node parked by an exhausted retry ladder
+// would stay out of every scan even after a legitimate re-transition.
+func statusUpdate(status database.SyncStatus) map[string]any {
+	return map[string]any{
+		"status":      status,
+		"retry_count": 0,
+		"retry_at":    nil,
+		"last_error":  nil,
+	}
+}
+
 // planNodeStore is the consumer-defined seam the reconciliation core operates
 // on. It exposes the minimal storage operations the transition table needs so
-// the same rules run against the background DatabaseService path and inside a
-// payment CAS transaction.
+// the same rules run against the background sync store and inside a payment
+// CAS transaction.
 type planNodeStore interface {
 	// LoadSubscription loads the subscription row (revoked guard + plan
 	// resolution on the background path).
@@ -359,23 +371,13 @@ func (s txPlanStore) MarkActiveNodesPendingUpdate(ctx context.Context, subscript
 
 	return s.tx.WithContext(ctx).Model(&database.SubscriptionNode{}).
 		Where("subscription_id = ? AND node_id IN (?) AND status = ?", subscriptionID, targetNodeIDs, database.SyncStatusActive).
-		Updates(map[string]any{
-			"status":      database.SyncStatusPendingUpdate,
-			"retry_count": 0,
-			"retry_at":    nil,
-			"last_error":  nil,
-		}).Error
+		Updates(statusUpdate(database.SyncStatusPendingUpdate)).Error
 }
 
 func (s txPlanStore) SetNodeStatus(ctx context.Context, subID, nodeID uint, status database.SyncStatus) error {
 	return s.tx.WithContext(ctx).Model(&database.SubscriptionNode{}).
 		Where("subscription_id = ? AND node_id = ?", subID, nodeID).
-		Updates(map[string]any{
-			"status":      status,
-			"retry_count": 0,
-			"retry_at":    nil,
-			"last_error":  nil,
-		}).Error
+		Updates(statusUpdate(status)).Error
 }
 
 func (s txPlanStore) UpsertPendingAdd(ctx context.Context, sn *database.SubscriptionNode) error {

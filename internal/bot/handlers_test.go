@@ -632,3 +632,36 @@ func TestHandleUpdate_AppliesTimeoutAtDispatch(t *testing.T) {
 
 	require.True(t, gotDeadline, "handler must run with a deadline-bearing context")
 }
+
+// Таймаут применяется на диспетчеризации для ВСЕХ путей обновления, не только
+// для callback: command-путь обязан приходить в хендлер с дедлайном.
+func TestHandleUpdate_AppliesTimeoutToCommandPath(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramBotToken: "test_token"}
+
+	var gotDeadline bool
+
+	mockDB := testutil.NewBotStoreFake()
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, _ int64) (*database.Subscription, error) {
+		_, ok := ctx.Deadline()
+		gotDeadline = ok
+
+		return nil, database.ErrSubscriptionNotFound
+	}
+
+	handler := NewHandler(testutil.NewBotAPI(), cfg, mockDB, NewTestBotConfig(), nil, "")
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			Text:     "/start",
+			From:     &tgbotapi.User{ID: 222, UserName: "user2"},
+			Chat:     &tgbotapi.Chat{ID: 222},
+			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 6}},
+		},
+	}
+
+	handler.HandleUpdate(context.Background(), update)
+
+	require.True(t, gotDeadline, "command handler must run with a deadline-bearing context")
+}

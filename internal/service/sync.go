@@ -150,7 +150,7 @@ func (s *SyncService) reconcilePlanNodesLocked(ctx context.Context, subscription
 				zap.String("operation", operation),
 				zap.Error(wrappedErr))
 
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			if utils.IsCtxErr(err) {
 				return wrappedErr
 			}
 
@@ -245,7 +245,7 @@ func (s *SyncService) SyncSubscription(ctx context.Context, subscriptionID uint)
 
 	err = s.syncNodes(ctx, sub, pending)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if utils.IsCtxErr(err) {
 			return err
 		}
 
@@ -291,7 +291,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 			err := s.db.UpdateSubscriptionNodeStatus(ctx, sn.SubscriptionID, sn.NodeID, database.SyncStatusPendingRemove)
 			if err != nil {
 				err = fmt.Errorf("mark revoked subscription node %d pending_remove: %w", sn.NodeID, err)
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				if utils.IsCtxErr(err) {
 					return err
 				}
 
@@ -302,9 +302,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 			}
 
 			sn.Status = database.SyncStatusPendingRemove
-			sn.RetryCount = 0
-			sn.RetryAt = nil
-			sn.LastError = nil
+			clearRetry(&sn)
 		}
 
 		// pending_remove is dispatched before the runtime node-type check: a
@@ -319,7 +317,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 
 			err := s.processPendingRemove(ctx, &sn, sub)
 			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				if utils.IsCtxErr(err) {
 					return err
 				}
 
@@ -363,7 +361,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 
 			err := s.processPendingAdd(ctx, &sn, sub)
 			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				if utils.IsCtxErr(err) {
 					return err
 				}
 
@@ -380,7 +378,7 @@ func (s *SyncService) syncNodes(ctx context.Context, sub *database.Subscription,
 
 			err := s.processPendingUpdate(ctx, &sn, sub)
 			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				if utils.IsCtxErr(err) {
 					return err
 				}
 
@@ -816,7 +814,7 @@ func (s *SyncService) processPendingRemove(ctx context.Context, sn *database.Sub
 // (UpdateSubscriptionNodeStatus, UpsertSubscriptionNode,
 // MarkActiveNodesPendingUpdate) resets retry metadata and releases the node.
 func (s *SyncService) handleSyncError(ctx context.Context, sn *database.SubscriptionNode, err error) {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if utils.IsCtxErr(err) {
 		logger.Debug("sync aborted by context, retry metadata untouched",
 			zap.Uint("subscription_id", sn.SubscriptionID),
 			zap.Uint("node_id", sn.NodeID),
@@ -882,6 +880,14 @@ func (s *SyncService) handleSyncError(ctx context.Context, sn *database.Subscrip
 			zap.Uint("node_id", sn.NodeID),
 			zap.Error(dbErr))
 	}
+}
+
+// clearRetry сбрасывает retry-состояние биндинга: любой легитимный переход
+// статуса освобождает ноду из бэкофф-лестницы и снимает парковку.
+func clearRetry(sn *database.SubscriptionNode) {
+	sn.RetryCount = 0
+	sn.RetryAt = nil
+	sn.LastError = nil
 }
 
 // maxSyncRetries caps the retry ladder of a pending node. With the backoff
@@ -956,7 +962,7 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 				zap.Uint("subscription_id", subID),
 				zap.Error(err))
 
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			if utils.IsCtxErr(err) {
 				break
 			}
 

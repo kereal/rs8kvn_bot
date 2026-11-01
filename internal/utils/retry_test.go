@@ -1,9 +1,11 @@
 package utils
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"testing"
 )
 
@@ -26,6 +28,8 @@ func TestIsRetryable(t *testing.T) {
 		{"dns error", &net.DNSError{Err: "dns", Name: "example.com"}, false},
 		{"net timeout", &net.OpError{Op: "read", Err: fmt.Errorf("i/o timeout")}, true},
 		{"plain error", errors.New("boom"), false},
+		{"context canceled", fmt.Errorf("post: %w", context.Canceled), false},
+		{"context deadline", &url.Error{Op: "Get", URL: "http://x", Err: context.DeadlineExceeded}, false},
 	}
 
 	for _, tc := range tests {

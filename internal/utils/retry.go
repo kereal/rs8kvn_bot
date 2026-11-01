@@ -14,6 +14,12 @@ import (
 // ErrNon200Response indicates the upstream returned a non-200 status code.
 var ErrNon200Response = errors.New("upstream returned non-200")
 
+// IsCtxErr сообщает, что ошибка — отмена или дедлайн контекста вызывающего,
+// а не сбой внешней системы.
+func IsCtxErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
 // IsRetryable determines whether the given error is retryable.
 // Retries are allowed only for network-level errors (DNS, timeouts, connection).
 // If the server responded (even with an error), retrying is pointless.
@@ -23,6 +29,12 @@ func IsRetryable(err error) bool {
 	}
 
 	if errors.Is(err, ErrNon200Response) {
+		return false
+	}
+
+	// Отмена контекста приходит обёрнутой в *url.Error, который реализует
+	// net.Error: без этой проверки она считалась бы ретрабельной.
+	if IsCtxErr(err) {
 		return false
 	}
 
