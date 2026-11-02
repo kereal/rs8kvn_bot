@@ -313,7 +313,9 @@ resp, err := c.httpClient.Do(req)
 **Multi-outbound flow grouping:**
 `groupInboundIDsByFlow` fetches each inbound's transport (`GET /panel/api/inbounds/get/{id}` → `GetRequiredFlow`)
 and buckets inbound IDs by flow (e.g. `xtls-rprx-vision` vs transports that need none). Create uses the
-`{client, inboundIds}` wrapper; update uses a flat client object. One panel call per flow group.
+`{client, inboundIds}` wrapper; update uses a flat client object plus `?inboundIds=` so each group's call
+touches only its own inbounds (without the filter the panel rewrites every attached inbound and the last
+group's flow wins — see «Контракт API панели 3x-ui», раздел 4.5). One panel call per flow group.
 
 **Endpoints:**
 | Op | Method + path |
@@ -1053,10 +1055,11 @@ Worker каждые 60 минут обрабатывает активные по
 (`<panel-host>/pnl`, доступ через Bearer-токен ноды) и исходники
 панели `MHSanaei/3x-ui` **тега `v3.11.0`** (`internal/web/service/client_crud.go`,
 `internal/web/controller/api.go`, `internal/web/controller/client.go`,
-`internal/web/service/inbound_traffic.go`, `internal/web/service/panel/api_token.go`).
-Дата проверки: **2026-10-31**. Живая панель: `currentVersion: 3.11.0`
-(`GET /panel/api/server/getPanelUpdateInfo`, Xray `26.10.21`) — проверка шла
-прямо на целевой версии.
+`internal/web/service/inbound_traffic.go`, `internal/web/service/panel/api_token.go`)
+и официальная спецификация `docs/public/openapi.json` того же тега.
+Дата проверки: **2026-11-02** (сверка с openapi + исходниками v3.11.0).
+Живая панель: `currentVersion: 3.11.0`
+(`GET /panel/api/server/getPanelUpdateInfo`, Xray `26.10.21`).
 
 Документ существует, чтобы контракт не пришлось выяснять заново по живому
 доступу к панели. Всё, что ниже помечено «проверено», воспроизводится
@@ -1080,8 +1083,8 @@ read-only запросами или из исходников панели.
 | Эндпоинт | Метод | Назначение в боте |
 |---|---|---|
 | `/panel/api/clients/add` | POST | создание клиента (`xui.Client.AddClientWithID`) |
-| `/panel/api/clients/update/{email}` | POST | обновление клиента (`xui.Client.UpdateClient`) |
-| `/panel/api/clients/del/{email}` | POST | удаление клиента (`xui.Client.DeleteClient`) |
+| `/panel/api/clients/update/{email}?inboundIds=…` | POST | обновление клиента (`xui.Client.UpdateClient`), скоуп — инбаунды одной flow-группы (раздел 4.5) |
+| `/panel/api/clients/del/{email}` | POST | удаление клиента (`xui.Client.DeleteClient`); без `keepTraffic=1` панель удаляет и строку трафика (раздел 4.6) |
 | `/panel/api/clients/resetTraffic/{email}` | POST | сброс счётчика трафика (`xui.Client.ResetTraffic`) |
 | `/panel/api/clients/traffic/{email}` | GET | чтение трафика (`xui.Client.GetClientTraffic`) |
 | `/panel/api/clients/get/{email}` | GET | **полная карточка клиента**, включая профиль авто-renew (`xui.Client.GetClientByEmail`) |
@@ -1150,6 +1153,12 @@ Go struct field ClientConfig.client.id of type string`) — фикстуры с
 (`xui.ErrClientNotFound`) — иначе вызывающий получит nil-указатель или нули
 трафика вместо ошибки.
 
+**`get/{email}` — тот же класс ответа:** карточка отдаётся только при успехе
+(`obj` — `gin.H`), поэтому `obj=null` при `success=true` означает «записи нет».
+`xui.doGetClientByEmail` маппит это в `ErrClientNotFound`, а не в ошибку разбора:
+иначе `SyncService` счёл бы пропавшего клиента инфраструктурным сбоем и не ушёл
+бы в `pending_add`.
+
 ## 4. Особенности поведения панели
 
 ### 4.1. `add` идемпотентен при совпадающем subId
@@ -1207,6 +1216,73 @@ allowlist'у (`nodeSyncScopeAllow`/`monitorScopeAllow` в
 - при смене скоупа на `node-sync`/`monitor` бот получит 403 на все операции с
   клиентами; адаптер классифицирует не-200 как `utils.ErrNon200Response`
   (не ретрабельный — раздел 5), синхронизация узла деградирует с Warn в логе.
+
+## 4.5. `update` скоупится по `?inboundIds=`
+
+`POST /clients/update/{email}` без query-параметра переписывает клиента **во
+всех** привязанных инбаундах (`ClientService.UpdateByEmail` → `Update(...,
+inboundFilter)`), а `flow` в теле запроса записывается в каждый
+flow-допустимый инбаунд (`clientWithInboundFlow`). Поэтому вызов одной
+flow-группы затирал бы `flow` соседних: группа с `flow=""` (ws/grpc/hysteria)
+стирала бы `xtls-rprx-vision` с reality-инбаунда, и порядок групп (map) делал бы
+результат недетерминированным.
+
+Фильтр `?inboundIds=1,2` (`parseInboundIdsQuery` в
+`internal/web/controller/client.go`) ограничивает запись перечисленными
+инбаундами. В `openapi.json` v3.11.0 параметр не описан — он читается из
+исходников контроллера. `xui.doUpdateClient` передаёт его всегда: без фильтра
+корректно работала бы только одноinbound-нода.
+
+## 4.6. `update` — полная замена строки клиента
+
+Тело update — плоский объект клиента; панель **заменяет** строку, а не патчит
+(официальное описание эндпоинта: «supply the full set of fields you want to
+keep»). Практические следствия для бота:
+
+- панель сама сохраняет `id`/`password`/`auth`/`secret` и `subId`, если они не
+  переданы (`Update`: «Preserve existing credentials when the caller omits
+  them») — поэтому бот их не дублирует, кроме собственных значений;
+- всё остальное, что бот не передаёт, записывается нулевым значением:
+  `limitHwid` (сброс лимита устройств), `group`, `adTag`, `keepAlive`,
+  `security`, `reverse`, `clientHostRuleIds`. Явно отправляемые `limitIp=0` и
+  `comment=""` тоже затирают ручные правки в панели. Это осознанная цена:
+  профиль бота — владелец клиента, а чтение-склейка-запись на каждом sync
+  стоила бы лишнего `GET /clients/get` и усложняла контракт. Правки админа в
+  панели по клиентам бота переживают только следующий sync.
+
+## 4.7. `del` удаляет строку трафика
+
+`keepTraffic` в `POST /clients/del/{email}` — **необязательный** query
+(`c.Query("keepTraffic") == "1"`); в `openapi.json` он помечен `required`, но
+панель без него работает и считает значение нулём. Бот параметр не передаёт:
+удаление клиента снимает и `xray_client_traffics`, поэтому повторная провизия
+того же email начинается с нулевых счётчиков.
+
+## 4.8. Flow решает панель, бот лишь повторяет её правило
+
+С v3.11 поток (`flow`) — свойство пары «клиент × инбаунд»
+(`client_inbounds.flow_override`), а не одно поле клиента: колонка `clients.flow`
+для мульти-инбаунд клиентов устаревает, когда последним синкается инбаунд без
+flow (issue #4792, `EffectiveFlow`). На записи панель сама снимает flow там, где
+инбаунд его не поддерживает (`clientWithInboundFlow` + `inboundCanEnableTlsFlow`:
+VLESS, `tcp` + `tls|reality`, либо включённое vless-шифрование).
+
+Правило бота (`Inbound.GetRequiredFlow` по `streamSettings.network`) — приближение
+к этому же правилу, и оно определяет только, в какую flow-группу попадёт
+инбаунд; окончательное значение выставляет панель. Расхождение в одну сторону
+безопасно (панель снимет лишний flow), в другую — бот отправит `""` на
+flow-допустимый инбаунд, которого нет в списке (например, VLESS+xhttp с
+включённым шифрованием). Таких инбаундов в проде нет; при появлении — сверять
+список с `inboundCanEnableTlsFlow`.
+
+## 4.9. `resetTraffic/{email}` включает клиента сам
+
+`ResetTrafficByEmail` обнуляет up/down и, если клиент был выключен квотой,
+включает его на каждом привязанном инбаунде (`reenablePlan` в
+`inbound_traffic.go`). Бот этим не ограничивается: `reenableResetClients`
+дополнительно отправляет `update` с `enable=true` для случаев, когда счётчик
+обнулился помимо панельного эндпоинта (ручной сброс, авто-renew). Клиента,
+у которого квота всё ещё превышена, воркер не включает — это чистая revenue-CTA.
 
 ## 5. Как это реализовано в боте
 

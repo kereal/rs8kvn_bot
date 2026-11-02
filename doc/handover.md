@@ -359,8 +359,8 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Subscription defaults:** `reset: 30` (days from creation), `expiresAt: now + 30 days`
 - **Auto-reset:** Only works when `expiresAt` > 0. Traffic resets every 30 days, expiry extends (3x-ui auto-renew logic)
 - **Client email:** `trial_{subID}` for trial, `{username}` for regular
-- **Flow detection:** When creating/updating clients, fetches inbound config via `GET /panel/api/inbounds/get/{id}` to determine transport type. Flow is set based on transport: `tcp` → `"xtls-rprx-vision"`, `xhttp/h2/ws/grpc` → `""` (empty). Falls back to `"xtls-rprx-vision"` if inbound cannot be fetched.
-- **Multi-inbound:** Nodes store `inbound_ids` as a JSON array. Client creation iterates all inbounds for the node.
+- **Flow detection:** When creating/updating clients, fetches inbound config via `GET /panel/api/inbounds/get/{id}` to determine transport type. Flow is set based on transport: `tcp` → `"xtls-rprx-vision"`, `xhttp/h2/ws/grpc` → `""` (empty). A failed inbound read fails the call (no guessed flow): a wrong value would silently mis-provision the client. v3.11 additionally strips flow itself for inbounds that cannot use it, and the update call is scoped to its own flow group via `?inboundIds=` (`doc/architecture.md`, «Контракт API панели 3x-ui» §4.5, §4.8).
+- **Multi-inbound:** Nodes store `inbound_ids` as a JSON array. Client creation sends all inbounds of one flow group per panel call (`{client, inboundIds}`).
 
 ### Subscription Flow
 - **Trial:** `/i/{code}` → IP rate limit (3/hour) → DB trial record (negative telegram_id) → user clicks link in Telegram → `BindTrialSubscription` sets telegram_id (из отрицательного в реальный), sets referred_by if from invite
