@@ -53,3 +53,6 @@ Desktop.ini
 
 # Local agent/MCP config: machine-specific paths and API tokens
 mcp.json
+
+# Local planning artifacts
+.planning/
