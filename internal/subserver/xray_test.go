@@ -2,7 +2,6 @@ package subserver
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -115,9 +114,11 @@ func TestConvertSingleJSONToXray_VLESSWSNoTLS(t *testing.T) {
 	ss := ob["streamSettings"].(map[string]any)
 	assert.Equal(t, "ws", ss["network"])
 	assert.Equal(t, "none", ss["security"])
-	// No TLS layer must be emitted for plaintext ws.
+	// No TLS layer must be emitted for plaintext ws: neither the key nor any
+	// empty security/tlsSettings block anywhere in the outbound.
 	_, hasTLS := ss["tlsSettings"]
 	assert.False(t, hasTLS)
+	assert.NotContains(t, string(x), "tlsSettings")
 
 	ws := ss["wsSettings"].(map[string]any)
 	assert.Equal(t, "/pyip=ProxyIP.US.CMLiussss.net", ws["path"])
@@ -217,15 +218,19 @@ func TestConvertJSONConfigsToXray_Batch(t *testing.T) {
 	configs, err := ExtractClashConfigs([]byte(clashVlessRealityYAML))
 	require.NoError(t, err)
 
+	// Batch contract: unsupported protocols are skipped, not fatal.
+	configs = append(configs, json.RawMessage(`{"type":"wireguard","address":"wg.example","port":51820}`))
+
 	out, err := ConvertJSONConfigsToXray(configs)
 	require.NoError(t, err)
-	assert.Len(t, out, len(configs))
+	assert.Len(t, out, len(configs)-1, "unsupported protocol must be skipped")
 
 	for _, x := range out {
 		var ob map[string]any
 		require.NoError(t, json.Unmarshal(x, &ob))
 		// Every outbound must be a valid Xray node object.
 		assert.Contains(t, []any{"vless", "vmess", "trojan", "shadowsocks", "hysteria2"}, ob["protocol"])
+		assert.NotEqual(t, "wireguard", ob["protocol"])
 	}
 }
 
@@ -237,29 +242,6 @@ func mustNormalise(t *testing.T, yamlBody string) json.RawMessage {
 	require.Len(t, configs, 1)
 
 	return configs[0]
-}
-
-// Ensure the generated JSON round-trips through encoding/json without issue
-// and contains no empty security/tlsSettings blocks.
-func TestConvertSingleJSONToXray_NoEmptySecurityBlocks(t *testing.T) {
-	t.Parallel()
-	raw := mustNormalise(t, `proxies:
-  - encryption: none
-    name: SE_39
-    network: ws
-    port: "80"
-    server: 104.24.38.86
-    servername: zeus-panel-8hkm7j.zeus-zew7l5.workers.dev
-    type: vless
-    uuid: 77b90f21-d414-43ae-a81d-ab6769649fc4
-    ws-opts:
-      headers:
-        Host: zeus-panel-8hkm7j.zeus-zew7l5.workers.dev
-      path: /x
-`)
-	x, err := ConvertSingleJSONToXray(raw)
-	require.NoError(t, err)
-	assert.False(t, strings.Contains(string(x), "tlsSettings"))
 }
 
 func TestConvertSingleJSONToXray_Hysteria2(t *testing.T) {

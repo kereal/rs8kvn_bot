@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -37,24 +36,12 @@ func newMultiNodeSub(t *testing.T, subID string) (*Service, *testutil.Subscripti
 	}))
 	t.Cleanup(backend.Close)
 
-	mockDB := testutil.NewSubscriptionRepositoryFake()
-	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, id string) (*database.SubscriptionFull, error) {
-		return &database.SubscriptionFull{
-			Subscription: database.Subscription{ID: 1, SubscriptionID: id, Status: "active"},
-			Plan:         database.Plan{ID: 1},
-			Nodes:        []database.Node{{ID: 1, IsActive: true, SubscriptionURL: backend.URL + "/"}},
-		}, nil
-	}
-	mockDB.UpdateDevicesFunc = func(context.Context, uint, string) error { return nil }
-	mockDB.UpdateIPsFunc = func(context.Context, uint, string) error { return nil }
-	mockDB.UpdateLastRequestFunc = func(context.Context, string) error { return nil }
-
-	return newTestSubSvc(t), mockDB
+	return newActiveSubDB(t, backend.URL+"/")
 }
 
 // TestHandleSubscription_SingboxParity_MultiNode proves the sing-box renderer
-// keeps BOTH live-shaped nodes with their readable names and full credentials,
-// and delivers the same routing/DNS policy the Xray profile carries.
+// keeps BOTH live-shaped nodes with their readable names and full credentials.
+// Routing/DNS/inbound policy is covered by TestBuildSingboxConfig_ParityWithXray.
 func TestHandleSubscription_SingboxParity_MultiNode(t *testing.T) {
 	t.Parallel()
 
@@ -65,11 +52,7 @@ func TestHandleSubscription_SingboxParity_MultiNode(t *testing.T) {
 	require.Equal(t, "application/json; charset=utf-8", result.Headers["content-type"])
 
 	var doc struct {
-		Log       map[string]any   `json:"log"`
-		DNS       map[string]any   `json:"dns"`
-		Inbounds  []map[string]any `json:"inbounds"`
 		Outbounds []map[string]any `json:"outbounds"`
-		Route     map[string]any   `json:"route"`
 	}
 	require.NoError(t, json.Unmarshal(result.Body, &doc))
 
@@ -123,46 +106,6 @@ func TestHandleSubscription_SingboxParity_MultiNode(t *testing.T) {
 	require.True(t, ok, "reality outbound must carry utls, sing-box refuses it otherwise")
 	require.Equal(t, true, utls["enabled"])
 	require.Equal(t, "firefox", utls["fingerprint"])
-
-	// selector lists both readable tags; direct replaces the removed block outbound.
-	sel := obs[2]
-	require.Equal(t, "selector", sel["type"])
-	require.Equal(t, []any{liveHy2Tag, liveVLESSTag}, sel["outbounds"])
-	require.Equal(t, "direct", obs[3]["tag"])
-
-	// Modern routing: rule_set definitions + 6 rules (sniff, reject, checkip,
-	// private, geoip-ru, geosite-ru/private), final → selector.
-	route := doc.Route
-	require.Equal(t, "proxy", route["final"])
-	require.Equal(t, "ru-dns", route["default_domain_resolver"], "node domains resolve direct (core requirement with 2+ DNS servers since 1.14)")
-	rsAny, ok := route["rule_set"].([]any)
-	require.True(t, ok)
-	require.Len(t, rsAny, 4, "ads-all, geosite-ru, geosite-private, geoip-ru")
-	rulesAny, ok := route["rules"].([]any)
-	require.True(t, ok)
-	require.Len(t, rulesAny, 6)
-	ads, _ := rulesAny[1].(map[string]any)
-	require.Equal(t, "reject", ads["action"], "ads block via action:reject (block outbound removed)")
-	checkip, _ := rulesAny[2].(map[string]any)
-	require.Equal(t, "direct", checkip["outbound"], "IP-check domains route direct")
-	ruGeosite, _ := rulesAny[5].(map[string]any)
-	require.Equal(t, []any{"geosite-ru", "geosite-private"}, ruGeosite["rule_set"])
-
-	// Modern DNS: typed type/server; ru/private rules via rule_set.
-	dnsServersAny, ok := doc.DNS["servers"].([]any)
-	require.True(t, ok)
-	addresses := make([]string, 0, len(dnsServersAny))
-	for _, s := range dnsServersAny {
-		addresses = append(addresses, s.(map[string]any)["server"].(string))
-	}
-	require.Contains(t, addresses, "1.1.1.1")
-	require.Contains(t, addresses, "77.88.8.8")
-
-	require.Len(t, doc.Inbounds, 1)
-	require.Equal(t, "mixed", doc.Inbounds[0]["type"])
-	require.Equal(t, float64(10808), doc.Inbounds[0]["listen_port"])
-	_, hasSniff := doc.Inbounds[0]["sniff"]
-	require.False(t, hasSniff, "sniff must live in a route rule, not the inbound")
 }
 
 // TestHandleSubscription_ClashParity_MultiNode proves the Clash/Mihomo renderer

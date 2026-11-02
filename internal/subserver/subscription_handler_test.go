@@ -30,6 +30,27 @@ func newTestSubSvc(t *testing.T) *Service {
 	return svc
 }
 
+// newActiveSubDB mocks an active subscription (plan, one active node served by
+// backendURL) with no-op analytics writers. Tests that need to observe an
+// Update* call override the corresponding Func after calling this helper.
+func newActiveSubDB(t *testing.T, backendURL string) (*Service, *testutil.SubscriptionRepositoryFake) {
+	t.Helper()
+
+	mockDB := testutil.NewSubscriptionRepositoryFake()
+	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, SubscriptionID: subID, Status: "active"},
+			Plan:         database.Plan{ID: 1},
+			Nodes:        []database.Node{{ID: 1, IsActive: true, SubscriptionURL: backendURL}},
+		}, nil
+	}
+	mockDB.UpdateDevicesFunc = func(context.Context, uint, string) error { return nil }
+	mockDB.UpdateIPsFunc = func(context.Context, uint, string) error { return nil }
+	mockDB.UpdateLastRequestFunc = func(context.Context, string) error { return nil }
+
+	return newTestSubSvc(t), mockDB
+}
+
 // ==================== HandleSubscription Tests ====================
 
 func TestHandleSubscription_CacheHit_Active(t *testing.T) {
@@ -405,6 +426,147 @@ func TestUpdateIPs_ReplacesExistingIP(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(subFull.Subscription.Ips, "10.0.0.1"))
 }
 
+// ==================== Expire Normalization Tests (G3) ====================
+
+func TestParseExpireToInt(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		userInfo string
+		want     int64
+		wantOK   bool
+	}{
+		{"empty", "", 0, false},
+		{"no expire key", "upload=1; download=2", 0, false},
+		{"unix seconds", "expire=1900000000", 1900000000, true},
+		{"milliseconds normalized to seconds", "expire=1900000000000", 1900000000, true},
+		{"non-numeric", "expire=abc", 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseExpireToInt(tt.userInfo)
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestUpdateMinExpire_MixesSecondsAndMilliseconds pins the comparison unit:
+// values are normalized to SECONDS first. Otherwise a millisecond value is
+// numerically larger and the true earliest expiry would lose.
+func TestUpdateMinExpire_MixesSecondsAndMilliseconds(t *testing.T) {
+	t.Parallel()
+
+	agg := aggregatedSources{}
+	updateMinExpire(&agg, map[string]string{"subscription-userinfo": "expire=1900000000000"}) // 1900000000 s
+	updateMinExpire(&agg, map[string]string{"subscription-userinfo": "expire=1890000000"})    // earlier
+
+	assert.Equal(t, int64(1890000000), agg.firstExpireVal)
+	assert.Equal(t, "1890000000", agg.firstExpire)
+}
+
+// TestHandleSubscription_UserinfoExpireNormalizedToSeconds runs the same
+// contract end-to-end: a source advertising expire in milliseconds must produce
+// a subscription-userinfo header with the value in seconds.
+func TestHandleSubscription_UserinfoExpireNormalizedToSeconds(t *testing.T) {
+	t.Parallel()
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Subscription-UserInfo", "upload=1; download=2; total=1073741824; expire=1900000000000")
+		_, _ = w.Write([]byte("vless://uuid@server.example:443?security=tls#Node"))
+	}))
+	defer backend.Close()
+
+	_, mockDB := newActiveSubDB(t, backend.URL+"/")
+
+	result, _, _, err := HandleSubscription(context.Background(), mockDB, newTestSubSvc(t), "sub-expire", "192.0.2.1", nil, "")
+	require.NoError(t, err)
+
+	userInfo := result.Headers["subscription-userinfo"]
+	assert.Contains(t, userInfo, "expire=1900000000", "expire must be emitted in seconds")
+	assert.NotContains(t, userInfo, "1900000000000", "raw milliseconds must not leak into the header")
+}
+
+// ==================== Analytics Caps Tests (G4) ====================
+
+// TestUpdateIPs_CapsAtMaxIPEntries: 101 distinct IPs are saved as exactly
+// MaxIPEntries records (rotation), the oldest one is dropped, the newest survives.
+func TestUpdateIPs_CapsAtMaxIPEntries(t *testing.T) {
+	t.Parallel()
+
+	mockDB := testutil.NewSubscriptionRepositoryFake()
+
+	var captured string
+	mockDB.UpdateIPsFunc = func(ctx context.Context, id uint, ipsJSON string) error {
+		captured = ipsJSON
+
+		return nil
+	}
+
+	subFull := &database.SubscriptionFull{
+		Subscription: database.Subscription{
+			ID:             20,
+			SubscriptionID: "sub-ip-cap",
+			Ips:            "[]",
+		},
+	}
+
+	for i := range MaxIPEntries + 1 {
+		UpdateIPs(context.Background(), mockDB, subFull, fmt.Sprintf("10.0.%d.%d", i/256, i%256))
+	}
+
+	ips, err := subFull.Subscription.ParseIPs()
+	require.NoError(t, err)
+	require.Len(t, ips, MaxIPEntries, "the cap must hold on the captured state")
+
+	first := ips[0]
+	last := ips[len(ips)-1]
+
+	_, hasOldest := first["10.0.0.0"]
+	assert.False(t, hasOldest, "the oldest entry must be dropped")
+
+	_, hasNewest := last["10.0.0.100"]
+	assert.True(t, hasNewest, "the newest entry must survive the rotation")
+	assert.NotEmpty(t, captured)
+}
+
+// TestUpdateDevices_CapsAtMaxDeviceEntries: 101 distinct HWIDs are saved as
+// exactly MaxDeviceEntries records (rotation).
+func TestUpdateDevices_CapsAtMaxDeviceEntries(t *testing.T) {
+	t.Parallel()
+
+	mockDB := testutil.NewSubscriptionRepositoryFake()
+
+	var captured string
+	mockDB.UpdateDevicesFunc = func(ctx context.Context, id uint, devicesJSON string) error {
+		captured = devicesJSON
+
+		return nil
+	}
+
+	subFull := &database.SubscriptionFull{
+		Subscription: database.Subscription{
+			ID:             21,
+			SubscriptionID: "sub-dev-cap",
+			Devices:        "[]",
+		},
+	}
+
+	for i := range MaxDeviceEntries + 1 {
+		UpdateDevices(context.Background(), mockDB, subFull, map[string]string{"x-hwid": fmt.Sprintf("hwid-%03d", i)})
+	}
+
+	devices, err := subFull.Subscription.ParseDevices()
+	require.NoError(t, err)
+	require.Len(t, devices, MaxDeviceEntries, "the cap must hold on the captured state")
+
+	assert.NotContains(t, devices[0]["x-hwid"], "hwid-000", "the oldest device entry must be dropped")
+	assert.Equal(t, "hwid-100", devices[len(devices)-1]["x-hwid"], "the newest device entry must survive")
+	assert.NotEmpty(t, captured)
+}
+
 // ==================== Helper Tests (subscription_helpers.go) ====================
 
 func TestParseUserInfoValue(t *testing.T) {
@@ -731,6 +893,8 @@ func TestDetectFormat(t *testing.T) {
 		{"plain vless link", "vless://uuid@server:443#Test", FormatPlain},
 		{"plain trojan link", "trojan://pass@server:443#Test", FormatPlain},
 		{"random text", "not-a-valid-protocol://something", FormatUnknown},
+		{"invalid base64", "not-valid-base64!!!", FormatUnknown},
+		{"whitespace only", "  ", FormatUnknown},
 		{"clash yaml with proxies", "proxies:\n  - type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: test-uuid\n", FormatClash},
 		{"clash yaml without proxies", "mixed-port: 7890\nmode: rule\n", FormatUnknown},
 	}
@@ -832,23 +996,63 @@ func TestHandleSubscription_CacheHit_LastRequestError_DoesNotBlockResponse(t *te
 	assert.NotNil(t, result.Body)
 }
 
-func TestHandleSubscription_CacheMiss_UpdatesLastRequestAndReturnsXrayJSON(t *testing.T) {
+// TestHandleSubscription_FetchNodeUsesURLAsIs pins buildSourceURL: a fetch-type
+// node is fetched with the URL as-is (subID NOT appended); a regular node gets
+// the subscription id appended to its base URL.
+func TestHandleSubscription_FetchNodeUsesURLAsIs(t *testing.T) {
 	t.Parallel()
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("vless://uuid@server.example:443?security=tls#Node"))
+
+	var mu sync.Mutex
+
+	var fetchURI, regularURI string
+
+	fetchBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		fetchURI = r.URL.RequestURI()
+		mu.Unlock()
+		_, _ = w.Write([]byte("vless://fetch-uuid@fetch.example:443?security=tls#Fetch"))
 	}))
-	defer backend.Close()
+	defer fetchBackend.Close()
+
+	regularBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		regularURI = r.URL.RequestURI()
+		mu.Unlock()
+		_, _ = w.Write([]byte("vless://regular-uuid@regular.example:443?security=tls#Regular"))
+	}))
+	defer regularBackend.Close()
 
 	mockDB := testutil.NewSubscriptionRepositoryFake()
 	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, SubscriptionID: subID, Status: "active"},
 			Plan:         database.Plan{ID: 1},
-			Nodes:        []database.Node{{ID: 1, IsActive: true, SubscriptionURL: backend.URL + "/"}},
+			Nodes: []database.Node{
+				{ID: 1, Name: "fetch-src", IsActive: true, Type: database.NodeTypeFetch, SubscriptionURL: fetchBackend.URL + "/static/links.txt"},
+				{ID: 2, Name: "regular-src", IsActive: true, SubscriptionURL: regularBackend.URL + "/sub/"},
+			},
 		}, nil
 	}
-	mockDB.UpdateDevicesFunc = func(context.Context, uint, string) error { return nil }
-	mockDB.UpdateIPsFunc = func(context.Context, uint, string) error { return nil }
+
+	_, _, _, err := HandleSubscription(context.Background(), mockDB, newTestSubSvc(t), "sub-fetch", "1.2.3.4", nil, "")
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, "/static/links.txt", fetchURI, "fetch-node URL must be used as-is, no subID appended")
+	assert.Equal(t, "/sub/sub-fetch", regularURI, "regular node URL must get the subscription id appended")
+}
+
+func TestHandleSubscription_CacheMiss_UpdatesLastRequestAndReturnsXrayJSON(t *testing.T) {
+	t.Parallel()
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("vless://uuid@server.example:443?security=tls#Node"))
+	}))
+	defer backend.Close()
+
+	_, mockDB := newActiveSubDB(t, backend.URL+"/")
+
 	var updatedID string
 	mockDB.UpdateLastRequestFunc = func(_ context.Context, subID string) error { updatedID = subID; return nil }
 
@@ -965,11 +1169,19 @@ func TestHandleSubscription_ConcurrentMissesShareOneFetch(t *testing.T) {
 
 	var fetches atomic.Int32
 
+	// Release-барьер: апстрим держит первый fan-out до тех пор, пока тест не
+	// увидит, что fetch начался, и не разрешит ответ. Никаких таймингов —
+	// поведение детерминированно на любом шедулере.
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fetches.Add(1)
-		// Держим ответ достаточно долго, чтобы остальные запросы успели
-		// присоединиться к уже начатому промаху.
-		time.Sleep(50 * time.Millisecond)
+		if fetches.Add(1) == 1 {
+			started <- struct{}{}
+		}
+
+		<-release
+
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp#node")
 	}))
@@ -1003,6 +1215,13 @@ func TestHandleSubscription_ConcurrentMissesShareOneFetch(t *testing.T) {
 	}
 
 	close(start)
+
+	// Ждём, пока первый fan-out реально дошёл до апстрима, и только потом
+	// отпускаем ответ: остальные запросы обязаны присоединиться к полёту
+	// (или получить кэш) — вторых fetch быть не должно.
+	<-started
+	close(release)
+
 	wg.Wait()
 
 	assert.Equal(t, int32(1), fetches.Load(), "одновременные промахи должны схлопнуться в один fan-out")

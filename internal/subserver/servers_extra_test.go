@@ -91,6 +91,7 @@ func TestConvertSingleJSONToLink_Trojan(t *testing.T) {
 		"address": "trojan.example.com",
 		"port": 443,
 		"password": "my-secret",
+		"security": "tls",
 		"sni": "real.example.com",
 		"remark": "Trojan-Node"
 	}`)
@@ -98,8 +99,26 @@ func TestConvertSingleJSONToLink_Trojan(t *testing.T) {
 	link, err := ConvertSingleJSONToLink(raw)
 	require.NoError(t, err)
 	assert.Contains(t, link, "trojan://my-secret@trojan.example.com:443")
+	assert.Contains(t, link, "security=tls")
 	assert.Contains(t, link, "sni=real.example.com")
 	assert.Contains(t, link, "#Trojan-Node")
+}
+
+func TestConvertSingleJSONToLink_Hysteria_IPv6(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{
+		"type": "hysteria2",
+		"address": "::1",
+		"port": 443,
+		"password": "hy2-pass",
+		"remark": "Hy2-IPv6"
+	}`)
+
+	link, err := ConvertSingleJSONToLink(raw)
+	require.NoError(t, err)
+	assert.Contains(t, link, "hysteria2://hy2-pass@[::1]:443")
+	assert.Contains(t, link, "#Hy2-IPv6")
 }
 
 func TestConvertSingleJSONToLink_Shadowsocks(t *testing.T) {

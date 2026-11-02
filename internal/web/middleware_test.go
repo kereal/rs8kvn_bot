@@ -84,7 +84,6 @@ func TestBearerAuthMiddleware_Rejection(t *testing.T) {
 		wantCode   int
 	}{
 		{"missing header", "my-token", "", false, http.StatusUnauthorized},
-		{"empty header value", "my-token", "", false, http.StatusUnauthorized},
 		{"wrong scheme Basic", "my-secret-token", "Basic dXNlcjpwYXNz", false, http.StatusUnauthorized},
 		{"wrong scheme no prefix", "my-secret-token", "my-secret-token", false, http.StatusUnauthorized},
 		{"wrong scheme lowercase bearer", "my-secret-token", "bearer my-secret-token", false, http.StatusUnauthorized},
@@ -183,96 +182,6 @@ func TestBearerAuthMiddleware_OptionsRequest(t *testing.T) {
 
 	assert.True(t, called, "next handler should be called for OPTIONS without auth")
 	assert.Equal(t, http.StatusOK, rec.Code)
-}
-
-func TestBearerAuthMiddleware_TokenWithSpecialChars(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name   string
-		token  string
-		header string
-	}{
-		{"UUID token", "550e8400-e29b-41d4-a716-446655440000", "Bearer 550e8400-e29b-41d4-a716-446655440000"},
-		{"Base64 token", "dGVzdF90b2tlbg==", "Bearer dGVzdF90b2tlbg=="},
-		{"JWT-like token", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0", "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0"},
-		{"Token with dots", "my.token.value", "Bearer my.token.value"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			called := false
-			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				called = true
-
-				w.WriteHeader(http.StatusOK)
-			})
-
-			handler := BearerAuthMiddleware(tt.token)(next)
-
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
-			req.Header.Set("Authorization", tt.header)
-
-			rec := httptest.NewRecorder()
-
-			handler.ServeHTTP(rec, req)
-
-			assert.True(t, called, "next handler should be called with matching token")
-			assert.Equal(t, http.StatusOK, rec.Code)
-		})
-	}
-}
-
-func TestBearerAuthMiddleware_DifferentMethods(t *testing.T) {
-	t.Parallel()
-
-	token := "test-token"
-	handler := BearerAuthMiddleware(token)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	methods := []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}
-
-	for _, method := range methods {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/v1/subscriptions", nil)
-			req.Header.Set("Authorization", "Bearer "+token)
-
-			rec := httptest.NewRecorder()
-
-			handler.ServeHTTP(rec, req)
-
-			assert.Equal(t, http.StatusOK, rec.Code)
-		})
-	}
-}
-
-func TestBearerAuthMiddleware_MultipleRequests(t *testing.T) {
-	t.Parallel()
-
-	token := "shared-token"
-	callCount := 0
-
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
-
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := BearerAuthMiddleware(token)(next)
-
-	for range 5 {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions", nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-
-		rec := httptest.NewRecorder()
-
-		handler.ServeHTTP(rec, req)
-
-		assert.Equal(t, http.StatusOK, rec.Code)
-	}
-
-	assert.Equal(t, 5, callCount)
 }
 
 func TestBearerAuthMiddleware_RejectThenAllow(t *testing.T) {

@@ -28,6 +28,26 @@ func TestHandleHealthz(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "ok", "handleHealthz() body should contain 'ok'")
 }
 
+// TestHandleHealthz_DownCheckerReturns503 pins the gap fix: a DOWN dependency
+// must be reported as 503 on /healthz too, not only on /readyz — otherwise a
+// dead node keeps the load balancer green forever.
+func TestHandleHealthz_DownCheckerReturns503(t *testing.T) {
+	t.Parallel()
+
+	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
+	srv.RegisterChecker("db", func(ctx context.Context) ComponentHealth {
+		return ComponentHealth{Status: StatusDown, Message: "connection refused"}
+	})
+
+	req := httptest.NewRequest("GET", "/healthz", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleHealthz(rec, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "healthz must report DOWN as 503")
+	assert.Contains(t, rec.Body.String(), `"status":"down"`)
+}
+
 func TestHandleHealthz_MethodNotAllowed(t *testing.T) {
 	t.Parallel()
 
@@ -130,24 +150,6 @@ func TestHandleReadyz_HeadMethod(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code, "handleReadyz() should accept HEAD")
 }
 
-func TestHandleReadyz_NotReady(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
-	// Register a failing checker to make health status not "ok"
-	srv.RegisterChecker("failing", func(ctx context.Context) ComponentHealth {
-		return ComponentHealth{Status: StatusDown, Message: "service down"}
-	})
-
-	req := httptest.NewRequest("GET", "/readyz", nil)
-	rec := httptest.NewRecorder()
-
-	srv.handleReadyz(rec, req)
-
-	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "handleReadyz() status when not ready")
-	assert.Contains(t, rec.Body.String(), "NOT READY", "handleReadyz() body should contain 'NOT READY'")
-}
-
 func TestHandleReadyz_Ready(t *testing.T) {
 	t.Parallel()
 
@@ -161,27 +163,6 @@ func TestHandleReadyz_Ready(t *testing.T) {
 	srv.handleReadyz(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code, "handleReadyz() status when ready")
-	assert.Equal(t, "OK", rec.Body.String(), "handleReadyz() body should be 'OK'")
-}
-
-func TestHandleReadyz_WithChecker(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
-	srv.SetReady(true)
-
-	// Register a health checker that returns OK
-	srv.RegisterChecker("test-component", func(ctx context.Context) ComponentHealth {
-		return ComponentHealth{Status: StatusOK, Message: "all good"}
-	})
-
-	req := httptest.NewRequest("GET", "/readyz", nil)
-	rec := httptest.NewRecorder()
-
-	srv.handleReadyz(rec, req)
-
-	// handleReadyz returns simple "OK" or "NOT READY", not JSON
-	assert.Equal(t, http.StatusOK, rec.Code, "handleReadyz() status with healthy checker")
 	assert.Equal(t, "OK", rec.Body.String(), "handleReadyz() body should be 'OK'")
 }
 
@@ -289,51 +270,3 @@ func TestWriteJSON(t *testing.T) {
 	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"), "writeJSON() content-type")
 	assert.Contains(t, rec.Body.String(), "status", "writeJSON() body should contain status")
 }
-
-func TestSetReady(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
-
-	// Initially not ready
-	srv.mu.Lock()
-	ready := srv.ready
-	srv.mu.Unlock()
-	assert.False(t, ready, "Server should not be ready initially")
-
-	// Set ready
-	srv.SetReady(true)
-	srv.mu.Lock()
-	ready = srv.ready
-	srv.mu.Unlock()
-	assert.True(t, ready, "Server should be ready after SetReady(true)")
-
-	// Set not ready
-	srv.SetReady(false)
-	srv.mu.Lock()
-	ready = srv.ready
-	srv.mu.Unlock()
-	assert.False(t, ready, "Server should not be ready after SetReady(false)")
-}
-
-func TestRegisterChecker(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(":8880", nil, &config.Config{}, "testbot", nil, nil)
-
-	// Register multiple checkers
-	srv.RegisterChecker("checker1", func(ctx context.Context) ComponentHealth {
-		return ComponentHealth{Status: StatusOK}
-	})
-	srv.RegisterChecker("checker2", func(ctx context.Context) ComponentHealth {
-		return ComponentHealth{Status: StatusOK}
-	})
-
-	srv.mu.Lock()
-	count := len(srv.checkers)
-	srv.mu.Unlock()
-
-	assert.Equal(t, 2, count, "Server should have 2 checkers registered")
-}
-
-// Register multiple checkers

@@ -1,7 +1,9 @@
 package subserver
 
 import (
-	"encoding/json"
+	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -119,6 +121,64 @@ const clashMixedProtocolsYAML = `proxies:
     password: tuicpass
     sni: tuic.example.com
 `
+
+// clashProxyYAML renders a single-proxy Clash fixture as a "proxies:" block.
+// Field values may be scalars, []string (block list) or map[string]any (nested
+// block). Keys are sorted so fixtures are deterministic.
+func clashProxyYAML(fields map[string]any) []byte {
+	var entry strings.Builder
+
+	writeYAMLFields(&entry, fields, "    ")
+
+	lines := strings.Split(strings.TrimRight(entry.String(), "\n"), "\n")
+
+	var b strings.Builder
+
+	b.WriteString("proxies:\n")
+	// The proxy is a list item: the first field carries the "- " marker.
+	b.WriteString("  - " + strings.TrimPrefix(lines[0], "    ") + "\n")
+
+	for _, l := range lines[1:] {
+		b.WriteString(l + "\n")
+	}
+
+	return []byte(b.String())
+}
+
+func writeYAMLFields(b *strings.Builder, fields map[string]any, indent string) {
+	for _, k := range slices.Sorted(maps.Keys(fields)) {
+		switch v := fields[k].(type) {
+		case map[string]any:
+			fmt.Fprintf(b, "%s%s:\n", indent, k)
+			writeYAMLFields(b, v, indent+"  ")
+		case []string:
+			fmt.Fprintf(b, "%s%s:\n", indent, k)
+
+			for _, item := range v {
+				fmt.Fprintf(b, "%s  - %s\n", indent, item)
+			}
+		case bool:
+			fmt.Fprintf(b, "%s%s: %v\n", indent, k, v)
+		case int:
+			fmt.Fprintf(b, "%s%s: %d\n", indent, k, v)
+		default:
+			fmt.Fprintf(b, "%s%s: %s\n", indent, k, v)
+		}
+	}
+}
+
+// TestBuildClashProxy_SkipCertVerify pins the Clash field name: AllowInsecure
+// must render as skip-cert-verify (not allowInsecure/insecure).
+func TestBuildClashProxy_SkipCertVerify(t *testing.T) {
+	t.Parallel()
+
+	p, err := buildClashProxy(&serverConfig{
+		Type: "vless", Address: "x.example", Port: 443, UUID: "u-1",
+		TLS: "true", SNI: "s.example", AllowInsecure: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, true, p["skip-cert-verify"], "AllowInsecure must render as skip-cert-verify")
+}
 
 func TestExtractClashConfigs_VlessReality(t *testing.T) {
 	t.Parallel()
@@ -269,7 +329,7 @@ func TestExtractClashConfigs_UnsupportedType(t *testing.T) {
 func TestNormaliseClashProxy_VMessAlterId(t *testing.T) {
 	t.Parallel()
 
-	yaml := "proxies:\n  - type: vmess\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    alterId: 2\n    cipher: auto\n    servername: example.com\n"
+	yaml := clashProxyYAML(map[string]any{"type": "vmess", "server": "1.2.3.4", "port": 443, "uuid": "aaaa-bbbb", "alterId": "2", "cipher": "auto", "servername": "example.com"})
 	configs, err := ExtractClashConfigs([]byte(yaml))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
@@ -284,7 +344,7 @@ func TestNormaliseClashProxy_VMessAlterId(t *testing.T) {
 func TestExtractClashConfigs_ALPNList(t *testing.T) {
 	t.Parallel()
 
-	yaml := "proxies:\n  - name: vless-alpn\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: ws\n    tls: true\n    alpn:\n      - h2\n      - http/1.1\n"
+	yaml := clashProxyYAML(map[string]any{"name": "vless-alpn", "type": "vless", "server": "1.2.3.4", "port": 443, "uuid": "aaaa-bbbb", "network": "ws", "tls": true, "alpn": []string{"h2", "http/1.1"}})
 	configs, err := ExtractClashConfigs([]byte(yaml))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
@@ -303,7 +363,7 @@ func TestExtractClashConfigs_ALPNList(t *testing.T) {
 func TestExtractClashConfigs_VMessHTTPObfs(t *testing.T) {
 	t.Parallel()
 
-	yaml := "proxies:\n  - name: vmess-http\n    type: vmess\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    cipher: auto\n    tls: true\n    network: http\n    http-opts:\n      path:\n        - /a\n        - /b\n      headers:\n        Host:\n          - fake.com\n"
+	yaml := clashProxyYAML(map[string]any{"name": "vmess-http", "type": "vmess", "server": "1.2.3.4", "port": 443, "uuid": "aaaa-bbbb", "cipher": "auto", "tls": true, "network": "http", "http-opts": map[string]any{"path": []string{"/a", "/b"}, "headers": map[string]any{"Host": []string{"fake.com"}}}})
 	configs, err := ExtractClashConfigs([]byte(yaml))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
@@ -324,7 +384,7 @@ func TestExtractClashConfigs_VMessHTTPObfs(t *testing.T) {
 func TestExtractClashConfigs_SSPlugin(t *testing.T) {
 	t.Parallel()
 
-	yaml := "proxies:\n  - name: ss-obfs\n    type: shadowsocks\n    server: 1.2.3.4\n    port: 8388\n    cipher: aes-256-gcm\n    password: sspass\n    plugin: obfs\n    plugin-opts:\n      mode: http\n      host: bing.com\n"
+	yaml := clashProxyYAML(map[string]any{"name": "ss-obfs", "type": "shadowsocks", "server": "1.2.3.4", "port": 8388, "cipher": "aes-256-gcm", "password": "sspass", "plugin": "obfs", "plugin-opts": map[string]any{"mode": "http", "host": "bing.com"}})
 	configs, err := ExtractClashConfigs([]byte(yaml))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
@@ -345,7 +405,7 @@ func TestExtractClashConfigs_SSPlugin(t *testing.T) {
 func TestExtractClashConfigs_VLESSXHTTP(t *testing.T) {
 	t.Parallel()
 
-	yaml := "proxies:\n  - name: vless-xhttp\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    flow: xtls-rprx-vision\n    network: xhttp\n    tls: true\n    alpn:\n      - h2\n    reality-opts:\n      public-key: pk\n      short-id: sid\n    xhttp-opts:\n      path: /x\n      host: x.example.com\n      mode: stream-up\n"
+	yaml := clashProxyYAML(map[string]any{"name": "vless-xhttp", "type": "vless", "server": "1.2.3.4", "port": 443, "uuid": "aaaa-bbbb", "flow": "xtls-rprx-vision", "network": "xhttp", "tls": true, "alpn": []string{"h2"}, "reality-opts": map[string]any{"public-key": "pk", "short-id": "sid"}, "xhttp-opts": map[string]any{"path": "/x", "host": "x.example.com", "mode": "stream-up"}})
 	configs, err := ExtractClashConfigs([]byte(yaml))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
@@ -372,7 +432,7 @@ func TestExtractClashConfigs_VLESSXHTTP(t *testing.T) {
 func TestExtractClashConfigs_VLESSSplitHTTPAlias(t *testing.T) {
 	t.Parallel()
 
-	yaml := "proxies:\n  - name: vless-splithttp\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: splithttp\n    tls: true\n    xhttp-opts:\n      path: /s\n"
+	yaml := clashProxyYAML(map[string]any{"name": "vless-splithttp", "type": "vless", "server": "1.2.3.4", "port": 443, "uuid": "aaaa-bbbb", "network": "splithttp", "tls": true, "xhttp-opts": map[string]any{"path": "/s"}})
 	configs, err := ExtractClashConfigs([]byte(yaml))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
@@ -389,7 +449,7 @@ func TestExtractClashConfigs_VLESSSplitHTTPAlias(t *testing.T) {
 func TestExtractClashConfigs_VLESSSkipCertVerify(t *testing.T) {
 	t.Parallel()
 
-	yaml := "proxies:\n  - name: vless-skip\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    tls: true\n    skip-cert-verify: true\n    network: ws\n    ws-opts:\n      path: /ws\n      headers:\n        Host: example.com\n"
+	yaml := clashProxyYAML(map[string]any{"name": "vless-skip", "type": "vless", "server": "1.2.3.4", "port": 443, "uuid": "aaaa-bbbb", "tls": true, "skip-cert-verify": true, "network": "ws", "ws-opts": map[string]any{"path": "/ws", "headers": map[string]any{"Host": "example.com"}}})
 	configs, err := ExtractClashConfigs([]byte(yaml))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
@@ -408,7 +468,7 @@ func TestExtractClashConfigs_VLESSSkipCertVerify(t *testing.T) {
 func TestExtractClashConfigs_VLESSHTTPOpts(t *testing.T) {
 	t.Parallel()
 
-	yaml := "proxies:\n  - name: vless-http\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: http\n    tls: true\n    alpn:\n      - h2\n    http-opts:\n      path:\n        - /a\n      headers:\n        Host:\n          - fake.com\n"
+	yaml := clashProxyYAML(map[string]any{"name": "vless-http", "type": "vless", "server": "1.2.3.4", "port": 443, "uuid": "aaaa-bbbb", "network": "http", "tls": true, "alpn": []string{"h2"}, "http-opts": map[string]any{"path": []string{"/a"}, "headers": map[string]any{"Host": []string{"fake.com"}}}})
 	configs, err := ExtractClashConfigs([]byte(yaml))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
@@ -430,7 +490,7 @@ func TestExtractClashConfigs_VLESSHTTPOpts(t *testing.T) {
 func TestExtractClashConfigs_VLESSHTTPOptsLowercaseHost(t *testing.T) {
 	t.Parallel()
 
-	yaml := "proxies:\n  - name: vless-http-lower\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: http\n    tls: true\n    http-opts:\n      path:\n        - /a\n      headers:\n        host:\n          - lower.example.com\n"
+	yaml := clashProxyYAML(map[string]any{"name": "vless-http-lower", "type": "vless", "server": "1.2.3.4", "port": 443, "uuid": "aaaa-bbbb", "network": "http", "tls": true, "http-opts": map[string]any{"path": []string{"/a"}, "headers": map[string]any{"host": []string{"lower.example.com"}}}})
 	configs, err := ExtractClashConfigs([]byte(yaml))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
@@ -450,7 +510,7 @@ func TestExtractClashConfigs_VLESSHTTPOptsLowercaseHost(t *testing.T) {
 func TestExtractClashConfigs_VLESSH2Opts(t *testing.T) {
 	t.Parallel()
 
-	yaml := "proxies:\n  - name: vless-h2\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: h2\n    tls: true\n    alpn:\n      - h2\n    h2-opts:\n      path:\n        - /h2\n      headers:\n        Host:\n          - h2.example.com\n"
+	yaml := clashProxyYAML(map[string]any{"name": "vless-h2", "type": "vless", "server": "1.2.3.4", "port": 443, "uuid": "aaaa-bbbb", "network": "h2", "tls": true, "alpn": []string{"h2"}, "h2-opts": map[string]any{"path": []string{"/h2"}, "headers": map[string]any{"Host": []string{"h2.example.com"}}}})
 	configs, err := ExtractClashConfigs([]byte(yaml))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
@@ -472,7 +532,7 @@ func TestExtractClashConfigs_VLESSH2Opts(t *testing.T) {
 func TestExtractClashConfigs_VLESSH2OptsLowercaseHost(t *testing.T) {
 	t.Parallel()
 
-	yaml := "proxies:\n  - name: vless-h2-lower\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: h2\n    tls: true\n    h2-opts:\n      path:\n        - /h2\n      headers:\n        host:\n          - h2-lower.example.com\n"
+	yaml := clashProxyYAML(map[string]any{"name": "vless-h2-lower", "type": "vless", "server": "1.2.3.4", "port": 443, "uuid": "aaaa-bbbb", "network": "h2", "tls": true, "h2-opts": map[string]any{"path": []string{"/h2"}, "headers": map[string]any{"host": []string{"h2-lower.example.com"}}}})
 	configs, err := ExtractClashConfigs([]byte(yaml))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
@@ -490,7 +550,7 @@ func TestExtractClashConfigs_VLESSH2OptsLowercaseHost(t *testing.T) {
 func TestExtractClashConfigs_VLESSRawNormalisesToTCP(t *testing.T) {
 	t.Parallel()
 
-	yaml := "proxies:\n  - name: vless-raw\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: aaaa-bbbb\n    network: raw\n    tls: true\n    servername: tls.example.com\n"
+	yaml := clashProxyYAML(map[string]any{"name": "vless-raw", "type": "vless", "server": "1.2.3.4", "port": 443, "uuid": "aaaa-bbbb", "network": "raw", "tls": true, "servername": "tls.example.com"})
 	configs, err := ExtractClashConfigs([]byte(yaml))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
@@ -512,7 +572,7 @@ func TestExtractClashConfigs_VLESSRawNormalisesToTCP(t *testing.T) {
 func TestExtractClashConfigs_TrojanTLS(t *testing.T) {
 	t.Parallel()
 
-	yaml := "proxies:\n  - name: trojan-tls\n    type: trojan\n    server: 5.6.7.8\n    port: 443\n    password: trojpass\n    sni: sni.example.com\n    tls: true\n    network: ws\n    ws-opts:\n      path: /ws\n      headers:\n        Host: ws.example.com\n"
+	yaml := clashProxyYAML(map[string]any{"name": "trojan-tls", "type": "trojan", "server": "5.6.7.8", "port": 443, "password": "trojpass", "sni": "sni.example.com", "tls": true, "network": "ws", "ws-opts": map[string]any{"path": "/ws", "headers": map[string]any{"Host": "ws.example.com"}}})
 	configs, err := ExtractClashConfigs([]byte(yaml))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
@@ -539,7 +599,7 @@ func TestExtractClashConfigs_TrojanTLS(t *testing.T) {
 func TestExtractClashConfigs_TrojanSplitHTTPAlias(t *testing.T) {
 	t.Parallel()
 
-	yaml := "proxies:\n  - name: trojan-splithttp\n    type: trojan\n    server: 5.6.7.8\n    port: 443\n    password: trojpass\n    tls: true\n    network: splithttp\n"
+	yaml := clashProxyYAML(map[string]any{"name": "trojan-splithttp", "type": "trojan", "server": "5.6.7.8", "port": 443, "password": "trojpass", "tls": true, "network": "splithttp"})
 	configs, err := ExtractClashConfigs([]byte(yaml))
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
@@ -550,6 +610,3 @@ func TestExtractClashConfigs_TrojanSplitHTTPAlias(t *testing.T) {
 	assert.Contains(t, link, "type=xhttp")
 	assert.NotContains(t, link, "type=splithttp")
 }
-
-// Suppress unused import warning if json is not directly referenced.
-var _ = json.RawMessage(nil)
