@@ -133,6 +133,5 @@ func TestGetProductByID_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := svc.GetProductByID(ctx, 99999)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "product not found")
+	assert.ErrorIs(t, err, ErrProductNotFound)
 }

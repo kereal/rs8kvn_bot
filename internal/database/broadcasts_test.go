@@ -147,13 +147,8 @@ func TestBroadcastStatusCheckConstraint(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestBroadcastJSONHelpers(t *testing.T) {
+func TestParseDeliveryReport_EmptyReport(t *testing.T) {
 	t.Parallel()
-
-	// ParseBroadcastFilter — typed API для фильтров аудитории.
-	f, err := ParseBroadcastFilter(`{"plan_type":"paid"}`)
-	require.NoError(t, err)
-	assert.Equal(t, "paid", f.PlanType)
 
 	// Пустой отчёт возвращает инициализированные (не nil) списки.
 	empty, err := (&Broadcast{}).ParseDeliveryReport()

@@ -125,18 +125,6 @@ func TestNewService_InvalidPath(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestService_Close(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	svc, err := NewService(dbPath)
-	require.NoError(t, err)
-
-	assert.NoError(t, svc.Close())
-}
-
 func TestService_Close_AlreadyClosed(t *testing.T) {
 	t.Parallel()
 
@@ -146,10 +134,7 @@ func TestService_Close_AlreadyClosed(t *testing.T) {
 	svc, err := NewService(dbPath)
 	require.NoError(t, err)
 
-	err = svc.Close()
-	if err != nil {
-		t.Logf("Warning: failed to close database service: %v", err)
-	}
+	assert.NoError(t, svc.Close(), "First Close should return no error")
 
 	assert.NoError(t, svc.Close(), "Second Close should return no error")
 }
@@ -219,7 +204,7 @@ func TestService_GetByTelegramID_NotFound(t *testing.T) {
 	svc := newTestService(t)
 
 	_, err := svc.GetByTelegramID(context.Background(), 999999)
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 }
 
 func TestService_GetByTelegramID_ReturnsActiveOnly(t *testing.T) {
@@ -294,27 +279,6 @@ func TestService_GetByTelegramID_MultipleUsers(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, u.username, got.Username)
 	}
-}
-
-func TestService_CreateSubscription(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-
-	sub := &Subscription{
-		TelegramID:     54321,
-		Username:       "newuser",
-		ClientID:       "client-456",
-		SubscriptionID: "test-sub-id",
-		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
-		Status:         "active",
-	}
-
-	require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, sub), ""))
-
-	retrieved, err := svc.GetByTelegramID(context.Background(), 54321)
-	require.NoError(t, err)
-	assert.Equal(t, "client-456", retrieved.ClientID)
 }
 
 func TestService_CreateSubscription_PersistsInviteCodeAndReferredBy(t *testing.T) {
@@ -418,6 +382,10 @@ func TestService_CreateSubscription_AllFields(t *testing.T) {
 	var retrieved Subscription
 	require.NoError(t, svc.db.First(&retrieved, sub.ID).Error)
 
+	byTG, err := svc.GetByTelegramID(context.Background(), sub.TelegramID)
+	require.NoError(t, err)
+	assert.Equal(t, sub.ClientID, byTG.ClientID)
+
 	assert.Equal(t, sub.TelegramID, retrieved.TelegramID)
 	assert.Equal(t, sub.Username, retrieved.Username)
 	assert.Equal(t, sub.ClientID, retrieved.ClientID)
@@ -513,7 +481,7 @@ func TestService_GetByID_NotFound(t *testing.T) {
 	svc := newTestService(t)
 
 	_, err := svc.GetByID(context.Background(), 99999)
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
 }
 
 // ==================== Service DeleteSubscriptionByID Tests ====================
@@ -613,6 +581,30 @@ func TestService_GetLatestSubscriptions(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, subs, 3)
 	assert.Equal(t, "service_user4", subs[0].Username)
+
+	t.Run("LimitOne", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newTestService(t)
+
+		for i := range 5 {
+			sub := &Subscription{
+				TelegramID:     int64(100000000 + i),
+				Username:       fmt.Sprintf("user%d", i),
+				ClientID:       fmt.Sprintf("client-%d", i),
+				SubscriptionID: fmt.Sprintf("sub-%d", i),
+				ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+				Status:         "active",
+				CreatedAt:      time.Now().Add(-time.Duration(5-i) * time.Minute),
+			}
+			require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
+		}
+
+		subs, err := svc.GetLatestSubscriptions(context.Background(), 1)
+		require.NoError(t, err)
+		assert.Len(t, subs, 1)
+		assert.Equal(t, "user4", subs[0].Username)
+	})
 }
 
 func TestService_GetLatestSubscriptions_Empty(t *testing.T) {
@@ -650,10 +642,23 @@ func TestService_GetLatestSubscriptions_OnlyActive(t *testing.T) {
 	}
 	require.NoError(t, svc.db.Create(prepareForCreate(t, svc, revokedSub)).Error)
 
+	expiredSub := &Subscription{
+		TelegramID:     100000003,
+		Username:       "expired_user",
+		ClientID:       "client-expired",
+		SubscriptionID: "sub-expired",
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+		Status:         "expired",
+	}
+	require.NoError(t, svc.db.Create(prepareForCreate(t, svc, expiredSub)).Error)
+
 	subs, err := svc.GetLatestSubscriptions(context.Background(), 10)
 	require.NoError(t, err)
 	assert.Len(t, subs, 1)
 	assert.Equal(t, "active_user", subs[0].Username)
+	for _, sub := range subs {
+		assert.Equal(t, "active", sub.Status)
+	}
 }
 
 func TestService_GetLatestSubscriptions_LimitZero(t *testing.T) {
@@ -668,30 +673,6 @@ func TestService_GetLatestSubscriptions_LimitZero(t *testing.T) {
 	subs, err := svc.GetLatestSubscriptions(context.Background(), 0)
 	require.NoError(t, err)
 	assert.Len(t, subs, 0)
-}
-
-func TestService_GetLatestSubscriptions_LimitOne(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-
-	for i := range 5 {
-		sub := &Subscription{
-			TelegramID:     int64(100000000 + i),
-			Username:       fmt.Sprintf("user%d", i),
-			ClientID:       fmt.Sprintf("client-%d", i),
-			SubscriptionID: fmt.Sprintf("sub-%d", i),
-			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
-			Status:         "active",
-			CreatedAt:      time.Now().Add(-time.Duration(5-i) * time.Minute),
-		}
-		require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
-	}
-
-	subs, err := svc.GetLatestSubscriptions(context.Background(), 1)
-	require.NoError(t, err)
-	assert.Len(t, subs, 1)
-	assert.Equal(t, "user4", subs[0].Username)
 }
 
 func TestService_GetLatestSubscriptions_LimitGreaterThanTotal(t *testing.T) {
@@ -782,44 +763,6 @@ func TestService_GetLatestSubscriptions_OrderingConsistency(t *testing.T) {
 		}
 
 		assert.Equal(t, expected, subs[i].Username, "Position %d", i)
-	}
-}
-
-func TestService_GetLatestSubscriptions_MixedStatuses(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-
-	statuses := []string{"active", "revoked", "expired", "active", "active"}
-
-	for i, status := range statuses {
-		sub := &Subscription{
-			TelegramID:     int64(100000000 + i),
-			Username:       fmt.Sprintf("status_user%d", i),
-			ClientID:       fmt.Sprintf("client-%d", i),
-			SubscriptionID: fmt.Sprintf("sub-%d", i),
-			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
-			Status:         status,
-			CreatedAt:      time.Now().Add(-time.Duration(len(statuses)-i) * time.Minute),
-		}
-		require.NoError(t, svc.db.Create(prepareForCreate(t, svc, sub)).Error)
-	}
-
-	subs, err := svc.GetLatestSubscriptions(context.Background(), 10)
-	require.NoError(t, err)
-
-	expectedActive := 0
-
-	for _, status := range statuses {
-		if status == "active" {
-			expectedActive++
-		}
-	}
-
-	assert.Len(t, subs, expectedActive)
-
-	for _, sub := range subs {
-		assert.Equal(t, "active", sub.Status)
 	}
 }
 
@@ -1471,6 +1414,8 @@ func TestService_BindTrialSubscription_Success(t *testing.T) {
 	var stored Subscription
 	require.NoError(t, svc.db.Where("subscription_id = ?", "sub-bind-test").First(&stored).Error)
 	assert.Nil(t, stored.ExpiresAt, "free subscription must not retain the trial expiry")
+	assert.Equal(t, int64(555555), stored.TelegramID)
+	assert.Equal(t, "active", stored.Status)
 }
 
 func TestService_BindTrialSubscription_InviteLookupError(t *testing.T) {
@@ -1540,39 +1485,6 @@ func TestService_BindTrialSubscription_NotFound(t *testing.T) {
 	assert.Error(t, err, "Binding non-existent subscription should fail")
 }
 
-// TestService_BindTrialSubscription_SetsTelegramID verifies that
-// binding a trial sets the telegram_id on the trial subscription.
-func TestService_BindTrialSubscription_SetsTelegramID(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t)
-	ctx := context.Background()
-
-	// Resolve the free plan id (BindTrial promotes trial→free).
-	var freePlan Plan
-	require.NoError(t, svc.db.Where("name = ?", FreePlanName).First(&freePlan).Error)
-
-	// 1) Create a trial (unbound) for a subscription id.
-	_, err := svc.CreateTrialSubscription(
-		ctx, "INVITE000", "sub-bind-test", "client-trial", time.Now().Add(3*time.Hour),
-	)
-	require.NoError(t, err)
-
-	// 2) Bind the trial to a user.
-	bound, err := svc.BindTrialSubscription(ctx, "sub-bind-test", 999000, "newuser")
-	require.NoError(t, err)
-	require.NotNil(t, bound)
-	assert.Equal(t, int64(999000), bound.TelegramID)
-	assert.Equal(t, "active", bound.Status)
-
-	// 3) Verify the subscription has the correct telegram_id.
-	var sub Subscription
-	require.NoError(t, svc.db.Where("subscription_id = ?", "sub-bind-test").First(&sub).Error)
-	assert.Equal(t, int64(999000), sub.TelegramID)
-	assert.Equal(t, freePlan.ID, sub.PlanID)
-	assert.Nil(t, sub.ExpiresAt, "bound free subscription must have no expiry")
-}
-
 // ==================== Edge-case Tests ====================
 
 func TestService_Ping_ContextCanceled(t *testing.T) {
@@ -1613,10 +1525,24 @@ func TestService_CleanupExpiredTrials_RecordsError(t *testing.T) {
 	}
 	require.NoError(t, svc.db.Create(oldTrial).Error)
 
+	// A failure of the late trial_requests pruning stage must not be swallowed:
+	// CleanupExpiredTrials surfaces the error. The trial deletion itself has
+	// already committed (physically removed and journaled) before that stage,
+	// even though the returned slice is nil on error.
+	require.NoError(t, svc.db.Migrator().DropTable(&TrialRequest{}))
+
 	deleted, err := svc.CleanupExpiredTrials(context.Background(), 24)
-	require.NoError(t, err, "CleanupExpiredTrials must surface cleanup errors instead of swallowing them")
-	assert.Len(t, deleted, 1)
-	assert.Equal(t, "old-trial-sub", deleted[0].SubscriptionID)
+	require.Error(t, err, "CleanupExpiredTrials must surface cleanup errors instead of swallowing them")
+	assert.Contains(t, err.Error(), "failed to cleanup expired trial requests")
+	assert.Empty(t, deleted, "on a late-stage failure prod returns nil, discarding the RETURNING rows")
+
+	var remaining int64
+	require.NoError(t, svc.db.Unscoped().Model(&Subscription{}).Where("subscription_id = ?", "old-trial-sub").Count(&remaining).Error)
+	assert.Equal(t, int64(0), remaining, "expired trial must stay deleted despite the late-stage error")
+
+	events, err := svc.GetAuditLogByEvent(context.Background(), AuditEventTrialDeleted, 10)
+	require.NoError(t, err)
+	require.Len(t, events, 1, "trial_deleted audit must be recorded before the late-stage failure")
 }
 
 // ==================== Helper Functions ====================
