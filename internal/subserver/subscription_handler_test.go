@@ -1170,11 +1170,11 @@ func TestHandleSubscription_ConcurrentMissesShareOneFetch(t *testing.T) {
 
 	var fetches atomic.Int32
 
-	// Release-барьер: апстрим держит первый fan-out до тех пор, пока тест не
-	// увидит, что fetch начался, и не разрешит ответ. Никаких таймингов —
-	// поведение детерминированно на любом шедулере.
+	// Апстрим удерживается, пока все остальные запросы не присоединятся к flight.
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if fetches.Add(1) == 1 {
@@ -1187,8 +1187,12 @@ func TestHandleSubscription_ConcurrentMissesShareOneFetch(t *testing.T) {
 		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp#node")
 	}))
 	defer upstream.Close()
+	defer unblock()
 
 	mockDB := testutil.NewSubscriptionRepositoryFake()
+	mockDB.GetSubscriptionStatusFunc = func(context.Context, string) (string, time.Time, error) {
+		return "active", time.Now().Add(24 * time.Hour), nil
+	}
 	mockDB.GetWithPlanAndNodesFunc = func(context.Context, string) (*database.SubscriptionFull, error) {
 		return &database.SubscriptionFull{
 			Subscription: database.Subscription{ID: 1, Status: "active"},
@@ -1201,6 +1205,8 @@ func TestHandleSubscription_ConcurrentMissesShareOneFetch(t *testing.T) {
 	ctx := context.Background()
 
 	const requests = 8
+	joined := make(chan struct{}, requests-1)
+	svc.flights.onJoin = func() { joined <- struct{}{} }
 
 	var wg sync.WaitGroup
 
@@ -1216,12 +1222,25 @@ func TestHandleSubscription_ConcurrentMissesShareOneFetch(t *testing.T) {
 	}
 
 	close(start)
+	defer func() {
+		unblock()
+		wg.Wait()
+	}()
 
-	// Ждём, пока первый fan-out реально дошёл до апстрима, и только потом
-	// отпускаем ответ: остальные запросы обязаны присоединиться к полёту
-	// (или получить кэш) — вторых fetch быть не должно.
-	<-started
-	close(release)
+	// Не отпускаем upstream, пока все followers не вошли в общий flight.
+	select {
+	case <-started:
+	case <-time.After(4 * time.Second):
+		t.Fatal("upstream fetch did not start")
+	}
+	for range requests - 1 {
+		select {
+		case <-joined:
+		case <-time.After(4 * time.Second):
+			t.Fatal("requests did not join the shared flight")
+		}
+	}
+	unblock()
 
 	wg.Wait()
 

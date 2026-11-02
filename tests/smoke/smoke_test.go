@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,10 +22,9 @@ import (
 // binPath holds the path to the pre-built binary (built once in TestMain).
 var binPath string
 
-// readinessMarker — лог, который бинарный бот пишет в stdout после успешной
-// инициализации БД. Это последняя доступная точка готовности без реального
-// токена Telegram (initBot с фейковым токеном уходит в retry-цикл).
-const readinessMarker = "Database initialized successfully"
+// readinessMarker — лог, который бинарный бот пишет в stdout после успешного
+// запуска web server, до retry-цикла initBot с фейковым токеном Telegram.
+const readinessMarker = "Web server started"
 
 // validSmokeEnv возвращает env, который проходит cfg.validate() и доводит
 // процесс до readiness-лога. dbPath указывает на заранее засеянную БД
@@ -107,16 +107,33 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // startBinary запускает бинарник с заданным env и ждёт readiness-лог в его
 // stdout. Краш процесса до readiness-лога (результат cmd.Wait) приводит к
 // падению теста с захваченным выводом — вместо фиксированного Sleep.
-// Возвращает cmd; завершить процесс нужно через stopBinary.
-func startBinary(t *testing.T, envVars []string) *exec.Cmd {
+// Возвращает cmd и канал с результатом Wait; завершить процесс нужно через stopBinary.
+func startBinary(t *testing.T, envVars []string) (*exec.Cmd, <-chan error) {
 	t.Helper()
 
 	cmd := exec.Command(binPath)
 	cmd.Env = envVars
-	var out bytes.Buffer
+	var out syncBuffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 
@@ -131,7 +148,7 @@ func startBinary(t *testing.T, envVars []string) *exec.Cmd {
 
 	for {
 		if strings.Contains(out.String(), readinessMarker) {
-			return cmd
+			return cmd, exited
 		}
 		select {
 		case err := <-exited:
@@ -147,11 +164,11 @@ func startBinary(t *testing.T, envVars []string) *exec.Cmd {
 	}
 }
 
-func stopBinary(t *testing.T, cmd *exec.Cmd) {
+func stopBinary(t *testing.T, cmd *exec.Cmd, exited <-chan error) {
 	t.Helper()
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		<-exited
 	}
 }
 
@@ -160,8 +177,8 @@ func TestSmoke_BinaryStartup(t *testing.T) {
 		t.Skip("Set RUN_SMOKE=1 to run smoke tests")
 	}
 
-	cmd := startBinary(t, prepareEnvDir(t))
-	stopBinary(t, cmd)
+	cmd, exited := startBinary(t, prepareEnvDir(t))
+	stopBinary(t, cmd, exited)
 
 	t.Log("Smoke test passed: binary reached readiness without unexpected crash")
 }

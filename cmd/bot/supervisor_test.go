@@ -10,7 +10,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/web"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // shortenSupervisorBackoff ускоряет надзор на время теста и восстанавливает
@@ -95,30 +94,10 @@ func TestRunSupervised_StopsOnContextCancel(t *testing.T) {
 	assert.Equal(t, int32(1), runs.Load(), "после отмены контекста перезапуска быть не должно")
 }
 
-// runStamp фиксирует границы одного прогона воркера; пауза надзора — это
-// интервал «конец прогона → начало следующего».
-type runStamp struct {
-	start, end time.Time
-}
-
-// collectStamps собирает все runStamp из канала (закрыв его).
-func collectStamps(ch chan runStamp) []runStamp {
-	close(ch)
-	var stamps []runStamp
-	for s := range ch {
-		stamps = append(stamps, s)
-	}
-
-	return stamps
-}
-
-// Тест поведения: паузы между перезапусками растут экспоненциально (до
-// supervisorMaxBackoff), а стабильный прогон длиннее supervisorStableRun
-// сбрасывает backoff к начальному.
+// Тест поведения: backoff растёт до максимума и сбрасывается после стабильного прогона.
 func TestRunSupervised_BackoffEscalation(t *testing.T) {
 	setBackoff := func(t *testing.T, initial, max, stable time.Duration) {
 		t.Helper()
-
 		prevInitial, prevMax, prevStable := supervisorInitialBackoff, supervisorMaxBackoff, supervisorStableRun
 		supervisorInitialBackoff, supervisorMaxBackoff, supervisorStableRun = initial, max, stable
 		t.Cleanup(func() {
@@ -126,110 +105,43 @@ func TestRunSupervised_BackoffEscalation(t *testing.T) {
 		})
 	}
 
-	// runStamp фиксирует границы одного прогона воркера; пауза надзора — это
-	// интервал «конец прогона → начало следующего».
-	type runStamp struct {
-		start, end time.Time
-	}
-
-	// collectStamps собирает все runStamp из канала (закрыв его).
-	collectStamps := func(ch chan runStamp) []runStamp {
-		close(ch)
-		var stamps []runStamp
-		for s := range ch {
-			stamps = append(stamps, s)
-		}
-
-		return stamps
-	}
-
 	t.Run("backoff grows between restarts", func(t *testing.T) {
-		setBackoff(t, 10*time.Millisecond, 40*time.Millisecond, time.Hour) // reset недостижим
-
-		stampsCh := make(chan runStamp, 16)
-		var runs atomic.Int32
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-
-			runSupervised(ctx, "test-backoff-grow", func(context.Context) {
-				start := time.Now()
-				defer func() { stampsCh <- runStamp{start: start, end: time.Now()} }()
-
-				// 5 прогонов: 4 рестарта с паузами 10→20→40→40 мс; после
-				// пятого отменяем контекст, чтобы надзор остановился.
-				if runs.Add(1) >= 5 {
-					cancel()
-				}
-				panic("boom")
-			})
-		}()
-
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Fatal("supervisor did not finish")
-		}
-
-		stamps := collectStamps(stampsCh)
-		require.Len(t, stamps, 5, "ожидается 5 прогонов: 4 паники с рестартом + отменяющий")
-
-		delay := func(i int) time.Duration { return stamps[i+1].start.Sub(stamps[i].end) }
-		// Ожидаемые паузы: 10мс → 20мс → 40мс → 40мс (потолок).
-		assert.Less(t, delay(0), delay(1), "backoff должен расти: 10мс → 20мс")
-		assert.Less(t, delay(1), delay(2), "backoff должен расти: 20мс → 40мс")
-		assert.GreaterOrEqual(t, delay(2), 40*time.Millisecond, "backoff должен дорасти до максимума")
-		assert.Less(t, delay(3), delay(2)+5*time.Millisecond, "после максимума backoff не растёт дальше 40мс")
+		setBackoff(t, 10*time.Millisecond, 40*time.Millisecond, time.Hour)
+		var delays []time.Duration
+		runs := 0
+		runSupervisedWithWait(context.Background(), "test-backoff-grow", func(context.Context) {
+			runs++
+			if runs == 5 {
+				return
+			}
+			panic("boom")
+		}, func(_ context.Context, delay time.Duration) bool {
+			delays = append(delays, delay)
+			return true
+		})
+		assert.Equal(t, 5, runs)
+		assert.Equal(t, []time.Duration{10 * time.Millisecond, 20 * time.Millisecond, 40 * time.Millisecond, 40 * time.Millisecond}, delays)
 	})
 
 	t.Run("backoff resets after stable run", func(t *testing.T) {
 		setBackoff(t, 10*time.Millisecond, 40*time.Millisecond, 30*time.Millisecond)
-
-		stampsCh := make(chan runStamp, 16)
-		var runs atomic.Int32
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-
-			runSupervised(ctx, "test-backoff-reset", func(context.Context) {
-				start := time.Now()
-				defer func() { stampsCh <- runStamp{start: start, end: time.Now()} }()
-
-				n := runs.Add(1)
-				// Третий прогон длится дольше supervisorStableRun: backoff
-				// перед следующим рестартом сбрасывается к начальному.
-				if n == 3 {
-					time.Sleep(50 * time.Millisecond)
-				}
-				if n >= 4 {
-					cancel()
-				}
-				panic("boom")
-			})
-		}()
-
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Fatal("supervisor did not finish")
-		}
-
-		stamps := collectStamps(stampsCh)
-		require.Len(t, stamps, 4)
-
-		delay := func(i int) time.Duration { return stamps[i+1].start.Sub(stamps[i].end) }
-		// Ожидаемые паузы: 10мс, 20мс, затем сброс после стабильного прогона → 10мс.
-		assert.Less(t, delay(0), delay(1), "backoff растёт до сброса: 10мс → 20мс")
-		assert.Less(t, delay(2), delay(1), "стабильный прогон должен сбросить backoff к начальному")
-		assert.LessOrEqual(t, delay(2), 15*time.Millisecond, "после сброса пауза снова около начальных 10мс")
+		var delays []time.Duration
+		runs := 0
+		runSupervisedWithWait(context.Background(), "test-backoff-reset", func(context.Context) {
+			runs++
+			if runs == 3 {
+				time.Sleep(50 * time.Millisecond)
+			}
+			if runs == 4 {
+				return
+			}
+			panic("boom")
+		}, func(_ context.Context, delay time.Duration) bool {
+			delays = append(delays, delay)
+			return true
+		})
+		assert.Equal(t, 4, runs)
+		assert.Equal(t, []time.Duration{10 * time.Millisecond, 20 * time.Millisecond, 10 * time.Millisecond}, delays)
 	})
 }
 

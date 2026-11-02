@@ -12,6 +12,8 @@ import "sync"
 type flightGroup struct {
 	mu    sync.Mutex
 	calls map[string]*flightCall
+	// onJoin, when set, observes a follower joining an existing flight.
+	onJoin func()
 }
 
 type flightCall struct {
@@ -41,6 +43,9 @@ func (g *flightGroup) Do(key string, fn func() flightResult) flightResult {
 
 	if call, ok := g.calls[key]; ok {
 		g.mu.Unlock()
+		if g.onJoin != nil {
+			g.onJoin()
+		}
 		<-call.done
 
 		return flightResult{result: call.result, success: call.success, total: call.total, err: call.err}

@@ -32,6 +32,20 @@ var (
 // recoverAndReport глотал панику, процесс продолжал работать, /readyz оставался
 // зелёным, и воркер молча не работал (см. инцидент с nil-deref в синке).
 func runSupervised(ctx context.Context, name string, fn func(context.Context)) {
+	runSupervisedWithWait(ctx, name, fn, waitSupervisorBackoff)
+}
+
+// waitSupervisorBackoff waits for the restart delay or cancellation.
+func waitSupervisorBackoff(ctx context.Context, delay time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(delay):
+		return true
+	}
+}
+
+func runSupervisedWithWait(ctx context.Context, name string, fn func(context.Context), wait func(context.Context, time.Duration) bool) {
 	backoff := supervisorInitialBackoff
 
 	for {
@@ -52,10 +66,8 @@ func runSupervised(ctx context.Context, name string, fn func(context.Context)) {
 			zap.Duration("backoff", backoff),
 		)
 
-		select {
-		case <-ctx.Done():
+		if !wait(ctx, backoff) {
 			return
-		case <-time.After(backoff):
 		}
 
 		backoff *= 2
