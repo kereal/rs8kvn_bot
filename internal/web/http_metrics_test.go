@@ -36,6 +36,14 @@ func TestHTTPMetrics_RealEndpoint(t *testing.T) {
 		require.Equal(t, "Subscription not found", string(body))
 	}
 
+	// Сканерский путь не должен становиться меткой: сырой path в лейбле — это
+	// новая временная серия на каждый запрос, и она живёт в TSDB вечно.
+	// Проверяем обе стороны нормировки: самого пути в выдаче нет, а его серия
+	// схлопнута в общий бакет other.
+	scannerResp, err := http.Get(base + "/wp-login.php")
+	require.NoError(t, err)
+	_ = scannerResp.Body.Close()
+
 	resp, err := http.Get(base + "/metrics")
 	require.NoError(t, err)
 
@@ -56,6 +64,8 @@ func TestHTTPMetrics_RealEndpoint(t *testing.T) {
 		require.True(t, strings.Contains(text, want), "в /metrics нет %q", want)
 	}
 
-	require.False(t, strings.Contains(text, `path="other"`),
-		"сканерные пути не должны создавать серии")
+	require.False(t, strings.Contains(text, "wp-login.php"),
+		"сырой scanner-путь не должен становиться меткой")
+	require.True(t, strings.Contains(text, `path="other"`),
+		"scanner-путь должен схлопываться в бакет other")
 }

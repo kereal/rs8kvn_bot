@@ -628,9 +628,9 @@ func (testPaymentProvider) GetTransactionStatus(context.Context, uuid.UUID) (*pl
 
 // Тест поведения: отказ по подписи должен оставлять след — метрику и алерт
 // администратору. Иначе провайдер списал деньги, а в системе ни строчки.
+// Не параллельный: меряет дельту глобального payment_issues_total, а этот же
+// счётчик увеличивают соседние тесты неподписанного callback'а.
 func TestHandlePaymentCallback_UnauthorizedIsReported(t *testing.T) {
-	t.Parallel()
-
 	srv, _, bot := newPaymentTestServer(t, nil)
 
 	before := promtestutil.ToFloat64(metrics.PaymentIssuesTotal.WithLabelValues("callback_unauthorized"))

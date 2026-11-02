@@ -113,23 +113,52 @@ func TestInstrumentHTTPSkipsMetricsAndStatic(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	beforeRequests := metricSamples(t, HTTPRequestsTotal)
-	beforeDuration := metricSamples(t, HTTPRequestDuration)
-
+	// Число серий по конкретному пути, а не по коллектору: глобальное сравнение
+	// «до/после» ломается при -count>1, где серия создана предыдущим прогоном.
 	for _, path := range []string{"/metrics", "/static/app.js"} {
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, path, nil))
 		assert.Equal(t, http.StatusOK, resp.Code)
 	}
 
-	assert.Equal(t, beforeRequests, metricSamples(t, HTTPRequestsTotal), "skipped routes must not record request samples")
-	assert.Equal(t, beforeDuration, metricSamples(t, HTTPRequestDuration), "skipped routes must not record duration samples")
+	assert.Equal(t, 0, samplesForPath(t, HTTPRequestsTotal, "/metrics"), "skipped /metrics не создаёт серий")
+	assert.Equal(t, 0, samplesForPath(t, HTTPRequestDuration, "/metrics"), "skipped /metrics не создаёт серий латентности")
+	assert.Equal(t, 0, samplesForPath(t, HTTPRequestsTotal, "/static/app.js"), "static не создаёт серий")
 
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	assert.Equal(t, http.StatusOK, resp.Code)
-	assert.Greater(t, metricSamples(t, HTTPRequestsTotal), beforeRequests)
-	assert.Greater(t, metricSamples(t, HTTPRequestDuration), beforeDuration)
+	assert.Equal(t, 1, samplesForPath(t, HTTPRequestsTotal, "/healthz"), "обычный путь обязан создать серию")
+	assert.Equal(t, 1, samplesForPath(t, HTTPRequestDuration, "/healthz"), "обычный путь обязан создать серию латентности")
+}
+
+// samplesForPath считает серии коллектора с меткой path, равной указанной.
+func samplesForPath(t *testing.T, collector prometheus.Collector, path string) int {
+	t.Helper()
+
+	ch := make(chan prometheus.Metric, 1)
+	go func() {
+		collector.Collect(ch)
+		close(ch)
+	}()
+
+	count := 0
+
+	for metric := range ch {
+		dtoMetric := &dto.Metric{}
+		if metric.Write(dtoMetric) != nil {
+			continue
+		}
+
+		for _, label := range dtoMetric.GetLabel() {
+			if label.GetName() == "path" && label.GetValue() == path {
+				count++
+				break
+			}
+		}
+	}
+
+	return count
 }
 
 func metricSamples(t *testing.T, collector prometheus.Collector) int {
@@ -151,9 +180,9 @@ func metricSamples(t *testing.T, collector prometheus.Collector) int {
 	return count
 }
 
+// Не параллельный: публикует свою версию в общий AppInfo, а соседний тест
+// проверяет, что после Reset остаётся ровно одна серия.
 func TestMetricsEndpoint(t *testing.T) {
-	t.Parallel()
-
 	SetBuildInfo("rs8kvn_bot@test", "0000000")
 
 	handler := promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{})
@@ -183,9 +212,9 @@ func TestMetricsEndpoint(t *testing.T) {
 	assert.Contains(t, body, `subserver_requests_total{format="clash"} 0`)
 }
 
+// Не параллельный: SetBuildInfo делает Reset() глобального AppInfo, поэтому
+// любой соседний тест, публикующий свою версию, ломает подсчёт серий.
 func TestSetBuildInfoPublishesSingleSeries(t *testing.T) {
-	t.Parallel()
-
 	SetBuildInfo("rs8kvn_bot@v2.7.0", "9d04409")
 	SetBuildInfo("rs8kvn_bot@v2.7.1", "3afc5bd")
 
