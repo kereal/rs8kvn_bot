@@ -44,18 +44,24 @@ func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepositor
 	}
 
 	// 3-4. Fetch from all active sources and aggregate items + traffic.
-	agg, success, total := fetchAndAggregateSources(ctx, subID, subFull.Nodes)
-
-	// 5. Build the final response and cache it. Paid (premium) subscriptions get
-	// a " Premium" suffix appended to the upstream profile-title header.
+	// Параллельные промахи по одному ключу схлопываются: иначе истечение TTL
+	// после падения панели превращалось в лавину одинаковых fan-out'ов.
 	profileTitleSuffix := ""
 	if subFull.Subscription.IsPaid() {
 		profileTitleSuffix = " Premium"
 	}
 
-	res, err := buildResponse(subSvc, cacheKey, agg, subFull.Plan.TrafficLimit, profileTitleSuffix, outFormat)
+	out := subSvc.flights.Do(cacheKey, func() flightResult {
+		agg, success, total := fetchAndAggregateSources(ctx, subID, subFull.Nodes)
 
-	return res, success, total, err
+		// 5. Build the final response and cache it. Paid (premium) subscriptions
+		// get a " Premium" suffix appended to the upstream profile-title header.
+		res, resErr := buildResponse(subSvc, cacheKey, agg, subFull.Plan.TrafficLimit, profileTitleSuffix, outFormat)
+
+		return flightResult{result: res, success: success, total: total, err: resErr}
+	})
+
+	return out.result, out.success, out.total, out.err
 }
 
 // UpdateDevices records the current request headers as a device entry in the

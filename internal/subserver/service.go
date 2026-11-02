@@ -23,12 +23,21 @@ type Service struct {
 	// (devices/IPs) only across requests for the SAME subID, so cache misses for
 	// different subscriptions do not block each other.
 	analyticsLocks analyticsKeyedLock
+
+	// lastRequest троттлит запись last_request: без него каждый cache hit
+	// писал в SQLite и сериализовался на единственном писателе.
+	lastRequest lastRequestThrottle
+
+	// flights схлопывает одновременные промахи кэша по одному ключу в один
+	// fan-out к нодам вместо лавины одинаковых запросов.
+	flights flightGroup
 }
 
 // NewService creates a new Service with a cache TTL.
 func NewService(ttl time.Duration) *Service {
 	return &Service{
-		Cache: NewCache(ttl),
+		Cache:       NewCache(ttl),
+		lastRequest: lastRequestThrottle{every: LastRequestWriteInterval, pruneAt: touchPruneThreshold},
 	}
 }
 

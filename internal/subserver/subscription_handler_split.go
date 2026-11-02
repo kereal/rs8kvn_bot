@@ -74,13 +74,9 @@ func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, s
 	}
 
 	logger.Debug("Cache hit", zap.String("sub_id", subID))
-	// best-effort: обновляем last_request, ошибки не блокируют выдачу.
-	err = db.UpdateLastRequest(ctx, subID)
-	if err != nil {
-		logger.Warn("Failed to update last_request",
-			zap.String("sub_id", subID),
-			zap.Error(err))
-	}
+	// best-effort и с троттлингом: запись на каждый хит сериализовалась на
+	// единственном писателе SQLite.
+	subSvc.touchLastRequest(ctx, db, subID)
 
 	return &SubscriptionResult{
 		Body:    cachedBody,
@@ -127,13 +123,9 @@ func loadSubscription(ctx context.Context, db interfaces.SubscriptionRepository,
 	UpdateDevices(ctx, db, subFull, requestHeaders)
 	UpdateIPs(ctx, db, subFull, clientIP)
 
-	// best-effort: обновляем last_request, ошибки не блокируют выдачу.
-	err = db.UpdateLastRequest(ctx, subID)
-	if err != nil {
-		logger.Warn("Failed to update last_request",
-			zap.String("sub_id", subID),
-			zap.Error(err))
-	}
+	// best-effort и с троттлингом: запись на каждый запрос сериализовалась на
+	// единственном писателе SQLite.
+	subSvc.touchLastRequest(ctx, db, subID)
 
 	return subFull, nil
 }

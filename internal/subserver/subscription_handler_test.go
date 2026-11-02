@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -923,4 +924,86 @@ func TestUpdateLastRequest_NotFound(t *testing.T) {
 
 	err = db.UpdateLastRequest(context.Background(), "nonexistent-sub-id")
 	assert.ErrorIs(t, err, database.ErrSubscriptionNotFound)
+}
+
+// Тест поведения: повторные обращения к подписке не пишут last_request на
+// каждый запрос — запись троттлится, чтобы не сериализоваться на единственном
+// писателе SQLite.
+func TestHandleSubscription_LastRequestThrottled(t *testing.T) {
+	t.Parallel()
+
+	mockDB := testutil.NewSubscriptionRepositoryFake()
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	svc.Set("sub-lr-throttle", []byte("cached"), map[string]string{"content-type": "text/plain"})
+
+	mockDB.GetSubscriptionStatusFunc = func(context.Context, string) (string, time.Time, error) {
+		return "active", time.Now().Add(24 * time.Hour), nil
+	}
+
+	writes := 0
+
+	mockDB.UpdateLastRequestFunc = func(context.Context, string) error {
+		writes++
+
+		return nil
+	}
+
+	for range 3 {
+		_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-lr-throttle", "1.2.3.4", nil, "")
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, 1, writes, "в пределах интервала троттлинга last_request пишется один раз")
+}
+
+// Тест поведения: одновременные промахи кэша по одной подписке дают один
+// fan-out к источнику, а не по одному на запрос.
+func TestHandleSubscription_ConcurrentMissesShareOneFetch(t *testing.T) {
+	t.Parallel()
+
+	var fetches atomic.Int32
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetches.Add(1)
+		// Держим ответ достаточно долго, чтобы остальные запросы успели
+		// присоединиться к уже начатому промаху.
+		time.Sleep(50 * time.Millisecond)
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp#node")
+	}))
+	defer upstream.Close()
+
+	mockDB := testutil.NewSubscriptionRepositoryFake()
+	mockDB.GetWithPlanAndNodesFunc = func(context.Context, string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, Status: "active"},
+			Plan:         database.Plan{TrafficLimit: 1 << 30},
+			Nodes:        []database.Node{{ID: 1, Name: "src", IsActive: true, SubscriptionURL: upstream.URL + "/sub/"}},
+		}, nil
+	}
+
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	const requests = 8
+
+	var wg sync.WaitGroup
+
+	start := make(chan struct{})
+
+	for range requests {
+		wg.Go(func() {
+			<-start
+
+			_, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-flight", "1.2.3.4", nil, "")
+			assert.NoError(t, err)
+		})
+	}
+
+	close(start)
+	wg.Wait()
+
+	assert.Equal(t, int32(1), fetches.Load(), "одновременные промахи должны схлопнуться в один fan-out")
 }
