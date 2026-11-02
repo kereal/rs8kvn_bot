@@ -18,13 +18,14 @@ import (
 
 var (
 	// HTTPRequestsTotal is a counter of application HTTP requests. The metrics
-	// endpoint and static assets are intentionally excluded.
+	// endpoint and static assets are intentionally excluded. code is the numeric
+	// status, so 5xx is selectable as code=~"5..".
 	HTTPRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "http_requests_total",
 			Help: "Total number of HTTP requests processed",
 		},
-		[]string{"method", "path", "status"},
+		[]string{"method", "path", "code"},
 	)
 
 	// HTTPRequestDuration is a histogram of application HTTP request durations.
@@ -523,7 +524,7 @@ func InstrumentHTTP(next http.Handler) http.Handler {
 
 		duration := time.Since(start).Seconds()
 		HTTPRequestDuration.WithLabelValues(method, path).Observe(duration)
-		HTTPRequestsTotal.WithLabelValues(method, path, rr.statusCodeString()).Inc()
+		HTTPRequestsTotal.WithLabelValues(method, path, rr.codeLabel()).Inc()
 	})
 }
 
@@ -597,13 +598,9 @@ func (r *responseRecorder) Push(target string, opts *http.PushOptions) error {
 	return http.ErrNotSupported
 }
 
-func (r *responseRecorder) statusCodeString() string {
-	// StatusText("") == "" и для нестандартных кодов тоже пуст: пустая метка
-	// склеила бы в одну серию все ответы без стандартного текста.
-	text := http.StatusText(r.statusCode)
-	if text == "" {
-		return strconv.Itoa(r.statusCode)
-	}
-
-	return text
+// statusCode renders the numeric status. Текстовый статус («Not Found») в
+// метрике неудобен: по нему не выразить класс ответа, а один и тот же код
+// мог попасть в серию и текстом, и числом.
+func (r *responseRecorder) codeLabel() string {
+	return strconv.Itoa(r.statusCode)
 }

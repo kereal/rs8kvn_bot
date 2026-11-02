@@ -54,20 +54,23 @@ func TestNormalizePath(t *testing.T) {
 	}
 }
 
-func TestStatusCodeString(t *testing.T) {
+func TestCodeLabel(t *testing.T) {
 	t.Parallel()
 
-	rr := &responseRecorder{statusCode: 200}
-	assert.Equal(t, "OK", rr.statusCodeString())
+	tests := []struct {
+		code int
+		want string
+	}{
+		{200, "200"},
+		{404, "404"},
+		{503, "503"},
+		{0, "0"},
+	}
 
-	rr.statusCode = 404
-	assert.Equal(t, "Not Found", rr.statusCodeString())
-
-	rr.statusCode = 0
-	assert.Equal(t, "0", rr.statusCodeString(), "нестандартный код не должен давать пустую метку")
-
-	rr.statusCode = 500
-	assert.Equal(t, "Internal Server Error", rr.statusCodeString())
+	for _, tt := range tests {
+		rr := &responseRecorder{statusCode: tt.code}
+		assert.Equal(t, tt.want, rr.codeLabel(), "статус %d должен оставаться числом", tt.code)
+	}
 }
 
 func TestNewMetricsInitialized(t *testing.T) {
