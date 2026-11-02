@@ -3165,3 +3165,50 @@ func TestHandleSyncError_IncompleteFanoutSchedulesRetry(t *testing.T) {
 	assert.True(t, savedRetryAt.Before(parkedRetryAt), "ретрай не должен парковать узел")
 	assert.Equal(t, 1, sn.RetryCount)
 }
+
+// Тест поведения: неполный fan-out по инбаундам оставляет биндинг в pending и
+// ставит ретрай — узел не паркуется, подписка не остаётся полурабочей.
+func TestSyncService_SyncNodes_IncompleteFanoutRetriesInsteadOfParking(t *testing.T) {
+	t.Parallel()
+
+	var (
+		retryCounts []int
+		retryAt     []*time.Time
+	)
+
+	db := testutil.NewServiceStoreFake()
+	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
+		return &database.Plan{ID: 7, Name: "premium", TrafficLimit: 1024}, nil
+	}
+	db.UpdateRetryFunc = func(_ context.Context, _, _ uint, retryCount int, at *time.Time, _ *string) error {
+		retryCounts = append(retryCounts, retryCount)
+		retryAt = append(retryAt, at)
+
+		return nil
+	}
+
+	client := &mockVPNClient{createError: fmt.Errorf("create: %w", xui.ErrIncompleteFanout)}
+	clients := NodeClients{1: {Provision: client}}
+
+	svc := NewSyncService(db, clients, []database.Node{{ID: 1, Type: database.NodeType3xUI, IsActive: true}})
+	sub := &database.Subscription{
+		ID:             51,
+		PlanID:         7,
+		TelegramID:     200,
+		Username:       "partial-user",
+		ClientID:       "client-51",
+		SubscriptionID: "sub-51",
+	}
+
+	err := svc.syncNodes(context.Background(), sub, []database.SubscriptionNode{
+		{SubscriptionID: 51, NodeID: 1, Status: database.SyncStatusPendingAdd},
+	})
+	require.Error(t, err)
+	require.True(t, client.createCalled)
+
+	require.Len(t, retryCounts, 1)
+	assert.Equal(t, 1, retryCounts[0], "ретрай должен быть запланирован, а не пропущен")
+	require.Len(t, retryAt, 1)
+	require.NotNil(t, retryAt[0])
+	assert.True(t, retryAt[0].Before(parkedRetryAt), "узел не должен быть запаркован")
+}
