@@ -586,9 +586,9 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 	}
 
 	mockDB.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
-		// Одна активная привязка на узел 1: читатель опрашивается, но
-		// отвечает ошибкой — трафик измерить не удалось, Available=true
-		// (узел читаемый), поэтому карточка показывает 0.00.
+		// Одна активная привязка на узел 1: читатель опрашивается, но отвечает
+		// ошибкой — трафик не измерен, поэтому карточка честно сообщает
+		// «измерение недоступно», а не показывает нулевой расход.
 		return []database.SubscriptionNode{{SubscriptionID: subscriptionID, NodeID: 1, Status: database.SyncStatusActive}}, nil
 	}
 
@@ -597,8 +597,8 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 
 	assert.True(t, mockBot.SendCalledSafe())
 	assert.Contains(t, mockBot.LastSentTextSafe(), "Ваша подписка")
-	// Should still show subscription even if traffic fetch fails
-	assert.Contains(t, mockBot.LastSentTextSafe(), "0.00 из 100 Гб (0%)")
+	// Should still show subscription even if traffic fetch fails.
+	assert.Contains(t, mockBot.LastSentTextSafe(), "измерение недоступно")
 }
 
 func TestHandleMySubscription_UsesCache(t *testing.T) {

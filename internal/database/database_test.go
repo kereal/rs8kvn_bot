@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1803,4 +1804,38 @@ func TestGetStalePendingOrdersAfterID(t *testing.T) {
 	expired, err = svc.ExpirePendingOrder(ctx, stale.ID)
 	require.NoError(t, err)
 	assert.False(t, expired, "повторное истечение не должно перезаписывать статус")
+}
+
+// Тест поведения: после миграций индекс pending-скана синка существует, и
+// GetPendingSync использует его, а не полный скан таблицы.
+func TestPendingSyncUsesRetryIndex(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	var indexCount int64
+
+	require.NoError(t, svc.GetDB().WithContext(ctx).
+		Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_subscription_nodes_retry'").
+		Scan(&indexCount).Error)
+	require.Equal(t, int64(1), indexCount, "индекс idx_subscription_nodes_retry должен существовать")
+
+	var plan []struct {
+		Detail string
+	}
+
+	require.NoError(t, svc.GetDB().WithContext(ctx).
+		Raw(`EXPLAIN QUERY PLAN SELECT subscription_id, node_id FROM subscription_nodes WHERE status IN ('pending_add','pending_remove','pending_update') AND (retry_at IS NULL OR retry_at <= ?)`, time.Now().UTC()).
+		Scan(&plan).Error)
+	require.NotEmpty(t, plan)
+
+	usedIndex := false
+	for _, row := range plan {
+		if strings.Contains(row.Detail, "idx_subscription_nodes_retry") {
+			usedIndex = true
+		}
+
+		assert.NotContains(t, row.Detail, "SCAN subscription_nodes", "pending-скан не должен идти полным сканом: %s", row.Detail)
+	}
+
+	assert.True(t, usedIndex, "план запроса должен опираться на idx_subscription_nodes_retry: %+v", plan)
 }
