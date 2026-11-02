@@ -928,11 +928,8 @@ func (c *Client) doGetInbound(ctx context.Context, inboundID int) (*Inbound, err
 
 // getRequiredFlow возвращает flow, требуемый для работы с указанным inbound.
 func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, error) {
-	err := ctx.Err()
-	if err != nil {
-		return "", err
-	}
-
+	// Отменённый контекст отсекается транспортом и распознаётся ниже через
+	// utils.IsCtxErr: отдельная предварительная проверка дублировала бы это.
 	inbound, err := c.doGetInbound(ctx, inboundID)
 	if err != nil {
 		logger.Debug("Failed to get inbound for flow",

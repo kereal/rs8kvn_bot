@@ -11,9 +11,11 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/ratelimiter"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
@@ -664,4 +666,37 @@ func TestHandleUpdate_AppliesTimeoutToCommandPath(t *testing.T) {
 	handler.HandleUpdate(context.Background(), update)
 
 	require.True(t, gotDeadline, "command handler must run with a deadline-bearing context")
+}
+
+// Тест поведения: отказ по лимиту считается отдельной серией метрики и не
+// попадает повторно в "error" — иначе доля ошибок завышена на каждом отказе.
+func TestHandleUpdate_RateLimitedIsNotCountedAsError(t *testing.T) {
+	// Без t.Parallel: тест читает приращение глобальных счётчиков, а
+	// параллельные тесты пакета увеличивали бы те же серии.
+	cfg := &config.Config{TelegramAdminID: 123456789, TelegramBotToken: "test_token"}
+	mockBot := testutil.NewBotAPI()
+	mockDB := testutil.NewBotStoreFake()
+
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
+
+	const command = "callback"
+
+	beforeLimited := promtestutil.ToFloat64(metrics.BotUpdatesTotal.WithLabelValues(command, "rate_limited"))
+	beforeError := promtestutil.ToFloat64(metrics.BotUpdatesTotal.WithLabelValues(command, "error"))
+
+	update := tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		ID:   "cb",
+		From: &tgbotapi.User{ID: 777001},
+		Data: "balance",
+	}}
+
+	for range 40 {
+		handler.HandleUpdate(context.Background(), update)
+	}
+
+	limited := promtestutil.ToFloat64(metrics.BotUpdatesTotal.WithLabelValues(command, "rate_limited")) - beforeLimited
+	errs := promtestutil.ToFloat64(metrics.BotUpdatesTotal.WithLabelValues(command, "error")) - beforeError
+
+	assert.Positive(t, limited, "часть запросов должна упереться в лимит")
+	assert.Zero(t, errs, "отказы по лимиту не должны увеличивать серию error")
 }

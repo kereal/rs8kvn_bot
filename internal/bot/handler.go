@@ -697,9 +697,13 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 	defer func() {
 		metrics.BotUpdateDuration.WithLabelValues(command).Observe(time.Since(start).Seconds())
 
-		if err != nil {
+		switch {
+		case errors.Is(err, ErrRateLimited):
+			// Отказ по лимиту уже посчитан отдельной серией "rate_limited";
+			// второй раз как "error" он искажал бы долю ошибок.
+		case err != nil:
 			metrics.BotUpdatesTotal.WithLabelValues(command, "error").Inc()
-		} else {
+		default:
 			metrics.BotUpdatesTotal.WithLabelValues(command, "success").Inc()
 		}
 	}()

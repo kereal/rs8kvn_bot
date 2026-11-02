@@ -40,9 +40,6 @@ const (
 	// RateLimiterRefillRate is the rate at which tokens are refilled (tokens per second)
 	RateLimiterRefillRate = 5
 
-	// RateLimiterPollInterval is the interval for checking token availability
-	RateLimiterPollInterval = 100 * time.Millisecond
-
 	// MaxConcurrentHandlers is the maximum number of concurrent update handlers
 	// This prevents unbounded goroutine spawning under load
 	MaxConcurrentHandlers = 10
@@ -130,12 +127,6 @@ const (
 const (
 	// DefaultWebServerPort is the default port for the web server
 	DefaultWebServerPort = 8880
-)
-
-// Validation Constants
-const (
-	// SubIDLengthBytes is the number of random bytes for subscription ID (28 hex chars)
-	SubIDLengthBytes = 14
 )
 
 // MaxResponseSize is the maximum response size to read from upstream responses (2MB).
