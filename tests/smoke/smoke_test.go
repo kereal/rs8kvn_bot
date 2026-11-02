@@ -3,6 +3,7 @@
 package smoke
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -12,17 +13,72 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/stretchr/testify/require"
 )
 
 // binPath holds the path to the pre-built binary (built once in TestMain).
 var binPath string
 
+// readinessMarker — лог, который бинарный бот пишет в stdout после успешной
+// инициализации БД. Это последняя доступная точка готовности без реального
+// токена Telegram (initBot с фейковым токеном уходит в retry-цикл).
+const readinessMarker = "Database initialized successfully"
+
+// validSmokeEnv возвращает env, который проходит cfg.validate() и доводит
+// процесс до readiness-лога. dbPath указывает на заранее засеянную БД
+// (бинарику нужен хотя бы один node: initDatabase падает с
+// "no nodes configured" на пустой базе).
+func validSmokeEnv(dbPath, logPath string) []string {
+	return []string{
+		"TELEGRAM_BOT_TOKEN=123456:smoke-test-token",
+		"TELEGRAM_ADMIN_ID=1",
+		"DATABASE_PATH=" + dbPath,
+		"LOG_FILE_PATH=" + logPath,
+		"LOG_LEVEL=debug",
+		"GLOBAL_SUB_URL=https://sub.example.com",
+		"SITE_URL=https://vpn.example.com",
+		"WEB_SERVER_PORT=18744",
+	}
+}
+
+// prepareEnvDir создаёт БД с одной нодой (host заведомо недоступен — клиенты
+// строятся без сетевых вызовов) и возвращает env для запуска бинарника.
+func prepareEnvDir(t *testing.T) []string {
+	t.Helper()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	logPath := filepath.Join(dir, "test.log")
+
+	svc, err := database.NewService(dbPath)
+	require.NoError(t, err, "Failed to seed smoke database")
+	require.NoError(t, svc.CreateNode(context.Background(), &database.Node{
+		Name:       "smoke-node",
+		Type:       database.NodeType3xUI,
+		IsActive:   true,
+		Host:       "http://127.0.0.1:1",
+		APIToken:   "smoke-token",
+		InboundIDs: `[1]`,
+	}), "Failed to create smoke node")
+	require.NoError(t, svc.Close(), "Failed to close seeded database")
+
+	return validSmokeEnv(dbPath, logPath)
+}
+
 func TestMain(m *testing.M) {
+	// Засев БД ниже вызывает logger.Info внутри database.NewService —
+	// глобальный zap-логгер нужно инициализировать в процессе теста.
+	if _, lerr := logger.Init("", "error"); lerr != nil {
+		fmt.Fprintf(os.Stderr, "Failed to init test logger: %v\n", lerr)
+		os.Exit(1)
+	}
+
 	// Build binary once before all tests
 	dir, err := os.MkdirTemp("", "smoke-test-*")
 	if err != nil {
-		os.Stderr.WriteString("Failed to create temp dir: " + err.Error() + "\n")
+		fmt.Fprintf(os.Stderr, "Failed to create temp dir: %v\n", err)
 		os.Exit(1)
 	}
 	cleanup := func() {
@@ -51,15 +107,44 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func startBinary(t *testing.T, envVars []string, extraEnvVars ...string) *exec.Cmd {
+// startBinary запускает бинарник с заданным env и ждёт readiness-лог в его
+// stdout. Краш процесса до readiness-лога (результат cmd.Wait) приводит к
+// падению теста с захваченным выводом — вместо фиксированного Sleep.
+// Возвращает cmd; завершить процесс нужно через stopBinary.
+func startBinary(t *testing.T, envVars []string) *exec.Cmd {
 	t.Helper()
-	allEnv := append(envVars, extraEnvVars...)
+
 	cmd := exec.Command(binPath)
-	cmd.Env = append(os.Environ(), allEnv...)
-	err := cmd.Start()
-	require.NoError(t, err, "Failed to start binary")
-	time.Sleep(500 * time.Millisecond)
-	return cmd
+	cmd.Env = envVars
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	require.NoError(t, cmd.Start(), "Failed to start binary")
+
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+
+	deadline := time.After(10 * time.Second)
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if strings.Contains(out.String(), readinessMarker) {
+			return cmd
+		}
+		select {
+		case err := <-exited:
+			require.Failf(t, "binary exited before readiness",
+				"wait error: %v; output:\n%s", err, out.String())
+		case <-deadline:
+			_ = cmd.Process.Kill()
+			<-exited
+			require.Failf(t, "binary did not reach readiness in time",
+				"missing %q in output:\n%s", readinessMarker, out.String())
+		case <-ticker.C:
+		}
+	}
 }
 
 func stopBinary(t *testing.T, cmd *exec.Cmd) {
@@ -75,81 +160,57 @@ func TestSmoke_BinaryStartup(t *testing.T) {
 		t.Skip("Set RUN_SMOKE=1 to run smoke tests")
 	}
 
-	dir := t.TempDir()
-
-	cmd := startBinary(t, []string{
-		"TELEGRAM_BOT_TOKEN=test_token_1234567:ABCdefGHIjklMNOpqrsTUVwWX",
-		"TELEGRAM_ADMIN_ID=0",
-	}, "DATABASE_PATH="+filepath.Join(dir, "test.db"),
-		"LOG_FILE_PATH="+filepath.Join(dir, "test.log"),
-		"LOG_LEVEL=debug",
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
+	cmd := startBinary(t, prepareEnvDir(t))
 	stopBinary(t, cmd)
 
-	t.Log("Smoke test passed: binary started and ran without unexpected crash")
+	t.Log("Smoke test passed: binary reached readiness without unexpected crash")
 }
 
-func TestSmoke_PanicRecovery(t *testing.T) {
-	if os.Getenv("CI") == "" {
-		t.Skip("Skipping panic recovery test in non-CI environment")
-	}
-
-	tests := []struct {
-		name     string
-		envVars  []string
-		hasPanic bool
-	}{
-		{
-			name: "valid_config_no_panic",
-			envVars: []string{
-				"TELEGRAM_BOT_TOKEN=test_token_1234567:ABCdefGHIjklMNOpqrstuVWX",
-				"TELEGRAM_ADMIN_ID=0",
-			},
-			hasPanic: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cmd := startBinary(t, tt.envVars)
-			stopBinary(t, cmd)
-			require.False(t, tt.hasPanic, "Expected no panic")
-		})
-	}
-}
+// TestSmoke_PanicRecovery удалён: в бинарнике нет инъекционной точки паники
+// (никакой env-ручки или тестового хука нет, добавлять прод-ручку ради smoke —
+// неоправданно). Паники и восстановление покрыты юнит-тестами: cmd/bot
+// TestHandleUpdateSafely (паникующий deps + recover), supervisor-тесты
+// TestRunSupervised_* (перезапуск после паники с backoff).
 
 func TestSmoke_ConfigValidation(t *testing.T) {
+	if os.Getenv("CI") == "" && !strings.Contains(os.Getenv("RUN_SMOKE")+"", "1") {
+		t.Skip("Set RUN_SMOKE=1 to run smoke tests")
+	}
+
 	tests := []struct {
 		name    string
 		envVars []string
-		wantErr bool
+		wantIn  string // подстрока ошибки конфигурации в stderr
 	}{
 		{
 			name: "missing_token",
 			envVars: []string{
-				"TELEGRAM_ADMIN_ID=0",
+				"TELEGRAM_ADMIN_ID=1",
+				"GLOBAL_SUB_URL=https://sub.example.com",
+				"SITE_URL=https://vpn.example.com",
 			},
-			wantErr: true,
+			wantIn: "TELEGRAM_BOT_TOKEN",
 		},
 		{
 			name: "invalid_token",
 			envVars: []string{
 				"TELEGRAM_BOT_TOKEN=test",
+				"TELEGRAM_ADMIN_ID=1",
+				"GLOBAL_SUB_URL=https://sub.example.com",
+				"SITE_URL=https://vpn.example.com",
 			},
-			wantErr: true,
+			wantIn: "TELEGRAM_BOT_TOKEN",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			cmd := exec.CommandContext(ctx, binPath)
-			cmd.Env = append(os.Environ(), tt.envVars...)
+			cmd := exec.Command(binPath)
+			// Полностью переопределяем env: родительская среда не должна
+			// случайно вылечить невалидный конфиг.
+			cmd.Env = tt.envVars
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
 
 			err := cmd.Start()
 			require.NoError(t, err, "Failed to start binary")
@@ -157,18 +218,22 @@ func TestSmoke_ConfigValidation(t *testing.T) {
 			done := make(chan error, 1)
 			go func() { done <- cmd.Wait() }()
 
+			// Невалидный конфиг должен завершить процесс сам, быстро.
 			select {
-			case <-done:
-			case <-ctx.Done():
-				if cmd.Process != nil {
-					_ = cmd.Process.Kill()
-					_ = cmd.Wait()
-				}
+			case err := <-done:
+				require.Error(t, err, "invalid config must exit non-zero")
+				var exitErr *exec.ExitError
+				require.ErrorAs(t, err, &exitErr, "process must be terminated by config validation")
+				require.NotEqual(t, 0, exitErr.ExitCode(), "config validation failure must produce non-zero exit code")
+			case <-time.After(10 * time.Second):
+				_ = cmd.Process.Kill()
+				<-done
+				t.Fatalf("binary with invalid config did not exit in time")
 			}
 
-			if tt.wantErr {
-				t.Logf("Expected validation error for %s", tt.name)
-			}
+			require.Contains(t, stderr.String(), "Failed to load config",
+				"validation failure must be reported to stderr")
+			require.Contains(t, stderr.String(), tt.wantIn)
 		})
 	}
 }

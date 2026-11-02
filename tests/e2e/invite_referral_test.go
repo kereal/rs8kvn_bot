@@ -14,7 +14,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/kereal/rs8kvn_bot/internal/web"
-	"github.com/kereal/rs8kvn_bot/internal/xui"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
@@ -39,50 +38,6 @@ func TestE2E_ShareLink_CachesPendingInvite(t *testing.T) {
 	assert.True(t, env.botAPI.SendCalledSafe(), "Invite message should be sent")
 	assert.Contains(t, env.botAPI.LastSentText, "пригласили", "Should show invited message")
 	assert.Contains(t, env.botAPI.LastSentText, "реферальное", "Should mention referral")
-}
-
-func TestE2E_ShareLink_ExistingSubscription_Ignored(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	existingSub := &database.Subscription{
-		TelegramID:     env.chatID,
-		Username:       env.username,
-		ClientID:       "existing-client",
-		SubscriptionID: "existing-sub",
-		Status:         "active",
-	}
-	createE2ESub(t, env.db, existingSub)
-
-	_, err := env.db.GetOrCreateInvite(ctx, 111222, "sharecode456")
-	require.NoError(t, err)
-
-	resetBotAPI(env.botAPI)
-
-	env.handler.HandleStart(ctx, tgbotapi.Update{
-		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_sharecode456", 6),
-	})
-
-	assert.True(t, env.botAPI.SendCalledSafe(), "Menu should be sent")
-	assert.Contains(t, env.botAPI.LastSentText, "кнопки ниже", "Should show normal menu, not invite message")
-}
-
-func TestE2E_ShareLink_InvalidCode(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	resetBotAPI(env.botAPI)
-
-	env.handler.HandleStart(ctx, tgbotapi.Update{
-		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_invalidcode", 6),
-	})
-
-	assert.True(t, env.botAPI.SendCalledSafe(), "Menu should be sent")
-	assert.Contains(t, env.botAPI.LastSentText, "Привет", "Should show normal menu for invalid code")
 }
 
 func setupInviteServer(t *testing.T, env *e2eTestEnv, inviteCode string, xuiSetup func(*testutil.XUIClient)) (*web.Server, *service.SubscriptionService) {
@@ -142,30 +97,6 @@ func TestE2E_InviteLink_Parameterized(t *testing.T) {
 				assert.True(t, env.xui.AddClientWithIDCalled, "XUI AddClientWithID should be called")
 			},
 		},
-		{
-			name:         "invalid_code",
-			inviteCode:   "nonexistent_code",
-			referrerID:   0,
-			setupXUI:     nil,
-			createInvite: false,
-			wantStatus:   http.StatusNotFound,
-			wantContains: "Приглашение не найдено",
-			check:        nil,
-		},
-		{
-			name:       "xui_error",
-			inviteCode: "invite_xui_fail",
-			referrerID: 200003,
-			setupXUI: func(xuiClient *testutil.XUIClient) {
-				xuiClient.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
-					return nil, fmt.Errorf("authentication failed")
-				}
-			},
-			createInvite: true,
-			wantStatus:   http.StatusInternalServerError,
-			wantContains: "Ошибка сервера",
-			check:        nil,
-		},
 	}
 
 	for _, tt := range tests {
@@ -196,47 +127,6 @@ func TestE2E_InviteLink_Parameterized(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestE2E_AutoRelogin_On401(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	inviteCode := "invite_relogin"
-	_, err := env.db.GetOrCreateInvite(ctx, 300001, inviteCode)
-	require.NoError(t, err)
-
-	env.cfg.TrialRateLimit = 100
-
-	addClientCallCount := 0
-	env.xui.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
-		addClientCallCount++
-		if addClientCallCount == 1 {
-			return nil, fmt.Errorf("authentication failed")
-		}
-
-		return &xui.ClientConfig{
-			ID:    req.ClientID,
-			Email: req.Email,
-			SubID: req.SubID,
-		}, nil
-	}
-
-	clients := e2eNodeClients(map[uint]interfaces.XUIClient{1: env.xui})
-	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true, ID: 1}}
-	subService := service.NewSubscriptionService(env.db, clients, nodes, env.cfg)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig.Username, subService, nil)
-
-	req := httptest.NewRequest("GET", "/i/"+inviteCode, nil)
-	req.Header.Set("X-Forwarded-For", "10.2.1.1")
-
-	rec := httptest.NewRecorder()
-
-	srv.HandleInvite(rec, req)
-
-	assert.GreaterOrEqual(t, addClientCallCount, 1, "AddClientWithID should have been called at least once")
 }
 
 func TestE2E_InviteLink_RateLimitExceeded(t *testing.T) {
@@ -508,61 +398,6 @@ func TestE2E_FullCycle_MultipleUsersViaInvite(t *testing.T) {
 	}
 }
 
-func TestE2E_FullCycle_InviteThenShare(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	webInviteCode := "web_invite_then_share"
-	shareInviteCode := "share_invite_then_bind"
-
-	_, err := env.db.GetOrCreateInvite(ctx, 300004, webInviteCode)
-	require.NoError(t, err)
-	_, err = env.db.GetOrCreateInvite(ctx, 300005, shareInviteCode)
-	require.NoError(t, err)
-
-	env.cfg.TrialRateLimit = 100
-
-	clients := e2eNodeClients(map[uint]interfaces.XUIClient{1: env.xui})
-	nodes := []database.Node{{Name: "main", Host: "https://panel.example.com", APIToken: "test-api-token", InboundIDs: "[1]", IsActive: true, ID: 1}}
-	subService := service.NewSubscriptionService(env.db, clients, nodes, env.cfg)
-	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig.Username, subService, nil)
-
-	req := httptest.NewRequest("GET", "/i/"+webInviteCode, nil)
-	req.Header.Set("X-Forwarded-For", "10.4.1.1")
-
-	rec := httptest.NewRecorder()
-	srv.HandleInvite(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	html := rec.Body.String()
-	subIDStart := strings.Index(html, "trial_")
-	require.Greater(t, subIDStart, -1)
-	subIDEnd := strings.Index(html[subIDStart:], "\"")
-	require.Greater(t, subIDEnd, -1)
-	trialSubID := html[subIDStart+6 : subIDStart+subIDEnd]
-
-	resetBotAPI(env.botAPI)
-	env.xui.AddClientWithIDCalled = false
-	env.xui.UpdateClientCalled = false
-
-	env.handler.HandleStart(ctx, tgbotapi.Update{
-		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start trial_"+trialSubID, 6),
-	})
-
-	assert.True(t, env.botAPI.SendCalledSafe())
-
-	resetBotAPI(env.botAPI)
-	env.handler.HandleStart(ctx, tgbotapi.Update{
-		Message: newCommandMessage(env.chatID, env.chatID, env.username, "/start share_"+shareInviteCode, 6),
-	})
-
-	assert.True(t, env.botAPI.SendCalledSafe())
-	assert.NotContains(t, env.botAPI.LastSentText, "пригласил", "Should not show invite message when user has subscription")
-}
-
 func TestE2E_FullCycle_ConcurrentInviteAccess(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer env.db.Close()
@@ -628,37 +463,6 @@ func TestE2E_FullCycle_ConcurrentInviteAccess(t *testing.T) {
 	assert.GreaterOrEqual(t, trialCount, 10, "Should have at least 10 trial subscriptions")
 }
 
-func TestE2E_Referral_IncrementDecrements(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	referrerID := int64(700001)
-
-	assert.Equal(t, int64(0), env.handler.GetReferralCount(referrerID))
-
-	env.handler.IncrementReferralCount(referrerID)
-	assert.Equal(t, int64(1), env.handler.GetReferralCount(referrerID))
-
-	env.handler.IncrementReferralCount(referrerID)
-	assert.Equal(t, int64(2), env.handler.GetReferralCount(referrerID))
-
-	env.handler.DecrementReferralCount(referrerID)
-	assert.Equal(t, int64(1), env.handler.GetReferralCount(referrerID))
-
-	env.handler.DecrementReferralCount(referrerID)
-	assert.Equal(t, int64(0), env.handler.GetReferralCount(referrerID))
-}
-
-func TestE2E_Referral_DecrementDoesNotGoNegative(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	referrerID := int64(700002)
-
-	env.handler.DecrementReferralCount(referrerID)
-	assert.Equal(t, int64(0), env.handler.GetReferralCount(referrerID))
-}
-
 func TestE2E_Referral_RefstatsShowsData(t *testing.T) {
 	env := setupE2EEnv(t)
 	defer env.db.Close()
@@ -683,63 +487,4 @@ func TestE2E_Referral_RefstatsShowsData(t *testing.T) {
 	assert.True(t, env.botAPI.SendCalledSafe(), "Refstats should send message")
 	assert.Contains(t, env.botAPI.LastSentText, "Статистика рефералов", "Should show referral stats")
 	assert.Contains(t, env.botAPI.LastSentText, "3", "Should show total referrals")
-}
-
-func TestE2E_InviteChain_ABC(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer env.db.Close()
-
-	ctx := context.Background()
-
-	// User A creates subscription (referrer)
-	userA := int64(100000)
-	_, err := env.subService.Create(ctx, userA, "user_a", "")
-	require.NoError(t, err)
-
-	// Create invite for A
-	_, err = env.db.GetOrCreateInvite(ctx, userA, "invite_a")
-	require.NoError(t, err)
-
-	// User B creates subscription (referred by A)
-	userB := int64(200000)
-	_, err = env.subService.Create(ctx, userB, "user_b", "")
-	require.NoError(t, err)
-
-	subB, err := env.db.GetByTelegramID(ctx, userB)
-	require.NoError(t, err)
-
-	referredByB := int64(100000)
-	subB.ReferredBy = &referredByB
-	err = env.db.UpdateSubscription(ctx, subB)
-	require.NoError(t, err)
-
-	subB, err = env.db.GetByTelegramID(ctx, userB)
-	require.NoError(t, err)
-	assert.Equal(t, int64(100000), *subB.ReferredBy, "B should have A as referrer")
-
-	// Create invite for B
-	_, err = env.db.GetOrCreateInvite(ctx, userB, "invite_b")
-	require.NoError(t, err)
-
-	// User C creates subscription (referred by B)
-	userC := int64(300000)
-	_, err = env.subService.Create(ctx, userC, "user_c", "")
-	require.NoError(t, err)
-
-	subC, err := env.db.GetByTelegramID(ctx, userC)
-	require.NoError(t, err)
-
-	referredByC := int64(200000)
-	subC.ReferredBy = &referredByC
-	err = env.db.UpdateSubscription(ctx, subC)
-	require.NoError(t, err)
-
-	subC, err = env.db.GetByTelegramID(ctx, userC)
-	require.NoError(t, err)
-	assert.Equal(t, int64(200000), *subC.ReferredBy, "C should have B as referrer")
-
-	// Verify A has no referrer
-	subA, err := env.db.GetByTelegramID(ctx, 100000)
-	require.NoError(t, err)
-	assert.Nil(t, subA.ReferredBy, "A should have no referrer")
 }

@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -12,12 +13,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/service"
+	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
@@ -65,6 +68,26 @@ func createE2ESub(t *testing.T, db *database.Service, sub *database.Subscription
 
 func e2eNodes(host string) []database.Node {
 	return []database.Node{{ID: 1, Name: "main", IsActive: true, Host: host, APIToken: "test-api-token", Type: database.NodeType3xUI, InboundIDs: "[1]"}}
+}
+
+// fixedPaymentProvider is a shared PaymentProvider stub returning a
+// deterministic transaction id and payment link. The transaction id is supplied
+// per test so the webhook callback can reference the same id
+// (see platega.ParseTransactionID).
+type fixedPaymentProvider struct {
+	transactionID string
+}
+
+func (p fixedPaymentProvider) CreateTransaction(_ context.Context, _ platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
+	return &platega.CreateTransactionResponse{
+		TransactionID: p.transactionID,
+		URL:           "https://pay.example/checkout",
+		ExpiresIn:     "00:15:00",
+	}, nil
+}
+
+func (fixedPaymentProvider) GetTransactionStatus(_ context.Context, _ uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	return nil, errors.New("status not configured")
 }
 
 type e2eTestEnv struct {

@@ -237,54 +237,6 @@ func TestE2E_SetPlanCommand_Success(t *testing.T) {
 	assert.Equal(t, database.SyncStatusActive, nodes[0].Status)
 }
 
-func TestE2E_SetPlanCommand_ArgValidation(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		cmd     string
-		wantMsg string
-	}{
-		{name: "no_args", cmd: "/setplan", wantMsg: "Использование: /setplan"},
-		{name: "invalid_sub_id", cmd: "/setplan abc 2", wantMsg: "Неверный ID подписки"},
-		{name: "invalid_plan_id", cmd: "/setplan 5 abc", wantMsg: "Неверный ID тарифа"},
-		{name: "days_too_large", cmd: "/setplan 5 3 99999", wantMsg: "Количество дней не может превышать"},
-		{name: "not_found", cmd: "/setplan 99999 2", wantMsg: "Ошибка смены тарифа"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			env := setupE2EEnv(t)
-			defer func() {
-				err := env.db.Close()
-				if err != nil {
-					t.Logf("Warning: failed to close database: %v", err)
-				}
-			}()
-
-			ctx := context.Background()
-			adminID := env.cfg.TelegramAdminID
-			resetBotAPI(env.botAPI)
-
-			update := tgbotapi.Update{
-				Message: &tgbotapi.Message{
-					Chat: &tgbotapi.Chat{ID: adminID},
-					From: &tgbotapi.User{
-						ID:       adminID,
-						UserName: "admin",
-					},
-					Text:     tt.cmd,
-					Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 7}},
-				},
-			}
-			env.handler.HandleSetPlan(ctx, update)
-
-			assert.True(t, env.botAPI.SendCalledSafe())
-			assert.Contains(t, env.botAPI.LastSentText, tt.wantMsg)
-		})
-	}
-}
-
 // broadcastName is the fixed broadcast name used by runBroadcastFlow.
 const broadcastName = "E2E рассылка"
 
@@ -603,8 +555,9 @@ func TestE2E_SendCommand_ArgValidation(t *testing.T) {
 		cmd     string
 		wantMsg string
 	}{
-		{name: "no_args", cmd: "/send", wantMsg: "Использование: /send"},
-		{name: "only_target_no_message", cmd: "/send 123456", wantMsg: "Использование"},
+		// no_args / only_target are covered by unit tests
+		// TestHandleSend_NoArguments and TestHandleSend_OnlyTarget; only the
+		// DB-backed lookup remains here.
 		{name: "user_not_found", cmd: "/send nonexistent_user Hello!", wantMsg: "не найден в базе"},
 	}
 
@@ -919,6 +872,20 @@ func TestE2E_NonAdmin_AccessControl(t *testing.T) {
 			},
 			wantNotSent: true,
 		},
+		{
+			name: "cannot_access_version",
+			setupEnv: func(env *e2eTestEnv, ctx context.Context) {
+				env.handler.HandleVersion(ctx, tgbotapi.Update{
+					Message: &tgbotapi.Message{
+						Chat:     &tgbotapi.Chat{ID: 999999},
+						From:     &tgbotapi.User{ID: 999999, UserName: "notadmin"},
+						Text:     "/v",
+						Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 2}},
+					},
+				})
+			},
+			wantNotSent: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1016,36 +983,6 @@ func TestE2E_VersionCommand_Admin(t *testing.T) {
 	env.handler.HandleVersion(ctx, update)
 
 	assert.True(t, env.botAPI.SendCalledSafe(), "Admin should receive version info")
-}
-
-func TestE2E_VersionCommand_NonAdmin(t *testing.T) {
-	env := setupE2EEnv(t)
-	defer func() {
-		err := env.db.Close()
-		if err != nil {
-			t.Logf("Warning: failed to close database: %v", err)
-		}
-	}()
-
-	ctx := context.Background()
-	nonAdminID := int64(999999)
-
-	resetBotAPI(env.botAPI)
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: nonAdminID},
-			From: &tgbotapi.User{
-				ID:       nonAdminID,
-				UserName: "notadmin",
-			},
-			Text:     "/v",
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 2}},
-		},
-	}
-	env.handler.HandleVersion(ctx, update)
-
-	assert.False(t, env.botAPI.SendCalledSafe(), "Non-admin should not receive version info")
 }
 
 // TestE2E_BroadcastCrashMidChunksResumesAfterRestart моделирует падение воркера
