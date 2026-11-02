@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
+	"github.com/kereal/rs8kvn_bot/internal/web"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -91,4 +92,33 @@ func TestRunSupervised_StopsOnContextCancel(t *testing.T) {
 	})
 
 	assert.Equal(t, int32(1), runs.Load(), "после отмены контекста перезапуска быть не должно")
+}
+
+type stubNodeHealth struct {
+	total int
+	down  int
+}
+
+func (s stubNodeHealth) NodeHealthSnapshot() (int, int) { return s.total, s.down }
+
+// Тест поведения: готовность сервиса отражает состояние нод, а не только БД —
+// пять дней лежащая нода больше не выглядит зелёной.
+func TestNodeHealthComponent(t *testing.T) {
+	tests := []struct {
+		name   string
+		source nodeHealthSource
+		status web.Status
+	}{
+		{name: "no source", source: nil, status: web.StatusOK},
+		{name: "no readable nodes", source: stubNodeHealth{}, status: web.StatusOK},
+		{name: "all nodes up", source: stubNodeHealth{total: 3}, status: web.StatusOK},
+		{name: "one node down", source: stubNodeHealth{total: 3, down: 1}, status: web.StatusDegraded},
+		{name: "all nodes down", source: stubNodeHealth{total: 3, down: 3}, status: web.StatusDown},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.status, nodeHealthComponent(tt.source).Status)
+		})
+	}
 }

@@ -231,10 +231,35 @@ func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 	return nil, nil, fmt.Errorf("failed to initialize Telegram bot after %d attempts: %w", botInitMaxAttempts, lastErr)
 }
 
+// nodeHealthSource сообщает доступность нод по последнему проходу синка.
+// Проверка готовности читает готовый снимок и не ходит в панель по сети.
+type nodeHealthSource interface {
+	NodeHealthSnapshot() (total, down int)
+}
+
+// nodeHealthComponent превращает снимок доступности нод в компонент готовности:
+// часть нод недоступна — Degraded (трафик идёт через оставшиеся), все — Down.
+func nodeHealthComponent(source nodeHealthSource) web.ComponentHealth {
+	if source == nil {
+		return web.ComponentHealth{Status: web.StatusOK}
+	}
+
+	total, down := source.NodeHealthSnapshot()
+
+	switch {
+	case total == 0 || down == 0:
+		return web.ComponentHealth{Status: web.StatusOK}
+	case down == total:
+		return web.ComponentHealth{Status: web.StatusDown, Message: fmt.Sprintf("all %d nodes unavailable", total)}
+	default:
+		return web.ComponentHealth{Status: web.StatusDegraded, Message: fmt.Sprintf("%d/%d nodes unavailable", down, total)}
+	}
+}
+
 // startWebServer создаёт и запускает HTTP-сервер (подписки, инвайт/trial-страницы).
 // Сервер стартует асинхронно; функция ждёт до 2 секунд первой ошибки запуска,
 // чтобы не блокировать старт бота, но вернуть ошибку, если сервер точно не поднялся.
-func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service, orderService *service.OrderService, botAPI interfaces.BotAPI) (*web.Server, error) {
+func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service, orderService *service.OrderService, botAPI interfaces.BotAPI, nodeHealth nodeHealthSource) (*web.Server, error) {
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.WebServerPort), dbService, cfg, botConfig.Username, subService, subServer)
 	webServer.SetOrderService(orderService)
 	webServer.SetBot(botAPI)
@@ -246,6 +271,10 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 			Secret:     cfg.PlategaSecret,
 		})
 	}
+
+	webServer.RegisterChecker("nodes", func(context.Context) web.ComponentHealth {
+		return nodeHealthComponent(nodeHealth)
+	})
 
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		err := dbService.Ping(ctx)
@@ -519,7 +548,7 @@ func main() {
 	// The web server starts with an empty bot username; initBot injects the real
 	// username (from Telegram getMe) via SetBotUsername once the bot is ready, so
 	// the share/invite page shows the correct @username after startup.
-	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService, svc.orderService, botAPI)
+	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService, svc.orderService, botAPI, svc.syncService)
 	if err != nil {
 		logger.Fatal("Failed to start web server", zap.Error(err))
 	}

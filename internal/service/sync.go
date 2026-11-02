@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
@@ -27,6 +28,10 @@ type SyncService struct {
 	db      interfaces.SyncStore
 	clients NodeClients
 	nodes   []database.Node
+	// nodeHealth — снимок доступности нод по последнему проходу синка.
+	// Заменяется целиком одним писателем, поэтому читателей не нужно
+	// сериализовать: /readyz читает карту без блокировок.
+	nodeHealth atomic.Pointer[map[uint]bool]
 
 	locksMu     sync.Mutex
 	locks       map[uint]*subscriptionSyncLock
@@ -968,6 +973,7 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 	// попали в этот же проход.
 	s.releaseRecoveredNodes(ctx)
 	s.refreshSyncGauges(ctx)
+	s.refreshNodeHealth(ctx)
 
 	pendingNodes, err := s.db.GetPendingSync(ctx)
 	if err != nil {
@@ -1152,6 +1158,61 @@ func (s *SyncService) releaseRecoveredNodes(ctx context.Context) {
 				zap.Int64("released", released))
 		}
 	}
+}
+
+// refreshNodeHealth пингует активные ноды с читаемой панелью и заменяет
+// снимок доступности. /readyz и алерты видят результат без живого запроса к
+// панели: проверка готовности не должна ходить по сети.
+func (s *SyncService) refreshNodeHealth(ctx context.Context) {
+	health := make(map[uint]bool, len(s.nodes))
+
+	for _, node := range s.nodes {
+		if !node.IsActive || ctx.Err() != nil {
+			continue
+		}
+
+		reader, ok := s.clients.Reader(node.ID)
+		if !ok {
+			continue
+		}
+
+		pingErr := reader.Ping(ctx)
+		up := pingErr == nil
+		health[node.ID] = up
+
+		if up {
+			metrics.NodeUp.WithLabelValues(node.Name).Set(1)
+			continue
+		}
+
+		metrics.NodeUp.WithLabelValues(node.Name).Set(0)
+		logger.Warn("sync: node health probe failed",
+			zap.Uint("node_id", node.ID),
+			zap.String("node", node.Name),
+			zap.Error(pingErr))
+	}
+
+	s.nodeHealth.Store(&health)
+}
+
+// NodeHealthSnapshot возвращает число проверенных нод и число недоступных по
+// последнему проходу синка. total == 0 означает, что проверять нечего
+// (нод нет или у них нет читаемой панели).
+func (s *SyncService) NodeHealthSnapshot() (total, down int) {
+	health := s.nodeHealth.Load()
+	if health == nil {
+		return 0, 0
+	}
+
+	unavailable := 0
+
+	for _, up := range *health {
+		if !up {
+			unavailable++
+		}
+	}
+
+	return len(*health), unavailable
 }
 
 // refreshSyncGauges обновляет метрики состояния биндингов: без них парковка и

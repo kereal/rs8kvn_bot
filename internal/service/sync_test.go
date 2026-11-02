@@ -3106,3 +3106,35 @@ func TestSyncPendingNodes_KeepsParkedBindingsWhenNodeStillDown(t *testing.T) {
 	require.NoError(t, svc.SyncPendingNodes(context.Background()))
 	assert.False(t, releaseCalled, "пока Ping падает, биндинги не освобождаются")
 }
+
+// Тест поведения: снимок доступности нод строится по пингам активных нод с
+// читаемой панелью — /readyz должен видеть упавшую ноду.
+func TestSyncPendingNodes_ReportsNodeHealth(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.NewServiceStoreFake()
+	db.CountSubscriptionNodesByStatusFunc = func(context.Context) (map[string]int64, error) {
+		return map[string]int64{}, nil
+	}
+
+	upNode := database.Node{ID: 1, Name: "up-node", IsActive: true, Host: "http://up", APIToken: "t"}
+	downNode := database.Node{ID: 2, Name: "down-node", IsActive: true, Host: "http://down", APIToken: "t"}
+	disabledNode := database.Node{ID: 3, Name: "disabled-node", IsActive: false, Host: "http://off", APIToken: "t"}
+	proxmanNode := database.Node{ID: 4, Name: "proxman-node", IsActive: true, Host: "http://prox", APIToken: "t"}
+
+	clients := NodeClients{
+		1: {Reader: &testutil.XUIClient{}},
+		2: {Reader: &testutil.XUIClient{PingFunc: func(context.Context) error { return errors.New("connection refused") }}},
+		3: {Reader: &testutil.XUIClient{}},
+		// 4 — без Reader: нода без читаемой панели не проверяется.
+		4: {Provision: &mockVPNClient{}},
+	}
+
+	svc := NewSyncService(db, clients, []database.Node{upNode, downNode, disabledNode, proxmanNode})
+
+	require.NoError(t, svc.SyncPendingNodes(context.Background()))
+
+	total, down := svc.NodeHealthSnapshot()
+	assert.Equal(t, 2, total, "проверяются только активные ноды с читаемой панелью")
+	assert.Equal(t, 1, down, "упавшая нода должна попадать в снимок")
+}

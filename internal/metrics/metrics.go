@@ -212,6 +212,17 @@ var (
 		},
 	)
 
+	// NodeUp reports panel availability per node as seen by the sync health
+	// probe: 1 = panel answers, 0 = node is down. Alerting on this is what
+	// turns a dead node into a page instead of a support ticket.
+	NodeUp = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "node_up",
+			Help: "VPN node panel availability from the sync health probe (1 = up)",
+		},
+		[]string{"node"},
+	)
+
 	// SubscriptionNodes tracks subscription node bindings by sync status.
 	SubscriptionNodes = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
