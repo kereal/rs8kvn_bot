@@ -819,6 +819,23 @@ func TestGetInbound(t *testing.T) {
 		assert.Equal(t, 443, inbound.Port)
 		assert.Equal(t, "ws", inbound.GetTransport())
 	})
+
+	t.Run("non-200 is wrapped as retryable ErrNon200Response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("upstream error"))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(server.URL, testAPIToken)
+		require.NoError(t, err)
+
+		defer client.Close()
+
+		_, err = client.GetInbound(context.Background(), 1)
+		assert.ErrorIs(t, err, utils.ErrNon200Response,
+			"a non-200 from /inbounds/get must stay retryable, not park the node")
+	})
 }
 
 func TestGetRequiredFlow_Fallback(t *testing.T) {

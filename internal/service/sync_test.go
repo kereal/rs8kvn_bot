@@ -791,18 +791,19 @@ func TestSyncService_handleSyncError_RetryableClimbsThenParks(t *testing.T) {
 
 	svc := NewSyncService(db, nil, []database.Node{*node1})
 
-	// Climb the ladder: each hit schedules a near-future retry.
-	for range maxSyncRetries {
+	// Climb the ladder: each hit schedules a near-future retry, increments
+	// the counter exactly once and records the timeout text.
+	for i := 1; i <= maxSyncRetries; i++ {
 		svc.handleSyncError(ctx, sn, timeoutErr)
 
 		rows, err := db.GetBySubscriptionID(ctx, sub.ID)
 		require.NoError(t, err)
 		require.Len(t, rows, 1)
+		require.NotNil(t, rows[0].RetryAt)
 		require.True(t, rows[0].RetryAt.Before(time.Now().UTC().Add(2*time.Hour)), "ladder retries stay in the near future")
-		if rows[0].RetryCount == 1 {
-			assert.Equal(t, 1, rows[0].RetryCount, "first hit increments once")
-			assert.Contains(t, *rows[0].LastError, "i/o timeout")
-		}
+		assert.Equal(t, i, rows[0].RetryCount, "hit %d must increment the counter to %d", i, i)
+		require.NotNil(t, rows[0].LastError, "hit %d must record the error", i)
+		assert.Contains(t, *rows[0].LastError, "i/o timeout")
 	}
 
 	rows, err := db.GetBySubscriptionID(ctx, sub.ID)

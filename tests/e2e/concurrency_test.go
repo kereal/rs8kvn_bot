@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestE2E_Concurrent_CreateSubscription_SameUser(t *testing.T) {
@@ -62,23 +64,39 @@ func TestE2E_Concurrent_CreateSubscription_SameUser(t *testing.T) {
 
 	assert.Equal(t, 1, active, "exactly one active subscription should exist for the user after concurrent creates")
 
-	// Same race through the handler path (create_subscription callback): the
-	// in-progress lock must let exactly one creation win and leave the user
-	// with a readable subscription.
+	// Гонка через handler (callback create_subscription) на пользователе БЕЗ
+	// подписки — иначе победитель идёт в ветку «подписка уже есть» и реальный
+	// createSubscription не вызывается никогда. Счётчик врезается в SQL-вставку
+	// subscriptions: он срабатывает до того, как subService.Create вернёт
+	// опоздавшим идемпотентный успех, и считает настоящие вызовы создания.
+	// Идемпотентные выходы вставку не трогают, поэтому ровно один прогон ==
+	// ровно одно создание через handleCreateSubscription.
+	const handlerChatID = int64(990001)
+	var creates atomic.Int32
+	sqlDB := env.db.GetDB()
+	require.NoError(t, sqlDB.Callback().Create().Before("gorm:create").Register("e2e_count_subscription_creates", func(tx *gorm.DB) {
+		if created, ok := tx.Statement.Dest.(*database.Subscription); ok && created.TelegramID == handlerChatID {
+			creates.Add(1)
+		}
+	}))
+	defer func() {
+		_ = sqlDB.Callback().Create().Remove("e2e_count_subscription_creates")
+	}()
+
 	var handlerWG sync.WaitGroup
 	for range 5 {
 		handlerWG.Go(func() {
 			env.handler.HandleCallback(ctx, tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
 					Message: &tgbotapi.Message{
-						Chat: &tgbotapi.Chat{ID: env.chatID},
+						Chat: &tgbotapi.Chat{ID: handlerChatID},
 						From: &tgbotapi.User{
-							ID:       env.chatID,
+							ID:       handlerChatID,
 							UserName: env.username,
 						},
 					},
 					From: &tgbotapi.User{
-						ID:       env.chatID,
+						ID:       handlerChatID,
 						UserName: env.username,
 					},
 					Data: "create_subscription",
@@ -88,11 +106,14 @@ func TestE2E_Concurrent_CreateSubscription_SameUser(t *testing.T) {
 	}
 	handlerWG.Wait()
 
+	assert.Equal(t, int32(1), creates.Load(),
+		"пять параллельных callback одному пользователю без подписки должны дать ровно один реальный вызов создания")
 	assert.True(t, env.botAPI.SendCalledSafe(), "At least one message should be sent during concurrent callback handling")
 
-	sub, err := env.db.GetByTelegramID(ctx, env.chatID)
+	sub, err := env.db.GetByTelegramID(ctx, handlerChatID)
 	require.NoError(t, err)
-	assert.Equal(t, env.chatID, sub.TelegramID)
+	assert.Equal(t, handlerChatID, sub.TelegramID)
+	assert.NotEmpty(t, sub.SubscriptionID, "the winning creation must leave a readable subscription")
 }
 
 func TestE2E_Concurrent_CreateSubscription_DifferentUsers(t *testing.T) {

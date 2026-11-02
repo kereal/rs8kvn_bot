@@ -379,12 +379,16 @@ func TestProcessTrafficNotifications_DisabledWithoutExhaustedBitStaysDisabled(t 
 			}, nil
 		},
 	}
+	// Обе ноды отвечают: частичный снимок раньше `used < limit` выходит из
+	// проверки, поэтому полный снимок обязателен — иначе skip засчитывается
+	// из-за недоступной ноды, а не из-за отсутствующего exhausted-бита.
 	client1 := &testutil.XUIClient{
 		GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) { return traffic, nil },
 		UpdateClientFunc:     func(context.Context, xui.ClientRequest) error { updated = true; return nil },
 	}
 	client2 := &testutil.XUIClient{
-		GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) { return nil, errors.New("node unavailable") },
+		GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) { return traffic, nil },
+		UpdateClientFunc:     func(context.Context, xui.ClientRequest) error { updated = true; return nil },
 	}
 	bot := testutil.NewBotAPI()
 	svc := NewSubscriptionService(db, NodeClients{1: {Reader: client1}, 2: {Reader: client2}}, []database.Node{
