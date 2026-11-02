@@ -119,8 +119,7 @@
 - **HTTP Requests by Status** — по `coalesce(nullIf(label('code'),''), label('status'))`, поэтому график живёт и на старой, и на новой сборке
 - **HTTP Request Latency (mean)** — по `path`
 
-### Payments
-- **Payment Revenue by Currency**, **Payment Operations by Result** — быстрый финансовый срез
+Секция Payments из этого дашборда удалена: деньги живут в 💰 Payments & Revenue, дубль показывал накопленную сумму (`avgMerge(value_avg)` по counter'у) вместо потока.
 
 ---
 
@@ -274,6 +273,8 @@
 2. **Counter читается только через rate.** `avgMerge(rate_avg)` для «сколько в секунду», `max−min` для «сколько за период». `maxMerge(value_max)` в одиночку — накопленное с рестарта процесса, а не за диапазон.
 3. **Пустая серия ≠ ноль.** Permetheus не отдаёт детей `CounterVec` до первого события. Для воркеров и форматов выдачи приложение публикует нулевые серии в `init()`, остальные (платежи, кеш-инвалидации) появятся после первого события. Графики с `treat_missing_values: zero` показывают ноль, а не разрыв.
 4. **`derivativeMerge` отсутствует** в Better Stack, хотя фигурировал в старых записях.
+5. **`series_column` обязан совпадать с алиасом в SQL.** Если запрос отдаёт `operation`/`command`, а настройки ждут `series`, легенда пустая, хотя график рисуется. Проверяй пару «алиас в запросе ↔ `series_column`».
+6. **RUM-дашборды `Web vitals` (1077180) и `Website analytics` (1077181) удалить через API нельзя** — `remove_dashboard` возвращает 404, хотя они видны в списке. Не наши данные, оставлены как есть.
 
 ## История изменений
 
@@ -283,7 +284,7 @@
 - Покрытие расширено с бота на **сервер**: swap, OOM kills, иноды `/`, ядра CPU; контейнеры — CPU/память/лимиты/PIDs/disk IO разбиты по `container_name` (раньше усреднялись в одну серию).
 - Найдено и исправлено 8 графиков с теми же дефектами, что в первом проходе: три «p95» на Bot Activity, три «hourly» revenue на Payments (`value_avg` вместо дельты), старый лейбл `status` на Bot Activity, накопительный revenue.
 - Добавлены графики: CPU cores, Swap, OOM kills, Root inodes, Container memory limit, Container PIDs, Container disk IO, GC cycles/pause, Open FDs, Metrics scrape health, HTTP Requests by path, Cache invalidations by reason, Source fetch latency, Bindings by status, Reminders sent, Traffic notifications sent, Orphan reconcile latency, Payment operation latency, Payment reconcile runs, DB pool wait time, Telegram API calls by result.
-- Удалены: «Sync Runs» (дубль «Sync runs by result»), «Cumulative Revenue (process lifetime)» на Overview, пустая секция «Telegram Bot» в 1165131.
+- Удалены: «Sync Runs» (дубль «Sync runs by result»), «Cumulative Revenue (process lifetime)» на Overview, пустая секция «Telegram Bot» в 1165131, секция Payments на 🤖 Telegram Bot (дубль + чтение counter'а как значения), а также починен `series_column` у «Updates by Command / Result».
 - Все 8 алертов **включены** (ранее 6 были в paused).
 - Зафиксированы ограничения Better Stack по перцентилям и чтению counters.
 
