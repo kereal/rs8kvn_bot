@@ -391,7 +391,15 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !platega.VerifyHeaders(pc.MerchantID, pc.Secret, r.Header) {
+		// Отказ по подписи раньше уходил клиенту молча: ни лога, ни метрики,
+		// ни алерта. Провайдер уже списал деньги, а следов в системе нет.
+		logger.Warn("payment callback rejected: signature mismatch",
+			zap.String("remote_addr", r.RemoteAddr))
+		s.notifyPaymentCallbackIssue(r.Context(), platega.CallbackPayload{},
+			"callback_unauthorized", "signature mismatch",
+			"verify PLATEGA_MERCHANT_ID/PLATEGA_SECRET and the provider signing configuration")
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+
 		return
 	}
 	// Payment state transitions and post-commit user/admin notifications must

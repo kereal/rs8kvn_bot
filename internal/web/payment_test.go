@@ -15,9 +15,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -622,4 +624,31 @@ func (testPaymentProvider) CreateTransaction(context.Context, platega.CreateTran
 
 func (testPaymentProvider) GetTransactionStatus(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
 	return nil, errors.New("status not configured")
+}
+
+// Тест поведения: отказ по подписи должен оставлять след — метрику и алерт
+// администратору. Иначе провайдер списал деньги, а в системе ни строчки.
+func TestHandlePaymentCallback_UnauthorizedIsReported(t *testing.T) {
+	t.Parallel()
+
+	srv, _, bot := newPaymentTestServer(t, nil)
+
+	before := promtestutil.ToFloat64(metrics.PaymentIssuesTotal.WithLabelValues("callback_unauthorized"))
+
+	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{}`))
+	req.Header.Set("X-Merchantid", "wrong-merchant")
+	req.Header.Set("X-Secret", "wrong-secret")
+	req.RemoteAddr = "203.0.113.10:5555"
+
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+
+	after := promtestutil.ToFloat64(metrics.PaymentIssuesTotal.WithLabelValues("callback_unauthorized"))
+	assert.Equal(t, float64(1), after-before, "отказ по подписи должен попадать в payment_issues_total")
+
+	messages := bot.GetAllSentMessages()
+	require.Len(t, messages, 1, "администратор должен получить алерт об отказе")
+	assert.Contains(t, messages[0].Text, "callback_unauthorized")
 }
