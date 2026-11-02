@@ -474,7 +474,7 @@ func TestHandleSubscription_UserinfoExpireNormalizedToSeconds(t *testing.T) {
 	t.Parallel()
 
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Subscription-UserInfo", "upload=1; download=2; total=1073741824; expire=1900000000000")
+		w.Header().Set("Subscription-Userinfo", "upload=1; download=2; total=1073741824; expire=1900000000000")
 		_, _ = w.Write([]byte("vless://uuid@server.example:443?security=tls#Node"))
 	}))
 	defer backend.Close()
@@ -1034,8 +1034,9 @@ func TestHandleSubscription_FetchNodeUsesURLAsIs(t *testing.T) {
 		}, nil
 	}
 
-	_, _, _, err := HandleSubscription(context.Background(), mockDB, newTestSubSvc(t), "sub-fetch", "1.2.3.4", nil, "")
+	result, _, _, err := HandleSubscription(context.Background(), mockDB, newTestSubSvc(t), "sub-fetch", "1.2.3.4", nil, "")
 	require.NoError(t, err)
+	require.NotNil(t, result, "both sources must render")
 
 	mu.Lock()
 	defer mu.Unlock()
