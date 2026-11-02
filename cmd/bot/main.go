@@ -259,7 +259,14 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 	webServerStartErr := make(chan error, 1)
 
 	go func() {
-		defer recoverAndReport("Web server start")
+		defer func() {
+			if r := recover(); r != nil {
+				// Паника до готовности сервера иначе оставила бы select ниже
+				// ждать вечно, а процесс — без веб-сервера.
+				reportPanic("Web server start", r)
+				webServerStartErr <- fmt.Errorf("web server panicked: %v", r)
+			}
+		}()
 
 		err := webServer.Start(context.Background())
 		if err != nil {
@@ -298,123 +305,132 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	}
 
 	go func() {
-		defer recoverAndReport("DB pool metrics collector")
 		defer wg.Done()
 
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
+		runSupervised(ctx, "DB pool metrics collector", func(ctx context.Context) {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				metrics.CollectDBPoolMetrics(ctx, dbService.GetDB())
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					metrics.CollectDBPoolMetrics(ctx, dbService.GetDB())
+				}
 			}
-		}
+		})
 	}()
 
 	go func() {
-		defer recoverAndReport("Orphan reconciler")
 		defer wg.Done()
 
-		select {
-		case <-time.After(30 * time.Second):
-		case <-ctx.Done():
-			return
-		}
-
-		svc := handler.GetSubscriptionService()
-		if svc == nil {
-			logger.Warn("SubscriptionService not available, skipping orphan reconciliation")
-			return
-		}
-
-		count, err := svc.ReconcileOrphanedClients(ctx)
-		if err != nil {
-			logger.Warn("Initial orphan reconciliation failed", zap.Error(err))
-		} else {
-			logger.Info("Orphan reconciliation completed", zap.Int("revoked", count))
-		}
-
-		ticker := time.NewTicker(8 * time.Hour)
-		defer ticker.Stop()
-
-		for {
+		runSupervised(ctx, "Orphan reconciler", func(ctx context.Context) {
 			select {
+			case <-time.After(30 * time.Second):
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				count, err := svc.ReconcileOrphanedClients(ctx)
-				if err != nil {
-					logger.Warn("Orphan reconciliation failed", zap.Error(err))
-				} else {
-					logger.Info("Orphan reconciliation completed", zap.Int("revoked", count))
+			}
+
+			svc := handler.GetSubscriptionService()
+			if svc == nil {
+				logger.Warn("SubscriptionService not available, skipping orphan reconciliation")
+				return
+			}
+
+			count, err := svc.ReconcileOrphanedClients(ctx)
+			if err != nil {
+				logger.Warn("Initial orphan reconciliation failed", zap.Error(err))
+			} else {
+				logger.Info("Orphan reconciliation completed", zap.Int("revoked", count))
+			}
+
+			ticker := time.NewTicker(8 * time.Hour)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					count, err := svc.ReconcileOrphanedClients(ctx)
+					if err != nil {
+						logger.Warn("Orphan reconciliation failed", zap.Error(err))
+					} else {
+						logger.Info("Orphan reconciliation completed", zap.Int("revoked", count))
+					}
 				}
 			}
-		}
+		})
 	}()
 
 	backupSched := scheduler.NewBackupScheduler(cfg.DatabasePath, config.DefaultBackupHour, config.DefaultBackupRetention)
 
 	go func() {
-		defer recoverAndReport("Backup scheduler")
 		defer wg.Done()
 
-		backupSched.Start(ctx)
+		runSupervised(ctx, "Backup scheduler", func(ctx context.Context) {
+			backupSched.Start(ctx)
+		})
 	}()
 
 	go func() {
-		defer recoverAndReport("Heartbeat scheduler")
 		defer wg.Done()
 
-		heartbeat.Start(ctx, cfg.HeartbeatURL, cfg.HeartbeatInterval)
+		runSupervised(ctx, "Heartbeat scheduler", func(ctx context.Context) {
+			heartbeat.Start(ctx, cfg.HeartbeatURL, cfg.HeartbeatInterval)
+		})
 	}()
 
 	go func() {
-		defer recoverAndReport("Trial cleanup scheduler")
 		defer wg.Done()
 
-		trialSched := scheduler.NewTrialCleanupScheduler(subService)
-		trialSched.Start(ctx)
+		runSupervised(ctx, "Trial cleanup scheduler", func(ctx context.Context) {
+			trialSched := scheduler.NewTrialCleanupScheduler(subService)
+			trialSched.Start(ctx)
+		})
 	}()
 
 	go func() {
-		defer recoverAndReport("Subscription sync worker")
 		defer wg.Done()
 
-		syncWorker := scheduler.NewSubscriptionSyncWorker(syncSvc, orderSvc)
-		syncWorker.Run(ctx)
+		runSupervised(ctx, "Subscription sync worker", func(ctx context.Context) {
+			syncWorker := scheduler.NewSubscriptionSyncWorker(syncSvc, orderSvc)
+			syncWorker.Run(ctx)
+		})
 	}()
 
 	go func() {
-		defer recoverAndReport("Subscription expire worker")
 		defer wg.Done()
 
-		expireWorker := scheduler.NewSubscriptionExpireWorker(dbService, subService)
-		expireWorker.Run(ctx)
+		runSupervised(ctx, "Subscription expire worker", func(ctx context.Context) {
+			expireWorker := scheduler.NewSubscriptionExpireWorker(dbService, subService)
+			expireWorker.Run(ctx)
+		})
 	}()
 
 	if cfg.NotificationsEnabled {
 		go func() {
-			defer recoverAndReport("Subscription reminder worker")
 			defer wg.Done()
 
-			reminderWorker := scheduler.NewSubscriptionReminderWorker(dbService, subService)
-			reminderWorker.Run(ctx)
+			runSupervised(ctx, "Subscription reminder worker", func(ctx context.Context) {
+				reminderWorker := scheduler.NewSubscriptionReminderWorker(dbService, subService)
+				reminderWorker.Run(ctx)
+			})
 		}()
 	}
 
 	go func() {
-		defer recoverAndReport("Subscription traffic worker")
 		defer wg.Done()
 
-		trafficWorker := scheduler.NewSubscriptionTrafficWorker(dbService, subService)
-		if cfg.NotificationsEnabled {
-			trafficWorker.Run(ctx)
-			return
-		}
-		trafficWorker.RunRecovery(ctx)
+		runSupervised(ctx, "Subscription traffic worker", func(ctx context.Context) {
+			trafficWorker := scheduler.NewSubscriptionTrafficWorker(dbService, subService)
+			if cfg.NotificationsEnabled {
+				trafficWorker.Run(ctx)
+				return
+			}
+			trafficWorker.RunRecovery(ctx)
+		})
 	}()
 
 	if !cfg.NotificationsEnabled {
@@ -580,21 +596,6 @@ func main() {
 
 	// 12. Graceful shutdown of background workers
 	gracefulShutdown(bgWg, svc.handler, svc.subServer)
-}
-
-// recoverAndReport recovers from panics, reports to Sentry, and logs the error.
-// Usage: defer recoverAndReport("Component name")
-func recoverAndReport(component string) {
-	if r := recover(); r != nil {
-		stack := debug.Stack()
-
-		sentry.CurrentHub().Recover(r)
-		sentry.Flush(logger.SentryPanicFlushTimeout)
-		logger.Error(component+" panicked",
-			zap.Any("panic", r),
-			zap.String("stack", string(stack)),
-		)
-	}
 }
 
 // handleUpdateSafely handles a Telegram update with panic recovery.

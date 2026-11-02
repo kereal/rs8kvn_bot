@@ -212,6 +212,15 @@ var (
 		},
 	)
 
+	// WorkerRestartsTotal counts background worker restarts after a recovered panic.
+	WorkerRestartsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "worker_restarts_total",
+			Help: "Total number of background worker restarts after a recovered panic",
+		},
+		[]string{"worker"},
+	)
+
 	// SubscriptionSyncTotal counts subscription sync worker runs.
 	SubscriptionSyncTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
