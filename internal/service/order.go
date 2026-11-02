@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -816,6 +817,51 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 	return &PaymentInfo{URL: url, Provider: "platega", PaymentID: providerPaymentID, ExpiresAt: expiresAt}, order, nil
 }
 
+// orderByCallbackPayload находит заказ по payload провайдера, когда id
+// транзакции ещё не сохранён, и привязывает этот id. Заказ с уже записанным
+// другим id не перехватывается: payload мог устареть.
+func (o *OrderService) orderByCallbackPayload(
+	ctx context.Context, payload string, providerPaymentID uuid.UUID,
+) (*database.Order, error) {
+	raw := strings.TrimSpace(payload)
+	if raw == "" {
+		return nil, database.ErrOrderNotFound
+	}
+
+	orderID, convErr := strconv.ParseUint(raw, 10, 64)
+	if convErr != nil {
+		return nil, database.ErrOrderNotFound
+	}
+
+	order, loadErr := o.db.GetOrderByID(ctx, uint(orderID))
+	if loadErr != nil {
+		return nil, loadErr
+	}
+
+	if strings.TrimSpace(order.ProviderPaymentID) != "" {
+		return nil, database.ErrOrderNotFound
+	}
+
+	attached, attachErr := o.db.AttachProviderPaymentID(ctx, order.ID, "platega", providerPaymentID)
+	if attachErr != nil {
+		return nil, attachErr
+	}
+
+	if !attached {
+		// Параллельный callback успел привязать транзакцию.
+		return nil, database.ErrOrderNotFound
+	}
+
+	logger.Info("payment callback matched order by payload after missing provider id",
+		zap.Uint("order_id", order.ID),
+		zap.String("provider_payment_id", providerPaymentID.String()))
+
+	order.ProviderPaymentID = providerPaymentID.String()
+	order.PaymentProvider = "platega"
+
+	return order, nil
+}
+
 // logAuditOrderCreated пишет событие order_created best-effort: ошибка журнала
 // не влияет на выдачу платёжной ссылки.
 func (o *OrderService) logAuditOrderCreated(ctx context.Context, order *database.Order) {
@@ -831,9 +877,11 @@ func (o *OrderService) logAuditOrderCreated(ctx context.Context, order *database
 // ConfirmPayment validates a provider callback and atomically applies the paid
 // transition plus subscription plan changes. Only the successful pending-to-paid
 // CAS caller performs post-commit synchronization and reports Activated=true.
-func (o *OrderService) ConfirmPayment(ctx context.Context, providerPaymentID uuid.UUID, amount json.Number, currency string) (*PaymentConfirmation, error) {
+func (o *OrderService) ConfirmPayment(
+	ctx context.Context, providerPaymentID uuid.UUID, payload string, amount json.Number, currency string,
+) (*PaymentConfirmation, error) {
 	start := time.Now()
-	confirmation, err := o.confirmPayment(ctx, providerPaymentID, amount, currency)
+	confirmation, err := o.confirmPayment(ctx, providerPaymentID, payload, amount, currency)
 
 	result := "success"
 	if err != nil {
@@ -853,7 +901,9 @@ func (o *OrderService) ConfirmPayment(ctx context.Context, providerPaymentID uui
 	return confirmation, err
 }
 
-func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uuid.UUID, amount json.Number, currency string) (*PaymentConfirmation, error) {
+func (o *OrderService) confirmPayment(
+	ctx context.Context, providerPaymentID uuid.UUID, payload string, amount json.Number, currency string,
+) (*PaymentConfirmation, error) {
 	if o.payment == nil {
 		return nil, ErrPaymentDisabled
 	}
@@ -878,6 +928,14 @@ func (o *OrderService) confirmPayment(ctx context.Context, providerPaymentID uui
 	}
 
 	order, err := o.db.GetOrderByProviderPaymentID(detachCtx, "platega", providerPaymentID)
+	if err != nil && (errors.Is(err, database.ErrOrderNotFound) || errors.Is(err, gorm.ErrRecordNotFound)) {
+		// Окно между CreateTransaction и SavePaymentDetails: провайдер может
+		// подтвердить платёж раньше, чем мы сохранили id транзакции. Провайдер
+		// возвращает payload, переданный при создании (= order.ID), поэтому
+		// заказ находится по нему, а id привязывается CAS.
+		order, err = o.orderByCallbackPayload(detachCtx, payload, providerPaymentID)
+	}
+
 	if err != nil {
 		if errors.Is(err, database.ErrOrderNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Warn("payment callback for unknown order", zap.String("provider_payment_id", providerPaymentID.String()))

@@ -45,6 +45,27 @@ func (s *Service) GetOrderByProviderPaymentID(ctx context.Context, provider stri
 	return &order, nil
 }
 
+// AttachProviderPaymentID привязывает id транзакции провайдера к заказу, у
+// которого он ещё не записан. Это окно между CreateTransaction и
+// SavePaymentDetails: callback провайдера может обогнать сохранение. CAS по
+// пустому provider_payment_id не даёт перехватить уже подтверждённый заказ.
+func (s *Service) AttachProviderPaymentID(
+	ctx context.Context, orderID uint, provider string, providerPaymentID uuid.UUID,
+) (bool, error) {
+	result := s.db.WithContext(ctx).
+		Model(&Order{}).
+		Where("id = ? AND (provider_payment_id IS NULL OR provider_payment_id = '')", orderID).
+		Updates(map[string]any{
+			"provider_payment_id": providerPaymentID.String(),
+			"payment_provider":    provider,
+		})
+	if result.Error != nil {
+		return false, fmt.Errorf("attach provider payment id: %w", result.Error)
+	}
+
+	return result.RowsAffected > 0, nil
+}
+
 // FindPendingPaymentOrder returns the current pending payment intent. An
 // expired intent is terminalized, but no replacement is created by this method.
 func (s *Service) FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, now time.Time) (*Order, error) {

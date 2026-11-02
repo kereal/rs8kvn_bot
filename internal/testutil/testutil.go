@@ -488,6 +488,7 @@ type ServiceStoreFake struct {
 	ReleaseTrafficReminderFunc                  func(ctx context.Context, id uint, bit int) error
 	SaveOrderPaymentAmountsFunc                 func(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error
 	SavePaymentDetailsFunc                      func(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
+	AttachProviderPaymentIDFunc                 func(ctx context.Context, orderID uint, provider string, providerPaymentID uuid.UUID) (bool, error)
 	UpdateRetryFunc                             func(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error
 	UpdateSubscriptionFunc                      func(ctx context.Context, sub *database.Subscription) error
 	UpdateSubscriptionNodeStatusFunc            func(ctx context.Context, subID, nodeID uint, status database.SyncStatus) error
@@ -1211,6 +1212,16 @@ func (m *ServiceStoreFake) ReleaseTrafficReminder(ctx context.Context, id uint, 
 	}
 
 	return errors.New("fake: ReleaseTrafficReminderFunc is not set")
+}
+
+func (m *ServiceStoreFake) AttachProviderPaymentID(
+	ctx context.Context, orderID uint, provider string, providerPaymentID uuid.UUID,
+) (bool, error) {
+	if m.AttachProviderPaymentIDFunc != nil {
+		return m.AttachProviderPaymentIDFunc(ctx, orderID, provider, providerPaymentID)
+	}
+
+	return false, nil
 }
 
 func (m *ServiceStoreFake) SaveOrderPaymentAmounts(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error {

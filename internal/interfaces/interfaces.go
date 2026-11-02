@@ -214,6 +214,9 @@ type OrderRepository interface {
 	FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
 	MarkPaymentCreationUncertain(ctx context.Context, orderID uint, uncertain bool) (bool, error)
 	SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
+	// AttachProviderPaymentID привязывает id провайдера к заказу, у которого его
+	// ещё нет (callback обогнал сохранение деталей).
+	AttachProviderPaymentID(ctx context.Context, orderID uint, provider string, providerPaymentID uuid.UUID) (bool, error)
 	SaveOrderPaymentAmounts(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error
 	GetPaidOrdersWithoutProviderFee(ctx context.Context, limit int) ([]database.Order, error)
 	GetPaidOrdersWithoutProviderFeeAfterID(ctx context.Context, afterID uint, limit int) ([]database.Order, error)

@@ -498,7 +498,7 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	status := strings.ToUpper(strings.TrimSpace(payload.Status))
 	switch status {
 	case "CONFIRMED":
-		confirmation, err := orderService.ConfirmPayment(notifyCtx, paymentID, payload.Amount, payload.Currency)
+		confirmation, err := orderService.ConfirmPayment(notifyCtx, paymentID, payload.Payload, payload.Amount, payload.Currency)
 		if err != nil {
 			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) || errors.Is(err, service.ErrInvalidPaymentTransition) {
 				http.Error(w, err.Error(), http.StatusBadRequest)

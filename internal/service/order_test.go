@@ -128,7 +128,7 @@ func TestOrderService_NotifiesAdminForLateConfirmedPayment(t *testing.T) {
 	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
 	o.SetAdminBot(adminBot)
 
-	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "RUB")
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("23.00"), "RUB")
 	require.NoError(t, err)
 	assert.False(t, confirmation.Activated)
 
@@ -180,7 +180,7 @@ func TestOrderService_ActivatesExpiredPaymentWithinSettlementGrace(t *testing.T)
 	}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 
-	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "RUB")
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("23.00"), "RUB")
 	require.NoError(t, err)
 	require.True(t, confirmation.Activated, "a callback arriving four minutes after the provider deadline is inside the settlement grace period")
 	assert.Equal(t, database.OrderStatusPaid, order.Status)
@@ -446,7 +446,7 @@ func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
 	firstDone := make(chan error, 1)
 
 	go func() {
-		_, err := orderService.ConfirmPayment(context.Background(), firstID, json.Number("23.00"), "RUB")
+		_, err := orderService.ConfirmPayment(context.Background(), firstID, "", json.Number("23.00"), "RUB")
 		firstDone <- err
 	}()
 
@@ -459,7 +459,7 @@ func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
 	secondDone := make(chan error, 1)
 
 	go func() {
-		_, err := orderService.ConfirmPayment(context.Background(), secondID, json.Number("23.00"), "RUB")
+		_, err := orderService.ConfirmPayment(context.Background(), secondID, "", json.Number("23.00"), "RUB")
 		secondDone <- err
 	}()
 
@@ -500,7 +500,7 @@ func TestConfirmPayment_ActivatedCASWithNilExpiryDoesNotPanic(t *testing.T) {
 	}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 
-	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "METRIC")
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("23.00"), "METRIC")
 	require.NoError(t, err)
 	require.True(t, confirmation.Activated)
 	assert.Equal(t, database.OrderStatusPaid, confirmation.Order.Status)
@@ -518,7 +518,7 @@ func TestConfirmPayment_RequiresSyncServiceForPendingOrder(t *testing.T) {
 		},
 	}
 	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", nil)
-	_, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "RUB")
+	_, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("23.00"), "RUB")
 	require.ErrorIs(t, err, ErrPaymentSyncNotReady)
 }
 
@@ -570,7 +570,7 @@ func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
 			o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
 			o.SetAdminBot(adminBot)
 
-			_, err := o.ConfirmPayment(context.Background(), providerID, tt.amount, tt.currency)
+			_, err := o.ConfirmPayment(context.Background(), providerID, "", tt.amount, tt.currency)
 			if tt.wantErr != nil {
 				require.ErrorIs(t, err, tt.wantErr)
 			} else {
@@ -608,7 +608,7 @@ func TestConfirmPayment_NotifiesAdminOnActivation(t *testing.T) {
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
 	o.SetAdminBot(adminBot)
 
-	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("2300.00"), "RUB")
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("2300.00"), "RUB")
 	require.NoError(t, err)
 	require.True(t, confirmation.Activated)
 	assert.Equal(t, float64(0), promtestutil.ToFloat64(metrics.SubscriptionRenewalsTotal)-beforeRenewals, "first activation must not be counted as a renewal")
@@ -659,7 +659,7 @@ func TestConfirmPayment_NotifiesAdminOnRenewal(t *testing.T) {
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
 	o.SetAdminBot(adminBot)
 
-	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("2300.00"), "RUB")
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("2300.00"), "RUB")
 	require.NoError(t, err)
 	require.True(t, confirmation.Activated)
 	assert.Equal(t, float64(1), promtestutil.ToFloat64(metrics.SubscriptionRenewalsTotal)-beforeRenewals)
@@ -703,7 +703,7 @@ func TestConfirmPayment_InvalidatesSubserverCacheOnActivation(t *testing.T) {
 
 	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
 
-	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("2300.00"), "RUB")
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("2300.00"), "RUB")
 	require.NoError(t, err)
 	require.True(t, confirmation.Activated)
 	assert.Equal(t, []string{"sub-abc"}, invalidated,
@@ -1036,7 +1036,7 @@ func TestConfirmPayment_DeletedSubscriptionOrProductReturnsNoop(t *testing.T) {
 			o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
 			o.SetAdminBot(adminBot)
 
-			confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "RUB")
+			confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("23.00"), "RUB")
 			require.NoError(t, err, "deleted dependency must acknowledge the callback instead of 500")
 			require.False(t, confirmation.Activated)
 			assert.False(t, casCalled, "no CAS may run when the product/subscription is gone")
@@ -1298,7 +1298,7 @@ func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
 	provider := statusPaymentProvider{status: &platega.TransactionStatusResponse{Status: "CONFIRMED", Commission: json.Number("4.5")}}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
 
-	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("52.50"), "RUB")
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("52.50"), "RUB")
 	require.NoError(t, err)
 	require.True(t, confirmation.Activated)
 
@@ -1344,7 +1344,7 @@ func TestConfirmPayment_ProviderFeeUnavailableKeepsCallbackAmount(t *testing.T) 
 	provider := statusPaymentProvider{err: errors.New("transaction API unreachable")}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
 
-	confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("52.50"), "RUB")
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("52.50"), "RUB")
 	require.NoError(t, err)
 	require.True(t, confirmation.Activated)
 
@@ -1478,4 +1478,89 @@ func TestBuildPaidUserNotification_MissingSubscriptionServiceReturnsError(t *tes
 	_, _, err := o.BuildPaidUserNotification(context.Background(), &database.Order{ID: 1, SubscriptionID: 1, ProviderPaymentID: providerID.String()})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "subscription service is not configured")
+}
+
+// Тест поведения: callback, пришедший в окно между CreateTransaction и
+// SavePaymentDetails, находится по payload (= order.ID), а id транзакции
+// привязывается CAS — иначе деньги списаны, а активации нет.
+func TestOrderService_ConfirmPayment_FindsOrderByPayloadWhenProviderIDLost(t *testing.T) {
+	t.Parallel()
+
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440118")
+	order := &database.Order{
+		ID:             33,
+		SubscriptionID: 9,
+		ProductID:      14,
+		Status:         database.OrderStatusPending,
+		AmountCents:    2300,
+		Currency:       "RUB",
+	}
+	product := &database.Product{ID: 14, PlanID: 2, Name: "Premium", DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}
+	sub := &database.Subscription{ID: 9, TelegramID: 47, PlanID: 1, Status: "active"}
+	attached := 0
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			return nil, database.ErrOrderNotFound
+		},
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) {
+			return order, nil
+		},
+		AttachProviderPaymentIDFunc: func(_ context.Context, orderID uint, provider string, id uuid.UUID) (bool, error) {
+			attached++
+			assert.Equal(t, order.ID, orderID)
+			assert.Equal(t, "platega", provider)
+			assert.Equal(t, providerID, id)
+			order.ProviderPaymentID = id.String()
+
+			return true, nil
+		},
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return product, nil
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
+			order.Status = database.OrderStatusPaid
+
+			return true, nil
+		},
+	}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
+
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, "33", json.Number("23.00"), "RUB")
+	require.NoError(t, err)
+	require.True(t, confirmation.Activated, "платёж должен активироваться по payload")
+	assert.Equal(t, 1, attached)
+	assert.Equal(t, database.OrderStatusPaid, order.Status)
+}
+
+// Тест поведения: заказ с уже привязанной другой транзакцией не перехватывается
+// по устаревшему payload.
+func TestOrderService_ConfirmPayment_DoesNotHijackOrderWithOtherProviderID(t *testing.T) {
+	t.Parallel()
+
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440119")
+	otherID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440120")
+	order := &database.Order{ID: 34, SubscriptionID: 9, ProductID: 14, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: otherID.String()}
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			return nil, database.ErrOrderNotFound
+		},
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) {
+			return order, nil
+		},
+		AttachProviderPaymentIDFunc: func(context.Context, uint, string, uuid.UUID) (bool, error) {
+			t.Fatal("нельзя привязывать вторую транзакцию к заказу")
+
+			return false, nil
+		},
+	}
+	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", nil)
+
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, "34", json.Number("23.00"), "RUB")
+	require.NoError(t, err)
+	assert.False(t, confirmation.Activated)
 }
