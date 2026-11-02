@@ -32,6 +32,13 @@ func NewService(ttl time.Duration) *Service {
 	}
 }
 
+// InvalidateSubscriber сбрасывает кэш подписки во всех форматах вывода.
+// Инвалидация одного Xray-ключа оставляла sing-box/Clash до TTL со старым
+// лимитом и старым сроком после оплаты или смены тарифа.
+func (s *Service) InvalidateSubscriber(subID string) {
+	s.DeleteKeys(subscriptionCacheKeys(subID))
+}
+
 // analyticsKeyedLock is a per-key mutex: Lock(key) returns an unlock func that
 // must be called (typically via defer). Requests for the same key serialize;
 // requests for different keys run in parallel. Entries are refcounted and

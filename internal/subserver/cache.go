@@ -99,6 +99,16 @@ func (c *Cache) Delete(key string) {
 	delete(c.entries, key)
 }
 
+// DeleteKeys removes the given entries in one critical section.
+func (c *Cache) DeleteKeys(keys []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, key := range keys {
+		delete(c.entries, key)
+	}
+}
+
 // cleanupLoop periodically evicts expired entries every TTL/2.
 func (c *Cache) cleanupLoop() {
 	ticker := time.NewTicker(c.ttl / 2)

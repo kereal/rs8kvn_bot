@@ -29,13 +29,7 @@ import (
 // and cache revalidation. Analytics and last_request errors do not block delivery.
 func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID, clientIP string, requestHeaders map[string]string, formatParam string) (*SubscriptionResult, int, int, error) {
 	outFormat := DetectOutputFormat(formatParam, requestHeaders["user-agent"])
-	cacheKey := subID
-	if outFormat != OutputXray {
-		// Per-format cache entries keep a suffix so a sing-box client never
-		// receives the default Xray body (and vice versa). The Xray key stays
-		// bare for backward compatibility with existing cache entries.
-		cacheKey = subID + ":" + outFormat.String()
-	}
+	cacheKey := subscriptionCacheKey(subID, outFormat)
 
 	// 1. Try to serve from cache first.
 	if result, hit, err := serveFromCache(ctx, db, subSvc, subID, cacheKey); hit {
