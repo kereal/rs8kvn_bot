@@ -52,11 +52,15 @@ func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepositor
 	}
 
 	out := subSvc.flights.Do(cacheKey, func() flightResult {
-		agg, success, total := fetchAndAggregateSources(ctx, subID, subFull.Nodes)
+		agg, success, total := fetchAndAggregateSources(ctx, subID, subFull.Nodes, subSvc.sourceTimeout)
 
-		// 5. Build the final response and cache it. Paid (premium) subscriptions
-		// get a " Premium" suffix appended to the upstream profile-title header.
-		res, resErr := buildResponse(subSvc, cacheKey, agg, subFull.Plan.TrafficLimit, profileTitleSuffix, outFormat)
+		// Кэшируем только полный ответ: недобранные источники (или
+		// отменённый контекст) означают, что набор серверов неполон.
+		cacheable := (total == 0 || success == total) && ctx.Err() == nil
+
+		// 5. Build the final response. Paid (premium) subscriptions get a
+		// " Premium" suffix appended to the upstream profile-title header.
+		res, resErr := buildResponse(subSvc, cacheKey, agg, subFull.Plan.TrafficLimit, profileTitleSuffix, outFormat, cacheable)
 
 		return flightResult{result: res, success: success, total: total, err: resErr}
 	})

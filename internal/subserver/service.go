@@ -31,13 +31,17 @@ type Service struct {
 	// flights схлопывает одновременные промахи кэша по одному ключу в один
 	// fan-out к нодам вместо лавины одинаковых запросов.
 	flights flightGroup
+
+	// sourceTimeout ограничивает один upstream-запрос при сборке подписки.
+	sourceTimeout time.Duration
 }
 
 // NewService creates a new Service with a cache TTL.
 func NewService(ttl time.Duration) *Service {
 	return &Service{
-		Cache:       NewCache(ttl),
-		lastRequest: lastRequestThrottle{every: LastRequestWriteInterval, pruneAt: touchPruneThreshold},
+		Cache:         NewCache(ttl),
+		lastRequest:   lastRequestThrottle{every: LastRequestWriteInterval, pruneAt: touchPruneThreshold},
+		sourceTimeout: defaultSourceFetchTimeout,
 	}
 }
 

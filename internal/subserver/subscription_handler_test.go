@@ -1007,3 +1007,92 @@ func TestHandleSubscription_ConcurrentMissesShareOneFetch(t *testing.T) {
 
 	assert.Equal(t, int32(1), fetches.Load(), "одновременные промахи должны схлопнуться в один fan-out")
 }
+
+// Тест поведения: недобранный ответ (часть источников не ответила) не
+// кэшируется — иначе пользователь до конца TTL видит подписку без половины
+// серверов, хотя апстрим уже поднялся.
+func TestHandleSubscription_PartialSourcesAreNotCached(t *testing.T) {
+	t.Parallel()
+
+	var goodFetches atomic.Int32
+
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		goodFetches.Add(1)
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp#good")
+	}))
+	defer good.Close()
+
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer bad.Close()
+
+	enabled := atomic.Bool{}
+	enabled.Store(true)
+
+	mockDB := testutil.NewSubscriptionRepositoryFake()
+	mockDB.GetWithPlanAndNodesFunc = func(context.Context, string) (*database.SubscriptionFull, error) {
+		nodes := []database.Node{{ID: 1, Name: "good", IsActive: true, SubscriptionURL: good.URL + "/sub/"}}
+		if enabled.Load() {
+			nodes = append(nodes, database.Node{ID: 2, Name: "bad", IsActive: true, SubscriptionURL: bad.URL + "/sub/"})
+		}
+
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, Status: "active"},
+			Plan:         database.Plan{TrafficLimit: 1 << 30},
+			Nodes:        nodes,
+		}, nil
+	}
+
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	_, success, total, err := HandleSubscription(ctx, mockDB, svc, "sub-partial", "1.2.3.4", nil, "")
+	require.NoError(t, err)
+	require.Equal(t, 1, success, "один источник из двух должен ответить")
+	require.Equal(t, 2, total)
+
+	_, _, hit := svc.Get("sub-partial")
+	assert.False(t, hit, "недобранный ответ не должен попадать в кэш")
+
+	// Апстрим восстановился: следующий запрос обязан собрать полный набор.
+	enabled.Store(false)
+
+	_, success, total, err = HandleSubscription(ctx, mockDB, svc, "sub-partial", "1.2.3.4", nil, "")
+	require.NoError(t, err)
+	assert.Equal(t, 1, success)
+	assert.Equal(t, 1, total)
+}
+
+// Тест поведения: медленный источник обрывается по своему дедлайну, не съедая
+// бюджет всего запроса.
+func TestHandleSubscription_PerSourceTimeout(t *testing.T) {
+	t.Parallel()
+
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(400 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer slow.Close()
+
+	mockDB := testutil.NewSubscriptionRepositoryFake()
+	mockDB.GetWithPlanAndNodesFunc = func(context.Context, string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, Status: "active"},
+			Plan:         database.Plan{TrafficLimit: 1 << 30},
+			Nodes:        []database.Node{{ID: 1, Name: "slow", IsActive: true, SubscriptionURL: slow.URL + "/sub/"}},
+		}, nil
+	}
+
+	svc := newTestSubSvc(t)
+	svc.sourceTimeout = 50 * time.Millisecond
+
+	start := time.Now()
+	_, success, total, err := HandleSubscription(context.Background(), mockDB, svc, "sub-slow", "1.2.3.4", nil, "")
+
+	require.Error(t, err, "единственный источник не ответил")
+	assert.Zero(t, success)
+	assert.Equal(t, 1, total)
+	assert.Less(t, time.Since(start), 300*time.Millisecond, "дедлайн источника должен срабатывать раньше его ответа")
+}
