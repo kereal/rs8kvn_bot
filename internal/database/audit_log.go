@@ -725,3 +725,27 @@ func auditActorTelegram(sub *Subscription) *string {
 
 	return marshalAuditJSONString(fmt.Sprintf("%d", sub.TelegramID))
 }
+
+// AuditLogRetention — сколько хранится журнал аудита. append-only не значит
+// вечно: строки старше этого срока удаляются дневным обслуживанием, иначе файл
+// БД растёт линейно (порядка 5–10 МБ в месяц на 1k подписок).
+const AuditLogRetention = 180 * 24 * time.Hour
+
+// DeleteAuditLogBefore удаляет не более batch записей старше before и
+// возвращает число удалённых. Пачками — чтобы DELETE не держал write-lock на
+// всю таблицу и не блокировал платежи/синк.
+func (s *Service) DeleteAuditLogBefore(ctx context.Context, before time.Time, batch int) (int64, error) {
+	if batch <= 0 {
+		batch = 1000
+	}
+
+	result := s.db.WithContext(ctx).
+		Exec(`DELETE FROM audit_log WHERE id IN (
+			SELECT id FROM audit_log WHERE created_at < ? ORDER BY id LIMIT ?
+		)`, before, batch)
+	if result.Error != nil {
+		return 0, fmt.Errorf("delete audit log before %s: %w", before.Format(time.RFC3339), result.Error)
+	}
+
+	return result.RowsAffected, nil
+}

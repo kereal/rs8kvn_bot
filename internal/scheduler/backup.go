@@ -16,6 +16,9 @@ type BackupScheduler struct {
 	dbPath    string
 	hour      int
 	retention int
+	// maintenance — суточное обслуживание БД после бэкапа (retention аудита).
+	// Отдельный хук, чтобы планировщик не знал про внутренности database.
+	maintenance func(context.Context) error
 }
 
 // NewBackupScheduler creates a new BackupScheduler.
@@ -25,6 +28,11 @@ func NewBackupScheduler(dbPath string, hour, retention int) *BackupScheduler {
 		hour:      hour,
 		retention: retention,
 	}
+}
+
+// SetMaintenance подключает суточное обслуживание, выполняемое после бэкапа.
+func (s *BackupScheduler) SetMaintenance(fn func(context.Context) error) {
+	s.maintenance = fn
 }
 
 // Start runs the backup scheduler loop. It blocks until ctx is cancelled.
@@ -52,6 +60,13 @@ func (s *BackupScheduler) Start(ctx context.Context) {
 				logger.Error("Backup failed", zap.Error(err))
 			} else {
 				logger.Info("Database backup completed successfully")
+			}
+
+			if s.maintenance != nil {
+				maintErr := s.maintenance(ctx)
+				if maintErr != nil {
+					logger.Warn("Daily database maintenance failed", zap.Error(maintErr))
+				}
 			}
 
 		case <-ctx.Done():

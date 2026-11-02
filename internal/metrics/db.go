@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"log"
+	"os"
 	"time"
 
 	"gorm.io/gorm"
@@ -102,4 +103,18 @@ func CollectDBPoolMetrics(_ context.Context, db *gorm.DB) {
 	stats := sqlDB.Stats()
 	DBPoolWait.Set(float64(stats.WaitCount))
 	DBPoolWaitDurationSeconds.Set(stats.WaitDuration.Seconds())
+}
+
+// CollectDatabaseFileSize публикует размеры файла БД и её WAL. Ошибки чтения
+// игнорируются: отсутствие файла (in-memory БД в тестах) — не инцидент.
+func CollectDatabaseFileSize(dbPath string) {
+	stat, err := os.Stat(dbPath)
+	if err == nil {
+		DBFileBytes.Set(float64(stat.Size()))
+	}
+
+	walStat, walErr := os.Stat(dbPath + "-wal")
+	if walErr == nil {
+		DBWALBytes.Set(float64(walStat.Size()))
+	}
 }

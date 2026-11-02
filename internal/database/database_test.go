@@ -1839,3 +1839,40 @@ func TestPendingSyncUsesRetryIndex(t *testing.T) {
 
 	assert.True(t, usedIndex, "план запроса должен опираться на idx_subscription_nodes_retry: %+v", plan)
 }
+
+// Тест поведения: суточное обслуживание удаляет только записи аудита старше
+// срока хранения, пачками, не трогая свежие события.
+func TestDailyMaintenance_PrunesOldAuditLog(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	old := now.Add(-AuditLogRetention - 24*time.Hour)
+	fresh := now.Add(-time.Hour)
+
+	oldEntity, freshEntity, actor := "old", "fresh", "1"
+
+	for i := range 3 {
+		require.NoError(t, svc.InsertAuditLog(ctx, &AuditLog{
+			EntityType: EntitySubscription, EntityID: &oldEntity, Event: AuditEventSubscriptionCreated,
+			ActorType: ActorUser, ActorID: &actor, CreatedAt: old.Add(time.Duration(i) * time.Minute),
+		}))
+	}
+
+	for i := range 2 {
+		require.NoError(t, svc.InsertAuditLog(ctx, &AuditLog{
+			EntityType: EntitySubscription, EntityID: &freshEntity, Event: AuditEventSubscriptionCreated,
+			ActorType: ActorUser, ActorID: &actor, CreatedAt: fresh.Add(time.Duration(i) * time.Minute),
+		}))
+	}
+
+	require.NoError(t, svc.DailyMaintenance(ctx))
+
+	var oldLeft, freshLeft int64
+
+	require.NoError(t, svc.GetDB().WithContext(ctx).Model(&AuditLog{}).Where("entity_id = ?", "old").Count(&oldLeft).Error)
+	require.NoError(t, svc.GetDB().WithContext(ctx).Model(&AuditLog{}).Where("entity_id = ?", "fresh").Count(&freshLeft).Error)
+
+	assert.Zero(t, oldLeft, "записи старше срока хранения удаляются")
+	assert.Equal(t, int64(2), freshLeft, "свежие записи остаются")
+}

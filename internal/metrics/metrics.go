@@ -242,6 +242,23 @@ var (
 		},
 	)
 
+	// DBFileBytes and DBWALBytes track the on-disk size of the SQLite database
+	// and its WAL. Unbounded growth is otherwise invisible until the disk fills
+	// and WAL checkpoints start failing.
+	DBFileBytes = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "db_file_bytes",
+			Help: "Size of the SQLite database file in bytes",
+		},
+	)
+
+	DBWALBytes = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "db_wal_bytes",
+			Help: "Size of the SQLite WAL file in bytes",
+		},
+	)
+
 	// PaymentReconcileTotal counts outcomes of the stale pending order sweep.
 	PaymentReconcileTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{

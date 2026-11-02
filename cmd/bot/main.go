@@ -346,6 +346,7 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 					return
 				case <-ticker.C:
 					metrics.CollectDBPoolMetrics(ctx, dbService.GetDB())
+					metrics.CollectDatabaseFileSize(cfg.DatabasePath)
 				}
 			}
 		})
@@ -394,6 +395,7 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	}()
 
 	backupSched := scheduler.NewBackupScheduler(cfg.DatabasePath, config.DefaultBackupHour, config.DefaultBackupRetention)
+	backupSched.SetMaintenance(dbService.DailyMaintenance)
 
 	go func() {
 		defer wg.Done()
