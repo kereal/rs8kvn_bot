@@ -66,12 +66,11 @@ func (w *SubscriptionSyncWorker) Run(ctx context.Context) {
 }
 
 func (w *SubscriptionSyncWorker) process(ctx context.Context) {
-	metrics.SubscriptionSyncTotal.Inc()
-
 	start := time.Now()
 
 	err := w.syncSvc.SyncPendingNodes(ctx)
 	if err != nil {
+		metrics.SubscriptionSyncTotal.WithLabelValues("degraded").Inc()
 		logger.Warn("Subscription sync failed", zap.Error(err))
 
 		// Сводное событие аудита за прогон (не per-item): деградация воркера
@@ -85,6 +84,7 @@ func (w *SubscriptionSyncWorker) process(ctx context.Context) {
 			}
 		}
 	} else {
+		metrics.SubscriptionSyncTotal.WithLabelValues("ok").Inc()
 		logger.Debug("Subscription sync completed")
 	}
 

@@ -278,12 +278,16 @@ var (
 		[]string{"worker"},
 	)
 
-	// SubscriptionSyncTotal counts subscription sync worker runs.
-	SubscriptionSyncTotal = promauto.NewCounter(
+	// SubscriptionSyncTotal counts subscription sync worker runs by outcome.
+	// A run that returns an aggregate error still counts: the backlog is
+	// retried by the next pass, and the degraded series is what an alert sees.
+	// result values: ok, degraded
+	SubscriptionSyncTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "subscription_sync_total",
-			Help: "Total number of subscription sync worker runs",
+			Help: "Total number of subscription sync worker runs by result",
 		},
+		[]string{"result"},
 	)
 
 	// SubscriptionSyncDuration is a histogram of subscription sync worker duration.
@@ -295,11 +299,23 @@ var (
 		},
 	)
 
-	// SubscriptionExpireTotal counts subscription expire worker runs.
-	SubscriptionExpireTotal = promauto.NewCounter(
+	// SubscriptionExpireTotal counts subscription expire worker runs by
+	// outcome. result values: ok, degraded
+	SubscriptionExpireTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "subscription_expire_total",
-			Help: "Total number of subscription expire worker runs",
+			Help: "Total number of subscription expire worker runs by result",
+		},
+		[]string{"result"},
+	)
+
+	// SubscriptionsExpiredTotal counts subscriptions actually deactivated by
+	// the expire worker. Run counters alone cannot tell an idle hour from a
+	// batch of hundreds.
+	SubscriptionsExpiredTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "subscriptions_expired_total",
+			Help: "Total number of subscriptions deactivated by the expire worker",
 		},
 	)
 
@@ -466,6 +482,20 @@ var TrafficNotificationRunsTotal = promauto.NewCounter(
 		Help: "Total number of traffic notification worker scans.",
 	},
 )
+
+// workerResults — фиксированный набор исходов прогонов воркеров.
+var workerResults = []string{"ok", "degraded"}
+
+// init публикует нулевые серии известных label-наборов. Без этого Vec-метрика
+// до первого события не экспортируется вовсе, и «воркер не падал ни разу»
+// неотличимо от «воркер не запускается»: rate() по отсутствующей серии — пусто,
+// а не ноль.
+func init() {
+	for _, result := range workerResults {
+		SubscriptionSyncTotal.WithLabelValues(result)
+		SubscriptionExpireTotal.WithLabelValues(result)
+	}
+}
 
 // SetBuildInfo publishes the running build as a single app_info series. Reset
 // keeps exactly one label set even if the process re-initialises the logger.
