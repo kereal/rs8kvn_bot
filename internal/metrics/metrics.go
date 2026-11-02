@@ -371,6 +371,16 @@ var (
 		},
 	)
 
+	// SubserverNotFoundTotal counts requests for unknown or revoked
+	// subscriptions. Removing a user leaves the link inside the client, and the
+	// client keeps polling it; the rate tracks that residue rather than errors.
+	SubserverNotFoundTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "subserver_not_found_total",
+			Help: "Total subscription requests for unknown or revoked subscriptions",
+		},
+	)
+
 	// PaymentOperationsTotal counts payment service operations by operation and result.
 	// Operation values: request, confirm, cancel. Result values: success, error.
 	PaymentOperationsTotal = promauto.NewCounterVec(

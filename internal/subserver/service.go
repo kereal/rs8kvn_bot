@@ -5,6 +5,8 @@ import (
 	"sync"
 	"text/template"
 	"time"
+
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 )
 
 //go:embed templates/xray_client.json
@@ -26,7 +28,7 @@ type Service struct {
 
 	// lastRequest троттлит запись last_request: без него каждый cache hit
 	// писал в SQLite и сериализовался на единственном писателе.
-	lastRequest lastRequestThrottle
+	lastRequest *utils.IntervalGate
 
 	// flights схлопывает одновременные промахи кэша по одному ключу в один
 	// fan-out к нодам вместо лавины одинаковых запросов.
@@ -40,7 +42,7 @@ type Service struct {
 func NewService(ttl time.Duration) *Service {
 	return &Service{
 		Cache:         NewCache(ttl),
-		lastRequest:   lastRequestThrottle{every: LastRequestWriteInterval, pruneAt: touchPruneThreshold},
+		lastRequest:   utils.NewIntervalGate(LastRequestWriteInterval, touchPruneThreshold),
 		sourceTimeout: defaultSourceFetchTimeout,
 	}
 }
