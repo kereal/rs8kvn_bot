@@ -88,33 +88,51 @@ func (s *SubscriptionService) processTraffic(ctx context.Context, sub *database.
 	for _, n := range nodes {
 		traffic, tErr := n.reader.GetClientTraffic(ctx, n.email)
 		if tErr != nil {
-			logger.Warn("traffic notifications: GetClientTraffic failed on source",
+			// A client absent on one node is an expected panel state, not a
+			// node failure: skip that node and keep the pass alive on the rest.
+			if errors.Is(tErr, xui.ErrClientNotFound) {
+				logger.Info("traffic notifications: client not found on node; skipping node",
+					zap.Uint("subscription_id", sub.ID),
+					zap.Uint("node_id", n.nodeID),
+					zap.String("email", n.email))
+				continue
+			}
+			logger.Warn("traffic notifications: GetClientTraffic failed on node; skipping node",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", n.nodeID),
 				zap.Error(tErr))
-			return nil
+			continue
 		}
 		if traffic == nil {
-			logger.Warn("traffic notifications: source returned empty traffic snapshot",
+			logger.Warn("traffic notifications: source returned empty traffic snapshot; skipping node",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", n.nodeID))
-			return nil
+			continue
 		}
 		if traffic.Up < 0 || traffic.Down < 0 {
-			logger.Warn("traffic notifications: source returned negative traffic",
+			logger.Warn("traffic notifications: source returned negative traffic; skipping node",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", n.nodeID),
 				zap.Int64("up", traffic.Up),
 				zap.Int64("down", traffic.Down))
-			return nil
+			continue
 		}
 		if traffic.Up > maxInt64-traffic.Down {
-			logger.Warn("traffic notifications: source traffic overflows int64",
+			logger.Warn("traffic notifications: source traffic overflows int64; skipping node",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", n.nodeID))
-			return nil
+			continue
 		}
 		snapshots = append(snapshots, trafficSnapshot{node: n, traffic: *traffic})
+	}
+
+	// Decide on successful snapshots only. If no node answered, skip this
+	// subscription pass (the worker continues with the next subscription)
+	// instead of failing the whole traffic-control loop.
+	if len(snapshots) == 0 {
+		logger.Warn("traffic notifications: no readable node snapshots; skipping subscription pass",
+			zap.Uint("subscription_id", sub.ID))
+		return nil
 	}
 
 	var used int64

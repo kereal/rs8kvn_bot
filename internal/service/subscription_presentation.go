@@ -27,11 +27,11 @@ func FormatSubscriptionMessage(heading, status string, traffic *TrafficInfo, sub
 	progress := ""
 
 	if traffic.LimitGB > 0 {
-		// Available=false: у подписки есть активные узлы, но ни один не умеет
-		// читать трафик (proxman, fetch) — показываем честное «недоступен»,
+		// Available=false: трафик не измерен (нет читателя на активных узлах
+		// или все чтения упали) — показываем честное «измерение недоступно»,
 		// а не вводящие в заблуждение 0 ГБ.
 		if !traffic.Available {
-			trafficInfo = "недоступен"
+			trafficInfo = "измерение недоступно"
 		} else {
 			trafficInfo = fmt.Sprintf("%.2f из %d Гб (%.0f%%)", traffic.UsedGB, traffic.LimitGB, traffic.Percentage)
 			progress = "\n" + traffic.ProgressBar

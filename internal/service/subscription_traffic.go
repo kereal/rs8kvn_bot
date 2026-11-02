@@ -22,10 +22,10 @@ type TrafficInfo struct {
 	Percentage  float64
 	ProgressBar string
 	ResetInfo   string
-	// Available reports that the traffic figure is actually measured. False
-	// means no active node of the subscription has a panel reader (proxman,
-	// fetch) — the card shows an honest "unavailable" line instead of a
-	// misleading 0 ГБ.
+	// Available reports that the traffic figure is actually measured: at least
+	// one panel read succeeded. False — no reader on any active node, or all
+	// reads failed — the card shows an honest "измерение недоступно" line
+	// instead of a misleading 0 ГБ.
 	Available          bool
 	CreatedAtFormatted string
 	ExpiresAtFormatted string
@@ -118,6 +118,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		totalUp, totalDown int64
 		anySuccess         bool
 		profileSource      readerTarget
+		panelTotal         int64
 	)
 
 	readers := s.activeReaders(activeSubNodeIDs, email)
@@ -152,11 +153,16 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		anySuccess = true
 		if profileSource.reader == nil {
 			profileSource = target
+			// Панельный лимит (traffic.Total в байтах) берём с того же
+			// источника, что и профиль сброса, чтобы карточка была согласована.
+			panelTotal = traffic.Total
 		}
 	}
 
 	// не получилось опросить серверы: читатели есть, но ответили ошибкой —
 	// трафик существует, просто не измерен (деградация, не отсутствие данных).
+	// Available=false: ни одно чтение не удалось, карточка показывает честное
+	// «измерение недоступно», а не вводящие в заблуждение 0 ГБ.
 	if !anySuccess {
 		return sub, &TrafficInfo{
 			UsedGB:             0,
@@ -164,25 +170,48 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 			Percentage:         0,
 			ProgressBar:        utils.GenerateProgressBar(0, float64(limitGB)),
 			ResetInfo:          resetUnknownText,
-			Available:          len(readers) > 0,
+			Available:          false,
 			CreatedAtFormatted: utils.FormatDateRu(sub.CreatedAt),
 			ExpiresAtFormatted: formatExpiresAt(sub.ExpiresAt),
 			PlanName:           planName,
 		}, nil
 	}
 
+	// Лимит для отображения: по умолчанию плановый, но если админ вручную
+	// выставил лимит в панели (traffic.Total, байты) и тот расходится с планом
+	// более чем на 1% — показываем панельный, чтобы ручная правка была видна
+	// пользователю. Логика уведомлений по-прежнему опирается на план
+	// (planTrafficLimitGB): здесь меняется только отображаемый лимит.
+	displayLimitGB := limitGB
+
+	if panelTotal > 0 && plan != nil {
+		planBytes := plan.TrafficLimit
+
+		var divergence int64
+		if panelTotal > planBytes {
+			divergence = panelTotal - planBytes
+		} else {
+			divergence = planBytes - panelTotal
+		}
+
+		// divergence > 1% от плана (в целочисленной арифметике, без float).
+		if divergence*100 > planBytes {
+			displayLimitGB = int(float64(panelTotal) / 1024 / 1024 / 1024)
+		}
+	}
+
 	usedGB := float64(totalUp+totalDown) / 1024 / 1024 / 1024
 	percentage := 0.0
 
-	if limitGB > 0 {
-		percentage = (usedGB / float64(limitGB)) * 100
+	if displayLimitGB > 0 {
+		percentage = (usedGB / float64(displayLimitGB)) * 100
 		if percentage > 100 {
 			percentage = 100
 		}
 	}
 
 	// Progress bar
-	progressBar := utils.GenerateProgressBar(usedGB, float64(limitGB))
+	progressBar := utils.GenerateProgressBar(usedGB, float64(displayLimitGB))
 
 	// «🔄 Сброс» показывает настоящий сброс трафика из профиля панели
 	// (trafficReset/trafficResetDay через GET /clients/get), а не дни до
@@ -212,7 +241,7 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 
 	return sub, &TrafficInfo{
 		UsedGB:             usedGB,
-		LimitGB:            limitGB,
+		LimitGB:            displayLimitGB,
 		Percentage:         percentage,
 		ProgressBar:        progressBar,
 		ResetInfo:          resetInfo,
