@@ -15,11 +15,14 @@
 
 - `active_subscriptions`, `premium_subscriptions`, `free_subscriptions`, `trial_subscriptions` — gauges, обновляются через `SubscriptionService.RefreshActiveSubscriptionsMetric()` после мутаций
 - `subscription_creates_total` — process-local first-time creations; `subscription_reanimations_total` — revoked→free recovery; `subscription_renewals_total` — paid renewals confirmed through callback
-- Воркеры: `subscription_sync_total/duration`, `subscription_expire_total/duration`, `reconcile_orphaned_duration`, `subscription_reminder*`, `traffic_notification*`
+- Воркеры: `subscription_sync_total{result}/duration`, `subscription_expire_total{result}/duration`, `subscriptions_expired_total`, `reconcile_orphaned_duration`, `subscription_reminder*`, `traffic_notification*`
+- `app_info{version,revision}` — ревизия сборки, единственный способ увидеть устаревший деплой
+- `subserver_not_found_total`, `subserver_requests_total{format}` — мёртвые подписки и микс форматов выдачи
 - `bot_orphaned_clients_revoked_total` — orphan subscriptions revoked (не deleted)
 
 ### Database & Cache
-- `db_queries_total{operation,result}`, `db_query_duration_seconds{operation}` — GORM callbacks в `internal/metrics/db.go`
+- `db_queries_total{operation,result,table}`, `db_query_duration_seconds{operation}` — GORM callbacks в `internal/metrics/db.go`; `table` берётся из Statement и ограничена схемой
+- `db_pool_waits_total`, `db_pool_wait_seconds_total` — **counters** (приращение sql.DBStats), не gauges
 - `cache_hits_total{cache}`, `cache_misses_total{cache}` — кэши `subscription`, `subserver`; `referral` не используется
 
 ### Payments (финансовая аналитика)
@@ -32,7 +35,7 @@
 - `payment_issues_total{event}` — операционные проблемы (те же события → админу в Telegram)
 
 ### APIs & Integrations
-- HTTP API: `http_requests_total{method,path,status}`, `http_request_duration_seconds{method,path}`
+- HTTP API: `http_requests_total{method,path,code}` (code числовой), `http_request_duration_seconds{method,path}`
 - Telegram Bot: `bot_updates_total{command,result}`, `bot_update_duration_seconds{command}`, `telegram_api_calls_total{method,result}`, `telegram_api_duration_seconds{method}`
 - 3x-ui panel: `xui_requests_total{operation,result,node}`, `xui_request_duration_seconds{operation,node}`; `node` is configured VPN node name
 - Subserver: `subserver_source_fetch_total{result,format}`, `subserver_source_fetch_duration_seconds{result}`, `subserver_cache_invalidations_total{reason}`, `subserver_no_items_total`

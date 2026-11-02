@@ -84,19 +84,19 @@ docker compose up -d --no-deps rs8kvn_bot
 docker inspect rs8kvn_bot --format '{{.State.Health.Status}}'
 curl -fsS http://127.0.0.1:8880/healthz
 curl -fsS http://127.0.0.1:8880/readyz
-curl -fsS http://127.0.0.1:8880/metrics | grep -E 'db_pool_wait(_duration_seconds)?|subscription_(renewals|reanimations)_total|xui_requests_total'
+curl -fsS http://127.0.0.1:8880/metrics | grep -E 'app_info|db_pool_wait|subserver_not_found|subscription_(renewals|reanimations)_total|xui_requests_total'
 docker logs --since 10m rs8kvn_bot
 ```
 
 ### Проверка метрик после rollout
 
-`/metrics` должен отдавать HTTP 200. После запуска проверьте наличие `db_pool_wait`, `db_pool_wait_duration_seconds`, `subscription_renewals_total`, `subscription_reanimations_total` и XUI-метрик с label `node`. Counter series могут появляться только после соответствующего события; отсутствие конкретной серии сразу после рестарта не является доказательством ошибки.
+`/metrics` должен отдавать HTTP 200. После запуска проверьте наличие `app_info` (там `version` и `revision` — сравните с ожидаемым коммитом), `db_pool_waits_total`, `db_pool_wait_seconds_total`, `subscription_renewals_total`, `subscription_reanimations_total` и XUI-метрик с label `node`. Counter series могут появляться только после соответствующего события; отсутствие конкретной серии сразу после рестарта не является доказательством ошибки.
 
 Перед деструктивными rebuild-миграциями (026, 027, 032, 033, 034) приложение само снимает копию файла БД: `<db>.pre-migration.<version>.<timestamp>` рядом с основной БД (после `wal_checkpoint(TRUNCATE)`). Если миграция упала и схема осталась частично применённой, эта копия — точка восстановления; штатный бэкап её не заменяет, потому что делается раз в сутки.
 
 Журнал аудита обрезается суточным обслуживанием после бэкапа: строки старше срока хранения удаляются пачками по 1000 (`DailyMaintenance`). Срок задаётся `AUDIT_LOG_RETENTION_DAYS` (дней), по умолчанию **180 — полгода**; `0` означает значение по умолчанию, отрицательные отвергаются при старте, верхняя граница — 3650 (10 лет). Файл БД при этом не уменьшается — SQLite переиспользует освобождённые страницы; для фактического сжатия нужен ручной `VACUUM` в окне обслуживания (блокирует писателя и требует свободного места ~размер БД). Размеры файла и WAL видны в `db_file_bytes` / `db_wal_bytes`.
 
-`db_pool_wait` и `db_pool_wait_duration_seconds` — накопительные значения с момента старта процесса. Для оценки нагрузки сравнивайте изменение между scrape, а не абсолютное значение. Метрики подписок и платежей process-local, сбрасываются при рестарте и не заменяют базу данных/audit log.
+`db_pool_waits_total` и `db_pool_wait_seconds_total` — counters, накопленные значения с момента старта процесса. Для оценки нагрузки сравнивайте изменение между scrape, а не абсолютное значение. Метрики подписок и платежей process-local, сбрасываются при рестарте и не заменяют базу данных/audit log.
 
 Проверьте Better Stack после первого scrape и убедитесь, что новый XUI label идентифицирует VPN-ноду. Он не идентифицирует экземпляр приложения; агрегация нескольких bot hosts требует отдельного стабильного host/source label на стороне collector.
 
@@ -378,37 +378,40 @@ The bot exposes a `/metrics` endpoint on the same port as health checks (default
 
 **Результат аудита (2026-08-26):**
 
-Цель — держать только метрики, по которым есть алерт, SLO или оперативное действие. Сейчас объявлено 34 прикладных collector-а (без стандартных `go_*`, `process_*` и `promhttp_*`); это ещё приемлемо, но часть из них имеет невысокую диагностическую ценность. Платёжные метрики в целом добавлены правильно: отсутствуют user/order/provider ID labels, а суммы нормализуются до копеек и валюты.
+Цель — держать только метрики, по которым есть алерт, SLO или оперативное действие. Сейчас объявлено 50 прикладных collector-ов (без стандартных `go_*`, `process_*` и `promhttp_*`); это ещё приемлемо, но часть из них имеет невысокую диагностическую ценность. Платёжные метрики в целом добавлены правильно: отсутствуют user/order/provider ID labels, а суммы нормализуются до копеек и валюты.
 
 **Рекомендуемый обязательный набор:**
 
 - `http_requests_total`, `http_request_duration_seconds` — трафик, ошибки и latency API;
 - `bot_updates_total`, `bot_update_duration_seconds` — основной пользовательский канал;
 - `xui_requests_total`, `xui_request_duration_seconds` — доступность и latency VPN-панелей;
-- `db_queries_total`, `db_query_duration_seconds`, `db_pool_wait` — ошибки/замедление SQLite;
+- `db_queries_total{operation,result,table}`, `db_query_duration_seconds` — ошибки/замедление SQLite; метка `table` адресует виновника;
+- `db_pool_waits_total`, `db_pool_wait_seconds_total` — ожидания свободного соединения (counters, читать через `increase`);
 - `active_subscriptions` — все активные подписки;
 - `premium_subscriptions` — активные оплаченные Premium-подписки;
 - `free_subscriptions` — активные бесплатные подписки;
 - `trial_subscriptions` — активные trial-подписки; отозванные/неактивные отдельно не считаются;
-- `subscription_sync_total`, `subscription_sync_duration_seconds`, `bot_orphaned_clients_revoked_total` — целостность VPN-доступа;
+- `subscription_sync_total{result}`, `subscription_sync_duration_seconds`, `bot_orphaned_clients_revoked_total` — целостность VPN-доступа; `result="degraded"` — прогон вернул ошибку по части биндингов;
+- `subscription_expire_total{result}`, `subscriptions_expired_total` — прогоны экспирации и число реально отключённых подписок;
+- `app_info{version,revision}` — какая ревизия сейчас в проде; без неё «поведение поменялось» не отличить от «крутится старый образ»;
 - `node_up{node}` — доступность панели каждой нодой по последнему проходу синка (1/0); на `== 0` нужен алерт;
 - `subscription_nodes{status}`, `subscription_nodes_parked` — состояние биндингов по статусам синка; рост `parked` означает, что пользователи на этих нодах не провижены;
 - `worker_restarts_total{worker}` — перезапуски фонового воркера после паники; любой рост — повод разобрать стек в логе;
 - `payment_reconcile_total{result}` — исходы сверки зависших pending-заказов (`confirmed_activated`, `expired`, `provider_error`, …);
 - `payment_operations_total`, `payment_operation_duration_seconds`, `payment_amount_cents_total`, `payment_issues_total` — платёжная воронка и инциденты;
 
-**Второстепенные:** cache hit/miss, Telegram API latency, subserver fetch детализация, worker run/latency и `db_pool_wait` полезны для расследований, но не требуют обязательных алертов.
+**Второстепенные:** cache hit/miss, Telegram API latency, subserver fetch детализация, worker run/latency и ожидания пула полезны для расследований, но не требуют обязательных алертов.
 
 **Кандидаты на удаление или исправление:**
 
-1. `db_pool_open`, `db_pool_in_use`, `db_pool_idle` удалены: при пуле из 4 соединений и WAL они почти не дают новой информации.
+1. `db_pool_open`, `db_pool_in_use`, `db_pool_idle` удалены: при пуле из 4 соединений и WAL они почти не дают новой информации. Ожидания пула оставлены — и как **counters** (`_total`), а не gauges: накопленное значение читается только через `increase()`.
 2. `subscription_reminder_runs_total` и `subscription_expire_total` оставлены только как контроль запуска фоновых workers; обязательные алерты на них не нужны.
 3. Детальные cache hit/miss duration-метрики удалены, чтобы не дублировать HTTP latency.
 4. В документации используется фактическое имя `payment_amount_cents_total`.
 
 **Labels:**
 
-- Оставить bounded labels: `status` (лучше числовой код или класс `2xx/4xx/5xx`), `method`, нормализованный route, `result`, `operation`, `currency`, `event`, `window`, `format`, `cache`, `target`.
+- Оставить bounded labels: `code` (числовой, сделан), `method`, нормализованный route, `result`, `operation` (формат `ресурс.действие`), `table` (из GORM-схемы), `currency`, `event`, `window`, `format`, `cache`, `target`.
 - Для HTTP желательно перейти от ручного `normalizePath` к router route pattern, чтобы новые динамические endpoints не создавали series по ID. Текущая нормализация покрывает только `/i/*` и `/sub/*`.
 - Не добавлять `telegram_id`, `user_id`, `order_id`, `subscription_id`, `provider_payment_id`, URL, payload, username или payment URL: это unbounded/high-cardinality и потенциально PII.
 - Для платежей полезно добавить только bounded `provider` (сейчас фактически всегда Platega) и, если появятся провайдеры, `payment_provider` в `payment_operations_total` и `payment_operation_duration_seconds`. Не добавлять `payment_method`, если его набор/значения не зафиксированы и он не нужен для отдельного алерта.
@@ -441,7 +444,7 @@ sum(rate(payment_amount_cents_total{operation="confirmed"}[24h]))
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `http_requests_total` | Counter | method, path, status | Application HTTP requests; `/metrics` and `/static/*` excluded |
+| `http_requests_total` | Counter | method, path, code | Application HTTP requests; `/metrics` and `/static/*` excluded; `code` — числовой статус |
 | `http_request_duration_seconds` | Histogram | method, path | Application HTTP latency; `/metrics` and `/static/*` excluded |
 | `premium_subscriptions` | Gauge | — | Текущее количество активных оплаченных Premium-подписок |
 | `bot_updates_total` | Counter | command, result | Bot updates processed (success/error/rate_limited) |
@@ -683,7 +686,7 @@ curl http://localhost:8880/debug/pprof/goroutine?debug=1  # if enabled
 
 **Solutions:**
 1. **Пул соединений**: `MaxOpenConns=4`, `MaxIdleConnsDB=4`; SQLite использует WAL с busy timeout 5s. Не увеличивайте пул вслепую: SQLite допускает одного writer, а больше соединений не ускоряет конкурентные записи.
-2. **Сначала измерить**: `db_pool_wait` и `db_pool_wait_duration_seconds` — накопительные значения ожидания с начала процесса, не размер очереди. Сравнивайте прирост между scrape/рестартами и сопоставляйте с DB latency и логами `database is locked`.
+2. **Сначала измерить**: `db_pool_waits_total` и `db_pool_wait_seconds_total` — накопленные значения ожидания с начала процесса, не размер очереди. Сравнивайте прирост между scrape/рестартами и сопоставляйте с DB latency и логами `database is locked`.
 3. **Снизить конкурирующие записи** только по подтверждённой причине; trial cleanup каждые 3 часа, backup ежедневно.
 4. Рассматривать PostgreSQL при доказанной write contention/нагрузке, а не по одному высокому cumulative wait count.
 

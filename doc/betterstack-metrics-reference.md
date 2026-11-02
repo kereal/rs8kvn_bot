@@ -90,9 +90,14 @@
 
 ## Application Metrics (bot экспортирует)
 
+### Build (`app_*`)
+
+- **`app_info{version,revision}`** — gauge, всегда 1: что именно крутится. `revision` — короткий VCS-хэш или ldflag-commit. Единственный способ увидеть со стороны дашборда, что прод крутит старый образ.
+
 ### HTTP API (`http_*`)
 
-- **`http_requests_total{method,path,status}`** — counter: всего HTTP запросов (без `/metrics` и static assets)
+- **`http_requests_total{method,path,code}`** — counter: всего HTTP запросов (без `/metrics` и static assets)
+  - `code`: **числовой** HTTP-код (`200`, `404`, `503`) — можно фильтровать `label('code') = '503'` или класс через префикс
 - **`http_request_duration_seconds{method,path}`** — histogram: latency HTTP запросов
 
 ### Telegram Bot (`bot_*`, `telegram_*`)
@@ -106,17 +111,19 @@
 ### 3x-ui Panel Integration (`xui_*`)
 
 - **`xui_requests_total{operation,result,node}`** — counter: запросы к панели; `node` — имя настроенной VPN-ноды
+  - `operation`: `ресурс.действие` — `clients.add`, `clients.update`, `clients.del`, `clients.traffic`, `clients.get`, `inbounds.get`, `server.status`
   - `result`: `success`, `error`
 - **`xui_request_duration_seconds{operation,node}`** — histogram: latency запросов по ноде
 
 ### Database (`db_*`)
 
-- **`db_queries_total{operation,result}`** — counter: всего database queries
+- **`db_queries_total{operation,result,table}`** — counter: всего database queries
+  - `table`: имя таблицы из GORM-модели (`subscriptions`, `orders`, …) или `other`. Именно по ней видно, какой запрос падает
 - **`db_query_duration_seconds{operation}`** — histogram: latency database queries
-- **`db_pool_wait`** — gauge: cumulative `sql.DBStats.WaitCount` (number of calls waiting for a connection since start)
-- **`db_pool_wait_duration_seconds`** — gauge: cumulative `sql.DBStats.WaitDuration` in seconds
+- **`db_pool_waits_total`** — counter: сколько раз вызов ждал свободное соединение с момента старта (`sql.DBStats.WaitCount`)
+- **`db_pool_wait_seconds_total`** — counter: сколько секунд суммарно ушло на ожидание (`sql.DBStats.WaitDuration`)
 
-`db_pool_wait` и `db_pool_wait_duration_seconds` снимаются с `sql.DBStats` раз в 10 секунд. Первый показывает накопленное число ожиданий, второй — накопленные секунды ожидания; это не rate и не текущая длина очереди.
+Оба — **counters** и снимаются с `sql.DBStats` раз в 10 секунд: сборщик добавляет приращение, поэтому повторный сбор ничего не удваивает. Читать через `derivativeMerge(rate_avg)`. Абсолютное значение смысла не несёт; текущей длины очереди среди метрик нет.
 ### Cache (`cache_*`)
 
 - **`cache_hits_total{cache}`** — counter: cache hits
@@ -140,10 +147,11 @@ These are process-local counters; they reset on restart and are not durable busi
 
 ### Subscriptions — Workers (`subscription_*`, `reconcile_*`, `bot_orphaned_*`)
 
-- **`subscription_sync_total`** — counter: прогоны sync worker
+- **`subscription_sync_total{result}`** — counter: прогоны sync worker, `result`: `ok` / `degraded` (прогон вернул агрегированную ошибку)
 - **`subscription_sync_duration_seconds`** — histogram: длительность sync worker
-- **`subscription_expire_total`** — counter: scans by expire worker
+- **`subscription_expire_total{result}`** — counter: прогоны expire worker, `result`: `ok` / `degraded` (часть подписок не отключилась)
 - **`subscription_expire_duration_seconds`** — histogram: worker duration
+- **`subscriptions_expired_total`** — counter: сколько подписок реально отключил expire worker (не путать с числом прогонов)
 - **`subscription_reminder_runs_total`** — counter: reminder scans, including empty scans
 - **`subscription_reminders_total{window,result}`** — counter: attempted reminder sends; no rows means no eligible user/sends, not necessarily worker outage
 - **`traffic_notification_runs_total`** — counter: traffic scans, including empty scans
@@ -167,6 +175,8 @@ These are process-local counters; they reset on restart and are not durable busi
 
 ### Subserver (`subserver_*`)
 
+- **`subserver_requests_total{format}`** — counter: выдачи по форматам (`xray`, `singbox`, `clash`). Нулевые серии публикуются сразу, поэтому «нет данных» означает «нет трафика», а не «метрика не работает»
+- **`subserver_not_found_total`** — counter: запросы по удалённым/отозванным подпискам (клиент, у которого остался конфиг, продолжает опрашивать ссылку)
 - **`subserver_source_fetch_total{result,format}`** — counter: fetches upstream sources
   - `result`: `success`, `error`
   - `format`: `json`, `base64`, `plain`, `unknown`
@@ -320,7 +330,7 @@ ORDER BY time
 
 ### Money Totals (cumulative counter)
 
-`payment_amount_cents_total` — counter суммы в minor units. В Better Stack `value_avg` содержит сохранённое значение counter; `rate_avg` — rate по окнам. Для суммы периода используй last minus first cumulative sample, а не суммирование samples.
+`payment_amount_cents_total` — counter суммы в minor units. В Better Stack `value_avg` содержит сохранённое значение counter; `rate_avg` — rate по окнам. Для суммы периода используй last minus first cumulative sample, а не суммирование samples. Для **счётчиков** то же правило: «сколько за период» = `maxMerge(value_max) - minMerge(value_min)`, а `maxMerge(value_max)` в одиночку — это накопленное с момента рестарта процесса, а не за интервал.
 
 ```sql
 SELECT

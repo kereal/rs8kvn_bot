@@ -25,16 +25,33 @@
 ### KPIs (число)
 - **Active Subscriptions** — текущие активные подписки
 - **Premium** / **Free** / **Trial** — breakdown по типам
-- **Confirmed Revenue** — накопительная подтверждённая сумма в RUB/USD/EUR, process lifetime
-- **Successful Confirms** — число успешных callback-активаций за выбранный период
+- **RUB/USD/EUR Revenue (period)** — сумма подтверждённых оплат **за выбранный период** (`max(value_max) - min(value_min)`); раньше график показывал накопленное с момента рестарта процесса, что в секции «Revenue 24h» вводило в заблуждение
+- **Successful Confirms (period)** — число успешных callback-активаций за период (тоже дельта, а не накопленное)
 
 ### Trends (временные ряды)
 - **Subscription Creates** — rate создания/реанимации подписок
 - **Subscription Renewals** — rate успешных платных продлений; ноль до релиза, который начал инкрементировать метрику
 - **Cumulative Revenue** — накопительный counter в выбранном временном диапазоне (не hourly/daily revenue)
 - **Container CPU %**, **Go Goroutines**, **Host Load 1m** — быстрый health snapshot
+- **Deployed build** — `app_info{version,revision}`: какая ревизия реально крутится (без неё устаревший деплой невидим)
+- **HTTP 5xx rate** — `http_requests_total` c числовым `code`
 
 ---
+
+## ⚠️ Алерты
+
+Готовы и **выключены (paused)** — включаются одним переключателем, чтобы не будить зря, пока не решено, нужны ли уведомления:
+
+| Алерт | Условие | График |
+|---|---|---|
+| VPN node panel is down | `node_up < 1` | Node panel availability (1165131) |
+| Parked subscription bindings | `subscription_nodes_parked > 0` | Parked bindings (1165129) |
+| Background worker restarted after panic | `worker_restarts_total` растёт | Worker restarts (1165129) |
+| Database query errors | ошибок > 0.05/с за 5 мин | DB Query Errors by Table (1165132) |
+| HTTP 5xx responses | > 0.05/с за 5 мин | HTTP 5xx rate (1165127) |
+| SQLite file too large | `db_file_bytes > 200 MiB` за час | SQLite size (1165132) |
+
+Алерты на `node_up`, `subscription_nodes_parked`, `worker_restarts_total`, `db_file_bytes` начнут срабатывать **после релиза** — метрик нет в текущей прод-сборке. Алерты на 5xx и ошибки БД работают сразу после релиза, потому что завязаны на изменённые `http_requests_total{code}` и `db_queries_total{table}`.
 
 ## 🤖 Bot Activity (1165167)
 
@@ -49,6 +66,10 @@
 
 ### Workers
 - Sync/expire/reminder/traffic notification worker scans
+- **Sync runs by result** — `subscription_sync_total{result="ok|degraded"}`: упавшая панель больше не выглядит как штатная работа
+- **Subscriptions expired** — `subscriptions_expired_total` (сколько подписок реально отключено)
+- **Parked bindings** — `subscription_nodes_parked`
+- **Worker restarts** — `worker_restarts_total{worker}`
 - Available worker duration histograms
 - Orphaned clients revoked and reconciliation duration
 
@@ -73,27 +94,28 @@
 ## 🔌 APIs & Integrations (1165131)
 
 ### 🌐 HTTP API
-- Requests rate by status; latency currently available via Bot Activity dashboard (1165167).
+- **HTTP Requests by Status** — rate по `code`; запрос пишет `coalesce(nullIf(label('code'),''), label('status'))`, поэтому график живёт и до релиза (старый лейбл `status`), и после (новый `code`).
 
 ### 🔌 VPN Panel & Subserver
-- 3x-ui requests by operation/result/node, plus latency p95.
-- Subserver source fetches by result/format and no-items count.
+- **Node panel availability** — `node_up{node}` (1/0) по проходам синка.
+- 3x-ui requests by `operation` (`clients.add`, `clients.update`, …) / result / node.
+- **XUI Latency (mean)** — среднее из `bucket_sum / bucket_count`. Перцентили в Better Stack не считаются (см. `doc/betterstack-metrics-reference.md`), поэтому p95-график заменён.
+- Subserver: source fetches by result/format, no-items count, **Subscriber requests by format** (`xray`/`singbox`/`clash`) и **Dead subscription requests** (`subserver_not_found_total` — клиенты, у которых остался конфиг удалённой подписки).
 
 Telegram updates and Telegram API charts are in **🤖 Bot Activity (1165167)**.
 
 ## 🗄️ Database & Cache
 
 ### 💾 SQLite Operations
-- **DB Operations by Type** — операции по типам (success)
-- **DB Errors** — ошибки по операциям
-- **DB Query Latency p50** — медиана latency
-- **DB Query Latency p95**
-- **DB Query Latency p99**
-- **DB Latency by Operation p95** — breakdown по операциям
+- **Query Rate** — операции по типам (success)
+- **DB Query Latency (mean)** — среднее по операциям (`sumMerge(bucket_sum)/sumMerge(bucket_count)`); перцентили недоступны
+- **DB Query Errors by Table** — ошибки чтения с меткой `table`: адрес проблемы, а не просто «query error»
+- **DB Pool Waits (rate)** — `db_pool_waits_total`, counter
+- **SQLite size (file + WAL)** — `db_file_bytes` / `db_wal_bytes`; рост БД иначе виден только по диску
 ### 🗃️ Cache Performance
 - `cache_hits_total{cache}` / `cache_misses_total{cache}` — rates split by `subscription`/`subserver`; compare as a hit/miss rate, do not interpret each chart as a percentage.
-- **DB Pool Wait Count** — cumulative `sql.DBStats.WaitCount` (not active queue depth).
-- **DB Pool Wait Duration** — cumulative wait duration in seconds; new metric absent from captured prod scrape.
+- **DB Pool Waits** — `db_pool_waits_total`, counter; не глубина очереди, читать через `increase`.
+- **DB Pool Wait Seconds** — `db_pool_wait_seconds_total`, counter.
 
 ---
 
@@ -147,8 +169,9 @@ Telegram updates and Telegram API charts are in **🤖 Bot Activity (1165167)**.
 - `subscription_creates_total` — successful first-time creations; process-local counter
 - `subscription_reanimations_total` — revoked subscriptions restored to free; process-local counter
 - `subscription_renewals_total` — paid renewal callbacks; process-local counter
-- `subscription_sync_total` / `subscription_sync_duration_seconds` — worker runs/duration
-- `subscription_expire_total` / `subscription_expire_duration_seconds` — worker runs/duration
+- `subscription_sync_total{result}` / `subscription_sync_duration_seconds` — worker runs (ok/degraded)/duration
+- `subscription_expire_total{result}` / `subscription_expire_duration_seconds` — worker runs/duration
+- `subscriptions_expired_total` — сколько подписок реально отключено
 - `subscription_reminder_runs_total` / `subscription_reminders_total{window,result}` — scans and send attempts
 - `traffic_notification_runs_total` / `traffic_notifications_total{kind,result}` — scans and send attempts
 - `bot_orphaned_clients_revoked_total` / `reconcile_orphaned_duration_seconds` — reconciliation outcome and duration
@@ -160,7 +183,8 @@ Telegram updates and Telegram API charts are in **🤖 Bot Activity (1165167)**.
 - `payment_issues_total{event}` (counter) — issues по событиям
 
 ### HTTP API
-- `http_requests_total{path, status}` (counter) — HTTP запросы
+- `http_requests_total{method, path, code}` (counter) — HTTP запросы, `code` числовой
+- `app_info{version,revision}` (gauge=1) — какая ревизия в проде
 - `http_request_duration_seconds{path}` (histogram) — latency
 
 ### Telegram Bot
@@ -170,7 +194,7 @@ Telegram updates and Telegram API charts are in **🤖 Bot Activity (1165167)**.
 - `telegram_api_duration_seconds{method}` (histogram) — latency for instrumented API calls
 
 ### 3x-ui VPN Panel
-- `xui_requests_total{operation,result,node}` (counter) — requests to panel by configured VPN node
+- `xui_requests_total{operation,result,node}` (counter) — requests to panel by configured VPN node; `operation` = `ресурс.действие`
 - `xui_request_duration_seconds{operation,node}` (histogram) — latency by node
 
 ### Subserver
@@ -178,12 +202,14 @@ Telegram updates and Telegram API charts are in **🤖 Bot Activity (1165167)**.
 - `subserver_source_fetch_duration_seconds{result}` (histogram) — fetch latency
 - `subserver_cache_invalidations_total{reason}` (counter) — invalidations
 - `subserver_no_items_total` (counter) — cases with no items
+- `subserver_not_found_total` (counter) — запросы по удалённым подпискам
+- `subserver_requests_total{format}` (counter) — микс форматов xray/singbox/clash
 
 ### Database
-- `db_queries_total{operation,result}` (counter) — DB operations
+- `db_queries_total{operation,result,table}` (counter) — DB operations
 - `db_query_duration_seconds{operation}` (histogram) — query latency
-- `db_pool_wait` (gauge) — cumulative connection-pool waits since process start
-- `db_pool_wait_duration_seconds` (gauge) — cumulative wait time, seconds, since process start. Not exported by the captured production build yet; chart becomes populated after rollout.
+- `db_pool_waits_total` (counter) — connection-pool waits since process start
+- `db_pool_wait_seconds_total` (counter) — wait time in seconds since process start
 
 ### Cache
 - `cache_hits_total{cache}` / `cache_misses_total{cache}` — `subscription`, `subserver`
@@ -224,6 +250,14 @@ Telegram updates and Telegram API charts are in **🤖 Bot Activity (1165167)**.
 ---
 
 ## История изменений
+
+### 2026-11-02: Аудит и приведение графиков к реальным метрикам
+- Перцентили заменены на среднее: `histogramQuantile`/`quantilePrometheusHistogramArrayMerge` в Better Stack возвращают верхнюю границу бакета (0.5 с для DB, 10 с для HTTP) для любого квантиля.
+- Доход и «Successful Confirms» переведены с накопленного `maxMerge(value_max)` на дельту за период.
+- `http_requests_total` переведён на числовой `code`, график читает оба варианта лейбла.
+- Добавлены графики: Deployed build, HTTP 5xx rate, Node panel availability, Sync runs by result, Subscriptions expired, Parked bindings, Worker restarts, DB Query Errors by Table, DB Pool Waits, SQLite size, Subscriber requests by format, Dead subscription requests.
+- Удалена пустая секция «Telegram Bot» в 1165131 (графики живут в Bot Activity).
+- Созданы 6 chart alerts в состоянии paused.
 
 ### 2026-10-26: Полная реорганизация
 - Создана новая структура из 7 дашбордов
