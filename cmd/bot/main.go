@@ -398,7 +398,9 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	}()
 
 	backupSched := scheduler.NewBackupScheduler(cfg.DatabasePath, config.DefaultBackupHour, config.DefaultBackupRetention)
-	backupSched.SetMaintenance(dbService.DailyMaintenance)
+	backupSched.SetMaintenance(func(ctx context.Context) error {
+		return dbService.DailyMaintenance(ctx, cfg.AuditLogRetentionDays)
+	})
 
 	go func() {
 		defer wg.Done()

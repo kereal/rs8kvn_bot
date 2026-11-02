@@ -1847,7 +1847,7 @@ func TestDailyMaintenance_PrunesOldAuditLog(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now().UTC()
-	old := now.Add(-AuditLogRetention - 24*time.Hour)
+	old := now.AddDate(0, 0, -181)
 	fresh := now.Add(-time.Hour)
 
 	oldEntity, freshEntity, actor := "old", "fresh", "1"
@@ -1866,7 +1866,7 @@ func TestDailyMaintenance_PrunesOldAuditLog(t *testing.T) {
 		}))
 	}
 
-	require.NoError(t, svc.DailyMaintenance(ctx))
+	require.NoError(t, svc.DailyMaintenance(ctx, 180))
 
 	var oldLeft, freshLeft int64
 
@@ -1909,4 +1909,25 @@ func TestSnapshotBeforeRebuild(t *testing.T) {
 	matches, err = filepath.Glob(dbPath + ".pre-migration.3[5-9].*")
 	require.NoError(t, err)
 	assert.Empty(t, matches)
+}
+
+// Тест поведения: нулевой срок означает «по умолчанию» (полгода), а не «удалить
+// всё» — пустая настройка не должна стирать историю.
+func TestDailyMaintenance_ZeroUsesDefault(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	entity, actor := "e", "1"
+	old := time.Now().UTC().AddDate(-2, 0, 0)
+
+	require.NoError(t, svc.InsertAuditLog(ctx, &AuditLog{
+		EntityType: EntitySubscription, EntityID: &entity, Event: AuditEventSubscriptionCreated,
+		ActorType: ActorUser, ActorID: &actor, CreatedAt: old,
+	}))
+
+	require.NoError(t, svc.DailyMaintenance(ctx, 0))
+
+	var left int64
+	require.NoError(t, svc.GetDB().WithContext(ctx).Model(&AuditLog{}).Count(&left).Error)
+	assert.Zero(t, left, "двухлетняя запись должна попасть под срок по умолчанию")
 }

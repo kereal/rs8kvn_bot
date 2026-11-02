@@ -983,3 +983,32 @@ func FuzzLoad_InvalidEnvValues(f *testing.F) {
 		}
 	})
 }
+
+// Тест поведения: срок хранения аудита по умолчанию — полгода, а нулевое или
+// отрицательное значение отвергается (иначе обслуживание снесло бы всю историю).
+func TestConfig_Validate_AuditRetention(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, 180, DefaultAuditLogRetentionDays)
+
+	base := &Config{
+		TelegramBotToken:      "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramAdminID:       123456,
+		HeartbeatInterval:     60,
+		LogLevel:              "info",
+		WebServerPort:         DefaultWebServerPort,
+		SiteURL:               "https://vpn.site",
+		TrialDurationHours:    3,
+		TrialRateLimit:        3,
+		GlobalSubURL:          "https://vpn.example.com/sub/",
+		AuditLogRetentionDays: 0,
+	}
+
+	require.NoError(t, base.validate(), "0 означает значение по умолчанию")
+
+	base.AuditLogRetentionDays = -1
+	require.ErrorContains(t, base.validate(), "AUDIT_LOG_RETENTION_DAYS")
+
+	base.AuditLogRetentionDays = 3650
+	require.NoError(t, base.validate())
+}

@@ -129,6 +129,11 @@ const (
 	DefaultWebServerPort = 8880
 )
 
+// DefaultAuditLogRetentionDays — срок хранения audit_log по умолчанию: полгода.
+// Меняется через AUDIT_LOG_RETENTION_DAYS без правки кода (комплаенс может
+// требовать больший срок).
+const DefaultAuditLogRetentionDays = 180
+
 // MaxResponseSize is the maximum response size to read from upstream responses (2MB).
 const MaxResponseSize = 2 << 20
 
