@@ -956,8 +956,9 @@ var retryBackoffIntervals = []time.Duration{
 }
 
 // CalculateRetryAt returns the next retry timestamp for the given retry count.
-// Intervals: 1m → 2m → 5m → 15m → 30m → 45m → 60m (capped).
-// After 6 failures further calls still get 60m and the record remains pending.
+// Intervals: 1m → 2m → 5m → 15m → 30m → 45m → 60m (capped at the last entry).
+// Точка остановки — не здесь, а в handleSyncError: при retry_count >= maxSyncRetries
+// запись паркуется (retry_at = parkedRetryAt), а этот расчёт продолжает давать 60m.
 func CalculateRetryAt(retryCount int) time.Time {
 	idx := retryCount
 	if idx >= len(retryBackoffIntervals) {

@@ -1075,7 +1075,7 @@ func TestGetClientTraffic(t *testing.T) {
 }
 
 // GetClientByEmail теперь читает выделенный эндпоинт GET /clients/get/{email};
-// контрактные тесты — в panel_contract_test.go.
+// контрактные тесты — в этом же файле, группа TestPanelContract_*.
 
 func TestGetInbound(t *testing.T) {
 	t.Parallel()

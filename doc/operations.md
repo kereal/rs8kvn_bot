@@ -261,7 +261,7 @@ Currently backups are local only. For production, configure remote storage:
 | Endpoint | Description | Success | Failure |
 |----------|-------------|---------|---------|
 | `GET /healthz` | Liveness: DB ping | 200 | 503 |
-| `GET /readyz` | Readiness: all components initialized | 200 | 503 |
+| `GET /readyz` | Readiness: БД + доступность VPN-нод (`nodes`: Degraded при частичной, 503 при полной недоступности) | 200 | 503 |
 
 **Usage:**
 ```bash
@@ -385,13 +385,17 @@ The bot exposes a `/metrics` endpoint on the same port as health checks (default
 - `free_subscriptions` — активные бесплатные подписки;
 - `trial_subscriptions` — активные trial-подписки; отозванные/неактивные отдельно не считаются;
 - `subscription_sync_total`, `subscription_sync_duration_seconds`, `bot_orphaned_clients_revoked_total` — целостность VPN-доступа;
+- `node_up{node}` — доступность панели каждой нодой по последнему проходу синка (1/0); на `== 0` нужен алерт;
+- `subscription_nodes{status}`, `subscription_nodes_parked` — состояние биндингов по статусам синка; рост `parked` означает, что пользователи на этих нодах не провижены;
+- `worker_restarts_total{worker}` — перезапуски фонового воркера после паники; любой рост — повод разобрать стек в логе;
+- `payment_reconcile_total{result}` — исходы сверки зависших pending-заказов (`confirmed_activated`, `expired`, `provider_error`, …);
 - `payment_operations_total`, `payment_operation_duration_seconds`, `payment_amount_cents_total`, `payment_issues_total` — платёжная воронка и инциденты;
 
 **Второстепенные:** cache hit/miss, Telegram API latency, subserver fetch детализация, worker run/latency и `db_pool_wait` полезны для расследований, но не требуют обязательных алертов.
 
 **Кандидаты на удаление или исправление:**
 
-1. `db_pool_open`, `db_pool_in_use`, `db_pool_idle` удалены: при `MaxOpenConns=1` они почти не дают новой информации.
+1. `db_pool_open`, `db_pool_in_use`, `db_pool_idle` удалены: при пуле из 4 соединений и WAL они почти не дают новой информации.
 2. `subscription_reminder_runs_total` и `subscription_expire_total` оставлены только как контроль запуска фоновых workers; обязательные алерты на них не нужны.
 3. Детальные cache hit/miss duration-метрики удалены, чтобы не дублировать HTTP latency.
 4. В документации используется фактическое имя `payment_amount_cents_total`.
@@ -447,7 +451,12 @@ sum(rate(payment_amount_cents_total{operation="confirmed"}[24h]))
 | `payment_operations_total` | Counter | operation, result | Payment request/confirm/cancel attempts by outcome |
 | `payment_operation_duration_seconds` | Histogram | operation | Payment service operation latency |
 | `payment_amount_cents_total` | Counter | operation, currency | Monetary amounts in cents by outcome (`confirmed`, `chargeback`) — watch for chargeback totals vs confirmed |
-| `payment_issues_total` | Counter | event | Payment incidents requiring investigation or operator attention |
+| `payment_issues_total` | Counter | event | Payment incidents requiring investigation or operator attention (`callback_unauthorized`, `unknown_provider_id`, …) |
+| `payment_reconcile_total` | Counter | result | Stale pending order sweep outcomes (`confirmed_activated`, `expired`, `provider_error`, `still_pending`, …) |
+| `node_up` | Gauge | node | Node panel availability from the sync health probe (1 = up) |
+| `subscription_nodes` | Gauge | status | Subscription node bindings by sync status |
+| `subscription_nodes_parked` | Gauge | — | Bindings parked after exhausted retries or a panel refusal |
+| `worker_restarts_total` | Counter | worker | Background worker restarts after a recovered panic |
 
 **Prometheus scrape config:**
 ```yaml

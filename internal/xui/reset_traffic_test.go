@@ -53,7 +53,7 @@ func TestResetTraffic_PanelErrorSurfacesMsg(t *testing.T) {
 
 	// Контракт панели: resetTraffic отсутствующего клиента —
 	// "Something went wrong (record not found)". Классификация — sentinel,
-	// а не текст ошибки (см. panel_contract_test.go).
+	// а не текст ошибки (см. client_test.go).
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

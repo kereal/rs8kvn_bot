@@ -5,7 +5,7 @@
 Документ без строки в этой таблице считается неактуальным. Новый документ
 добавляется сюда же — иначе он просто ляжет и умрёт. Источник истины по
 взаимодействию с панелью — раздел «Контракт API панели 3x-ui» в конце этого
-документа + contract-тесты `internal/xui/panel_contract_test.go`.
+документа + contract-тесты `internal/xui/client_test.go`.
 
 | Документ | О чём | Когда читать |
 |---|---|---|
@@ -392,11 +392,15 @@ if !rateLimiter.Allow(chatID) {
 
 **Connection pool:**
 ```go
-MaxOpenConns = 1   // SQLite single-writer constraint
-MaxIdleConns = 1
+MaxOpenConns    = 4   // WAL: many readers over one writer
+MaxIdleConns    = 4
 ConnMaxLifetime = 5m
 ConnMaxIdleTime = 2m
 ```
+Пул из 4 соединений (`internal/config/constants.go`) заменил `MaxOpenConns = 1`:
+одиночное соединение давало многодневные `db_pool_wait` при конкурентных
+чтениях. SQLite в WAL-режиме допускает параллельных читателей, писатель
+остаётся один.
 
 **Migrations:** Embedded SQL files, applied via `golang-migrate` at startup.
 
@@ -1331,7 +1335,7 @@ inbound'ы для `UpdateClient` — из `record.InboundIDs` с фолбэко�
 ## 7. Как проверить контракт без доступа к панели
 
 Контракт закреплён тестами `internal/xui` на фикстурах-ответах панели
-(`httptest`), см. `internal/xui/panel_contract_test.go`. Живая панель нужна
+(`httptest`), см. `internal/xui/client_test.go` (группа TestPanelContract_*). Живая панель нужна
 только для перепроверки при обновлении панели.
 
 
