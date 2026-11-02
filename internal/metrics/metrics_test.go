@@ -31,18 +31,19 @@ func TestNormalizePath(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"empty path", "", ""},
-		{"root", "/", "/"},
+		{"empty path", "", "other"},
 		{"static health", "/healthz", "/healthz"},
 		{"static ready", "/readyz", "/readyz"},
-		{"static api", "/api/v1/subscriptions", "/api/v1/subscriptions"},
+		{"unknown path is collapsed", "/api/v1/subscriptions", "other"},
+		{"scanner noise is collapsed", "/wp-login.php", "other"},
+		{"root is not a known route", "/", "other"},
 		{"invite with code", "/i/abc12345", "/i/:code"},
 		{"invite with long code", "/i/abcdef1234567890", "/i/:code"},
 		{"invite with subpath", "/i/abc/sub", "/i/:code"},
 		{"subscription id", "/sub/abc-123-xyz", "/sub/:id"},
 		{"subscription uuid", "/sub/550e8400-e29b-41d4-a716-446655440000", "/sub/:id"},
 		{"static after slash", "/static/logo.png", "/static/logo.png"},
-		{"mixed static", "/api/v1/users/123", "/api/v1/users/123"},
+		{"mixed static", "/api/v1/users/123", "other"},
 	}
 
 	for _, tt := range tests {
@@ -60,6 +61,9 @@ func TestStatusCodeString(t *testing.T) {
 
 	rr.statusCode = 404
 	assert.Equal(t, "Not Found", rr.statusCodeString())
+
+	rr.statusCode = 0
+	assert.Equal(t, "0", rr.statusCodeString(), "нестандартный код не должен давать пустую метку")
 
 	rr.statusCode = 500
 	assert.Equal(t, "Internal Server Error", rr.statusCodeString())

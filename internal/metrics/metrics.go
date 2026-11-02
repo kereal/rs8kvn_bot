@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -472,6 +473,16 @@ func shouldSkipHTTPMetrics(path string) bool {
 	return path == "/metrics" || path == "/static/logo.png" || strings.HasPrefix(path, "/static/")
 }
 
+// knownPaths — статические маршруты приложения. Всё остальное схлопывается в
+// "other": сканер, перебирающий /admin.php, /wp-login.php, /.env, иначе создаёт
+// по новой временной серии на каждый путь, и эти серии живут в TSDB вечно.
+var knownPaths = map[string]struct{}{
+	"/healthz":          {},
+	"/readyz":           {},
+	"/payment/callback": {},
+	"/static/logo.png":  {},
+}
+
 func normalizePath(p string) string {
 	// Dynamic routes with slash separator
 	if strings.HasPrefix(p, "/i/") {
@@ -482,8 +493,11 @@ func normalizePath(p string) string {
 		return "/sub/:id"
 	}
 
-	// Static/known application paths pass through unchanged.
-	return p
+	if _, ok := knownPaths[p]; ok {
+		return p
+	}
+
+	return "other"
 }
 
 // responseRecorder wraps ResponseWriter to capture status code.
@@ -524,5 +538,12 @@ func (r *responseRecorder) Push(target string, opts *http.PushOptions) error {
 }
 
 func (r *responseRecorder) statusCodeString() string {
-	return http.StatusText(r.statusCode)
+	// StatusText("") == "" и для нестандартных кодов тоже пуст: пустая метка
+	// склеила бы в одну серию все ответы без стандартного текста.
+	text := http.StatusText(r.statusCode)
+	if text == "" {
+		return strconv.Itoa(r.statusCode)
+	}
+
+	return text
 }

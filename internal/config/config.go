@@ -34,6 +34,11 @@ type Config struct {
 	// Health check configuration
 	WebServerPort int
 
+	// MetricsToken — shared secret для /metrics. Пустое значение оставляет
+	// эндпоинт открытым (обратная совместимость и scrape с localhost), но
+	// при публичном порту токен обязателен: метрики раскрывают топологию.
+	MetricsToken string
+
 	// Trial & Referral configuration
 	SiteURL            string
 	TrialDurationHours int
@@ -86,6 +91,7 @@ type configFlags struct {
 	subServerAccessLogPath *flag.StringValue
 	paymentEnabled         *flag.BoolValue
 	notificationsEnabled   *flag.BoolValue
+	metricsToken           *flag.StringValue
 	paymentProvider        *flag.StringValue
 	plategaMerchantID      *flag.StringValue
 	plategaSecret          *flag.StringValue
@@ -107,7 +113,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		donateURL: flag.NewString(DonateURL), donateEnabled: flag.NewBool(DefaultDonateEnabled),
 		globalSubURL: flag.NewString(""), subServerAccessLogPath: flag.NewString(""),
 		paymentEnabled: flag.NewBool(false), paymentProvider: flag.NewString("platega"), plategaMerchantID: flag.NewString(""), plategaSecret: flag.NewString(""),
-		notificationsEnabled: flag.NewBool(DefaultNotificationsEnabled),
+		notificationsEnabled: flag.NewBool(DefaultNotificationsEnabled), metricsToken: flag.NewString(""),
 	}
 	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
 	r.Register("TELEGRAM_ADMIN_ID", f.telegramAdminID)
@@ -132,6 +138,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("PAYMENT_PROVIDER", f.paymentProvider)
 	r.Register("PLATEGA_MERCHANT_ID", f.plategaMerchantID)
 	r.Register("PLATEGA_SECRET", f.plategaSecret)
+	r.Register("METRICS_TOKEN", f.metricsToken)
 
 	return r, f
 }
@@ -151,7 +158,7 @@ func Load() (*Config, error) {
 		TelegramBotToken: f.telegramBotToken.Get(), TelegramAdminID: f.telegramAdminID.Get(),
 		DatabasePath: f.databasePath.Get(), LogFilePath: f.logFilePath.Get(), LogLevel: f.logLevel.Get(),
 		HeartbeatURL: f.heartbeatURL.Get(), HeartbeatInterval: f.heartbeatInterval.Get(), SentryDSN: f.sentryDSN.Get(),
-		WebServerPort: f.webServerPort.Get(), SiteURL: f.siteURL.Get(),
+		WebServerPort: f.webServerPort.Get(), MetricsToken: f.metricsToken.Get(), SiteURL: f.siteURL.Get(),
 		TrialDurationHours: f.trialDurationHours.Get(), TrialRateLimit: f.trialRateLimit.Get(),
 		ContactUsername: f.contactUsername.Get(), DonateCardNumber: f.donateCardNumber.Get(), DonateURL: f.donateURL.Get(),
 		DonateEnabled: f.donateEnabled.Get(), GlobalSubURL: f.globalSubURL.Get(),

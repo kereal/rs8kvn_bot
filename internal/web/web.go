@@ -5,6 +5,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -214,7 +215,12 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/sub/", s.handleSubscription)
 	mux.HandleFunc("/static/logo.png", s.handleLogo)
 
-	mux.Handle("/metrics", promhttp.Handler())
+	metricsToken := ""
+	if s.cfg != nil {
+		metricsToken = s.cfg.MetricsToken
+	}
+
+	mux.Handle("/metrics", metricsAuth(metricsToken, promhttp.Handler()))
 
 	instrumentedHandler := metrics.InstrumentHTTP(SecurityHeadersMiddleware(mux))
 
@@ -611,6 +617,29 @@ func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logger.Debug("failed to write logo response", zap.Error(err))
 	}
+}
+
+// metricsAuth закрывает /metrics общим секретом, когда он задан. Пустой
+// token оставляет поведение прежним: эндпоинт открыт (локальный scrape).
+// Метрики раскрывают топологию (имена нод, объёмы), поэтому при публичном
+// порту токен обязателен.
+func metricsAuth(token string, next http.Handler) http.Handler {
+	if token == "" {
+		return next
+	}
+
+	expected := "Bearer " + token
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte(expected)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="metrics"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // HealthResponse is the JSON document returned by the health endpoint.
