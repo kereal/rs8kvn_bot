@@ -90,7 +90,28 @@ func recordDBMetric(tx *gorm.DB, startTimeKey, operation string) {
 	}
 
 	DBQueryDuration.WithLabelValues(operation).Observe(duration)
-	DBQueriesTotal.WithLabelValues(operation, result).Inc()
+	DBQueriesTotal.WithLabelValues(operation, result, statementTable(tx)).Inc()
+}
+
+// statementTable returns the table a statement touched. Без него упавший запрос
+// не отличить от упавшего запроса к другой таблице: в проде так копились
+// сотни ошибок в сутки с единственным лейблом operation=query. Имя таблицы
+// приходит из модели, а не из пользовательского ввода, поэтому набор значений
+// ограничен схемой.
+func statementTable(tx *gorm.DB) string {
+	if tx.Statement == nil {
+		return "other"
+	}
+
+	if table := tx.Statement.Table; table != "" {
+		return table
+	}
+
+	if tx.Statement.Schema != nil && tx.Statement.Schema.Table != "" {
+		return tx.Statement.Schema.Table
+	}
+
+	return "other"
 }
 
 // CollectDBPoolMetrics collects database connection pool statistics.

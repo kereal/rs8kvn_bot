@@ -79,6 +79,30 @@ func TestRegisterDBMetrics_Delete(t *testing.T) {
 	require.NoError(t, db.WithContext(context.Background()).Delete(&TestModel{}, 1).Error)
 }
 
+// Тест поведения: метка table называет таблицу, по которой ошибся запрос —
+// иначе разбор инцидента упирается в «query error» без адреса.
+func TestRegisterDBMetrics_RecordsTableLabel(t *testing.T) {
+	db := openTestDB(t)
+	defer closeDB(t, db)
+
+	RegisterDBMetrics(db)
+
+	type LabelModel struct {
+		ID  uint
+		Val string
+	}
+
+	require.NoError(t, db.AutoMigrate(&LabelModel{}))
+
+	before := testutil.ToFloat64(DBQueriesTotal.WithLabelValues("create", "success", "label_models"))
+	require.NoError(t, db.WithContext(context.Background()).Create(&LabelModel{Val: "a"}).Error)
+	after := testutil.ToFloat64(DBQueriesTotal.WithLabelValues("create", "success", "label_models"))
+
+	if after <= before {
+		t.Fatalf("ожидалась серия create/success/label_models, до=%v после=%v", before, after)
+	}
+}
+
 func TestCollectDBPoolMetrics_ExportsWaitStats(t *testing.T) {
 	db := openTestDB(t)
 	defer closeDB(t, db)

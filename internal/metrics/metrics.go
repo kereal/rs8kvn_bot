@@ -100,13 +100,15 @@ var (
 		[]string{"method"},
 	)
 
-	// DBQueriesTotal is a counter of database queries with labels: operation, result.
+	// DBQueriesTotal is a counter of database queries with labels: operation,
+	// result, table. The table label is bounded by the GORM schema and is what
+	// makes a failing query addressable.
 	DBQueriesTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "db_queries_total",
 			Help: "Total number of database queries",
 		},
-		[]string{"operation", "result"},
+		[]string{"operation", "result", "table"},
 	)
 
 	// DBQueryDuration is a histogram of database query duration in seconds with label: operation.
