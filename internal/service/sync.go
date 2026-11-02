@@ -836,7 +836,10 @@ func (s *SyncService) handleSyncError(ctx context.Context, sn *database.Subscrip
 	// Lock contention is only retried when the request never reached a
 	// decision point: a non-200 front response may quote "database is locked"
 	// in its body, and a refused request stays refused on retry.
+	// ErrIncompleteFanout = клиент записан не на все инбаунды: повтор приводит
+	// его к полному членству, парковка оставила бы подписку полурабочей.
 	retryable := utils.IsRetryable(err) || errors.Is(err, errNodeUnavailable) ||
+		errors.Is(err, xui.ErrIncompleteFanout) ||
 		(!errors.Is(err, utils.ErrNon200Response) && isTransientDBError(err))
 
 	if !retryable || sn.RetryCount >= maxSyncRetries {

@@ -3138,3 +3138,30 @@ func TestSyncPendingNodes_ReportsNodeHealth(t *testing.T) {
 	assert.Equal(t, 2, total, "проверяются только активные ноды с читаемой панелью")
 	assert.Equal(t, 1, down, "упавшая нода должна попадать в снимок")
 }
+
+// Тест поведения: неполный fan-out по инбаундам — ретраебельная ошибка, а не
+// терминальный отказ панели: парковка оставила бы подписку полурабочей.
+func TestHandleSyncError_IncompleteFanoutSchedulesRetry(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.NewServiceStoreFake()
+
+	var savedRetryAt *time.Time
+
+	db.UpdateRetryFunc = func(_ context.Context, _, _ uint, _ int, retryAt *time.Time, _ *string) error {
+		savedRetryAt = retryAt
+
+		return nil
+	}
+
+	svc := newTestSyncService(t, db, nil)
+
+	sn := &database.SubscriptionNode{SubscriptionID: 1, NodeID: 1, Status: database.SyncStatusPendingAdd}
+	err := fmt.Errorf("create: %w", xui.ErrIncompleteFanout)
+
+	svc.handleSyncError(context.Background(), sn, err)
+
+	require.NotNil(t, savedRetryAt, "неполный fan-out должен ставить ретрай")
+	assert.True(t, savedRetryAt.Before(parkedRetryAt), "ретрай не должен парковать узел")
+	assert.Equal(t, 1, sn.RetryCount)
+}

@@ -1462,6 +1462,12 @@ func TestPanelContract_Update_ScopedPerFlowGroup(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
 	})
+	// Многогрупповой update сверяет фактическое членство клиента: панель
+	// должна вернуть оба инбаунда, иначе операция считается неполной.
+	mux.HandleFunc("/panel/api/clients/get/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"obj":{"client":{"id":"uuid","email":"user@example.com"},"inboundIds":[1,2]}}`)
+	})
 
 	server := httptest.NewServer(mux)
 	defer server.Close()
@@ -1699,4 +1705,158 @@ func TestGetInbound_EmptyObjAndClassification(t *testing.T) {
 			"missing inbound must not be reported as a missing client: that path falls back to create")
 		assert.NotErrorIs(t, err, ErrClientNotFound)
 	})
+}
+
+// Тест поведения: если панель применила только часть flow-групп, клиент живёт
+// на части инбаундов — операция должна вернуть ретраебельный
+// ErrIncompleteFanout, а не отказ панели (который паркует узел).
+func TestAddClientWithID_PartialFlowGroupFailureIsIncompleteFanout(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/inbounds/get/") {
+			// inbound 1 — ws (flow ""), inbound 2 — tcp (vision). Группы
+			// применяются в сортированном порядке: "" раньше vision.
+			network := "ws"
+			if strings.HasSuffix(r.URL.Path, "/2") {
+				network = "tcp"
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"streamSettings":"{\"network\":\"%s\"}"}}`, network)
+
+			return
+		}
+
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"xtls-rprx-vision"`) {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"success":false,"msg":"inbound not found"}`)
+
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, testAPIToken)
+	require.NoError(t, err)
+
+	defer client.Close()
+
+	_, err = client.AddClientWithID(context.Background(), ClientRequest{
+		InboundIDs: []int{1, 2}, Email: "partial@example.com", ClientID: "uuid", SubID: "sub",
+		TrafficBytes: 100, ExpiryTime: time.Now(), ResetDays: 0,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrIncompleteFanout)
+}
+
+// Тест поведения: панель отвечает success по всем группам, но клиент привязан
+// не ко всем инбаундам — это тоже неполный fan-out, а не успех.
+func TestAddClientWithID_MissingInboundMembershipIsIncompleteFanout(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/inbounds/get/") {
+			network := "ws"
+			if strings.HasSuffix(r.URL.Path, "/2") {
+				network = "tcp"
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"streamSettings":"{\"network\":\"%s\"}"}}`, network)
+
+			return
+		}
+
+		if strings.Contains(r.URL.Path, "/clients/get/") {
+			w.Header().Set("Content-Type", "application/json")
+			// Панель отчиталась об успехе, но клиент есть только на inbound 1.
+			fmt.Fprint(w, `{"success":true,"obj":{"client":{"id":"uuid","email":"party@example.com"},"inboundIds":[1]}}`)
+
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, testAPIToken)
+	require.NoError(t, err)
+
+	defer client.Close()
+
+	_, err = client.AddClientWithID(context.Background(), ClientRequest{
+		InboundIDs: []int{1, 2}, Email: "party@example.com", ClientID: "uuid", SubID: "sub",
+		TrafficBytes: 100, ExpiryTime: time.Now(), ResetDays: 0,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrIncompleteFanout)
+}
+
+// Тест поведения: полное членство в инбаундах — успех без ложных ошибок.
+func TestAddClientWithID_MultiInboundSuccess(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/inbounds/get/") {
+			network := "ws"
+			if strings.HasSuffix(r.URL.Path, "/2") {
+				network = "tcp"
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"streamSettings":"{\"network\":\"%s\"}"}}`, network)
+
+			return
+		}
+
+		if strings.Contains(r.URL.Path, "/clients/get/") {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"success":true,"obj":{"client":{"id":"uuid","email":"full@example.com"},"inboundIds":[1,2]}}`)
+
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, testAPIToken)
+	require.NoError(t, err)
+
+	defer client.Close()
+
+	result, err := client.AddClientWithID(context.Background(), ClientRequest{
+		InboundIDs: []int{1, 2}, Email: "full@example.com", ClientID: "uuid", SubID: "sub",
+		TrafficBytes: 100, ExpiryTime: time.Now(), ResetDays: 0,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}
+
+// Тест поведения: неразбираемый streamSettings не превращается в vision —
+// иначе клиент уезжает на панель с flow, которого inbound не поддерживает.
+func TestGetRequiredFlow_UnparsableStreamSettingsIsError(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"obj":{"id":1,"streamSettings":"{not-json"}}`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, testAPIToken)
+	require.NoError(t, err)
+
+	defer client.Close()
+
+	flow, err := client.getRequiredFlow(context.Background(), 1)
+	require.Error(t, err)
+	assert.Empty(t, flow)
 }
