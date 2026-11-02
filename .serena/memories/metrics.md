@@ -16,7 +16,7 @@
 3. **`derivativeMerge` в Better Stack отсутствует**, хотя упоминался в старых записях.
 4. **Условный лейбл — только через `coalesce(nullIf(...))`.** `if(label('code') = '', label('status'), ...)` возвращает NULL; правильный вид: `coalesce(nullIf(label('code'), ''), label('status'))`. Алиас не должен совпадать с именем лейбла (иначе самоссылка → NULL).
 5. **Имена хостовых/контейнерных метрик — без `node_*`/`container_*`**: `cpu_percentage{container_name}`, `memory_used_bytes`, `memory_limit_bytes`, `pids_count`, `network_in_bytes`, `block_in_bytes`, `filesystem_used_bytes{mountpoint}`, `load1/5/15`, `uptime`.
-6. **Пустая серия ≠ ноль.** Permission деталей `CounterVec` не появляется до первого события; поэтому воркеры и форматы выдачи публикуют нули в `init()`.
+6. **Пустая серия ≠ ноль.** Серия `CounterVec` не появляется до первого события; поэтому воркеры и форматы выдачи публикуют нули в `init()`.
 
 ## Дашборды (8, все активны)
 

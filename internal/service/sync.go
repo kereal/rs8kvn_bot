@@ -1196,6 +1196,16 @@ func (s *SyncService) refreshNodeHealth(ctx context.Context) {
 			zap.Error(pingErr))
 	}
 
+	// Отменённый контекст даёт неполную карту (часть нод не пропингована):
+	// сохранять её нельзя — /readyz и алерты увидят ложные down.
+	ctxErr := ctx.Err()
+	if ctxErr != nil {
+		logger.Warn("sync: node health refresh interrupted, keeping previous snapshot",
+			zap.Error(ctxErr))
+
+		return
+	}
+
 	s.nodeHealth.Store(&health)
 }
 
