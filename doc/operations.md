@@ -317,6 +317,8 @@ If `SUBSERVER_ACCESS_LOG` is set, the bot appends every `/sub/{id}` request to t
 
 The main application log records an error message when this access log cannot be opened. To disable it, set `SUBSERVER_ACCESS_LOG` to an empty value and restart the bot.
 
+**Троттлинг «Subscription not found».** Клиент, у которого остался конфиг удалённой подписки, продолжает опрашивать `/sub/{id}` — после массовых `/del` это штатное состояние, а не сбой. Каждый такой запрос считается в `subserver_not_found_total`, а в лог попадает только первая пара `sub_id + client_ip` за час (WARN), остальные — уровнем DEBUG (при `LOG_LEVEL=info` их нет вовсе). Реализация: `utils.IntervalGate` (`internal/utils/gate.go`), карта чистится при достижении 4096 записей. Раньше такие запросы писали WARN и ERROR на каждый вызов: одна мёртвая подписка давала ~719 строк в сутки.
+
 ### 4.4 Logs
 
 **Location:** `./data/bot.log` (rotated: max 10MB × 2 backups, 14-day age limit)
@@ -394,13 +396,32 @@ The bot exposes a `/metrics` endpoint on the same port as health checks (default
 - `subscription_sync_total{result}`, `subscription_sync_duration_seconds`, `bot_orphaned_clients_revoked_total` — целостность VPN-доступа; `result="degraded"` — прогон вернул ошибку по части биндингов;
 - `subscription_expire_total{result}`, `subscriptions_expired_total` — прогоны экспирации и число реально отключённых подписок;
 - `app_info{version,revision}` — какая ревизия сейчас в проде; без неё «поведение поменялось» не отличить от «крутится старый образ»;
-- `node_up{node}` — доступность панели каждой нодой по последнему проходу синка (1/0); на `== 0` нужен алерт;
+- `node_up{node}` — доступность панели каждой нодой по последнему проходу синка (1/0); алерт на `== 0` включён;
 - `subscription_nodes{status}`, `subscription_nodes_parked` — состояние биндингов по статусам синка; рост `parked` означает, что пользователи на этих нодах не провижены;
 - `worker_restarts_total{worker}` — перезапуски фонового воркера после паники; любой рост — повод разобрать стек в логе;
 - `payment_reconcile_total{result}` — исходы сверки зависших pending-заказов (`confirmed_activated`, `expired`, `provider_error`, …);
 - `payment_operations_total`, `payment_operation_duration_seconds`, `payment_amount_cents_total`, `payment_issues_total` — платёжная воронка и инциденты;
 
 **Второстепенные:** cache hit/miss, Telegram API latency, subserver fetch детализация, worker run/latency и ожидания пула полезны для расследований, но не требуют обязательных алертов.
+
+**Алерты включены (Better Stack, 2026-11-02).** Восемь порогов, уведомления email + push на текущую команду:
+
+| Алерт | Условие | Источник |
+|---|---|---|
+| VPN node panel is down | `node_up < 1` за 5 мин | Node panel availability |
+| Parked subscription bindings | `subscription_nodes_parked > 0` | Parked bindings |
+| Background worker restarted after panic | рост `worker_restarts_total` | Worker restarts |
+| Sync worker stopped | rate `subscription_sync_total{result="ok"}` < 0.0005 за 30 мин | Sync runs by result |
+| Database query errors | > 0.05/с за 5 мин | DB Query Errors by Table |
+| HTTP 5xx responses | > 0.05/с за 5 мин | HTTP 5xx rate |
+| SQLite file too large | `db_file_bytes > 200 MiB` за час | SQLite size |
+| Payment integration issue | рост `payment_issues_total` | Payment issues by event |
+
+Принцип отбора: алерт ставится только там, где без него о поломке узнаёшь от пользователя. Всё остальное смотрят глазами на дашбордах (карта — `doc/betterstack-dashboards.md`).
+
+**Ограничения хранилища (проверено на живой базе):** перцентили не считаются — `histogramQuantile`/`quantileMerge`/`quantilePrometheusHistogramArrayMerge` возвращают верхнюю границу бакета для любого квантиля; среднее считается через `sumMerge(bucket_sum)/sumMerge(bucket_count)`. Counters читаются только через `avgMerge(rate_avg)` (в секунду) или `max−min` (за период). Имена хостовых и контейнерных метрик — без префиксов `node_*`/`container_*`.
+
+**Шум коллектора:** `filesystem_*` снимается со всех 25+ точек монтирования (tmpfs, overlay-слои, sysfs). В графики попадает только `/`; если объём мешает — фильтровать `mountpoint` в конфигурации коллектора (код приложения не участвует).
 
 **Кандидаты на удаление или исправление:**
 
@@ -476,11 +497,14 @@ scrape_configs:
     metrics_path: /metrics
 ```
 
-**Grafana dashboard ideas:**
-- HTTP error rate: `rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])`
+**Дашборды и алерты:** Better Stack (источник `hip-01 docker`, ID `2288221`), карта из 8 дашбордов и 8 включённых алертов — в `doc/betterstack-dashboards.md`. Grafana не используется: метрики, логи и аптайм уже в одном сервисе, отдельный стек для приложения такого размера не нужен.
+
+Полезные запросы (PromQL-совместимые формулировки; в Better Stack те же идеи выражаются через `avgMerge(rate_avg)`):
+- HTTP error rate: `rate(http_requests_total{code=~"5.."}[5m]) / rate(http_requests_total[5m])`
 - Bot error rate: `rate(bot_updates_total{result="error"}[5m])`
-- XUI latency p99: `histogram_quantile(0.99, rate(xui_request_duration_seconds_bucket[5m]))`
+- XUI latency: только среднее — `sum(rate(xui_request_duration_seconds_sum[5m])) / sum(rate(xui_request_duration_seconds_count[5m]))`; `histogram_quantile` на хранилище Better Stack не работает
 - Active subscriptions: `active_subscriptions`
+- Устаревший деплой: сравнить `app_info{revision}` с ожидаемым коммитом
 
 
 ## 5. Troubleshooting

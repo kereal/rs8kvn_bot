@@ -123,7 +123,7 @@
 - **`db_pool_waits_total`** — counter: сколько раз вызов ждал свободное соединение с момента старта (`sql.DBStats.WaitCount`)
 - **`db_pool_wait_seconds_total`** — counter: сколько секунд суммарно ушло на ожидание (`sql.DBStats.WaitDuration`)
 
-Оба — **counters** и снимаются с `sql.DBStats` раз в 10 секунд: сборщик добавляет приращение, поэтому повторный сбор ничего не удваивает. Читать через `derivativeMerge(rate_avg)`. Абсолютное значение смысла не несёт; текущей длины очереди среди метрик нет.
+Оба — **counters** и снимаются с `sql.DBStats` раз в 10 секунд: сборщик добавляет приращение, поэтому повторный сбор ничего не удваивает. Читать через `avgMerge(rate_avg)`. Абсолютное значение смысла не несёт; текущей длины очереди среди метрик нет.
 ### Cache (`cache_*`)
 
 - **`cache_hits_total{cache}`** — counter: cache hits
@@ -204,88 +204,52 @@ These are process-local counters; they reset on restart and are not durable busi
 - **`payment_issues_total{event}`** — counter: операционные проблемы платежей
   - `event`: стабильное имя события без IDs
 
-## Docker Container Metrics (node-exporter + cAdvisor)
+## Host и контейнеры (фактические имена коллектора)
 
-### Container Resources (`container_*`)
+Коллектор Better Stack отдаёт **свои** имена метрик: префиксов `node_*`, `container_*`, `host_*` в источнике нет. Запросы с ними вернут пустоту (проверено на живой базе 2026-11-02).
 
-- **`container_cpu_usage_seconds_total{container_name}`** — counter: cumulative CPU usage
-- **`container_memory_usage_bytes{container_name}`** — gauge: memory usage
-- **`container_memory_max_usage_bytes{container_name}`** — gauge: peak memory usage
-- **`container_spec_memory_limit_bytes{container_name}`** — gauge: memory limit
-- **`container_network_receive_bytes_total{container_name}`** — counter: network RX bytes
-- **`container_network_transmit_bytes_total{container_name}`** — counter: network TX bytes
-- **`container_fs_reads_bytes_total{container_name}`** — counter: filesystem read bytes
-- **`container_fs_writes_bytes_total{container_name}`** — counter: filesystem write bytes
+### Контейнеры (`container_name` = `netbird-client`, `beszel-agent`, `beszel`, `3xui_app`, `rs8kvn_bot`)
 
-### Go Runtime (`go_*`)
+- **`cpu_percentage{container_name}`** — gauge: процент CPU контейнера
+- **`cpu_seconds_total{container_name}`** — counter: накопленное CPU-время
+- **`memory_used_bytes{container_name}`** — gauge: потребление памяти
+- **`memory_limit_bytes{container_name}`** — gauge: лимит памяти
+- **`memory_percentage{container_name}`** — gauge: процент от лимита
+- **`pids_count{container_name}`** — gauge: число процессов
+- **`network_in_bytes{container_name}`** / **`network_out_bytes{container_name}`** — сеть контейнера
+- **`block_in_bytes{container_name}`** / **`block_out_bytes{container_name}`** — дисковый IO контейнера
+- **`disk_read_bytes_total`**, **`disk_written_bytes_total`**, **`disk_reads_completed_total`**, **`disk_writes_completed_total`** — тоже с `container_name`
 
-- **`go_goroutines`** — gauge: текущее количество goroutines
-- **`go_threads`** — gauge: OS threads
-- **`go_memstats_alloc_bytes`** — gauge: heap allocated
-- **`go_memstats_sys_bytes`** — gauge: memory obtained from system
-- **`go_memstats_heap_inuse_bytes`** — gauge: heap in use
-- **`go_gc_duration_seconds`** — summary: GC pause duration
+Важно: серия `memory_used_bytes` **без** `container_name` — это сам хост. Для контейнеров всегда фильтруй `label('container_name') != ''`, иначе хост попадёт в общий график.
 
-### Process (`process_*`)
+### Хост
 
-- **`process_resident_memory_bytes`** — gauge: resident set size (RSS)
-- **`process_cpu_seconds_total`** — counter: cumulative CPU time
-- **`process_open_fds`** — gauge: open file descriptors
+- **`load1` / `load5` / `load15`** — gauge: load average (читать через `maxMerge(value_max)` — метрика приходит с несколькими сэмплами на бакет)
+- **`logical_cpus`**, **`physical_cpus`** — gauge: ядра, база для оценки load
+- **`memory_total_bytes`**, **`memory_used_bytes`**, **`memory_available_bytes`**, **`memory_cached_bytes`**, **`memory_buffers_bytes`**, **`memory_free_bytes`**, **`memory_active_bytes`**, **`memory_shared_bytes`**, **`memory_percentage`**
+- **`memory_swap_total_bytes`**, **`memory_swap_used_bytes`**, **`memory_swap_free_bytes`**, **`memory_swapped_in_bytes_total`**, **`memory_swapped_out_bytes_total`**
+- **`memory_oom_kill_events_total`** — counter: убийства по OOM; любое значение > 0 требует разбора
+- **`filesystem_total_bytes`**, **`filesystem_used_bytes`**, **`filesystem_free_bytes`**, **`filesystem_used_ratio`**, **`filesystem_inodes_total`**, **`filesystem_inodes_used`**, **`filesystem_inodes_free`**, **`filesystem_inodes_used_ratio`** — labels `device`, `filesystem`, `mountpoint`
+  - На хосте 25+ точек монтирования (tmpfs, overlay-слои, sysfs, proc). Реальные для наблюдения: `mountpoint='/'` (ext4 на `/dev/sda1`) и `/boot/efi`. Остальное — шум, фильтруй в конфиге коллектора или в запросе.
+- **`network_receive_bytes_total`**, **`network_transmit_bytes_total`**, **`network_receive_packets_total`**, **`network_transmit_packets_total`**, **`network_receive_errs_total`**, **`network_transmit_errs_total`**, **`network_transmit_packets_drop_total`** — label `device` (на проде интерфейс `ens3`)
+- **`uptime`**, **`boot_time`** — gauge
 
-## Host Infrastructure Metrics (node-exporter)
+### Приложение (стандартные коллекторы)
 
-### Host CPU (`host_cpu_*`, `host_load*`)
-
-- **`host_cpu_seconds_total{mode,cpu}`** — counter: CPU time by mode
-  - `mode`: `idle`, `user`, `system`, `iowait`, `steal`, ...
-  - Используется для расчёта busy % как `1 - idle`
-- **`host_load1`** — gauge: 1-minute load average
-- **`host_load5`** — gauge: 5-minute load average
-- **`host_load15`** — gauge: 15-minute load average
-
-### Host Memory (`host_memory_*`, `host_swap_*`)
-
-- **`host_memory_total`** — gauge: total memory
-- **`host_memory_used`** — gauge: used memory
-- **`host_memory_available`** — gauge: available memory
-- **`host_memory_cached`** — gauge: cached memory
-- **`host_swap_total`** — gauge: total swap
-- **`host_swap_used`** — gauge: used swap
-
-### Host Disk (`host_filesystem_*`, `host_disk_*`)
-
-- **`host_filesystem_size{mountpoint}`** — gauge: filesystem size
-- **`host_filesystem_used{mountpoint}`** — gauge: filesystem used space
-- **`host_filesystem_free{mountpoint}`** — gauge: filesystem free space
-- **`host_disk_read_bytes_total{device}`** — counter: disk read bytes
-- **`host_disk_write_bytes_total{device}`** — counter: disk write bytes
-- **`host_disk_reads_completed_total{device}`** — counter: disk read operations
-- **`host_disk_writes_completed_total{device}`** — counter: disk write operations
-
-### Host Network (`host_network_*`)
-
-- **`host_network_receive_bytes_total{device}`** — counter: network receive bytes
-- **`host_network_transmit_bytes_total{device}`** — counter: network transmit bytes
-- **`host_network_receive_packets_total{device}`** — counter: network receive packets
-- **`host_network_transmit_packets_total{device}`** — counter: network transmit packets
-- **`host_network_receive_errs_total{device}`** — counter: network receive errors
-- **`host_network_transmit_errs_total{device}`** — counter: network transmit errors
-
-### Host System
-
-- **`host_uptime`** — gauge: system uptime in seconds
-- **`host_boot_time`** — gauge: Unix timestamp of system boot
+- **`go_goroutines`**, **`go_threads`**, **`go_memstats_*`**, **`go_gc_duration_seconds_count`**, **`go_gc_duration_seconds_sum`**, **`go_gc_gogc_percent`**, **`go_gc_gomemlimit_bytes`**, **`go_sched_gomaxprocs_threads`**, **`go_info`**
+- **`process_resident_memory_bytes`**, **`process_virtual_memory_bytes`**, **`process_cpu_seconds_total`**, **`process_open_fds`**, **`process_max_fds`**, **`process_start_time_seconds`**, **`process_network_receive_bytes_total`**, **`process_network_transmit_bytes_total`**
+- **`promhttp_metric_handler_requests_total{code}`**, **`promhttp_metric_handler_requests_in_flight`** — здоровье самого scrape; 500 здесь означает дыру в данных
 
 ## Query Patterns
 
 ### Counters (rate per second)
 
-Для всех `*_total` метрик используй **derivativeMerge(rate_avg)** для rate/sec:
+Для всех `*_total` метрик используй **avgMerge(rate_avg)** для rate/sec. Функции `derivativeMerge` в Better Stack нет — старые примеры с ней не работали:
 
 ```sql
 SELECT
   {{time}} AS time,
-  derivativeMerge(rate_avg) AS "Rate"
+  avgMerge(rate_avg) AS "Rate"
 FROM {{source}}
 WHERE dt BETWEEN {{start_time}} AND {{end_time}}
   AND name = 'payment_operations_total'
