@@ -197,22 +197,37 @@ docker stop rs8kvn_bot
 # 2. Rename current DB (for safety)
 mv ./data/rs8kvn.db ./data/rs8kvn.db.before-restore-$(date +%s)
 
-# 3. Copy backup over
+# 3. Remove stale WAL/SHM sidecars next to the target DB.
+#    Обязательно: старые -wal/-shm поверх восстановленной БД приведут к
+#    потере данных или повреждению новой базы (это же касается sidecar'ов
+#    переименованной копии из шага 2 — им они больше не нужны).
+rm -f ./data/rs8kvn.db-wal ./data/rs8kvn.db-shm
+
+# 4. Copy backup over
 cp ./data/rs8kvn.db.backup.20260417_030000 ./data/rs8kvn.db
 
-# 4. Fix permissions (if needed)
+# 5. Fix permissions (if needed)
 chown 1000:1000 ./data/rs8kvn.db  # Docker user
 # or chown current-user if running binary
 
-# 5. Start bot
+# 6. Verify the restored copy BEFORE starting the bot
+sqlite3 ./data/rs8kvn.db "PRAGMA integrity_check;"  # must print: ok
+sqlite3 ./data/rs8kvn.db "SELECT COUNT(*) FROM subscriptions;"
+
+# 7. Start bot
 docker start rs8kvn_bot
 ```
 
 **Verify:**
 ```bash
-sqlite3 ./data/rs8kvn.db "SELECT COUNT(*) FROM subscriptions;"
 docker logs rs8kvn_bot | grep -i "database initialized"
 ```
+
+> Note: automatic backups are integrity-checked on creation
+> (`PRAGMA integrity_check` + read of the `subscriptions` table). A copy that
+> fails verification is kept as `rs8kvn.db.backup.corrupt` (never deleted
+> silently) and the previous good backup stays in place — see `rs8kvn.log`
+> for the Warn entry with the reason.
 
 ### 3.4 Off-site Backups (recommended)
 

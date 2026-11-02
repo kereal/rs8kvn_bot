@@ -119,9 +119,61 @@ func checkpointWAL(ctx context.Context, dbPath string) error {
 	return nil
 }
 
+// verifyBackupCopy открывает созданную копию в режиме read-only и проверяет её:
+// PRAGMA integrity_check обязан вернуть "ok", таблица subscriptions — читаться.
+// Вызывается до переименования временного файла, чтобы испорченная копия не
+// затёрла последний хороший бэкап; исходная БД при ошибке не затрагивается.
+func verifyBackupCopy(ctx context.Context, backupPath string) error {
+	err := ctx.Err()
+	if err != nil {
+		return err
+	}
+
+	// #nosec G304 -- backupPath is a temp file created from the validated dbPath
+	dsn := fmt.Sprintf("file:%s?mode=ro", backupPath)
+
+	db, err := sql.Open("sqlite3", dsn)
+	if err != nil {
+		return fmt.Errorf("failed to open backup copy for verification: %w", err)
+	}
+
+	defer func() {
+		closeErr := db.Close()
+		if closeErr != nil {
+			logger.Debug("Failed to close verification database", zap.Error(closeErr))
+		}
+	}()
+
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	var integrity string
+
+	err = db.QueryRowContext(ctxWithTimeout, "PRAGMA integrity_check").Scan(&integrity)
+	if err != nil {
+		return fmt.Errorf("integrity check failed: %w", err)
+	}
+
+	if integrity != "ok" {
+		return fmt.Errorf("integrity check reported: %s", integrity)
+	}
+
+	var subscriptions int
+
+	err = db.QueryRowContext(ctxWithTimeout, "SELECT count(*) FROM subscriptions").Scan(&subscriptions)
+	if err != nil {
+		return fmt.Errorf("subscriptions table check failed: %w", err)
+	}
+
+	return nil
+}
+
 // BackupDatabase creates a backup of the SQLite database file.
 // It uses WAL checkpoint before copying to ensure a consistent snapshot,
 // then atomic write pattern (temp file + rename) for the copy itself.
+// После копирования выполняется проверка копии (PRAGMA integrity_check и чтение
+// subscriptions): испорченная копия помечается суффиксом .corrupt, последний
+// хороший бэкап и исходная БД не затрагиваются.
 func BackupDatabase(ctx context.Context, dbPath string) error {
 	// Validate the database path to prevent directory traversal
 	err := validatePath(dbPath)
@@ -215,21 +267,43 @@ func BackupDatabase(ctx context.Context, dbPath string) error {
 		return fmt.Errorf("failed to sync backup: %w", err)
 	}
 
+	// Ensure backup file has secure permissions (0600)
+	err = os.Chmod(tempPath, 0600)
+	if err != nil {
+		_ = os.Remove(tempPath)
+		logger.Error("Failed to set backup file permissions",
+			zap.String("path", tempPath),
+			zap.Error(err))
+
+		return fmt.Errorf("failed to set secure permissions on backup: %w", err)
+	}
+
+	// Проверяем копию до переименования: провал валидации не должен затирать
+	// последний хороший бэкап. Испорченную копию не удаляем, а помечаем
+	// суффиксом .corrupt для разбора; исходная БД остаётся нетронутой.
+	verifyErr := verifyBackupCopy(ctx, tempPath)
+	if verifyErr != nil {
+		corruptPath := backupPath + ".corrupt"
+
+		err = os.Rename(tempPath, corruptPath)
+		if err != nil {
+			_ = os.Remove(tempPath)
+			return fmt.Errorf("backup verification failed (%s), could not keep corrupt copy: %w", verifyErr.Error(), err)
+		}
+
+		logger.Warn("Backup verification failed, copy marked as corrupt",
+			zap.String("path", corruptPath),
+			zap.String("source", dbPath),
+			zap.Error(verifyErr))
+
+		return fmt.Errorf("backup verification failed: %w", verifyErr)
+	}
+
 	// Atomic rename (defer will close files after this)
 	err = os.Rename(tempPath, backupPath)
 	if err != nil {
 		_ = os.Remove(tempPath)
 		return fmt.Errorf("failed to rename backup: %w", err)
-	}
-
-	// Ensure backup file has secure permissions (0600)
-	err = os.Chmod(backupPath, 0600)
-	if err != nil {
-		logger.Error("Failed to set backup file permissions",
-			zap.String("path", backupPath),
-			zap.Error(err))
-
-		return fmt.Errorf("failed to set secure permissions on backup: %w", err)
 	}
 
 	logger.Info("Database backup created", zap.String("path", backupPath))
