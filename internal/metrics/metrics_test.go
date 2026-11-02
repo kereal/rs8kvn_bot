@@ -9,6 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	prometheus_testutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,18 +32,19 @@ func TestNormalizePath(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"empty path", "", ""},
-		{"root", "/", "/"},
+		{"empty path", "", "other"},
 		{"static health", "/healthz", "/healthz"},
 		{"static ready", "/readyz", "/readyz"},
-		{"static api", "/api/v1/subscriptions", "/api/v1/subscriptions"},
+		{"unknown path is collapsed", "/api/v1/subscriptions", "other"},
+		{"scanner noise is collapsed", "/wp-login.php", "other"},
+		{"root is not a known route", "/", "other"},
 		{"invite with code", "/i/abc12345", "/i/:code"},
 		{"invite with long code", "/i/abcdef1234567890", "/i/:code"},
 		{"invite with subpath", "/i/abc/sub", "/i/:code"},
 		{"subscription id", "/sub/abc-123-xyz", "/sub/:id"},
 		{"subscription uuid", "/sub/550e8400-e29b-41d4-a716-446655440000", "/sub/:id"},
 		{"static after slash", "/static/logo.png", "/static/logo.png"},
-		{"mixed static", "/api/v1/users/123", "/api/v1/users/123"},
+		{"mixed static", "/api/v1/users/123", "other"},
 	}
 
 	for _, tt := range tests {
@@ -52,17 +54,23 @@ func TestNormalizePath(t *testing.T) {
 	}
 }
 
-func TestStatusCodeString(t *testing.T) {
+func TestCodeLabel(t *testing.T) {
 	t.Parallel()
 
-	rr := &responseRecorder{statusCode: 200}
-	assert.Equal(t, "OK", rr.statusCodeString())
+	tests := []struct {
+		code int
+		want string
+	}{
+		{200, "200"},
+		{404, "404"},
+		{503, "503"},
+		{0, "0"},
+	}
 
-	rr.statusCode = 404
-	assert.Equal(t, "Not Found", rr.statusCodeString())
-
-	rr.statusCode = 500
-	assert.Equal(t, "Internal Server Error", rr.statusCodeString())
+	for _, tt := range tests {
+		rr := &responseRecorder{statusCode: tt.code}
+		assert.Equal(t, tt.want, rr.codeLabel(), "статус %d должен оставаться числом", tt.code)
+	}
 }
 
 func TestNewMetricsInitialized(t *testing.T) {
@@ -105,23 +113,52 @@ func TestInstrumentHTTPSkipsMetricsAndStatic(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	beforeRequests := metricSamples(t, HTTPRequestsTotal)
-	beforeDuration := metricSamples(t, HTTPRequestDuration)
-
+	// Число серий по конкретному пути, а не по коллектору: глобальное сравнение
+	// «до/после» ломается при -count>1, где серия создана предыдущим прогоном.
 	for _, path := range []string{"/metrics", "/static/app.js"} {
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, path, nil))
 		assert.Equal(t, http.StatusOK, resp.Code)
 	}
 
-	assert.Equal(t, beforeRequests, metricSamples(t, HTTPRequestsTotal), "skipped routes must not record request samples")
-	assert.Equal(t, beforeDuration, metricSamples(t, HTTPRequestDuration), "skipped routes must not record duration samples")
+	assert.Equal(t, 0, samplesForPath(t, HTTPRequestsTotal, "/metrics"), "skipped /metrics не создаёт серий")
+	assert.Equal(t, 0, samplesForPath(t, HTTPRequestDuration, "/metrics"), "skipped /metrics не создаёт серий латентности")
+	assert.Equal(t, 0, samplesForPath(t, HTTPRequestsTotal, "/static/app.js"), "static не создаёт серий")
 
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	assert.Equal(t, http.StatusOK, resp.Code)
-	assert.Greater(t, metricSamples(t, HTTPRequestsTotal), beforeRequests)
-	assert.Greater(t, metricSamples(t, HTTPRequestDuration), beforeDuration)
+	assert.Equal(t, 1, samplesForPath(t, HTTPRequestsTotal, "/healthz"), "обычный путь обязан создать серию")
+	assert.Equal(t, 1, samplesForPath(t, HTTPRequestDuration, "/healthz"), "обычный путь обязан создать серию латентности")
+}
+
+// samplesForPath считает серии коллектора с меткой path, равной указанной.
+func samplesForPath(t *testing.T, collector prometheus.Collector, path string) int {
+	t.Helper()
+
+	ch := make(chan prometheus.Metric, 1)
+	go func() {
+		collector.Collect(ch)
+		close(ch)
+	}()
+
+	count := 0
+
+	for metric := range ch {
+		dtoMetric := &dto.Metric{}
+		if metric.Write(dtoMetric) != nil {
+			continue
+		}
+
+		for _, label := range dtoMetric.GetLabel() {
+			if label.GetName() == "path" && label.GetValue() == path {
+				count++
+				break
+			}
+		}
+	}
+
+	return count
 }
 
 func metricSamples(t *testing.T, collector prometheus.Collector) int {
@@ -143,8 +180,10 @@ func metricSamples(t *testing.T, collector prometheus.Collector) int {
 	return count
 }
 
+// Не параллельный: публикует свою версию в общий AppInfo, а соседний тест
+// проверяет, что после Reset остаётся ровно одна серия.
 func TestMetricsEndpoint(t *testing.T) {
-	t.Parallel()
+	SetBuildInfo("rs8kvn_bot@test", "0000000")
 
 	handler := promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{})
 	resp := httptest.NewRecorder()
@@ -158,4 +197,27 @@ func TestMetricsEndpoint(t *testing.T) {
 	assert.Contains(t, resp.Body.String(), "subscription_sync_total")
 	assert.Contains(t, resp.Body.String(), "subscription_expire_total")
 	assert.Contains(t, resp.Body.String(), "reconcile_orphaned_duration_seconds")
+	assert.Contains(t, resp.Body.String(), "db_pool_waits_total")
+	assert.Contains(t, resp.Body.String(), "subserver_not_found_total")
+
+	body := resp.Body.String()
+	for _, want := range []string{"app_info", "subserver_requests_total", "subscriptions_expired_total"} {
+		assert.Contains(t, body, want)
+	}
+
+	// Нулевые серии публикуются заранее: иначе «событий не было» и «метрика
+	// сломана» выглядят одинаково.
+	assert.Contains(t, body, `subscription_sync_total{result="ok"} 0`)
+	assert.Contains(t, body, `subscription_sync_total{result="degraded"} 0`)
+	assert.Contains(t, body, `subserver_requests_total{format="clash"} 0`)
+}
+
+// Не параллельный: SetBuildInfo делает Reset() глобального AppInfo, поэтому
+// любой соседний тест, публикующий свою версию, ломает подсчёт серий.
+func TestSetBuildInfoPublishesSingleSeries(t *testing.T) {
+	SetBuildInfo("rs8kvn_bot@v2.7.0", "9d04409")
+	SetBuildInfo("rs8kvn_bot@v2.7.1", "3afc5bd")
+
+	assert.Equal(t, 1.0, prometheus_testutil.ToFloat64(AppInfo.WithLabelValues("rs8kvn_bot@v2.7.1", "3afc5bd")))
+	assert.Equal(t, 1, metricSamples(t, AppInfo), "после переинициализации должна остаться одна серия")
 }

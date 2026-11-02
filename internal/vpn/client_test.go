@@ -23,7 +23,7 @@ import (
 // панели распознаются адаптером, а vpn маппит sentinel'ы (mapPanelError).
 // Эти тесты проверяют поведение — какой sentinel получается, — а не текст
 // классификатора; контрактные тексты панели закреплены в
-// internal/xui/panel_contract_test.go.
+// internal/xui/client_test.go.
 func TestThreeXUIClient_CreateSubscription_AlreadyExists(t *testing.T) {
 	t.Parallel()
 

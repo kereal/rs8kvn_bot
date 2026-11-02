@@ -11,6 +11,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 
 	"go.uber.org/zap"
 )
@@ -29,13 +30,8 @@ import (
 // and cache revalidation. Analytics and last_request errors do not block delivery.
 func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID, clientIP string, requestHeaders map[string]string, formatParam string) (*SubscriptionResult, int, int, error) {
 	outFormat := DetectOutputFormat(formatParam, requestHeaders["user-agent"])
-	cacheKey := subID
-	if outFormat != OutputXray {
-		// Per-format cache entries keep a suffix so a sing-box client never
-		// receives the default Xray body (and vice versa). The Xray key stays
-		// bare for backward compatibility with existing cache entries.
-		cacheKey = subID + ":" + outFormat.String()
-	}
+	metrics.SubserverRequestsTotal.WithLabelValues(outFormat.String()).Inc()
+	cacheKey := subscriptionCacheKey(subID, outFormat)
 
 	// 1. Try to serve from cache first.
 	if result, hit, err := serveFromCache(ctx, db, subSvc, subID, cacheKey); hit {
@@ -50,18 +46,30 @@ func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepositor
 	}
 
 	// 3-4. Fetch from all active sources and aggregate items + traffic.
-	agg, success, total := fetchAndAggregateSources(ctx, subID, subFull.Nodes)
-
-	// 5. Build the final response and cache it. Paid (premium) subscriptions get
-	// a " Premium" suffix appended to the upstream profile-title header.
+	// Параллельные промахи по одному ключу схлопываются: иначе истечение TTL
+	// после падения панели превращалось в лавину одинаковых fan-out'ов.
 	profileTitleSuffix := ""
 	if subFull.Subscription.IsPaid() {
 		profileTitleSuffix = " Premium"
 	}
 
-	res, err := buildResponse(subSvc, cacheKey, agg, subFull.Plan.TrafficLimit, profileTitleSuffix, outFormat)
+	out := subSvc.flights.Do(cacheKey, func() flightResult {
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		agg, success, total := fetchAndAggregateSources(fetchCtx, subID, subFull.Nodes, subSvc.sourceTimeout)
 
-	return res, success, total, err
+		// Кэшируем только полный ответ: недобранные источники (или
+		// отменённый контекст) означают, что набор серверов неполон.
+		cacheable := (total == 0 || success == total) && fetchCtx.Err() == nil
+
+		// 5. Build the final response. Paid (premium) subscriptions get a
+		// " Premium" suffix appended to the upstream profile-title header.
+		res, resErr := buildResponse(subSvc, cacheKey, agg, subFull.Plan.TrafficLimit, profileTitleSuffix, outFormat, cacheable)
+
+		return flightResult{result: res, success: success, total: total, err: resErr}
+	})
+
+	return out.result, out.success, out.total, out.err
 }
 
 // UpdateDevices records the current request headers as a device entry in the

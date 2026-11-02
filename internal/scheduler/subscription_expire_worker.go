@@ -44,8 +44,6 @@ func (w *SubscriptionExpireWorker) Run(ctx context.Context) {
 }
 
 func (w *SubscriptionExpireWorker) process(ctx context.Context) {
-	metrics.SubscriptionExpireTotal.Inc()
-
 	start := time.Now()
 	defer func() {
 		metrics.SubscriptionExpireDuration.Observe(time.Since(start).Seconds())
@@ -53,19 +51,25 @@ func (w *SubscriptionExpireWorker) process(ctx context.Context) {
 
 	subs, err := w.db.GetExpiredPaidSubscriptions(ctx, time.Now().UTC())
 	if err != nil {
+		metrics.SubscriptionExpireTotal.WithLabelValues("degraded").Inc()
 		logger.Error("Failed to query expired subscriptions", zap.Error(err))
+
 		return
 	}
 
 	if len(subs) == 0 {
+		metrics.SubscriptionExpireTotal.WithLabelValues("ok").Inc()
+
 		return
 	}
 
 	processed := 0
+	failed := 0
 
 	for _, sub := range subs {
 		err := w.subSvc.ExpireSubscription(ctx, sub.ID)
 		if err != nil {
+			failed++
 			logger.Warn("Expire subscription failed",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Int64("telegram_id", sub.TelegramID),
@@ -76,6 +80,14 @@ func (w *SubscriptionExpireWorker) process(ctx context.Context) {
 
 		processed++
 	}
+
+	result := "ok"
+	if failed > 0 {
+		result = "degraded"
+	}
+
+	metrics.SubscriptionExpireTotal.WithLabelValues(result).Inc()
+	metrics.SubscriptionsExpiredTotal.Add(float64(processed))
 
 	logger.Info("Subscription expiration processed",
 		zap.Int("found", len(subs)),

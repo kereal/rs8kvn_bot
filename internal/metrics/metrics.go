@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,13 +18,14 @@ import (
 
 var (
 	// HTTPRequestsTotal is a counter of application HTTP requests. The metrics
-	// endpoint and static assets are intentionally excluded.
+	// endpoint and static assets are intentionally excluded. code is the numeric
+	// status, so 5xx is selectable as code=~"5..".
 	HTTPRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "http_requests_total",
 			Help: "Total number of HTTP requests processed",
 		},
-		[]string{"method", "path", "status"},
+		[]string{"method", "path", "code"},
 	)
 
 	// HTTPRequestDuration is a histogram of application HTTP request durations.
@@ -99,13 +101,15 @@ var (
 		[]string{"method"},
 	)
 
-	// DBQueriesTotal is a counter of database queries with labels: operation, result.
+	// DBQueriesTotal is a counter of database queries with labels: operation,
+	// result, table. The table label is bounded by the GORM schema and is what
+	// makes a failing query addressable.
 	DBQueriesTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "db_queries_total",
 			Help: "Total number of database queries",
 		},
-		[]string{"operation", "result"},
+		[]string{"operation", "result", "table"},
 	)
 
 	// DBQueryDuration is a histogram of database query duration in seconds with label: operation.
@@ -118,21 +122,22 @@ var (
 		[]string{"operation"},
 	)
 
-	// DBPoolWait is the cumulative number of waits for a database connection
-	// since process start (sql.DBStats.WaitCount).
-	DBPoolWait = promauto.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "db_pool_wait",
-			Help: "Cumulative number of waits for a database connection",
+	// DBPoolWaitsTotal is the cumulative number of waits for a database
+	// connection since process start (sql.DBStats.WaitCount). It only grows, so
+	// it is a counter: rate() and increase() carry the real meaning.
+	DBPoolWaitsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "db_pool_waits_total",
+			Help: "Total number of waits for a database connection",
 		},
 	)
 
-	// DBPoolWaitDurationSeconds is cumulative time spent waiting for a database
+	// DBPoolWaitSecondsTotal is cumulative time spent waiting for a database
 	// connection, in seconds (sql.DBStats.WaitDuration).
-	DBPoolWaitDurationSeconds = promauto.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "db_pool_wait_duration_seconds",
-			Help: "Cumulative time spent waiting for a database connection in seconds",
+	DBPoolWaitSecondsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "db_pool_wait_seconds_total",
+			Help: "Total time spent waiting for a database connection in seconds",
 		},
 	)
 
@@ -212,12 +217,81 @@ var (
 		},
 	)
 
-	// SubscriptionSyncTotal counts subscription sync worker runs.
-	SubscriptionSyncTotal = promauto.NewCounter(
+	// NodeUp reports panel availability per node as seen by the sync health
+	// probe: 1 = panel answers, 0 = node is down. Alerting on this is what
+	// turns a dead node into a page instead of a support ticket.
+	NodeUp = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "node_up",
+			Help: "VPN node panel availability from the sync health probe (1 = up)",
+		},
+		[]string{"node"},
+	)
+
+	// SubscriptionNodes tracks subscription node bindings by sync status.
+	SubscriptionNodes = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "subscription_nodes",
+			Help: "Subscription node bindings by sync status",
+		},
+		[]string{"status"},
+	)
+
+	// SubscriptionNodesParked counts bindings parked after the retry ladder was
+	// exhausted or the panel refused the request. Non-zero means users on those
+	// nodes are not provisioned until the node answers again.
+	SubscriptionNodesParked = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "subscription_nodes_parked",
+			Help: "Subscription node bindings parked after exhausted retries or a panel refusal",
+		},
+	)
+
+	// DBFileBytes and DBWALBytes track the on-disk size of the SQLite database
+	// and its WAL. Unbounded growth is otherwise invisible until the disk fills
+	// and WAL checkpoints start failing.
+	DBFileBytes = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "db_file_bytes",
+			Help: "Size of the SQLite database file in bytes",
+		},
+	)
+
+	DBWALBytes = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "db_wal_bytes",
+			Help: "Size of the SQLite WAL file in bytes",
+		},
+	)
+
+	// PaymentReconcileTotal counts outcomes of the stale pending order sweep.
+	PaymentReconcileTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_reconcile_total",
+			Help: "Outcomes of the stale pending payment order reconciliation",
+		},
+		[]string{"result"},
+	)
+
+	// WorkerRestartsTotal counts background worker restarts after a recovered panic.
+	WorkerRestartsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "worker_restarts_total",
+			Help: "Total number of background worker restarts after a recovered panic",
+		},
+		[]string{"worker"},
+	)
+
+	// SubscriptionSyncTotal counts subscription sync worker runs by outcome.
+	// A run that returns an aggregate error still counts: the backlog is
+	// retried by the next pass, and the degraded series is what an alert sees.
+	// result values: ok, degraded
+	SubscriptionSyncTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "subscription_sync_total",
-			Help: "Total number of subscription sync worker runs",
+			Help: "Total number of subscription sync worker runs by result",
 		},
+		[]string{"result"},
 	)
 
 	// SubscriptionSyncDuration is a histogram of subscription sync worker duration.
@@ -229,11 +303,23 @@ var (
 		},
 	)
 
-	// SubscriptionExpireTotal counts subscription expire worker runs.
-	SubscriptionExpireTotal = promauto.NewCounter(
+	// SubscriptionExpireTotal counts subscription expire worker runs by
+	// outcome. result values: ok, degraded
+	SubscriptionExpireTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "subscription_expire_total",
-			Help: "Total number of subscription expire worker runs",
+			Help: "Total number of subscription expire worker runs by result",
+		},
+		[]string{"result"},
+	)
+
+	// SubscriptionsExpiredTotal counts subscriptions actually deactivated by
+	// the expire worker. Run counters alone cannot tell an idle hour from a
+	// batch of hundreds.
+	SubscriptionsExpiredTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "subscriptions_expired_total",
+			Help: "Total number of subscriptions deactivated by the expire worker",
 		},
 	)
 
@@ -303,6 +389,38 @@ var (
 			Name: "subserver_no_items_total",
 			Help: "Total subscription requests with no items collected",
 		},
+	)
+
+	// SubserverRequestsTotal counts subscription requests by delivered format:
+	// xray, singbox, clash. The mix is a product signal that otherwise only
+	// exists inside User-Agent access logs.
+	SubserverRequestsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "subserver_requests_total",
+			Help: "Total subscription requests by delivered output format",
+		},
+		[]string{"format"},
+	)
+
+	// SubserverNotFoundTotal counts requests for unknown or revoked
+	// subscriptions. Removing a user leaves the link inside the client, and the
+	// client keeps polling it; the rate tracks that residue rather than errors.
+	SubserverNotFoundTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "subserver_not_found_total",
+			Help: "Total subscription requests for unknown or revoked subscriptions",
+		},
+	)
+
+	// AppInfo identifies the running build. Without it a dashboard cannot tell
+	// which revision produced a change in behaviour, and a stale deployment
+	// looks identical to a fresh one.
+	AppInfo = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "app_info",
+			Help: "Build information of the running binary (value is always 1)",
+		},
+		[]string{"version", "revision"},
 	)
 
 	// PaymentOperationsTotal counts payment service operations by operation and result.
@@ -380,6 +498,34 @@ var TrafficNotificationRunsTotal = promauto.NewCounter(
 	},
 )
 
+// workerResults — фиксированный набор исходов прогонов воркеров.
+var workerResults = []string{"ok", "degraded"}
+
+// outputFormats — фиксированный набор форматов выдачи подписки.
+var outputFormats = []string{"xray", "singbox", "clash"}
+
+// init публикует нулевые серии известных label-наборов. Без этого Vec-метрика
+// до первого события не экспортируется вовсе, и «воркер не падал ни разу»
+// неотличимо от «воркер не запускается»: rate() по отсутствующей серии — пусто,
+// а не ноль.
+func init() {
+	for _, result := range workerResults {
+		SubscriptionSyncTotal.WithLabelValues(result)
+		SubscriptionExpireTotal.WithLabelValues(result)
+	}
+
+	for _, format := range outputFormats {
+		SubserverRequestsTotal.WithLabelValues(format)
+	}
+}
+
+// SetBuildInfo publishes the running build as a single app_info series. Reset
+// keeps exactly one label set even if the process re-initialises the logger.
+func SetBuildInfo(version, revision string) {
+	AppInfo.Reset()
+	AppInfo.WithLabelValues(version, revision).Set(1)
+}
+
 // InstrumentHTTP middleware records metrics for HTTP requests.
 func InstrumentHTTP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -397,7 +543,7 @@ func InstrumentHTTP(next http.Handler) http.Handler {
 
 		duration := time.Since(start).Seconds()
 		HTTPRequestDuration.WithLabelValues(method, path).Observe(duration)
-		HTTPRequestsTotal.WithLabelValues(method, path, rr.statusCodeString()).Inc()
+		HTTPRequestsTotal.WithLabelValues(method, path, rr.codeLabel()).Inc()
 	})
 }
 
@@ -405,6 +551,16 @@ func InstrumentHTTP(next http.Handler) http.Handler {
 // (such as invite codes, subscription IDs, UUIDs) with placeholders.
 func shouldSkipHTTPMetrics(path string) bool {
 	return path == "/metrics" || path == "/static/logo.png" || strings.HasPrefix(path, "/static/")
+}
+
+// knownPaths — статические маршруты приложения. Всё остальное схлопывается в
+// "other": сканер, перебирающий /admin.php, /wp-login.php, /.env, иначе создаёт
+// по новой временной серии на каждый путь, и эти серии живут в TSDB вечно.
+var knownPaths = map[string]struct{}{
+	"/healthz":          {},
+	"/readyz":           {},
+	"/payment/callback": {},
+	"/static/logo.png":  {},
 }
 
 func normalizePath(p string) string {
@@ -417,8 +573,11 @@ func normalizePath(p string) string {
 		return "/sub/:id"
 	}
 
-	// Static/known application paths pass through unchanged.
-	return p
+	if _, ok := knownPaths[p]; ok {
+		return p
+	}
+
+	return "other"
 }
 
 // responseRecorder wraps ResponseWriter to capture status code.
@@ -458,6 +617,9 @@ func (r *responseRecorder) Push(target string, opts *http.PushOptions) error {
 	return http.ErrNotSupported
 }
 
-func (r *responseRecorder) statusCodeString() string {
-	return http.StatusText(r.statusCode)
+// statusCode renders the numeric status. Текстовый статус («Not Found») в
+// метрике неудобен: по нему не выразить класс ответа, а один и тот же код
+// мог попасть в серию и текстом, и числом.
+func (r *responseRecorder) codeLabel() string {
+	return strconv.Itoa(r.statusCode)
 }

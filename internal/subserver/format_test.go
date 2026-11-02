@@ -334,7 +334,7 @@ func TestRenderSingboxSubscriptionReservedTags(t *testing.T) {
 			json.RawMessage(`{"type":"vless","address":"two.example","port":443,"uuid":"id-2","remark":"proxy"}`),
 			json.RawMessage(`{"type":"vless","address":"three.example","port":443,"uuid":"id-3","remark":"node-three"}`),
 		},
-	}, 0, "", OutputSingbox)
+	}, 0, "", OutputSingbox, true)
 	require.NoError(t, err)
 
 	var doc struct {

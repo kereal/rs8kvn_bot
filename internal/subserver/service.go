@@ -5,6 +5,8 @@ import (
 	"sync"
 	"text/template"
 	"time"
+
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 )
 
 //go:embed templates/xray_client.json
@@ -23,13 +25,33 @@ type Service struct {
 	// (devices/IPs) only across requests for the SAME subID, so cache misses for
 	// different subscriptions do not block each other.
 	analyticsLocks analyticsKeyedLock
+
+	// lastRequest троттлит запись last_request: без него каждый cache hit
+	// писал в SQLite и сериализовался на единственном писателе.
+	lastRequest *utils.IntervalGate
+
+	// flights схлопывает одновременные промахи кэша по одному ключу в один
+	// fan-out к нодам вместо лавины одинаковых запросов.
+	flights flightGroup
+
+	// sourceTimeout ограничивает один upstream-запрос при сборке подписки.
+	sourceTimeout time.Duration
 }
 
 // NewService creates a new Service with a cache TTL.
 func NewService(ttl time.Duration) *Service {
 	return &Service{
-		Cache: NewCache(ttl),
+		Cache:         NewCache(ttl),
+		lastRequest:   utils.NewIntervalGate(LastRequestWriteInterval, touchPruneThreshold),
+		sourceTimeout: defaultSourceFetchTimeout,
 	}
+}
+
+// InvalidateSubscriber сбрасывает кэш подписки во всех форматах вывода.
+// Инвалидация одного Xray-ключа оставляла sing-box/Clash до TTL со старым
+// лимитом и старым сроком после оплаты или смены тарифа.
+func (s *Service) InvalidateSubscriber(subID string) {
+	s.DeleteKeys(subscriptionCacheKeys(subID))
 }
 
 // analyticsKeyedLock is a per-key mutex: Lock(key) returns an unlock func that

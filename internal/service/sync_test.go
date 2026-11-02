@@ -3040,3 +3040,187 @@ func TestApplyPlanToSubscriptionInTx_NilTransaction(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil transaction")
 }
+
+// Тест поведения: нода, которая снова отвечает на Ping, освобождает свои
+// запаркованные биндинги — иначе подписка остаётся без провизии навсегда.
+func TestSyncPendingNodes_ReleasesParkedBindingsWhenNodeRecovers(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.NewServiceStoreFake()
+
+	var releasedNodeID uint
+
+	db.GetNodesWithParkedSyncFunc = func(context.Context, time.Time) ([]uint, error) {
+		return []uint{7}, nil
+	}
+	db.ReleaseParkedNodesOnNodeFunc = func(_ context.Context, nodeID uint, _ time.Time) (int64, error) {
+		releasedNodeID = nodeID
+
+		return 3, nil
+	}
+	db.CountSubscriptionNodesByStatusFunc = func(context.Context) (map[string]int64, error) {
+		return map[string]int64{}, nil
+	}
+	db.CountParkedSubscriptionNodesFunc = func(context.Context, time.Time) (int64, error) {
+		return 0, nil
+	}
+
+	node := database.Node{ID: 7, Name: "recovered", IsActive: true, Host: "http://n7", APIToken: "t"}
+	reader := &testutil.XUIClient{PingFunc: func(context.Context) error { return nil }}
+
+	svc := NewSyncService(db, NodeClients{7: {Reader: reader}}, []database.Node{node})
+
+	require.NoError(t, svc.SyncPendingNodes(context.Background()))
+	assert.Equal(t, uint(7), releasedNodeID, "запаркованные биндинги должны быть освобождены после успешного Ping")
+}
+
+// Тест поведения: пока панель не отвечает, парковка сохраняется — повторять
+// отказ бессмысленно, а освобождение вернуло бы бесконечный цикл ретраев.
+func TestSyncPendingNodes_KeepsParkedBindingsWhenNodeStillDown(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.NewServiceStoreFake()
+
+	var releaseCalled bool
+
+	db.GetNodesWithParkedSyncFunc = func(context.Context, time.Time) ([]uint, error) {
+		return []uint{7}, nil
+	}
+	db.ReleaseParkedNodesOnNodeFunc = func(context.Context, uint, time.Time) (int64, error) {
+		releaseCalled = true
+
+		return 0, nil
+	}
+	db.CountSubscriptionNodesByStatusFunc = func(context.Context) (map[string]int64, error) {
+		return map[string]int64{}, nil
+	}
+	db.CountParkedSubscriptionNodesFunc = func(context.Context, time.Time) (int64, error) {
+		return 1, nil
+	}
+
+	node := database.Node{ID: 7, Name: "down", IsActive: true, Host: "http://n7", APIToken: "t"}
+	reader := &testutil.XUIClient{PingFunc: func(context.Context) error { return errors.New("connection refused") }}
+
+	svc := NewSyncService(db, NodeClients{7: {Reader: reader}}, []database.Node{node})
+
+	require.NoError(t, svc.SyncPendingNodes(context.Background()))
+	assert.False(t, releaseCalled, "пока Ping падает, биндинги не освобождаются")
+}
+
+// Тест поведения: снимок доступности нод строится по пингам активных нод с
+// читаемой панелью — /readyz должен видеть упавшую ноду.
+func TestSyncPendingNodes_ReportsNodeHealth(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.NewServiceStoreFake()
+	db.CountSubscriptionNodesByStatusFunc = func(context.Context) (map[string]int64, error) {
+		return map[string]int64{}, nil
+	}
+
+	upNode := database.Node{ID: 1, Name: "up-node", IsActive: true, Host: "http://up", APIToken: "t"}
+	downNode := database.Node{ID: 2, Name: "down-node", IsActive: true, Host: "http://down", APIToken: "t"}
+	disabledNode := database.Node{ID: 3, Name: "disabled-node", IsActive: false, Host: "http://off", APIToken: "t"}
+	proxmanNode := database.Node{ID: 4, Name: "proxman-node", IsActive: true, Host: "http://prox", APIToken: "t"}
+
+	clients := NodeClients{
+		1: {Reader: &testutil.XUIClient{}},
+		2: {Reader: &testutil.XUIClient{PingFunc: func(context.Context) error { return errors.New("connection refused") }}},
+		3: {Reader: &testutil.XUIClient{}},
+		// 4 — без Reader: нода без читаемой панели не проверяется.
+		4: {Provision: &mockVPNClient{}},
+	}
+
+	svc := NewSyncService(db, clients, []database.Node{upNode, downNode, disabledNode, proxmanNode})
+
+	require.NoError(t, svc.SyncPendingNodes(context.Background()))
+
+	total, down := svc.NodeHealthSnapshot()
+	assert.Equal(t, 2, total, "проверяются только активные ноды с читаемой панелью")
+	assert.Equal(t, 1, down, "упавшая нода должна попадать в снимок")
+}
+
+// Тест поведения: неполный fan-out по инбаундам — ретраебельная ошибка, а не
+// терминальный отказ панели: парковка оставила бы подписку полурабочей.
+func TestHandleSyncError_IncompleteFanoutSchedulesRetry(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.NewServiceStoreFake()
+
+	var savedRetryAt *time.Time
+
+	db.UpdateRetryFunc = func(_ context.Context, _, _ uint, _ int, retryAt *time.Time, _ *string) error {
+		savedRetryAt = retryAt
+
+		return nil
+	}
+
+	svc := newTestSyncService(t, db, nil)
+
+	sn := &database.SubscriptionNode{SubscriptionID: 1, NodeID: 1, Status: database.SyncStatusPendingAdd}
+	err := fmt.Errorf("create: %w", xui.ErrIncompleteFanout)
+
+	svc.handleSyncError(context.Background(), sn, err)
+
+	require.NotNil(t, savedRetryAt, "неполный fan-out должен ставить ретрай")
+	assert.True(t, savedRetryAt.Before(parkedRetryAt), "ретрай не должен парковать узел")
+	assert.Equal(t, 1, sn.RetryCount)
+}
+
+// Тест поведения: неполный fan-out по инбаундам оставляет биндинг в pending и
+// ставит ретрай — узел не паркуется, подписка не остаётся полурабочей.
+func TestSyncService_SyncNodes_IncompleteFanoutRetriesInsteadOfParking(t *testing.T) {
+	t.Parallel()
+
+	var (
+		retryCounts []int
+		retryAt     []*time.Time
+	)
+
+	db := testutil.NewServiceStoreFake()
+	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
+		return &database.Plan{ID: 7, Name: "premium", TrafficLimit: 1024}, nil
+	}
+	db.UpdateRetryFunc = func(_ context.Context, _, _ uint, retryCount int, at *time.Time, _ *string) error {
+		retryCounts = append(retryCounts, retryCount)
+		retryAt = append(retryAt, at)
+
+		return nil
+	}
+
+	client := &mockVPNClient{createError: fmt.Errorf("create: %w", xui.ErrIncompleteFanout)}
+	clients := NodeClients{1: {Provision: client}}
+
+	svc := NewSyncService(db, clients, []database.Node{{ID: 1, Type: database.NodeType3xUI, IsActive: true}})
+	sub := &database.Subscription{
+		ID:             51,
+		PlanID:         7,
+		TelegramID:     200,
+		Username:       "partial-user",
+		ClientID:       "client-51",
+		SubscriptionID: "sub-51",
+	}
+
+	err := svc.syncNodes(context.Background(), sub, []database.SubscriptionNode{
+		{SubscriptionID: 51, NodeID: 1, Status: database.SyncStatusPendingAdd},
+	})
+	require.Error(t, err)
+	require.True(t, client.createCalled)
+
+	require.Len(t, retryCounts, 1)
+	assert.Equal(t, 1, retryCounts[0], "ретрай должен быть запланирован, а не пропущен")
+	require.Len(t, retryAt, 1)
+	require.NotNil(t, retryAt[0])
+	assert.True(t, retryAt[0].Before(parkedRetryAt), "узел не должен быть запаркован")
+}
+
+func TestReleaseRecoveredNodes_SkipsPreviouslyHealthyNode(t *testing.T) {
+	db := testutil.NewServiceStoreFake()
+	db.GetNodesWithParkedSyncFunc = func(context.Context, time.Time) ([]uint, error) { return []uint{7}, nil }
+	called := false
+	db.ReleaseParkedNodesOnNodeFunc = func(context.Context, uint, time.Time) (int64, error) { called = true; return 0, nil }
+	svc := NewSyncService(db, NodeClients{7: {Reader: &testutil.XUIClient{}}}, nil)
+	previous := map[uint]bool{7: true}
+	svc.nodeHealth.Store(&previous)
+	svc.releaseRecoveredNodes(context.Background())
+	assert.False(t, called)
+}

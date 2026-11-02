@@ -93,9 +93,9 @@ func TestClient_RequestMetricsUseConfiguredNode(t *testing.T) {
 	defer client.Close()
 
 	client.SetNode("metrics-test-node")
-	before := promtestutil.ToFloat64(metrics.XUIRequestsTotal.WithLabelValues("server", "success", "metrics-test-node"))
+	before := promtestutil.ToFloat64(metrics.XUIRequestsTotal.WithLabelValues("server.status", "success", "metrics-test-node"))
 	require.NoError(t, client.Ping(context.Background()))
-	require.Equal(t, before+1, promtestutil.ToFloat64(metrics.XUIRequestsTotal.WithLabelValues("server", "success", "metrics-test-node")))
+	require.Equal(t, before+1, promtestutil.ToFloat64(metrics.XUIRequestsTotal.WithLabelValues("server.status", "success", "metrics-test-node")))
 }
 
 func TestPing(t *testing.T) {
@@ -1075,7 +1075,7 @@ func TestGetClientTraffic(t *testing.T) {
 }
 
 // GetClientByEmail теперь читает выделенный эндпоинт GET /clients/get/{email};
-// контрактные тесты — в panel_contract_test.go.
+// контрактные тесты — в этом же файле, группа TestPanelContract_*.
 
 func TestGetInbound(t *testing.T) {
 	t.Parallel()
@@ -1221,12 +1221,13 @@ func TestExtractOperation(t *testing.T) {
 		url      string
 		expected string
 	}{
-		{"add client", "http://host/panel/api/clients/add", "clients"},
-		{"delete client", "http://host/panel/api/clients/del/email", "clients"},
-		{"update client", "http://host/panel/api/clients/update/email", "clients"},
-		{"traffic", "http://host/panel/api/clients/traffic/email", "clients"},
-		{"inbound", "http://host/panel/api/inbounds/get/1", "inbounds"},
-		{"server status", "http://host/panel/api/server/status", "server"},
+		{"add client", "http://host/panel/api/clients/add", "clients.add"},
+		{"delete client", "http://host/panel/api/clients/del/email", "clients.del"},
+		{"update client", "http://host/panel/api/clients/update/email", "clients.update"},
+		{"traffic", "http://host/panel/api/clients/traffic/email", "clients.traffic"},
+		{"get client", "http://host/panel/api/clients/get/email", "clients.get"},
+		{"inbound", "http://host/panel/api/inbounds/get/1", "inbounds.get"},
+		{"server status", "http://host/panel/api/server/status", "server.status"},
 		{"unknown path", "http://host/other/path", "unknown"},
 		{"empty", "", "unknown"},
 	}
@@ -1399,6 +1400,106 @@ func TestPanelContract_Get_ObtainRecordNotFound(t *testing.T) {
 	require.Error(t, getErr)
 	assert.Nil(t, record)
 	assert.ErrorIs(t, getErr, ErrClientNotFound)
+}
+
+func TestPanelContract_Get_NullObjIsClientNotFound(t *testing.T) {
+	t.Parallel()
+
+	// Панель отдаёт success=true с obj=null, когда карточки нет: это
+	// ErrClientNotFound (как и у traffic/{email}), иначе sync считает пропажу
+	// клиента инфраструктурным сбоем и не уходит в pending_add.
+	server := newPanelFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/panel/api/clients/get/ghost@example.com", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"msg":"","obj":null}`)
+	})
+
+	client, err := NewClient(server.URL, testAPIToken)
+	require.NoError(t, err)
+	defer client.Close()
+
+	record, getErr := client.GetClientByEmail(context.Background(), "ghost@example.com")
+	require.Error(t, getErr)
+	assert.Nil(t, record)
+	assert.ErrorIs(t, getErr, ErrClientNotFound)
+}
+
+func TestPanelContract_Update_ScopedPerFlowGroup(t *testing.T) {
+	t.Parallel()
+
+	// Панель v3.11 применяет update ко всем привязанным инбаундам, если не
+	// передан ?inboundIds=. Инбаунд 1 (tcp → XTLS Vision) и инбаунд 2 (ws → без
+	// flow) попадают в разные flow-группы; каждый вызов обязан нести свой
+	// фильтр, иначе вызов группы 2 (flow="") стирает Vision на инбаунде 1.
+	type panelCall struct {
+		inboundIDs string
+		flow       string
+	}
+
+	calls := make(chan panelCall, 4)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/panel/api/inbounds/get/", func(w http.ResponseWriter, r *http.Request) {
+		network := "tcp"
+		if strings.HasSuffix(r.URL.Path, "/2") {
+			network = "ws"
+		}
+
+		stream, marshalErr := json.Marshal(map[string]string{"network": network})
+		require.NoError(t, marshalErr)
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"streamSettings":%q}}`, string(stream))
+	})
+	mux.HandleFunc("/panel/api/clients/update/", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(body, &payload))
+
+		flow, _ := payload["flow"].(string)
+		calls <- panelCall{inboundIDs: r.URL.Query().Get("inboundIds"), flow: flow}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+	})
+	// Многогрупповой update сверяет фактическое членство клиента: панель
+	// должна вернуть оба инбаунда, иначе операция считается неполной.
+	mux.HandleFunc("/panel/api/clients/get/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"obj":{"client":{"id":"uuid","email":"user@example.com"},"inboundIds":[1,2]}}`)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client, err := NewClient(server.URL, testAPIToken)
+	require.NoError(t, err)
+	defer client.Close()
+
+	err = client.UpdateClient(context.Background(), ClientRequest{
+		InboundIDs:   []int{1, 2},
+		CurrentEmail: "user@example.com",
+		Email:        "user@example.com",
+		ClientID:     "uuid",
+		SubID:        "sub",
+		TrafficBytes: 1 << 30,
+		ExpiryTime:   time.Now().Add(24 * time.Hour),
+		ResetDays:    30,
+	})
+	require.NoError(t, err)
+
+	byInbound := map[string]string{}
+
+	for range 2 {
+		call := <-calls
+		byInbound[call.inboundIDs] = call.flow
+	}
+
+	assert.Equal(t, map[string]string{
+		"1": "xtls-rprx-vision",
+		"2": "",
+	}, byInbound, "each update call must be scoped to its own flow group")
 }
 
 func TestPanelContract_Add_AlreadyInUse(t *testing.T) {
@@ -1605,4 +1706,158 @@ func TestGetInbound_EmptyObjAndClassification(t *testing.T) {
 			"missing inbound must not be reported as a missing client: that path falls back to create")
 		assert.NotErrorIs(t, err, ErrClientNotFound)
 	})
+}
+
+// Тест поведения: если панель применила только часть flow-групп, клиент живёт
+// на части инбаундов — операция должна вернуть ретраебельный
+// ErrIncompleteFanout, а не отказ панели (который паркует узел).
+func TestAddClientWithID_PartialFlowGroupFailureIsIncompleteFanout(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/inbounds/get/") {
+			// inbound 1 — ws (flow ""), inbound 2 — tcp (vision). Группы
+			// применяются в сортированном порядке: "" раньше vision.
+			network := "ws"
+			if strings.HasSuffix(r.URL.Path, "/2") {
+				network = "tcp"
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"streamSettings":"{\"network\":\"%s\"}"}}`, network)
+
+			return
+		}
+
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"xtls-rprx-vision"`) {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"success":false,"msg":"inbound not found"}`)
+
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, testAPIToken)
+	require.NoError(t, err)
+
+	defer client.Close()
+
+	_, err = client.AddClientWithID(context.Background(), ClientRequest{
+		InboundIDs: []int{1, 2}, Email: "partial@example.com", ClientID: "uuid", SubID: "sub",
+		TrafficBytes: 100, ExpiryTime: time.Now(), ResetDays: 0,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrIncompleteFanout)
+}
+
+// Тест поведения: панель отвечает success по всем группам, но клиент привязан
+// не ко всем инбаундам — это тоже неполный fan-out, а не успех.
+func TestAddClientWithID_MissingInboundMembershipIsIncompleteFanout(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/inbounds/get/") {
+			network := "ws"
+			if strings.HasSuffix(r.URL.Path, "/2") {
+				network = "tcp"
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"streamSettings":"{\"network\":\"%s\"}"}}`, network)
+
+			return
+		}
+
+		if strings.Contains(r.URL.Path, "/clients/get/") {
+			w.Header().Set("Content-Type", "application/json")
+			// Панель отчиталась об успехе, но клиент есть только на inbound 1.
+			fmt.Fprint(w, `{"success":true,"obj":{"client":{"id":"uuid","email":"party@example.com"},"inboundIds":[1]}}`)
+
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, testAPIToken)
+	require.NoError(t, err)
+
+	defer client.Close()
+
+	_, err = client.AddClientWithID(context.Background(), ClientRequest{
+		InboundIDs: []int{1, 2}, Email: "party@example.com", ClientID: "uuid", SubID: "sub",
+		TrafficBytes: 100, ExpiryTime: time.Now(), ResetDays: 0,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrIncompleteFanout)
+}
+
+// Тест поведения: полное членство в инбаундах — успех без ложных ошибок.
+func TestAddClientWithID_MultiInboundSuccess(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/inbounds/get/") {
+			network := "ws"
+			if strings.HasSuffix(r.URL.Path, "/2") {
+				network = "tcp"
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"streamSettings":"{\"network\":\"%s\"}"}}`, network)
+
+			return
+		}
+
+		if strings.Contains(r.URL.Path, "/clients/get/") {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"success":true,"obj":{"client":{"id":"uuid","email":"full@example.com"},"inboundIds":[1,2]}}`)
+
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, testAPIToken)
+	require.NoError(t, err)
+
+	defer client.Close()
+
+	result, err := client.AddClientWithID(context.Background(), ClientRequest{
+		InboundIDs: []int{1, 2}, Email: "full@example.com", ClientID: "uuid", SubID: "sub",
+		TrafficBytes: 100, ExpiryTime: time.Now(), ResetDays: 0,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}
+
+// Тест поведения: неразбираемый streamSettings не превращается в vision —
+// иначе клиент уезжает на панель с flow, которого inbound не поддерживает.
+func TestGetRequiredFlow_UnparsableStreamSettingsIsError(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"obj":{"id":1,"streamSettings":"{not-json"}}`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, testAPIToken)
+	require.NoError(t, err)
+
+	defer client.Close()
+
+	flow, err := client.getRequiredFlow(context.Background(), 1)
+	require.Error(t, err)
+	assert.Empty(t, flow)
 }

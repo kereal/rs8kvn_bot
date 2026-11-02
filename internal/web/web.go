@@ -5,6 +5,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -73,6 +75,15 @@ type ComponentHealth struct {
 // subserverAccessLogCloseTimeout bounds shutdown time spent flushing access logs.
 const subserverAccessLogCloseTimeout = 5 * time.Second
 
+// subserverNotFoundLogInterval — как часто повтор запроса по удалённой
+// подписке от той же пары sub_id+IP попадает в лог уровнем WARN.
+const subserverNotFoundLogInterval = time.Hour
+
+// subserverNotFoundLogPruneAt — размер карты троттлинга, после которого
+// устаревшие записи вычищаются: удалённых подписок со временем становится
+// больше, и карта не должна расти бесконечно.
+const subserverNotFoundLogPruneAt = 4096
+
 // PaymentConfig holds the resolved, ready-to-use payment settings for the
 // callback endpoint. It is set via SetPaymentConfig; when nil, the endpoint
 // returns 503 to signal that payments are not available.
@@ -106,6 +117,11 @@ type Server struct {
 	startTime       time.Time
 	trialTemplate   *template.Template
 	errorTemplate   *template.Template
+
+	// notFoundLog не даёт клиенту, который опрашивает удалённую подписку,
+	// залить лог: одна запись в час на пару sub_id+IP вместо каждого запроса.
+	notFoundLog               *utils.IntervalGate
+	unauthorizedCallbackAlert *utils.IntervalGate
 }
 
 // NewServer constructs a web server and parses the embedded templates. It does
@@ -114,7 +130,7 @@ func NewServer(addr string, db interfaces.WebRepository, cfg *config.Config, bot
 	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{"formatTime": func(t time.Time) string { return t.Format("02.01.2006 15:04") }}).ParseFS(staticFiles, "templates/trial.html"))
 	errorTmpl := template.Must(template.New("error.html").ParseFS(staticFiles, "templates/error.html"))
 
-	return &Server{addr: addr, db: db, cfg: cfg, botUsername: botUsername, subService: subService, subServer: subServer, checkers: make(map[string]func(context.Context) ComponentHealth), inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`), startTime: time.Now(), trialTemplate: trialTmpl, errorTemplate: errorTmpl}
+	return &Server{addr: addr, db: db, cfg: cfg, botUsername: botUsername, subService: subService, subServer: subServer, checkers: make(map[string]func(context.Context) ComponentHealth), inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`), startTime: time.Now(), trialTemplate: trialTmpl, errorTemplate: errorTmpl, notFoundLog: utils.NewIntervalGate(subserverNotFoundLogInterval, subserverNotFoundLogPruneAt), unauthorizedCallbackAlert: utils.NewIntervalGate(time.Minute, 1)}
 }
 
 // SetBot wires Telegram delivery for payment notifications and administrator alerts.
@@ -214,7 +230,12 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/sub/", s.handleSubscription)
 	mux.HandleFunc("/static/logo.png", s.handleLogo)
 
-	mux.Handle("/metrics", promhttp.Handler())
+	metricsToken := ""
+	if s.cfg != nil {
+		metricsToken = s.cfg.MetricsToken
+	}
+
+	mux.Handle("/metrics", metricsAuth(metricsToken, promhttp.Handler()))
 
 	instrumentedHandler := metrics.InstrumentHTTP(SecurityHeadersMiddleware(mux))
 
@@ -391,7 +412,19 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !platega.VerifyHeaders(pc.MerchantID, pc.Secret, r.Header) {
+		// Отказ по подписи раньше уходил клиенту молча: ни лога, ни метрики,
+		// ни алерта. Провайдер уже списал деньги, а следов в системе нет.
+		logger.Warn("payment callback rejected: signature mismatch",
+			zap.String("remote_addr", r.RemoteAddr))
+		if s.unauthorizedCallbackAlert.Allow("signature", time.Now()) {
+			s.notifyPaymentCallbackIssue(r.Context(), platega.CallbackPayload{},
+				"callback_unauthorized", "signature mismatch",
+				"verify PLATEGA_MERCHANT_ID/PLATEGA_SECRET and the provider signing configuration")
+		} else {
+			metrics.PaymentIssuesTotal.WithLabelValues("callback_unauthorized").Inc()
+		}
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+
 		return
 	}
 	// Payment state transitions and post-commit user/admin notifications must
@@ -490,7 +523,7 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	status := strings.ToUpper(strings.TrimSpace(payload.Status))
 	switch status {
 	case "CONFIRMED":
-		confirmation, err := orderService.ConfirmPayment(notifyCtx, paymentID, payload.Amount, payload.Currency)
+		confirmation, err := orderService.ConfirmPayment(notifyCtx, paymentID, payload.Payload, payload.Amount, payload.Currency)
 		if err != nil {
 			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) || errors.Is(err, service.ErrInvalidPaymentTransition) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -603,6 +636,29 @@ func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logger.Debug("failed to write logo response", zap.Error(err))
 	}
+}
+
+// metricsAuth закрывает /metrics общим секретом, когда он задан. Пустой
+// token оставляет поведение прежним: эндпоинт открыт (локальный scrape).
+// Метрики раскрывают топологию (имена нод, объёмы), поэтому при публичном
+// порту токен обязателен.
+func metricsAuth(token string, next http.Handler) http.Handler {
+	if token == "" {
+		return next
+	}
+
+	expected := "Bearer " + token
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte(expected)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="metrics"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // HealthResponse is the JSON document returned by the health endpoint.
@@ -958,6 +1014,33 @@ func isLocalAddress(host string) bool {
 	return ip.IsLoopback() || ip.IsPrivate()
 }
 
+// isSubscriptionNotFound reports whether err means the URL points at a
+// subscription that no longer exists (deleted via /del or revoked).
+func isSubscriptionNotFound(err error) bool {
+	return errors.Is(err, subserver.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound)
+}
+
+// writeSubscriptionNotFound answers 404 and keeps the log readable: the metric
+// counts every request, the log gets the first one per sub_id+IP per interval.
+// A user removed via /del leaves the link inside the client, and the client
+// keeps polling it — with hundreds of removed users that turns one warning into
+// a flood that carries no new information.
+func (s *Server) writeSubscriptionNotFound(w http.ResponseWriter, subID, clientIP string) {
+	metrics.SubserverNotFoundTotal.Inc()
+
+	if s.notFoundLog == nil || s.notFoundLog.Allow(subID+"|"+clientIP, time.Now()) {
+		logger.Warn("Subscription not found",
+			zap.String("sub_id", subID),
+			zap.String("client_ip", clientIP))
+	} else {
+		logger.Debug("Subscription not found (repeat)",
+			zap.String("sub_id", subID),
+			zap.String("client_ip", clientIP))
+	}
+
+	writeSubscriptionText(w, http.StatusNotFound, "Subscription not found")
+}
+
 // handleSubscription is the HTTP handler for GET /sub/{subID}.
 // It serves cached or aggregated Xray, sing-box, or Clash/Mihomo profiles,
 // selecting the format through DetectOutputFormat using ?format= and User-Agent.
@@ -1025,11 +1108,10 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		if errors.Is(err, subserver.ErrSubscriptionNotFound) {
-			logger.Warn("Subscription not found",
-				zap.String("sub_id", subID),
-				zap.String("client_ip", clientIP))
-			writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
+		// Удалённая или отозванная подписка — ожидаемый ответ, а не ошибка:
+		// клиент продолжает опрашивать ссылку, которую ему никто не отзывал.
+		if isSubscriptionNotFound(err) {
+			s.writeSubscriptionNotFound(response, subID, clientIP)
 
 			return
 		}
@@ -1039,9 +1121,22 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 			zap.String("client_ip", clientIP),
 			zap.Error(err))
 
-		if errors.Is(err, gorm.ErrRecordNotFound) ||
-			errors.Is(err, subserver.ErrNoSubscriptionItems) {
+		if errors.Is(err, subserver.ErrNoSubscriptionItems) {
+			// Нет ни одного пригодного элемента — две разные причины.
+			// Ни один источник не ответил: подписка жива, упал апстрим, и
+			// отдавать 404 значит сказать клиенту «вас удалили». Просим
+			// повторить позже.
+			if total > 0 && success == 0 {
+				response.Header().Set("Retry-After", subserverRetryAfterSeconds)
+				writeSubscriptionText(response, http.StatusServiceUnavailable, "Subscription sources unavailable")
+
+				return
+			}
+
+			// Источники ответили, но пригодных узлов нет: для клиента это
+			// то же самое, что отсутствие подписки.
 			writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
+
 			return
 		}
 
@@ -1087,6 +1182,10 @@ func (s *Server) logSubscriptionAccess(rec *statusRecorder, r *http.Request, cli
 
 // writeSubscriptionText writes a plain-text subscription response with the
 // supplied status code and a consistent content type.
+// subserverRetryAfterSeconds — пауза, которую клиент выдерживает перед
+// повторной попыткой, пока источники подписки недоступны.
+const subserverRetryAfterSeconds = "60"
+
 func writeSubscriptionText(w http.ResponseWriter, statusCode int, body string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(statusCode)

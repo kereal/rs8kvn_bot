@@ -48,19 +48,19 @@ func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
 
 	sqlDB, err := db.db.DB()
 	require.NoError(t, err)
-	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 41, false)
+	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 42, false)
 	require.NoError(t, err)
 
 	err = runMigrations(sqlDB)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "newer than the latest embedded migration 40")
+	assert.ErrorContains(t, err, "newer than the latest embedded migration 41")
 
 	var (
 		version int
 		dirty   bool
 	)
 	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
-	assert.Equal(t, 41, version)
+	assert.Equal(t, 42, version, "более новая схема не переписывается")
 	assert.False(t, dirty)
 }
 
@@ -77,7 +77,7 @@ func TestRunMigrationsCollapsesLegacyBroadcastMigration37(t *testing.T) {
 	require.NoError(t, runMigrations(sqlDB))
 	version, dirty, err := migrationState(sqlDB)
 	require.NoError(t, err)
-	assert.Equal(t, uint(40), version)
+	assert.Equal(t, uint(41), version)
 	assert.False(t, dirty)
 }
 
@@ -157,7 +157,7 @@ func TestRunMigrationsRepairsMetadataOnlyAfterCompleteNoTxMigration(t *testing.T
 		dirty   bool
 	)
 	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
-	assert.Equal(t, 40, version)
+	assert.Equal(t, 41, version)
 	assert.False(t, dirty)
 }
 

@@ -22,7 +22,6 @@ func TestConstants_RateLimiter(t *testing.T) {
 
 	assert.Equal(t, 30, RateLimiterMaxTokens, "RateLimiterMaxTokens")
 	assert.Equal(t, 5, RateLimiterRefillRate, "RateLimiterRefillRate")
-	assert.Equal(t, 100*time.Millisecond, RateLimiterPollInterval, "RateLimiterPollInterval")
 	assert.Equal(t, 10, MaxConcurrentHandlers, "MaxConcurrentHandlers")
 }
 
@@ -66,7 +65,6 @@ func TestConstants_TelegramLimits(t *testing.T) {
 func TestConstants_Validation(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, 14, SubIDLengthBytes)
 	assert.Equal(t, 2<<20, MaxResponseSize)
 }
 

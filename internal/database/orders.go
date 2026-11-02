@@ -45,6 +45,67 @@ func (s *Service) GetOrderByProviderPaymentID(ctx context.Context, provider stri
 	return &order, nil
 }
 
+const stalePendingOrderLookback = 30 * 24 * time.Hour
+
+// GetStalePendingOrdersAfterID возвращает pending-заказы с истёкшим сроком
+// платёжной ссылки (before - 30 дней <= payment_expires_at < before), начиная после afterID.
+// Заказы с неопределённым созданием транзакции пропускаются: у провайдера
+// может быть транзакция без сохранённого id, и такой заказ нельзя ни
+// подтвердить, ни истечь автоматически.
+func (s *Service) GetStalePendingOrdersAfterID(
+	ctx context.Context, before time.Time, afterID uint, limit int,
+) ([]Order, error) {
+	var orders []Order
+
+	result := s.db.WithContext(ctx).
+		Where("status = ? AND payment_creation_uncertain = ?", OrderStatusPending, false).
+		Where("payment_expires_at IS NOT NULL AND payment_expires_at >= ? AND payment_expires_at < ?", before.Add(-stalePendingOrderLookback), before).
+		Where("id > ?", afterID).
+		Order("id ASC").
+		Limit(limit).
+		Find(&orders)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to load stale pending orders: %w", result.Error)
+	}
+
+	return orders, nil
+}
+
+// ExpirePendingOrder переводит pending-заказ в expired. CAS по статусу:
+// конкурентный callback, успевший оплатить заказ, не перезаписывается.
+func (s *Service) ExpirePendingOrder(ctx context.Context, orderID uint) (bool, error) {
+	result := s.db.WithContext(ctx).
+		Model(&Order{}).
+		Where("id = ? AND status = ?", orderID, OrderStatusPending).
+		Update("status", OrderStatusExpired)
+	if result.Error != nil {
+		return false, fmt.Errorf("expire pending order %d: %w", orderID, result.Error)
+	}
+
+	return result.RowsAffected > 0, nil
+}
+
+// AttachProviderPaymentID привязывает id транзакции провайдера к заказу, у
+// которого он ещё не записан. Это окно между CreateTransaction и
+// SavePaymentDetails: callback провайдера может обогнать сохранение. CAS по
+// пустому provider_payment_id не даёт перехватить уже подтверждённый заказ.
+func (s *Service) AttachProviderPaymentID(
+	ctx context.Context, orderID uint, provider string, providerPaymentID uuid.UUID,
+) (bool, error) {
+	result := s.db.WithContext(ctx).
+		Model(&Order{}).
+		Where("id = ? AND (provider_payment_id IS NULL OR provider_payment_id = '')", orderID).
+		Updates(map[string]any{
+			"provider_payment_id": providerPaymentID.String(),
+			"payment_provider":    provider,
+		})
+	if result.Error != nil {
+		return false, fmt.Errorf("attach provider payment id: %w", result.Error)
+	}
+
+	return result.RowsAffected > 0, nil
+}
+
 // FindPendingPaymentOrder returns the current pending payment intent. An
 // expired intent is terminalized, but no replacement is created by this method.
 func (s *Service) FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, now time.Time) (*Order, error) {

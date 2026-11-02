@@ -85,7 +85,7 @@ func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T)
 
 			<-start
 
-			confirmation, err := o.ConfirmPayment(context.Background(), providerID, json.Number("23.00"), "RUB")
+			confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("23.00"), "RUB")
 			if confirmation != nil {
 				results[i] = result{activated: confirmation.Activated, err: err}
 			} else {
@@ -215,14 +215,14 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 
 		<-start
 
-		_, _ = o.ConfirmPayment(context.Background(), firstID, json.Number("23.00"), "RUB")
+		_, _ = o.ConfirmPayment(context.Background(), firstID, "", json.Number("23.00"), "RUB")
 	}()
 	go func() {
 		defer wg.Done()
 
 		<-start
 
-		_, _ = o.ConfirmPayment(context.Background(), secondID, json.Number("24.00"), "RUB")
+		_, _ = o.ConfirmPayment(context.Background(), secondID, "", json.Number("24.00"), "RUB")
 	}()
 
 	close(start)

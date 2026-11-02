@@ -18,8 +18,15 @@ import (
 type SubscriptionSyncWorker struct {
 	syncSvc  *service.SyncService
 	orderSvc *service.OrderService
+	subSvc   *service.SubscriptionService
 	db       interfaces.AuditLogWriter
+	// lastReconcile — время последней реконсиляции зависших pending-заказов:
+	// сверка с провайдером идёт раз в час, а не на каждом 5-минутном тике.
+	lastReconcile time.Time
 }
+
+// orderReconcileInterval — период сверки потерянных webhook'ов с провайдером.
+const orderReconcileInterval = time.Hour
 
 // NewSubscriptionSyncWorker creates a new SubscriptionSyncWorker. The optional
 // order service enables durable provider-fee retries without changing existing
@@ -31,6 +38,14 @@ func NewSubscriptionSyncWorker(syncSvc *service.SyncService, orderSvc ...*servic
 	}
 
 	return worker
+}
+
+// SetSubscriptionService подключает сервис подписок для периодического
+// обновления гейджей. Гейджи обновлялись только на мутациях, поэтому после
+// рестарта показывали ноль до первого изменения, а в тихое время — прошлые
+// сутки. Опционально: без сервиса воркер работает как раньше.
+func (w *SubscriptionSyncWorker) SetSubscriptionService(svc *service.SubscriptionService) {
+	w.subSvc = svc
 }
 
 // SetAuditDB подключает хранилище журнала аудита. Опционально: без него
@@ -60,12 +75,17 @@ func (w *SubscriptionSyncWorker) Run(ctx context.Context) {
 }
 
 func (w *SubscriptionSyncWorker) process(ctx context.Context) {
-	metrics.SubscriptionSyncTotal.Inc()
-
 	start := time.Now()
+
+	// Гейджи состояния подписок обновляются в том же проходе: отдельный
+	// горутин с таймером здесь ничего не даёт, кроме лишнего состояния.
+	if w.subSvc != nil {
+		w.subSvc.RefreshActiveSubscriptionsMetric(ctx)
+	}
 
 	err := w.syncSvc.SyncPendingNodes(ctx)
 	if err != nil {
+		metrics.SubscriptionSyncTotal.WithLabelValues("degraded").Inc()
 		logger.Warn("Subscription sync failed", zap.Error(err))
 
 		// Сводное событие аудита за прогон (не per-item): деградация воркера
@@ -79,6 +99,7 @@ func (w *SubscriptionSyncWorker) process(ctx context.Context) {
 			}
 		}
 	} else {
+		metrics.SubscriptionSyncTotal.WithLabelValues("ok").Inc()
 		logger.Debug("Subscription sync completed")
 	}
 
@@ -86,6 +107,17 @@ func (w *SubscriptionSyncWorker) process(ctx context.Context) {
 		err = w.orderSvc.SyncProviderFees(ctx, 50)
 		if err != nil {
 			logger.Warn("Provider fee sync failed", zap.Error(err))
+		}
+
+		// Потерянный webhook иначе оставляет заказ в pending навсегда: деньги
+		// списаны, доступа нет. Сверяем не чаще раза в час.
+		if time.Since(w.lastReconcile) >= orderReconcileInterval {
+			w.lastReconcile = time.Now()
+
+			reconcileErr := w.orderSvc.ReconcilePendingOrders(ctx, 50)
+			if reconcileErr != nil {
+				logger.Warn("Pending order reconciliation failed", zap.Error(reconcileErr))
+			}
 		}
 	}
 

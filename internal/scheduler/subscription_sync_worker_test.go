@@ -2,16 +2,38 @@ package scheduler
 
 import (
 	"context"
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// hourlyReconcileProvider — провайдер без транзакций: сверке нужен источник,
+// но в тесте чеканится только факт вызова.
+type hourlyReconcileProvider struct{}
+
+func (hourlyReconcileProvider) CreateTransaction(
+	context.Context, platega.CreateTransactionRequest,
+) (*platega.CreateTransactionResponse, error) {
+	return nil, nil
+}
+
+func (hourlyReconcileProvider) GetTransactionStatus(
+	context.Context, uuid.UUID,
+) (*platega.TransactionStatusResponse, error) {
+	return nil, platega.ErrTransactionNotFound
+}
 
 func TestMain(m *testing.M) {
 	code := m.Run()
@@ -75,4 +97,51 @@ func TestSubscriptionSyncWorker_Run_RecordsUnavailableNodeRetry(t *testing.T) {
 	require.Equal(t, 1, nodeState.RetryCount, "worker must process the pending node")
 	require.NotNil(t, nodeState.LastError, "unavailable node must record retry error")
 	require.Contains(t, *nodeState.LastError, "no VPN client")
+}
+
+// Тест поведения: сверка потерянных webhook'ов идёт не на каждом 5-минутном
+// тике, а по своему часовому интервалу.
+func TestSubscriptionSyncWorker_ReconcileRunsHourly(t *testing.T) {
+	syncFake := testutil.NewServiceStoreFake()
+	svc := service.NewSyncService(syncFake, nil, nil)
+
+	ordersFake := testutil.NewServiceStoreFake()
+	calls := 0
+
+	ordersFake.GetStalePendingOrdersAfterIDFunc = func(context.Context, time.Time, uint, int) ([]database.Order, error) {
+		calls++
+
+		return nil, nil
+	}
+
+	orderSvc := service.NewOrderService(ordersFake, nil, svc, hourlyReconcileProvider{}, "", nil)
+	worker := NewSubscriptionSyncWorker(svc, orderSvc)
+
+	worker.process(context.Background())
+	require.Equal(t, 1, calls, "первый проход обязан сверять зависшие заказы")
+
+	worker.process(context.Background())
+	assert.Equal(t, 1, calls, "второй проход внутри часа сверку не повторяет")
+
+	worker.lastReconcile = time.Now().Add(-2 * time.Hour)
+	worker.process(context.Background())
+	assert.Equal(t, 2, calls, "после часового интервала сверка возобновляется")
+}
+
+// Поведение: гейджи подписок обновляются прогоном воркера, а не только
+// мутациями — иначе после рестарта они показывают ноль до первого изменения.
+func TestSyncWorker_RefreshesSubscriptionGauges(t *testing.T) {
+	db := testutil.NewSubscriptionRepositoryFake()
+	db.CountActiveSubscriptionsFunc = func(context.Context) (int64, error) { return 42, nil }
+
+	cfg := &config.Config{}
+	subSvc := service.NewSubscriptionService(db, nil, nil, cfg)
+	syncSvc := service.NewSyncService(db, nil, nil)
+
+	worker := NewSubscriptionSyncWorker(syncSvc)
+	worker.SetSubscriptionService(subSvc)
+	worker.process(context.Background())
+
+	assert.Equal(t, 42.0, promtestutil.ToFloat64(metrics.ActiveSubscriptions),
+		"прогон воркера должен обновлять гейдж активных подписок")
 }

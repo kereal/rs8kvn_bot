@@ -74,13 +74,9 @@ func serveFromCache(ctx context.Context, db interfaces.SubscriptionRepository, s
 	}
 
 	logger.Debug("Cache hit", zap.String("sub_id", subID))
-	// best-effort: обновляем last_request, ошибки не блокируют выдачу.
-	err = db.UpdateLastRequest(ctx, subID)
-	if err != nil {
-		logger.Warn("Failed to update last_request",
-			zap.String("sub_id", subID),
-			zap.Error(err))
-	}
+	// best-effort и с троттлингом: запись на каждый хит сериализовалась на
+	// единственном писателе SQLite.
+	subSvc.touchLastRequest(ctx, db, subID)
 
 	return &SubscriptionResult{
 		Body:    cachedBody,
@@ -127,13 +123,9 @@ func loadSubscription(ctx context.Context, db interfaces.SubscriptionRepository,
 	UpdateDevices(ctx, db, subFull, requestHeaders)
 	UpdateIPs(ctx, db, subFull, clientIP)
 
-	// best-effort: обновляем last_request, ошибки не блокируют выдачу.
-	err = db.UpdateLastRequest(ctx, subID)
-	if err != nil {
-		logger.Warn("Failed to update last_request",
-			zap.String("sub_id", subID),
-			zap.Error(err))
-	}
+	// best-effort и с троттлингом: запись на каждый запрос сериализовалась на
+	// единственном писателе SQLite.
+	subSvc.touchLastRequest(ctx, db, subID)
 
 	return subFull, nil
 }
@@ -148,6 +140,13 @@ type aggregatedSources struct {
 	totalDownload      int64
 	firstSourceHeaders map[string]string
 }
+
+// defaultSourceFetchTimeout — предел на один источник. Общий дедлайн /sub
+// (30 s) делится между всеми нодами, и одна медленная нода не должна съедать
+// бюджет остальных: без персонального таймаута она держит воркер до конца
+// запроса. Значение живёт в Service (поле sourceTimeout), чтобы тесты не
+// мутировали общий глобал.
+const defaultSourceFetchTimeout = 5 * time.Second
 
 // maxSourceConcurrency bounds how many upstream sources are fetched in parallel
 // so a single slow/down node cannot be amplified into unbounded connection usage.
@@ -166,7 +165,9 @@ type sourceResult struct {
 // per-source fetch is isolated: a failure logs and is skipped, never aborting the
 // others. Results are merged in source order to keep header/expire selection
 // deterministic.
-func fetchAndAggregateSources(ctx context.Context, subID string, nodes []database.Node) (aggregatedSources, int, int) {
+func fetchAndAggregateSources(
+	ctx context.Context, subID string, nodes []database.Node, sourceTimeout time.Duration,
+) (aggregatedSources, int, int) {
 	agg := aggregatedSources{}
 
 	results := make([]sourceResult, len(nodes))
@@ -197,7 +198,7 @@ func fetchAndAggregateSources(ctx context.Context, subID string, nodes []databas
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			results[idx] = fetchSource(ctx, subID, src)
+			results[idx] = fetchSource(ctx, subID, src, sourceTimeout)
 		}(i, src)
 	}
 
@@ -243,11 +244,14 @@ func fetchAndAggregateSources(ctx context.Context, subID string, nodes []databas
 // fetchSource performs a single upstream fetch, records metrics, and returns the
 // parsed result. On error it returns a zero sourceResult (nil body), which the
 // caller treats as "skip this source".
-func fetchSource(ctx context.Context, subID string, src database.Node) sourceResult {
+func fetchSource(ctx context.Context, subID string, src database.Node, sourceTimeout time.Duration) sourceResult {
 	sourceURL := buildSourceURL(src, subID)
 
+	fetchCtx, cancel := context.WithTimeout(ctx, sourceTimeout)
+	defer cancel()
+
 	fetchStart := time.Now()
-	srcResp, err := FetchFromNode(ctx, sourceURL)
+	srcResp, err := FetchFromNode(fetchCtx, sourceURL)
 	fetchDuration := time.Since(fetchStart).Seconds()
 
 	if err != nil {
@@ -398,7 +402,10 @@ func parseExpireToInt(userInfo string) (int64, bool) {
 // trafficLimit is the total quota in bytes used in the user-info header.
 // A nonempty profileTitleSuffix is appended to the upstream
 // profile-title header, preserving its Base64 encoding when present.
-func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, trafficLimit int64, profileTitleSuffix string, format OutputFormat) (*SubscriptionResult, error) {
+func buildResponse(
+	subSvc *Service, cacheKey string, agg aggregatedSources, trafficLimit int64,
+	profileTitleSuffix string, format OutputFormat, cacheable bool,
+) (*SubscriptionResult, error) {
 	userInfo := BuildUserInfoHeader(agg.totalUpload, agg.totalDownload, trafficLimit, agg.firstExpire)
 
 	configs := aggregateConfigs(agg)
@@ -436,7 +443,13 @@ func buildResponse(subSvc *Service, cacheKey string, agg aggregatedSources, traf
 
 	cacheHeaders := ResponseHeaders(agg.firstSourceHeaders, format.ContentType(), userInfo)
 	ApplyProfileTitleSuffix(cacheHeaders, profileTitleSuffix)
-	subSvc.Set(cacheKey, responseBody, cacheHeaders)
+
+	// Усечённый ответ (часть источников не ответила) не кэшируем: иначе
+	// пользователь до конца TTL получает подписку без половины серверов.
+	if cacheable {
+		subSvc.Set(cacheKey, responseBody, cacheHeaders)
+	}
+
 	return &SubscriptionResult{Body: responseBody, Headers: cacheHeaders}, nil
 }
 

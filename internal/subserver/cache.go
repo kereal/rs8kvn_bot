@@ -77,6 +77,37 @@ func (c *Cache) Set(key string, body []byte, headers map[string]string) {
 		headers:   cloneHeaders(headers),
 		expiresAt: time.Now().Add(c.ttl),
 	}
+
+	c.evictOverflowLocked()
+}
+
+// MaxCacheEntries — предел числа записей: ключей не больше, чем подписчиков ×
+// форматов, и без предела карта росла бы вместе с историей подписок (записи
+// удалённых подписок живут до истечения TTL, а TTL обновляется на каждый Set).
+const MaxCacheEntries = 10000
+
+// evictOverflowLocked удаляет записи с ближайшим сроком истечения, пока размер
+// не вернётся к пределу. Вызывается под c.mu.
+func (c *Cache) evictOverflowLocked() {
+	for len(c.entries) > MaxCacheEntries {
+		var (
+			oldestKey  string
+			oldestTime time.Time
+			found      bool
+		)
+
+		for key, entry := range c.entries {
+			if !found || entry.expiresAt.Before(oldestTime) {
+				oldestKey, oldestTime, found = key, entry.expiresAt, true
+			}
+		}
+
+		if !found {
+			return
+		}
+
+		delete(c.entries, oldestKey)
+	}
 }
 
 // cloneHeaders returns a shallow copy of a string map.
@@ -97,6 +128,16 @@ func (c *Cache) Delete(key string) {
 	defer c.mu.Unlock()
 
 	delete(c.entries, key)
+}
+
+// DeleteKeys removes the given entries in one critical section.
+func (c *Cache) DeleteKeys(keys []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, key := range keys {
+		delete(c.entries, key)
+	}
 }
 
 // cleanupLoop periodically evicts expired entries every TTL/2.

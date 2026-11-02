@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1620,6 +1621,10 @@ func TestService_CleanupExpiredTrials_RecordsError(t *testing.T) {
 
 // ==================== Helper Functions ====================
 
+// parkedRetryThresholdForTest отделяет парковку от обычного бэккофф-ретрая
+// (ладдер не превышает 60 минут).
+const parkedRetryThresholdForTest = 61 * time.Minute
+
 func newTestService(t *testing.T) *Service {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -1675,4 +1680,269 @@ func createTestSubscription(t *testing.T, svc *Service, telegramID int64, userna
 	require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, sub), ""))
 
 	return sub
+}
+
+// Тест поведения: парковка биндинга (retry_at в далёком будущем) видна как
+// «запаркованная» и снимается освобождением ноды; обычный бэккофф-ретрай
+// (< 61 минуты) парковкой не считается.
+func TestSubscriptionNodeParking(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	planID := testFreePlanID(t, svc)
+	node := &Node{Name: "park-node", IsActive: true, Host: "http://p", APIToken: "t", InboundIDs: `[1]`}
+	require.NoError(t, svc.GetDB().WithContext(ctx).Create(node).Error)
+
+	sub := &Subscription{
+		TelegramID:     4242,
+		Username:       "parkuser",
+		ClientID:       "c-park",
+		SubscriptionID: "s-park",
+		Status:         "active",
+		PlanID:         planID,
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+
+	parkedAt := time.Date(9999, 12, 31, 23, 59, 0, 0, time.UTC)
+	parkedErr := "inbound not found: [2]"
+	retrySoon := time.Now().UTC().Add(30 * time.Minute)
+
+	require.NoError(t, svc.CreateSubscriptionNode(ctx, &SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: SyncStatusPendingAdd}))
+	require.NoError(t, svc.UpdateRetry(ctx, sub.ID, node.ID, 3, &parkedAt, &parkedErr))
+
+	parkedAfter := time.Now().UTC().Add(parkedRetryThresholdForTest)
+
+	nodeIDs, err := svc.GetNodesWithParkedSync(ctx, parkedAfter)
+	require.NoError(t, err)
+	assert.Equal(t, []uint{node.ID}, nodeIDs)
+
+	parked, err := svc.CountParkedSubscriptionNodes(ctx, parkedAfter)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), parked)
+
+	counts, err := svc.CountSubscriptionNodesByStatus(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), counts[string(SyncStatusPendingAdd)])
+
+	released, err := svc.ReleaseParkedNodesOnNode(ctx, node.ID, parkedAfter)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), released)
+
+	rows, err := svc.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Zero(t, rows[0].RetryCount)
+	assert.Nil(t, rows[0].RetryAt)
+	assert.Nil(t, rows[0].LastError)
+
+	// Обычный бэккофф-ретрай парковкой не считается и освобождением не снимается.
+	require.NoError(t, svc.UpdateRetry(ctx, sub.ID, node.ID, 1, &retrySoon, &parkedErr))
+
+	nodeIDs, err = svc.GetNodesWithParkedSync(ctx, parkedAfter)
+	require.NoError(t, err)
+	assert.Empty(t, nodeIDs, "ретрай в пределах ладдера не должен считаться парковкой")
+}
+
+// Тест поведения: сверка подбирает только pending-заказы с истёкшей ссылкой,
+// пропускает неопределённые транзакции и уважает пагинацию по id.
+func TestGetStalePendingOrdersAfterID(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	planID := testFreePlanID(t, svc)
+	sub := &Subscription{
+		TelegramID:     5151,
+		Username:       "staleuser",
+		ClientID:       "c-stale",
+		SubscriptionID: "s-stale",
+		Status:         "active",
+		PlanID:         planID,
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+
+	past := time.Now().UTC().Add(-time.Hour)
+	now := time.Now().UTC()
+
+	product := &Product{PlanID: planID, Name: "stale-product", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.GetDB().WithContext(ctx).Create(product).Error)
+
+	stale := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", CreatedAt: now, PaymentExpiresAt: &past, ProviderPaymentID: "t-1"}
+	fresh := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", CreatedAt: now, PaymentExpiresAt: ptrTime(now.Add(time.Hour)), ProviderPaymentID: "t-2"}
+	uncertain := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", CreatedAt: now, PaymentExpiresAt: &past, ProviderPaymentID: "t-3", PaymentCreationUncertain: true}
+	paid := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", CreatedAt: now, PaymentExpiresAt: &past, ProviderPaymentID: "t-4"}
+
+	// Партиальный уникальный индекс держит один pending на пару
+	// subscription/product, поэтому «свежий» заказ живёт с другим товаром.
+	otherProduct := &Product{PlanID: planID, Name: "fresh-product", DurationDays: 31, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.GetDB().WithContext(ctx).Create(otherProduct).Error)
+	fresh.ProductID = otherProduct.ID
+	fresh.ProviderPaymentID = "t-5"
+
+	uncertainProduct := &Product{PlanID: planID, Name: "uncertain-product", DurationDays: 32, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.GetDB().WithContext(ctx).Create(uncertainProduct).Error)
+	uncertain.ProductID = uncertainProduct.ID
+
+	oldProduct := &Product{PlanID: planID, Name: "old-product", DurationDays: 33, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.GetDB().WithContext(ctx).Create(oldProduct).Error)
+	old := &Order{SubscriptionID: sub.ID, ProductID: oldProduct.ID, Status: OrderStatusPending, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", CreatedAt: now, PaymentExpiresAt: ptrTime(now.Add(-stalePendingOrderLookback - time.Second)), ProviderPaymentID: "t-old"}
+
+	for _, o := range []*Order{stale, fresh, uncertain, paid, old} {
+		require.NoError(t, svc.GetDB().WithContext(ctx).Create(o).Error)
+	}
+
+	orders, err := svc.GetStalePendingOrdersAfterID(ctx, now, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, orders, 1)
+	assert.Equal(t, stale.ID, orders[0].ID)
+
+	orders, err = svc.GetStalePendingOrdersAfterID(ctx, now, stale.ID, 10)
+	require.NoError(t, err)
+	assert.Empty(t, orders)
+
+	// The lookback boundary is inclusive; the upper bound remains exclusive.
+	require.NoError(t, svc.GetDB().Model(stale).Update("payment_expires_at", now.Add(-stalePendingOrderLookback)).Error)
+	orders, err = svc.GetStalePendingOrdersAfterID(ctx, now, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, orders, 1)
+	assert.Equal(t, stale.ID, orders[0].ID)
+	require.NoError(t, svc.GetDB().Model(stale).Update("payment_expires_at", now).Error)
+	orders, err = svc.GetStalePendingOrdersAfterID(ctx, now, 0, 10)
+	require.NoError(t, err)
+	assert.Empty(t, orders)
+
+	expired, err := svc.ExpirePendingOrder(ctx, stale.ID)
+	require.NoError(t, err)
+	assert.True(t, expired)
+
+	expired, err = svc.ExpirePendingOrder(ctx, stale.ID)
+	require.NoError(t, err)
+	assert.False(t, expired, "повторное истечение не должно перезаписывать статус")
+}
+
+// Тест поведения: после миграций индекс pending-скана синка существует, и
+// GetPendingSync использует его, а не полный скан таблицы.
+func TestPendingSyncUsesRetryIndex(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	var indexCount int64
+
+	require.NoError(t, svc.GetDB().WithContext(ctx).
+		Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_subscription_nodes_retry'").
+		Scan(&indexCount).Error)
+	require.Equal(t, int64(1), indexCount, "индекс idx_subscription_nodes_retry должен существовать")
+
+	var plan []struct {
+		Detail string
+	}
+
+	require.NoError(t, svc.GetDB().WithContext(ctx).
+		Raw(`EXPLAIN QUERY PLAN SELECT subscription_id, node_id FROM subscription_nodes WHERE status IN ('pending_add','pending_remove','pending_update') AND (retry_at IS NULL OR retry_at <= ?)`, time.Now().UTC()).
+		Scan(&plan).Error)
+	require.NotEmpty(t, plan)
+
+	usedIndex := false
+	for _, row := range plan {
+		if strings.Contains(row.Detail, "idx_subscription_nodes_retry") {
+			usedIndex = true
+		}
+
+		assert.NotContains(t, row.Detail, "SCAN subscription_nodes", "pending-скан не должен идти полным сканом: %s", row.Detail)
+	}
+
+	assert.True(t, usedIndex, "план запроса должен опираться на idx_subscription_nodes_retry: %+v", plan)
+}
+
+// Тест поведения: суточное обслуживание удаляет только записи аудита старше
+// срока хранения, пачками, не трогая свежие события.
+func TestDailyMaintenance_PrunesOldAuditLog(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	old := now.AddDate(0, 0, -181)
+	fresh := now.Add(-time.Hour)
+
+	oldEntity, freshEntity, actor := "old", "fresh", "1"
+
+	for i := range 3 {
+		require.NoError(t, svc.InsertAuditLog(ctx, &AuditLog{
+			EntityType: EntitySubscription, EntityID: &oldEntity, Event: AuditEventSubscriptionCreated,
+			ActorType: ActorUser, ActorID: &actor, CreatedAt: old.Add(time.Duration(i) * time.Minute),
+		}))
+	}
+
+	for i := range 2 {
+		require.NoError(t, svc.InsertAuditLog(ctx, &AuditLog{
+			EntityType: EntitySubscription, EntityID: &freshEntity, Event: AuditEventSubscriptionCreated,
+			ActorType: ActorUser, ActorID: &actor, CreatedAt: fresh.Add(time.Duration(i) * time.Minute),
+		}))
+	}
+
+	require.NoError(t, svc.DailyMaintenance(ctx, 180))
+
+	var oldLeft, freshLeft int64
+
+	require.NoError(t, svc.GetDB().WithContext(ctx).Model(&AuditLog{}).Where("entity_id = ?", "old").Count(&oldLeft).Error)
+	require.NoError(t, svc.GetDB().WithContext(ctx).Model(&AuditLog{}).Where("entity_id = ?", "fresh").Count(&freshLeft).Error)
+
+	assert.Zero(t, oldLeft, "записи старше срока хранения удаляются")
+	assert.Equal(t, int64(2), freshLeft, "свежие записи остаются")
+}
+
+// Тест поведения: обновление БД, проходящее через rebuild-миграцию, оставляет
+// копию файла до неё; обычное обновление копию не делает.
+func TestSnapshotBeforeRebuild(t *testing.T) {
+	assert.Equal(t, 32, pendingRebuildMigration(30, 41), "ближайшая rebuild-миграция в диапазоне")
+	assert.Equal(t, 0, pendingRebuildMigration(34, 41), "после 34 rebuild-миграций нет")
+
+	dbPath := filepath.Join(t.TempDir(), "snapshot.db")
+
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+
+	defer func() { require.NoError(t, db.Close()) }()
+
+	sqlDB, err := db.GetDB().DB()
+	require.NoError(t, err)
+
+	snapshotBeforeRebuild(sqlDB, databaseFilePath(sqlDB), 33, 34)
+
+	matches, err := filepath.Glob(dbPath + ".pre-migration.34.*")
+	require.NoError(t, err)
+	require.Len(t, matches, 1, "копия перед rebuild-миграцией должна быть создана")
+
+	info, err := os.Stat(matches[0])
+	require.NoError(t, err)
+	assert.Positive(t, info.Size())
+
+	// Обычный диапазон без rebuild-миграций копий не оставляет.
+	snapshotBeforeRebuild(sqlDB, databaseFilePath(sqlDB), 34, 41)
+
+	matches, err = filepath.Glob(dbPath + ".pre-migration.3[5-9].*")
+	require.NoError(t, err)
+	assert.Empty(t, matches)
+}
+
+// Тест поведения: нулевой срок означает «по умолчанию» (полгода), а не «удалить
+// всё» — пустая настройка не должна стирать историю.
+func TestDailyMaintenance_ZeroUsesDefault(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	entity, actor := "e", "1"
+	old := time.Now().UTC().AddDate(-2, 0, 0)
+
+	require.NoError(t, svc.InsertAuditLog(ctx, &AuditLog{
+		EntityType: EntitySubscription, EntityID: &entity, Event: AuditEventSubscriptionCreated,
+		ActorType: ActorUser, ActorID: &actor, CreatedAt: old,
+	}))
+
+	require.NoError(t, svc.DailyMaintenance(ctx, 0))
+
+	var left int64
+	require.NoError(t, svc.GetDB().WithContext(ctx).Model(&AuditLog{}).Count(&left).Error)
+	assert.Zero(t, left, "двухлетняя запись должна попасть под срок по умолчанию")
 }

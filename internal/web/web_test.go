@@ -437,3 +437,43 @@ func TestRenderErrorPage(t *testing.T) {
 	assert.Contains(t, html, "Тестовая ошибка", "renderErrorPage() should contain error message")
 	assert.Contains(t, html, "<!DOCTYPE html>", "renderErrorPage() should be valid HTML")
 }
+
+// Тест поведения: при заданном METRICS_TOKEN /metrics без корректного заголовка
+// не отдаёт данные; без токена поведение прежнее (открыт).
+func TestMetricsAuth(t *testing.T) {
+	t.Parallel()
+
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("metrics"))
+	})
+
+	t.Run("no token configured keeps endpoint open", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		metricsAuth("", ok).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("missing header rejected", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		metricsAuth("s3cret", ok).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+		assert.Equal(t, `Bearer realm="metrics"`, rec.Header().Get("WWW-Authenticate"))
+	})
+
+	t.Run("wrong token rejected", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+		req.Header.Set("Authorization", "Bearer nope")
+		rec := httptest.NewRecorder()
+		metricsAuth("s3cret", ok).ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("correct token allowed", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+		req.Header.Set("Authorization", "Bearer s3cret")
+		rec := httptest.NewRecorder()
+		metricsAuth("s3cret", ok).ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "metrics", rec.Body.String())
+	})
+}

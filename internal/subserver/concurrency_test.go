@@ -80,7 +80,7 @@ func TestFetchAndAggregateSources_Parallel(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	_, success, total := fetchAndAggregateSources(ctx, "test", nodes)
+	_, success, total := fetchAndAggregateSources(ctx, "test", nodes, defaultSourceFetchTimeout)
 
 	// All nodes must be fetched and counted, regardless of parallelism.
 	require.Equal(t, numNodes, total, "every node must be counted")

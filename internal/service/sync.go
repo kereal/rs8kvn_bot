@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
@@ -26,6 +28,10 @@ type SyncService struct {
 	db      interfaces.SyncStore
 	clients NodeClients
 	nodes   []database.Node
+	// nodeHealth — снимок доступности нод по последнему проходу синка.
+	// Заменяется целиком одним писателем, поэтому читателей не нужно
+	// сериализовать: /readyz читает карту без блокировок.
+	nodeHealth atomic.Pointer[map[uint]bool]
 
 	locksMu     sync.Mutex
 	locks       map[uint]*subscriptionSyncLock
@@ -830,7 +836,10 @@ func (s *SyncService) handleSyncError(ctx context.Context, sn *database.Subscrip
 	// Lock contention is only retried when the request never reached a
 	// decision point: a non-200 front response may quote "database is locked"
 	// in its body, and a refused request stays refused on retry.
+	// ErrIncompleteFanout = клиент записан не на все инбаунды: повтор приводит
+	// его к полному членству, парковка оставила бы подписку полурабочей.
 	retryable := utils.IsRetryable(err) || errors.Is(err, errNodeUnavailable) ||
+		errors.Is(err, xui.ErrIncompleteFanout) ||
 		(!errors.Is(err, utils.ErrNon200Response) && isTransientDBError(err))
 
 	if !retryable || sn.RetryCount >= maxSyncRetries {
@@ -947,8 +956,9 @@ var retryBackoffIntervals = []time.Duration{
 }
 
 // CalculateRetryAt returns the next retry timestamp for the given retry count.
-// Intervals: 1m → 2m → 5m → 15m → 30m → 45m → 60m (capped).
-// After 6 failures further calls still get 60m and the record remains pending.
+// Intervals: 1m → 2m → 5m → 15m → 30m → 45m → 60m (capped at the last entry).
+// Точка остановки — не здесь, а в handleSyncError: при retry_count >= maxSyncRetries
+// запись паркуется (retry_at = parkedRetryAt), а этот расчёт продолжает давать 60m.
 func CalculateRetryAt(retryCount int) time.Time {
 	idx := retryCount
 	if idx >= len(retryBackoffIntervals) {
@@ -961,6 +971,13 @@ func CalculateRetryAt(retryCount int) time.Time {
 // SyncPendingNodes fetches pending nodes across all subscriptions and processes them.
 func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 	logger.Debug("sync pending nodes started")
+
+	// Парковка терминальна, но не вечна: нода, которая снова отвечает,
+	// освобождает свои запаркованные биндинги до выборки pending, чтобы они
+	// попали в этот же проход.
+	s.releaseRecoveredNodes(ctx)
+	s.refreshSyncGauges(ctx)
+	s.refreshNodeHealth(ctx)
 
 	pendingNodes, err := s.db.GetPendingSync(ctx)
 	if err != nil {
@@ -1081,6 +1098,165 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// parkedRetryThreshold отделяет парковку (retry_at в далёком будущем) от
+// обычной ступени ладдера, которая не превышает 60 минут.
+const parkedRetryThreshold = 61 * time.Minute
+
+// syncStatusGauges перечисляет статусы, для которых gauge выставляется всегда:
+// иначе исчезнувший статус оставлял бы в /metrics устаревшее значение.
+var syncStatusGauges = []database.SyncStatus{
+	database.SyncStatusActive,
+	database.SyncStatusPendingAdd,
+	database.SyncStatusPendingRemove,
+	database.SyncStatusPendingUpdate,
+}
+
+// releaseRecoveredNodes снимает парковку с биндингов тех нод, которые снова
+// отвечают на Ping. Пока панель отказывает, повторять бессмысленно — поэтому
+// парковка ставится сразу; но после восстановления панели или ротации токена
+// повод повторять уже есть. Без этого запаркованные подписки оставались без
+// провизии до смены плана или оплаты, то есть навсегда.
+func (s *SyncService) releaseRecoveredNodes(ctx context.Context) {
+	parkedAfter := time.Now().UTC().Add(parkedRetryThreshold)
+
+	nodeIDs, err := s.db.GetNodesWithParkedSync(ctx, parkedAfter)
+	if err != nil {
+		logger.Warn("sync: failed to list nodes with parked bindings", zap.Error(err))
+
+		return
+	}
+
+	prev := s.nodeHealth.Load()
+	for _, nodeID := range nodeIDs {
+		if prev != nil && (*prev)[nodeID] {
+			continue
+		}
+		if ctx.Err() != nil {
+			return
+		}
+
+		reader, ok := s.clients.Reader(nodeID)
+		if !ok {
+			continue
+		}
+
+		pingErr := reader.Ping(ctx)
+		if pingErr != nil {
+			logger.Debug("sync: node still unavailable, parked bindings kept",
+				zap.Uint("node_id", nodeID),
+				zap.Error(pingErr))
+
+			continue
+		}
+
+		released, relErr := s.db.ReleaseParkedNodesOnNode(ctx, nodeID, parkedAfter)
+		if relErr != nil {
+			logger.Warn("sync: failed to release parked bindings",
+				zap.Uint("node_id", nodeID),
+				zap.Error(relErr))
+
+			continue
+		}
+
+		if released > 0 {
+			logger.Info("sync: released parked bindings after node recovery",
+				zap.Uint("node_id", nodeID),
+				zap.Int64("released", released))
+		}
+	}
+}
+
+// refreshNodeHealth пингует активные ноды с читаемой панелью и заменяет
+// снимок доступности. /readyz и алерты видят результат без живого запроса к
+// панели: проверка готовности не должна ходить по сети.
+func (s *SyncService) refreshNodeHealth(ctx context.Context) {
+	health := make(map[uint]bool, len(s.nodes))
+
+	for _, node := range s.nodes {
+		if !node.IsActive || ctx.Err() != nil {
+			continue
+		}
+
+		reader, ok := s.clients.Reader(node.ID)
+		if !ok {
+			continue
+		}
+
+		pingErr := reader.Ping(ctx)
+		up := pingErr == nil
+		health[node.ID] = up
+
+		if up {
+			metrics.NodeUp.WithLabelValues(node.Name).Set(1)
+			continue
+		}
+
+		metrics.NodeUp.WithLabelValues(node.Name).Set(0)
+		logger.Warn("sync: node health probe failed",
+			zap.Uint("node_id", node.ID),
+			zap.String("node", node.Name),
+			zap.Error(pingErr))
+	}
+
+	// Отменённый контекст даёт неполную карту (часть нод не пропингована):
+	// сохранять её нельзя — /readyz и алерты увидят ложные down.
+	ctxErr := ctx.Err()
+	if ctxErr != nil {
+		logger.Warn("sync: node health refresh interrupted, keeping previous snapshot",
+			zap.Error(ctxErr))
+
+		return
+	}
+
+	s.nodeHealth.Store(&health)
+}
+
+// NodeHealthSnapshot возвращает число проверенных нод и число недоступных по
+// последнему проходу синка. total == 0 означает, что проверять нечего
+// (нод нет или у них нет читаемой панели).
+func (s *SyncService) NodeHealthSnapshot() (total, down int) {
+	health := s.nodeHealth.Load()
+	if health == nil {
+		return 0, 0
+	}
+
+	unavailable := 0
+
+	for _, up := range *health {
+		if !up {
+			unavailable++
+		}
+	}
+
+	return len(*health), unavailable
+}
+
+// refreshSyncGauges обновляет метрики состояния биндингов: без них парковка и
+// рост pending видны только по логам.
+func (s *SyncService) refreshSyncGauges(ctx context.Context) {
+	counts, err := s.db.CountSubscriptionNodesByStatus(ctx)
+	if err != nil {
+		logger.Warn("sync: failed to count subscription nodes by status", zap.Error(err))
+
+		return
+	}
+
+	for _, status := range syncStatusGauges {
+		metrics.SubscriptionNodes.WithLabelValues(string(status)).Set(float64(counts[string(status)]))
+	}
+
+	parkedAfter := time.Now().UTC().Add(parkedRetryThreshold)
+
+	parked, err := s.db.CountParkedSubscriptionNodes(ctx, parkedAfter)
+	if err != nil {
+		logger.Warn("sync: failed to count parked bindings", zap.Error(err))
+
+		return
+	}
+
+	metrics.SubscriptionNodesParked.Set(float64(parked))
 }
 
 // ApplyPlanToSubscription loads the subscription, marks its active nodes as

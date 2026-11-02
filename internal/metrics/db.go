@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"log"
+	"os"
 	"time"
 
 	"gorm.io/gorm"
@@ -89,17 +90,68 @@ func recordDBMetric(tx *gorm.DB, startTimeKey, operation string) {
 	}
 
 	DBQueryDuration.WithLabelValues(operation).Observe(duration)
-	DBQueriesTotal.WithLabelValues(operation, result).Inc()
+	DBQueriesTotal.WithLabelValues(operation, result, statementTable(tx)).Inc()
 }
 
-// CollectDBPoolMetrics collects database connection pool statistics.
+// statementTable returns the table a statement touched. Без него упавший запрос
+// не отличить от упавшего запроса к другой таблице: в проде так копились
+// сотни ошибок в сутки с единственным лейблом operation=query. Имя таблицы
+// приходит из модели, а не из пользовательского ввода, поэтому набор значений
+// ограничен схемой.
+func statementTable(tx *gorm.DB) string {
+	if tx.Statement == nil {
+		return "other"
+	}
+
+	if table := tx.Statement.Table; table != "" {
+		return table
+	}
+
+	if tx.Statement.Schema != nil && tx.Statement.Schema.Table != "" {
+		return tx.Statement.Schema.Table
+	}
+
+	return "other"
+}
+
+// dbPoolWaitsObserved и dbPoolWaitSecondsObserved хранят последнее прочитанное
+// значение sql.DBStats: счётчик должен получать приращение, а не абсолют.
+// CollectDBPoolMetrics вызывается из одного горутина.
+var (
+	dbPoolWaitsObserved       float64
+	dbPoolWaitSecondsObserved float64
+)
+
+// CollectDBPoolMetrics adds the delta of the connection pool wait statistics.
+// Repeated calls are safe: the delta between calls is what gets added.
 func CollectDBPoolMetrics(_ context.Context, db *gorm.DB) {
 	sqlDB, err := db.DB()
 	if err != nil {
 		return
 	}
 
+	// sql.DBStats отдаёт накопленные значения с момента старта процесса.
+	// Абсолютных чисел здесь нет: это счётчики, и читать их надо через
+	// increase()/rate(), иначе смысл теряется.
 	stats := sqlDB.Stats()
-	DBPoolWait.Set(float64(stats.WaitCount))
-	DBPoolWaitDurationSeconds.Set(stats.WaitDuration.Seconds())
+	DBPoolWaitsTotal.Add(float64(stats.WaitCount) - dbPoolWaitsObserved)
+	dbPoolWaitsObserved = float64(stats.WaitCount)
+
+	waitSeconds := stats.WaitDuration.Seconds()
+	DBPoolWaitSecondsTotal.Add(waitSeconds - dbPoolWaitSecondsObserved)
+	dbPoolWaitSecondsObserved = waitSeconds
+}
+
+// CollectDatabaseFileSize публикует размеры файла БД и её WAL. Ошибки чтения
+// игнорируются: отсутствие файла (in-memory БД в тестах) — не инцидент.
+func CollectDatabaseFileSize(dbPath string) {
+	stat, err := os.Stat(dbPath)
+	if err == nil {
+		DBFileBytes.Set(float64(stat.Size()))
+	}
+
+	walStat, walErr := os.Stat(dbPath + "-wal")
+	if walErr == nil {
+		DBWALBytes.Set(float64(walStat.Size()))
+	}
 }

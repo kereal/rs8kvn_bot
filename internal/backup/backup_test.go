@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -27,15 +28,33 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m)
 }
 
+// createTestSQLiteDB создаёт валидную SQLite-базу с таблицей subscriptions
+// и указанным числом строк — минимальный fixture для прохождения проверки бэкапа.
+func createTestSQLiteDB(t *testing.T, dbPath string, rows int) {
+	t.Helper()
+
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+
+	defer db.Close()
+
+	_, err = db.Exec("CREATE TABLE subscriptions (id INTEGER PRIMARY KEY, status TEXT)")
+	require.NoError(t, err)
+
+	for range rows {
+		_, err = db.Exec("INSERT INTO subscriptions (status) VALUES ('active')")
+		require.NoError(t, err)
+	}
+}
+
 func TestBackupDatabase(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	// Create a test database file
-	content := []byte("test database content")
-	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create test database")
+	// Create a real SQLite database with the subscriptions table
+	createTestSQLiteDB(t, dbPath, 1)
 
 	err := BackupDatabase(context.Background(), dbPath)
 	require.NoError(t, err, "BackupDatabase() error")
@@ -46,11 +65,22 @@ func TestBackupDatabase(t *testing.T) {
 	require.NoError(t, err, "Backup file was not created")
 	assert.Equal(t, os.FileMode(0o600), fi.Mode().Perm(), "backup file mode should be 0600")
 
-	// Check backup content matches original
-	backupContent, err := os.ReadFile(backupPath)
-	require.NoError(t, err, "Failed to read backup file")
+	// Check backup passes its own integrity verification
+	backupDB, err := sql.Open("sqlite3", "file:"+backupPath+"?mode=ro")
+	require.NoError(t, err)
 
-	assert.Equal(t, string(content), string(backupContent), "Backup content does not match original")
+	defer backupDB.Close()
+
+	var integrity string
+	require.NoError(t, backupDB.QueryRow("PRAGMA integrity_check").Scan(&integrity))
+	assert.Equal(t, "ok", integrity, "Backup copy must pass integrity_check")
+
+	var count int
+	require.NoError(t, backupDB.QueryRow("SELECT COUNT(*) FROM subscriptions").Scan(&count))
+	assert.Equal(t, 1, count, "Backup must contain the original rows")
+
+	_, err = os.Stat(backupPath + ".corrupt")
+	assert.True(t, os.IsNotExist(err), "No .corrupt marker expected for a valid database")
 }
 
 func TestBackupDatabase_WALContainsAllCommittedRows(t *testing.T) {
@@ -63,7 +93,7 @@ func TestBackupDatabase_WALContainsAllCommittedRows(t *testing.T) {
 
 	defer db.Close()
 
-	_, err = db.Exec("PRAGMA journal_mode=WAL; CREATE TABLE payments (id INTEGER PRIMARY KEY, status TEXT); INSERT INTO payments(status) VALUES ('pending');")
+	_, err = db.Exec("PRAGMA journal_mode=WAL; CREATE TABLE payments (id INTEGER PRIMARY KEY, status TEXT); CREATE TABLE subscriptions (id INTEGER PRIMARY KEY); INSERT INTO payments(status) VALUES ('pending');")
 	require.NoError(t, err)
 	_, err = db.Exec("INSERT INTO payments(status) VALUES ('paid')")
 	require.NoError(t, err)
@@ -98,23 +128,32 @@ func TestBackupDatabase_OverwritesExistingBackup(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 	backupPath := dbPath + ".backup"
 
-	// Create initial database
-	require.NoError(t, os.WriteFile(dbPath, []byte("initial content"), 0600), "Failed to create test database")
+	// Create real database so the backup passes verification
+	createTestSQLiteDB(t, dbPath, 1)
 
 	// Create first backup
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "First BackupDatabase() error")
 
 	// Modify database
-	require.NoError(t, os.WriteFile(dbPath, []byte("modified content"), 0600), "Failed to modify test database")
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+
+	_, err = db.Exec("INSERT INTO subscriptions (status) VALUES ('active')")
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
 
 	// Create second backup
 	require.NoError(t, BackupDatabase(context.Background(), dbPath), "Second BackupDatabase() error")
 
 	// Check backup has new content
-	backupContent, err := os.ReadFile(backupPath)
-	require.NoError(t, err, "Failed to read backup file")
+	backupDB, err := sql.Open("sqlite3", "file:"+backupPath+"?mode=ro")
+	require.NoError(t, err)
 
-	assert.Equal(t, "modified content", string(backupContent), "Backup should contain modified content")
+	defer backupDB.Close()
+
+	var count int
+	require.NoError(t, backupDB.QueryRow("SELECT COUNT(*) FROM subscriptions").Scan(&count))
+	assert.Equal(t, 2, count, "Backup should contain the modified data")
 }
 
 func TestRotateBackups(t *testing.T) {
@@ -161,7 +200,7 @@ func TestRotateBackups(t *testing.T) {
 			{
 				name: "keep_zero_uses_default",
 				setup: func(tmpDir, dbPath string) {
-					require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0644))
+					createTestSQLiteDB(t, dbPath, 1)
 					require.NoError(t, BackupDatabase(context.Background(), dbPath))
 				},
 				check: func(t *testing.T, tmpDir, dbPath string) {
@@ -298,7 +337,7 @@ func TestDailyBackup(t *testing.T) {
 			dbPath := filepath.Join(tmpDir, "test.db")
 
 			if tt.createDB {
-				require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create test database")
+				createTestSQLiteDB(t, dbPath, 1)
 				require.NoError(t, DailyBackup(context.Background(), dbPath, tt.keepDays), "DailyBackup() error")
 			}
 
@@ -325,7 +364,7 @@ func TestGetBackupInfo(t *testing.T) {
 		{
 			name: "with_backups",
 			setup: func(t *testing.T, dbPath string) {
-				require.NoError(t, os.WriteFile(dbPath, []byte("content"), 0600), "Failed to create database")
+				createTestSQLiteDB(t, dbPath, 1)
 				require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
 				require.NoError(t, DailyBackup(context.Background(), dbPath, 7), "DailyBackup() error")
 			},
@@ -397,8 +436,7 @@ func TestTotalBackupSize(t *testing.T) {
 		{
 			name: "with_backups",
 			setup: func(t *testing.T, dbPath string) {
-				content := []byte("test database content")
-				require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create database")
+				createTestSQLiteDB(t, dbPath, 1)
 				require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
 			},
 			check: func(t *testing.T, size int64) {
@@ -408,8 +446,7 @@ func TestTotalBackupSize(t *testing.T) {
 		{
 			name: "multiple_backups",
 			setup: func(t *testing.T, dbPath string) {
-				content := []byte("test content")
-				require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create database")
+				createTestSQLiteDB(t, dbPath, 1)
 				require.NoError(t, BackupDatabase(context.Background(), dbPath), "BackupDatabase() error")
 			},
 			check: func(t *testing.T, size int64) {
@@ -488,15 +525,23 @@ func TestBackupDatabase_EmptyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	// Create an empty file
+	// Create an empty file: SQLite treats it as a valid empty database,
+	// but it has no subscriptions table, so backup verification must fail.
 	require.NoError(t, os.WriteFile(dbPath, []byte{}, 0600), "Failed to create empty test file")
 
 	err := BackupDatabase(context.Background(), dbPath)
-	require.NoError(t, err, "BackupDatabase() should succeed with empty file")
+	require.Error(t, err, "BackupDatabase() should fail verification for an empty database")
+	assert.ErrorContains(t, err, "backup verification failed")
 
-	backupPath := dbPath + ".backup"
-	_, err = os.Stat(backupPath)
-	require.NoError(t, err, "Backup file should be created for empty source")
+	// The failed copy is preserved with the .corrupt suffix, no good backup is published
+	require.FileExists(t, dbPath+".backup.corrupt")
+	_, err = os.Stat(dbPath + ".backup")
+	assert.True(t, os.IsNotExist(err), "No .backup should be published when verification fails")
+
+	// The source file remains untouched
+	fi, err := os.Stat(dbPath)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), fi.Size(), "Source file must remain untouched")
 }
 
 func TestBackupDatabase_LargeFile(t *testing.T) {
@@ -505,20 +550,120 @@ func TestBackupDatabase_LargeFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	// Create a 10MB file
-	content := make([]byte, 10*1024*1024)
-	for i := range content {
-		content[i] = byte(i % 256)
-	}
+	// Create a large real SQLite database (~8MB blob) so the copy exercises
+	// the chunked copy path and passes verification
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
 
-	require.NoError(t, os.WriteFile(dbPath, content, 0600), "Failed to create large test file")
+	_, err = db.Exec("CREATE TABLE subscriptions (id INTEGER PRIMARY KEY, status TEXT); " +
+		"CREATE TABLE blobs (id INTEGER PRIMARY KEY, data BLOB); " +
+		"INSERT INTO subscriptions (status) VALUES ('active'); " +
+		"INSERT INTO blobs (data) VALUES (zeroblob(8 * 1024 * 1024));")
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
 
 	ctx := context.Background()
-	err := BackupDatabase(ctx, dbPath)
+	err = BackupDatabase(ctx, dbPath)
 	require.NoError(t, err, "BackupDatabase() should succeed with large file")
 
-	backupPath := dbPath + ".backup"
-	backupContent, err := os.ReadFile(backupPath)
-	require.NoError(t, err, "Failed to read backup file")
-	assert.Equal(t, content, backupContent, "Backup content should match large file")
+	fi, err := os.Stat(dbPath + ".backup")
+	require.NoError(t, err)
+	assert.Greater(t, fi.Size(), int64(4*1024*1024), "Backup should be large")
+
+	// The large copy must pass verification too
+	backupDB, err := sql.Open("sqlite3", "file:"+dbPath+".backup?mode=ro")
+	require.NoError(t, err)
+
+	defer backupDB.Close()
+
+	var integrity string
+	require.NoError(t, backupDB.QueryRow("PRAGMA integrity_check").Scan(&integrity))
+	assert.Equal(t, "ok", integrity)
+}
+
+// ==================== Backup Verification Tests ====================
+
+func TestBackupDatabase_CorruptCopyMarkedCorrupt(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// Publish a good backup first
+	createTestSQLiteDB(t, dbPath, 1)
+	require.NoError(t, BackupDatabase(context.Background(), dbPath))
+
+	goodBackup, err := os.ReadFile(dbPath + ".backup")
+	require.NoError(t, err, "Failed to read the good backup")
+
+	// Corrupt the source file directly: no valid SQLite header and no WAL
+	// sidecar, so the copy is produced from garbage and must fail verification
+	garbage := bytes.Repeat([]byte("not a sqlite database at all\n"), 100)
+	require.NoError(t, os.WriteFile(dbPath, garbage, 0600))
+
+	err = BackupDatabase(context.Background(), dbPath)
+	require.Error(t, err, "BackupDatabase() should report verification failure")
+	assert.ErrorContains(t, err, "backup verification failed")
+
+	// The bad copy is preserved with the .corrupt suffix for inspection
+	require.FileExists(t, dbPath+".backup.corrupt")
+
+	// The previous good backup is not overwritten
+	preserved, err := os.ReadFile(dbPath + ".backup")
+	require.NoError(t, err, "Failed to read the preserved backup")
+	assert.Equal(t, goodBackup, preserved, "Previous good backup must not be overwritten by a failed copy")
+
+	// The source file remains untouched
+	content, err := os.ReadFile(dbPath)
+	require.NoError(t, err)
+	assert.Equal(t, garbage, content, "Source database must remain untouched")
+}
+
+func TestBackupDatabase_MissingSubscriptionsTableMarkedCorrupt(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// A valid SQLite database without the subscriptions table:
+	// integrity_check passes, but the required table check must fail
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+
+	_, err = db.Exec("CREATE TABLE other (id INTEGER PRIMARY KEY)")
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	err = BackupDatabase(context.Background(), dbPath)
+	require.Error(t, err, "BackupDatabase() should report verification failure")
+	assert.ErrorContains(t, err, "subscriptions table check failed")
+
+	require.FileExists(t, dbPath+".backup.corrupt")
+	_, err = os.Stat(dbPath + ".backup")
+	assert.True(t, os.IsNotExist(err), "No .backup should be published when verification fails")
+}
+
+func TestBackupIgnoresCorruptFiles(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "db")
+	require.NoError(t, os.WriteFile(dbPath+".backup", []byte("valid"), 0600))
+	require.NoError(t, os.WriteFile(dbPath+".backup.corrupt", []byte("corrupt"), 0600))
+	require.NoError(t, RotateBackups(dbPath, 1))
+	infos, err := GetBackupInfo(dbPath)
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+	assert.NotContains(t, infos[0].Path, ".corrupt")
+	assert.FileExists(t, dbPath+".backup.corrupt")
+}
+
+func TestVerifyBackupCopyCleansSidecarsOnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "copy")
+	for _, suffix := range []string{"-wal", "-shm"} {
+		require.NoError(t, os.WriteFile(path+suffix, []byte("sidecar"), 0600))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.Error(t, verifyBackupCopy(ctx, path))
+	for _, suffix := range []string{"-wal", "-shm"} {
+		assert.NoFileExists(t, path+suffix)
+	}
 }

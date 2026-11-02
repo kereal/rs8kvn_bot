@@ -171,3 +171,79 @@ func (s *Service) UpdateRetry(ctx context.Context, subID, nodeID uint, retryCoun
 
 	return nil
 }
+
+// GetNodesWithParkedSync возвращает ID нод, у которых есть запаркованные
+// биндинги — записи с retry_at дальше parkedAfter (парковка ставит дату в 9999
+// году, обычная ступень ладдера не превышает 60 минут).
+func (s *Service) GetNodesWithParkedSync(ctx context.Context, parkedAfter time.Time) ([]uint, error) {
+	var nodeIDs []uint
+
+	result := s.db.WithContext(ctx).
+		Model(&SubscriptionNode{}).
+		Where("retry_at > ?", parkedAfter).
+		Distinct().
+		Pluck("node_id", &nodeIDs)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to list nodes with parked sync: %w", result.Error)
+	}
+
+	return nodeIDs, nil
+}
+
+// ReleaseParkedNodesOnNode снимает парковку с биндингов ноды: сбрасывает
+// retry-состояние, чтобы ближайший проход синка подхватил записи снова.
+// Возвращает число освобождённых записей.
+func (s *Service) ReleaseParkedNodesOnNode(ctx context.Context, nodeID uint, parkedAfter time.Time) (int64, error) {
+	result := s.db.WithContext(ctx).
+		Model(&SubscriptionNode{}).
+		Where("node_id = ? AND retry_at > ?", nodeID, parkedAfter).
+		Updates(map[string]any{
+			"retry_count": 0,
+			"retry_at":    nil,
+			"last_error":  nil,
+		})
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to release parked sync for node %d: %w", nodeID, result.Error)
+	}
+
+	return result.RowsAffected, nil
+}
+
+// CountSubscriptionNodesByStatus возвращает число биндингов по статусам синка.
+func (s *Service) CountSubscriptionNodesByStatus(ctx context.Context) (map[string]int64, error) {
+	var rows []struct {
+		Status string
+		Count  int64
+	}
+
+	result := s.db.WithContext(ctx).
+		Model(&SubscriptionNode{}).
+		Select("status, COUNT(*) AS count").
+		Group("status").
+		Scan(&rows)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to count subscription nodes by status: %w", result.Error)
+	}
+
+	counts := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		counts[row.Status] = row.Count
+	}
+
+	return counts, nil
+}
+
+// CountParkedSubscriptionNodes возвращает число запаркованных биндингов.
+func (s *Service) CountParkedSubscriptionNodes(ctx context.Context, parkedAfter time.Time) (int64, error) {
+	var count int64
+
+	result := s.db.WithContext(ctx).
+		Model(&SubscriptionNode{}).
+		Where("retry_at > ?", parkedAfter).
+		Count(&count)
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to count parked sync nodes: %w", result.Error)
+	}
+
+	return count, nil
+}

@@ -40,9 +40,6 @@ const (
 	// RateLimiterRefillRate is the rate at which tokens are refilled (tokens per second)
 	RateLimiterRefillRate = 5
 
-	// RateLimiterPollInterval is the interval for checking token availability
-	RateLimiterPollInterval = 100 * time.Millisecond
-
 	// MaxConcurrentHandlers is the maximum number of concurrent update handlers
 	// This prevents unbounded goroutine spawning under load
 	MaxConcurrentHandlers = 10
@@ -61,7 +58,7 @@ const (
 
 	// MaxOpenConns is the maximum number of open connections. SQLite in WAL
 	// mode multiplexes many concurrent readers over one writer, so a small pool
-	// is safe and avoids connection-pool waits (db_pool_wait) seen with 1.
+	// is safe and avoids connection-pool waits (db_pool_waits_total) seen with 1.
 	MaxOpenConns = 4
 
 	// MaxIdleConnsDB is the maximum number of idle connections
@@ -132,11 +129,10 @@ const (
 	DefaultWebServerPort = 8880
 )
 
-// Validation Constants
-const (
-	// SubIDLengthBytes is the number of random bytes for subscription ID (28 hex chars)
-	SubIDLengthBytes = 14
-)
+// DefaultAuditLogRetentionDays — срок хранения audit_log по умолчанию: полгода.
+// Меняется через AUDIT_LOG_RETENTION_DAYS без правки кода (комплаенс может
+// требовать больший срок).
+const DefaultAuditLogRetentionDays = 180
 
 // MaxResponseSize is the maximum response size to read from upstream responses (2MB).
 const MaxResponseSize = 2 << 20

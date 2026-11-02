@@ -8,10 +8,12 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -234,4 +236,18 @@ func TestSubscriptionExpireWorker_process_PaidPlanExpires_DowngradesToFree(t *te
 
 	assert.True(t, invalidateCalled, "cache invalidation should be called")
 	assert.Equal(t, sub.SubscriptionID, invalidateSubID)
+}
+
+// Не параллельный: счётчик прогонов общий для процесса, другие тесты пакета
+// тоже прогоняют воркер и сдвигали бы дельту.
+func TestExpireWorker_CountsRunResult(t *testing.T) {
+	db := testutil.NewSubscriptionRepositoryFake()
+
+	okBefore := promtestutil.ToFloat64(metrics.SubscriptionExpireTotal.WithLabelValues("ok"))
+
+	worker := NewSubscriptionExpireWorker(db, nil)
+	worker.process(context.Background())
+
+	assert.Equal(t, okBefore+1, promtestutil.ToFloat64(metrics.SubscriptionExpireTotal.WithLabelValues("ok")),
+		"успешный прогон должен попадать в серию result=ok")
 }

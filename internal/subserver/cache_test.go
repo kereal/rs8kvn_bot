@@ -155,3 +155,24 @@ func TestCache_HeadersCopy(t *testing.T) {
 	_, hasNew := gotHeaders["x-new"]
 	assert.False(t, hasNew, "headers map should be cloned on Set")
 }
+
+// Тест поведения: кэш не растёт без предела — сверх лимита вытесняются записи
+// с ближайшим сроком истечения.
+func TestCache_SetEvictsBeyondLimit(t *testing.T) {
+	t.Parallel()
+
+	c := NewCache(time.Minute)
+	defer c.Stop()
+
+	body := []byte("payload")
+
+	for i := range MaxCacheEntries + 50 {
+		c.Set(fmt.Sprintf("key-%d", i), body, nil)
+	}
+
+	c.mu.RLock()
+	size := len(c.entries)
+	c.mu.RUnlock()
+
+	assert.LessOrEqual(t, size, MaxCacheEntries, "кэш не должен превышать MaxCacheEntries")
+}

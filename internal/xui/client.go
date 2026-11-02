@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,8 +22,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// operationRegex extracts the API operation from the URL path.
-var operationRegex = regexp.MustCompile(`/panel/api/([^/]+)(?:/[^/]+)*`)
+// operationRegex extracts the API operation from the URL path. The first two
+// segments are kept: "clients.add", "clients.del", "clients.update",
+// "inbounds.get", "server.status". One segment ("clients") collapsed add,
+// update, delete and traffic reads into a single series, so a provisioning
+// failure was indistinguishable from a healthy read.
+var operationRegex = regexp.MustCompile(`/panel/api/([^/]+)(?:/([^/]+))?`)
 
 // Client — HTTP-клиент для взаимодействия с панелью 3x-ui.
 type Client struct {
@@ -167,9 +173,21 @@ func closeResponseBody(resp *http.Response) {
 
 // GetTransport извлекает тип транспортного слоя (network) из StreamSettings.
 // Поддерживает современный формат (JSON-объект) и legacy (двойная кодировка).
+// Неразбираемые настройки дают пустую строку — вызывающий, которому важно
+// отличить «транспорта нет» от «не смог прочитать», использует parseTransport.
 func (in *Inbound) GetTransport() string {
+	transport, _ := in.parseTransport()
+
+	return transport
+}
+
+// parseTransport извлекает тип транспорта и сообщает о неразбираемом
+// streamSettings. Молча возвращать пустую строку нельзя: ниже она превращается
+// в xtls-rprx-vision, и клиент уезжает на панель с flow, которого inbound не
+// поддерживает (панель примет запрос, клиент не подключится).
+func (in *Inbound) parseTransport() (string, error) {
 	if len(in.StreamSettings) == 0 {
-		return ""
+		return "", nil
 	}
 
 	// Try modern format: StreamSettings is already a JSON object
@@ -179,7 +197,7 @@ func (in *Inbound) GetTransport() string {
 
 	err := json.Unmarshal(in.StreamSettings, &netSettings)
 	if err == nil && netSettings.Network != "" {
-		return netSettings.Network
+		return netSettings.Network, nil
 	}
 
 	// Fallback for old format: StreamSettings is a JSON-encoded string (legacy panel)
@@ -187,37 +205,48 @@ func (in *Inbound) GetTransport() string {
 
 	err = json.Unmarshal(in.StreamSettings, &rawStr)
 	if err != nil {
-		logger.Debug("GetTransport: failed to unmarshal legacy streamSettings string",
+		logger.Debug("parseTransport: failed to unmarshal legacy streamSettings string",
 			zap.Error(err))
 
-		return ""
+		return "", fmt.Errorf("unmarshal streamSettings: %w", err)
 	}
 
 	cleaned := strings.ReplaceAll(rawStr, "\\n", "\n")
 
 	err = json.Unmarshal([]byte(cleaned), &netSettings)
 	if err != nil {
-		logger.Debug("GetTransport: failed to parse legacy streamSettings JSON",
+		logger.Debug("parseTransport: failed to parse legacy streamSettings JSON",
 			zap.Error(err))
 
-		return ""
+		return "", fmt.Errorf("parse legacy streamSettings: %w", err)
 	}
 
-	return netSettings.Network
+	return netSettings.Network, nil
 }
 
 // GetRequiredFlow возвращает значение flow, необходимое для данного inbound.
 // Для транспортов, не использующих XTLS (xhttp, hysteria2, ws, grpc, и т.д.),
-// flow не требуется (""). Ошибка получения inbound передаётся вызывающему коду.
+// flow не требуется ("") — см. requiredFlow.
 func (in *Inbound) GetRequiredFlow() string {
-	transport := in.GetTransport()
+	flow, _ := in.requiredFlow()
+
+	return flow
+}
+
+// requiredFlow возвращает flow inbound и ошибку разбора его настроек.
+func (in *Inbound) requiredFlow() (string, error) {
+	transport, err := in.parseTransport()
+	if err != nil {
+		return "", fmt.Errorf("determine required flow: %w", err)
+	}
+
 	switch transport {
 	case "xhttp", "h2", "ws", "grpc", "grpcs",
 		"hysteria", "hysteria2", "shadowsocks", "ss2022",
 		"tuic", "wireguard", "reality", "darkertls":
-		return ""
+		return "", nil
 	default:
-		return "xtls-rprx-vision"
+		return "xtls-rprx-vision", nil
 	}
 }
 
@@ -316,11 +345,15 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 // extractOperation извлекает имя операции из URL панели.
 func extractOperation(urlStr string) string {
 	matches := operationRegex.FindStringSubmatch(urlStr)
-	if len(matches) >= 2 {
-		return matches[1]
+	if len(matches) < 2 || matches[1] == "" {
+		return "unknown"
 	}
 
-	return "unknown"
+	if len(matches) >= 3 && matches[2] != "" {
+		return matches[1] + "." + matches[2]
+	}
+
+	return matches[1]
 }
 
 // tgIDContextKey — ключ контекста для передачи Telegram ID в методы панели.
@@ -421,26 +454,97 @@ func (c *Client) AddClientWithID(ctx context.Context, req ClientRequest) (*Clien
 		tgID = TgIDFromContext(ctx)
 	}
 
-	var (
-		result   *ClientConfig
-		firstErr error
-	)
+	var result *ClientConfig
 
-	for flow, ids := range groups {
-		errRetry := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-			var innerErr error
+	err = applyPerFlowGroup(ctx, groups, func(ctx context.Context, flow string, ids []int) error {
+		var innerErr error
 
-			result, innerErr = c.doAddClientWithID(ctx, ids, req, flow, tgID)
+		result, innerErr = c.doAddClientWithID(ctx, ids, req, flow, tgID)
 
-			return innerErr
-		})
-		if errRetry != nil {
-			firstErr = errRetry
-			break
+		return innerErr
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(groups) > 1 {
+		verifyErr := c.verifyClientInbounds(ctx, req.Email, req.InboundIDs)
+		if verifyErr != nil {
+			return nil, verifyErr
 		}
 	}
 
-	return result, firstErr
+	return result, nil
+}
+
+// applyPerFlowGroup применяет операцию по каждой flow-группе в детерминированном
+// порядке. Ошибка после уже применённых групп означает частичное состояние:
+// клиент существует только на части инбаундов, поэтому она помечается
+// ErrIncompleteFanout (ретраебельно) — иначе вызывающий считал бы отказ панели
+// окончательным и парковал узел с полурабочей подпиской.
+func applyPerFlowGroup(
+	ctx context.Context,
+	groups map[string][]int,
+	apply func(ctx context.Context, flow string, ids []int) error,
+) error {
+	keys := make([]string, 0, len(groups))
+	for flow := range groups {
+		keys = append(keys, flow)
+	}
+
+	sort.Strings(keys)
+
+	applied := 0
+
+	for _, flow := range keys {
+		err := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
+			return apply(ctx, flow, groups[flow])
+		})
+		if err != nil {
+			if applied > 0 {
+				return fmt.Errorf("%w: %d of %d flow groups applied before group %q failed: %w",
+					ErrIncompleteFanout, applied, len(keys), flow, err)
+			}
+
+			return err
+		}
+
+		applied++
+	}
+
+	return nil
+}
+
+// verifyClientInbounds сверяет фактическое членство клиента в инбаундах с
+// запрошенным. Панель отвечает success по каждой flow-группе, но «success» не
+// значит «привязан ко всем инбаундам»; расхождение иначе остаётся невидимым
+// (подписка работает частично, а состояние active). Сверка выполняется только
+// для многогруппового случая — она стоит одного GET.
+func (c *Client) verifyClientInbounds(ctx context.Context, email string, requested []int) error {
+	record, err := c.doGetClientByEmail(ctx, email)
+	if err != nil {
+		return fmt.Errorf("verify client inbounds for %s: %w", email, err)
+	}
+
+	actual := make(map[int]struct{}, len(record.InboundIDs))
+	for _, id := range record.InboundIDs {
+		actual[id] = struct{}{}
+	}
+
+	var missing []int
+
+	for _, id := range requested {
+		if _, ok := actual[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+
+	if len(missing) > 0 {
+		return fmt.Errorf("%w: client %s is missing inbound ids %v (panel reports %v)",
+			ErrIncompleteFanout, email, missing, record.InboundIDs)
+	}
+
+	return nil
 }
 
 // doAddClientWithID выполняет реальный POST /panel/api/clients/add
@@ -573,19 +677,21 @@ func (c *Client) UpdateClient(ctx context.Context, req ClientRequest) error {
 		return err
 	}
 
-	var firstErr error
+	err = applyPerFlowGroup(ctx, groups, func(ctx context.Context, flow string, ids []int) error {
+		return c.doUpdateClient(ctx, ids, req, flow)
+	})
+	if err != nil {
+		return err
+	}
 
-	for flow, ids := range groups {
-		errRetry := utils.RetryWithBackoff(ctx, config.XUIMaxRetries, config.XUIInitialRetryDelay, func() error {
-			return c.doUpdateClient(ctx, ids, req, flow)
-		})
-		if errRetry != nil {
-			firstErr = errRetry
-			break
+	if len(groups) > 1 && req.Email != "" {
+		verifyErr := c.verifyClientInbounds(ctx, req.Email, req.InboundIDs)
+		if verifyErr != nil {
+			return verifyErr
 		}
 	}
 
-	return firstErr
+	return nil
 }
 
 // doUpdateClient выполняет реальный POST /panel/api/clients/update/{currentEmail}.
@@ -631,7 +737,14 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, req Clien
 		clientObj["enable"] = *req.Enable
 	}
 
-	updateURL := fmt.Sprintf("%s/panel/api/clients/update/%s", c.host, url.PathEscape(req.CurrentEmail))
+	// Панель v3.11 применяет update ко ВСЕМ привязанным инбаундам, если не
+	// указан ?inboundIds= (controller/client.go: parseInboundIdsQuery →
+	// ClientService.UpdateByEmail(..., inboundFilter)). Без фильтра каждый вызов
+	// flow-группы переписывал бы клиента во всех инбаундах и накладывал свой
+	// flow на чужие группы: вызов группы с flow="" стирал бы Vision с
+	// reality-инбаунда. См. doc/architecture.md, «Контракт API панели 3x-ui» §4.5.
+	updateURL := fmt.Sprintf("%s/panel/api/clients/update/%s?inboundIds=%s",
+		c.host, url.PathEscape(req.CurrentEmail), inboundIDsQuery(inboundIDs))
 
 	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, updateURL, func() (io.Reader, error) {
 		return marshalJSON(clientObj)
@@ -768,8 +881,12 @@ func (c *Client) doGetClientByEmail(ctx context.Context, email string) (*ClientR
 		return nil, err
 	}
 
+	// Тот же класс ответа, что и у traffic/{email}: success=true с пустым obj
+	// означает «клиента нет», а не сбой разбора. Без sentinel'а вызывающий
+	// считает это инфраструктурной ошибкой и не переводит pending_update в
+	// pending_add.
 	if isNullObj(obj) {
-		return nil, fmt.Errorf("get client %s: unexpected empty obj", email)
+		return nil, fmt.Errorf("%w: get client %s returned empty obj", ErrClientNotFound, email)
 	}
 
 	var record ClientRecord
@@ -819,11 +936,8 @@ func (c *Client) doGetInbound(ctx context.Context, inboundID int) (*Inbound, err
 
 // getRequiredFlow возвращает flow, требуемый для работы с указанным inbound.
 func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, error) {
-	err := ctx.Err()
-	if err != nil {
-		return "", err
-	}
-
+	// Отменённый контекст отсекается транспортом и распознаётся ниже через
+	// utils.IsCtxErr: отдельная предварительная проверка дублировала бы это.
 	inbound, err := c.doGetInbound(ctx, inboundID)
 	if err != nil {
 		logger.Debug("Failed to get inbound for flow",
@@ -836,7 +950,12 @@ func (c *Client) getRequiredFlow(ctx context.Context, inboundID int) (string, er
 		return "", fmt.Errorf("get inbound for flow: %w", err)
 	}
 
-	return inbound.GetRequiredFlow(), nil
+	flow, flowErr := inbound.requiredFlow()
+	if flowErr != nil {
+		return "", fmt.Errorf("inbound %d: %w", inboundID, flowErr)
+	}
+
+	return flow, nil
 }
 
 // groupInboundIDsByFlow группирует уникальные inboundIDs по совместимому значению flow.
@@ -874,6 +993,22 @@ func (c *Client) Close() error {
 	}
 
 	return nil
+}
+
+// inboundIDsQuery собирает значение ?inboundIds= для панели: список ID через
+// запятую, как его разбирает parseInboundIdsQuery.
+func inboundIDsQuery(ids []int) string {
+	var b strings.Builder
+
+	for i, id := range ids {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+
+		b.WriteString(strconv.Itoa(id))
+	}
+
+	return b.String()
 }
 
 // getExpiresAtMillis конвертирует время истечения в миллисекунды Unix.

@@ -168,6 +168,25 @@ func getVersion() string {
 	return "rs8kvn_bot@" + version
 }
 
+// getRevision returns the short VCS revision (or the ldflag commit) the binary
+// was built from, for the app_info metric. Empty when the build carries no VCS
+// data and no ldflag commit — tests and `go run` have none.
+func getRevision() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" && len(setting.Value) >= 7 {
+				return setting.Value[:7]
+			}
+		}
+	}
+
+	if commit != "unknown" && len(commit) >= 7 {
+		return commit[:7]
+	}
+
+	return "unknown"
+}
+
 // initBot инициализирует Telegram-бота: проверяет токен, создаёт BotAPI
 // и собирает bot.BotConfig с повторными попытками при сбоях подключения.
 func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
@@ -231,10 +250,35 @@ func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 	return nil, nil, fmt.Errorf("failed to initialize Telegram bot after %d attempts: %w", botInitMaxAttempts, lastErr)
 }
 
+// nodeHealthSource сообщает доступность нод по последнему проходу синка.
+// Проверка готовности читает готовый снимок и не ходит в панель по сети.
+type nodeHealthSource interface {
+	NodeHealthSnapshot() (total, down int)
+}
+
+// nodeHealthComponent превращает снимок доступности нод в компонент готовности:
+// часть нод недоступна — Degraded (трафик идёт через оставшиеся), все — Down.
+func nodeHealthComponent(source nodeHealthSource) web.ComponentHealth {
+	if source == nil {
+		return web.ComponentHealth{Status: web.StatusOK}
+	}
+
+	total, down := source.NodeHealthSnapshot()
+
+	switch {
+	case total == 0 || down == 0:
+		return web.ComponentHealth{Status: web.StatusOK}
+	case down == total:
+		return web.ComponentHealth{Status: web.StatusDown, Message: fmt.Sprintf("all %d nodes unavailable", total)}
+	default:
+		return web.ComponentHealth{Status: web.StatusDegraded, Message: fmt.Sprintf("%d/%d nodes unavailable", down, total)}
+	}
+}
+
 // startWebServer создаёт и запускает HTTP-сервер (подписки, инвайт/trial-страницы).
 // Сервер стартует асинхронно; функция ждёт до 2 секунд первой ошибки запуска,
 // чтобы не блокировать старт бота, но вернуть ошибку, если сервер точно не поднялся.
-func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service, orderService *service.OrderService, botAPI interfaces.BotAPI) (*web.Server, error) {
+func startWebServer(subService *service.SubscriptionService, cfg *config.Config, botConfig *bot.BotConfig, subServer *subserver.Service, dbService *database.Service, orderService *service.OrderService, botAPI interfaces.BotAPI, nodeHealth nodeHealthSource) (*web.Server, error) {
 	webServer := web.NewServer(fmt.Sprintf(":%d", cfg.WebServerPort), dbService, cfg, botConfig.Username, subService, subServer)
 	webServer.SetOrderService(orderService)
 	webServer.SetBot(botAPI)
@@ -246,6 +290,10 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 			Secret:     cfg.PlategaSecret,
 		})
 	}
+
+	webServer.RegisterChecker("nodes", func(context.Context) web.ComponentHealth {
+		return nodeHealthComponent(nodeHealth)
+	})
 
 	webServer.RegisterChecker("database", func(ctx context.Context) web.ComponentHealth {
 		err := dbService.Ping(ctx)
@@ -259,7 +307,14 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 	webServerStartErr := make(chan error, 1)
 
 	go func() {
-		defer recoverAndReport("Web server start")
+		defer func() {
+			if r := recover(); r != nil {
+				// Паника до готовности сервера иначе оставила бы select ниже
+				// ждать вечно, а процесс — без веб-сервера.
+				reportPanic("Web server start", r)
+				webServerStartErr <- fmt.Errorf("web server panicked: %v", r)
+			}
+		}()
 
 		err := webServer.Start(context.Background())
 		if err != nil {
@@ -298,123 +353,140 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	}
 
 	go func() {
-		defer recoverAndReport("DB pool metrics collector")
 		defer wg.Done()
 
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
+		runSupervised(ctx, "DB pool metrics collector", func(ctx context.Context) {
+			// Первый замер сразу: иначе до первого тика gauge показывает 0.
+			metrics.CollectDatabaseFileSize(cfg.DatabasePath)
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				metrics.CollectDBPoolMetrics(ctx, dbService.GetDB())
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					metrics.CollectDBPoolMetrics(ctx, dbService.GetDB())
+					metrics.CollectDatabaseFileSize(cfg.DatabasePath)
+				}
 			}
-		}
+		})
 	}()
 
 	go func() {
-		defer recoverAndReport("Orphan reconciler")
 		defer wg.Done()
 
-		select {
-		case <-time.After(30 * time.Second):
-		case <-ctx.Done():
-			return
-		}
-
-		svc := handler.GetSubscriptionService()
-		if svc == nil {
-			logger.Warn("SubscriptionService not available, skipping orphan reconciliation")
-			return
-		}
-
-		count, err := svc.ReconcileOrphanedClients(ctx)
-		if err != nil {
-			logger.Warn("Initial orphan reconciliation failed", zap.Error(err))
-		} else {
-			logger.Info("Orphan reconciliation completed", zap.Int("revoked", count))
-		}
-
-		ticker := time.NewTicker(8 * time.Hour)
-		defer ticker.Stop()
-
-		for {
+		runSupervised(ctx, "Orphan reconciler", func(ctx context.Context) {
 			select {
+			case <-time.After(30 * time.Second):
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				count, err := svc.ReconcileOrphanedClients(ctx)
-				if err != nil {
-					logger.Warn("Orphan reconciliation failed", zap.Error(err))
-				} else {
-					logger.Info("Orphan reconciliation completed", zap.Int("revoked", count))
+			}
+
+			svc := handler.GetSubscriptionService()
+			if svc == nil {
+				logger.Warn("SubscriptionService not available, skipping orphan reconciliation")
+				return
+			}
+
+			count, err := svc.ReconcileOrphanedClients(ctx)
+			if err != nil {
+				logger.Warn("Initial orphan reconciliation failed", zap.Error(err))
+			} else {
+				logger.Info("Orphan reconciliation completed", zap.Int("revoked", count))
+			}
+
+			ticker := time.NewTicker(8 * time.Hour)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					count, err := svc.ReconcileOrphanedClients(ctx)
+					if err != nil {
+						logger.Warn("Orphan reconciliation failed", zap.Error(err))
+					} else {
+						logger.Info("Orphan reconciliation completed", zap.Int("revoked", count))
+					}
 				}
 			}
-		}
+		})
 	}()
 
 	backupSched := scheduler.NewBackupScheduler(cfg.DatabasePath, config.DefaultBackupHour, config.DefaultBackupRetention)
+	backupSched.SetMaintenance(func(ctx context.Context) error {
+		return dbService.DailyMaintenance(ctx, cfg.AuditLogRetentionDays)
+	})
 
 	go func() {
-		defer recoverAndReport("Backup scheduler")
 		defer wg.Done()
 
-		backupSched.Start(ctx)
+		runSupervised(ctx, "Backup scheduler", func(ctx context.Context) {
+			backupSched.Start(ctx)
+		})
 	}()
 
 	go func() {
-		defer recoverAndReport("Heartbeat scheduler")
 		defer wg.Done()
 
-		heartbeat.Start(ctx, cfg.HeartbeatURL, cfg.HeartbeatInterval)
+		runSupervised(ctx, "Heartbeat scheduler", func(ctx context.Context) {
+			heartbeat.Start(ctx, cfg.HeartbeatURL, cfg.HeartbeatInterval)
+		})
 	}()
 
 	go func() {
-		defer recoverAndReport("Trial cleanup scheduler")
 		defer wg.Done()
 
-		trialSched := scheduler.NewTrialCleanupScheduler(subService)
-		trialSched.Start(ctx)
+		runSupervised(ctx, "Trial cleanup scheduler", func(ctx context.Context) {
+			trialSched := scheduler.NewTrialCleanupScheduler(subService)
+			trialSched.Start(ctx)
+		})
 	}()
 
 	go func() {
-		defer recoverAndReport("Subscription sync worker")
 		defer wg.Done()
 
-		syncWorker := scheduler.NewSubscriptionSyncWorker(syncSvc, orderSvc)
-		syncWorker.Run(ctx)
+		runSupervised(ctx, "Subscription sync worker", func(ctx context.Context) {
+			syncWorker := scheduler.NewSubscriptionSyncWorker(syncSvc, orderSvc)
+			syncWorker.SetSubscriptionService(subService)
+			syncWorker.Run(ctx)
+		})
 	}()
 
 	go func() {
-		defer recoverAndReport("Subscription expire worker")
 		defer wg.Done()
 
-		expireWorker := scheduler.NewSubscriptionExpireWorker(dbService, subService)
-		expireWorker.Run(ctx)
+		runSupervised(ctx, "Subscription expire worker", func(ctx context.Context) {
+			expireWorker := scheduler.NewSubscriptionExpireWorker(dbService, subService)
+			expireWorker.Run(ctx)
+		})
 	}()
 
 	if cfg.NotificationsEnabled {
 		go func() {
-			defer recoverAndReport("Subscription reminder worker")
 			defer wg.Done()
 
-			reminderWorker := scheduler.NewSubscriptionReminderWorker(dbService, subService)
-			reminderWorker.Run(ctx)
+			runSupervised(ctx, "Subscription reminder worker", func(ctx context.Context) {
+				reminderWorker := scheduler.NewSubscriptionReminderWorker(dbService, subService)
+				reminderWorker.Run(ctx)
+			})
 		}()
 	}
 
 	go func() {
-		defer recoverAndReport("Subscription traffic worker")
 		defer wg.Done()
 
-		trafficWorker := scheduler.NewSubscriptionTrafficWorker(dbService, subService)
-		if cfg.NotificationsEnabled {
-			trafficWorker.Run(ctx)
-			return
-		}
-		trafficWorker.RunRecovery(ctx)
+		runSupervised(ctx, "Subscription traffic worker", func(ctx context.Context) {
+			trafficWorker := scheduler.NewSubscriptionTrafficWorker(dbService, subService)
+			if cfg.NotificationsEnabled {
+				trafficWorker.Run(ctx)
+				return
+			}
+			trafficWorker.RunRecovery(ctx)
+		})
 	}()
 
 	if !cfg.NotificationsEnabled {
@@ -503,7 +575,7 @@ func main() {
 	// The web server starts with an empty bot username; initBot injects the real
 	// username (from Telegram getMe) via SetBotUsername once the bot is ready, so
 	// the share/invite page shows the correct @username after startup.
-	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService, svc.orderService, botAPI)
+	webServer, err := startWebServer(svc.subService, cfg, botConfig, svc.subServer, dbService, svc.orderService, botAPI, svc.syncService)
 	if err != nil {
 		logger.Fatal("Failed to start web server", zap.Error(err))
 	}
@@ -580,21 +652,6 @@ func main() {
 
 	// 12. Graceful shutdown of background workers
 	gracefulShutdown(bgWg, svc.handler, svc.subServer)
-}
-
-// recoverAndReport recovers from panics, reports to Sentry, and logs the error.
-// Usage: defer recoverAndReport("Component name")
-func recoverAndReport(component string) {
-	if r := recover(); r != nil {
-		stack := debug.Stack()
-
-		sentry.CurrentHub().Recover(r)
-		sentry.Flush(logger.SentryPanicFlushTimeout)
-		logger.Error(component+" panicked",
-			zap.Any("panic", r),
-			zap.String("stack", string(stack)),
-		)
-	}
 }
 
 // handleUpdateSafely handles a Telegram update with panic recovery.

@@ -80,19 +80,24 @@ ${EDITOR:-vi} docker-compose.yml
 docker compose pull
 docker compose up -d --no-deps rs8kvn_bot
 
-# 4. Проверить health, readiness, метрики и логи
+# 4. Задайте METRICS_TOKEN в окружении, если защита метрик включена.
+# Проверить health, readiness, метрики и логи
 docker inspect rs8kvn_bot --format '{{.State.Health.Status}}'
 curl -fsS http://127.0.0.1:8880/healthz
 curl -fsS http://127.0.0.1:8880/readyz
-curl -fsS http://127.0.0.1:8880/metrics | grep -E 'db_pool_wait(_duration_seconds)?|subscription_(renewals|reanimations)_total|xui_requests_total'
+curl -fsS -H "Authorization: Bearer ${METRICS_TOKEN}" http://127.0.0.1:8880/metrics | grep -E 'app_info|db_pool_wait|subserver_not_found|subscription_(renewals|reanimations)_total|xui_requests_total'
 docker logs --since 10m rs8kvn_bot
 ```
 
 ### Проверка метрик после rollout
 
-`/metrics` должен отдавать HTTP 200. После запуска проверьте наличие `db_pool_wait`, `db_pool_wait_duration_seconds`, `subscription_renewals_total`, `subscription_reanimations_total` и XUI-метрик с label `node`. Counter series могут появляться только после соответствующего события; отсутствие конкретной серии сразу после рестарта не является доказательством ошибки.
+`/metrics` должен отдавать HTTP 200. После запуска проверьте наличие `app_info` (там `version` и `revision` — сравните с ожидаемым коммитом), `db_pool_waits_total`, `db_pool_wait_seconds_total`, `subscription_renewals_total`, `subscription_reanimations_total` и XUI-метрик с label `node`. Counter series могут появляться только после соответствующего события; отсутствие конкретной серии сразу после рестарта не является доказательством ошибки.
 
-`db_pool_wait` и `db_pool_wait_duration_seconds` — накопительные значения с момента старта процесса. Для оценки нагрузки сравнивайте изменение между scrape, а не абсолютное значение. Метрики подписок и платежей process-local, сбрасываются при рестарте и не заменяют базу данных/audit log.
+Перед деструктивными rebuild-миграциями (026, 027, 032, 033, 034) приложение само снимает копию файла БД: `<db>.pre-migration.<version>.<timestamp>` рядом с основной БД (после `wal_checkpoint(TRUNCATE)`). Если миграция упала и схема осталась частично применённой, эта копия — точка восстановления; штатный бэкап её не заменяет, потому что делается раз в сутки.
+
+Журнал аудита обрезается суточным обслуживанием после бэкапа: строки старше срока хранения удаляются пачками по 1000 (`DailyMaintenance`). Срок задаётся `AUDIT_LOG_RETENTION_DAYS` (дней), по умолчанию **180 — полгода**; `0` означает значение по умолчанию, отрицательные отвергаются при старте, верхняя граница — 3650 (10 лет). Файл БД при этом не уменьшается — SQLite переиспользует освобождённые страницы; для фактического сжатия нужен ручной `VACUUM` в окне обслуживания (блокирует писателя и требует свободного места ~размер БД). Размеры файла и WAL видны в `db_file_bytes` / `db_wal_bytes`.
+
+`db_pool_waits_total` и `db_pool_wait_seconds_total` — counters, накопленные значения с момента старта процесса. Для оценки нагрузки сравнивайте изменение между scrape, а не абсолютное значение. Метрики подписок и платежей process-local, сбрасываются при рестарте и не заменяют базу данных/audit log.
 
 Проверьте Better Stack после первого scrape и убедитесь, что новый XUI label идентифицирует VPN-ноду. Он не идентифицирует экземпляр приложения; агрегация нескольких bot hosts требует отдельного стабильного host/source label на стороне collector.
 
@@ -191,28 +196,52 @@ chmod 600 ./data/backup.manual
 ### 3.3 Restore from Backup
 
 ```bash
+# Run the restore in a subshell that stops on any error.
+(
+set -e
 # 1. Stop bot
 docker stop rs8kvn_bot
 
-# 2. Rename current DB (for safety)
-mv ./data/rs8kvn.db ./data/rs8kvn.db.before-restore-$(date +%s)
+# 2. Preserve the DB and any sidecars together, including committed WAL data.
+#    The unique directory prevents overwriting an earlier safety copy.
+saved_dir=$(mktemp -d ./data/before-restore.XXXXXXXX)
+saved_db="$saved_dir/rs8kvn.db"
+mv ./data/rs8kvn.db "$saved_db"
+for suffix in -wal -shm; do
+  if [ -e "./data/rs8kvn.db${suffix}" ]; then
+    mv "./data/rs8kvn.db${suffix}" "${saved_db}${suffix}"
+  fi
+done
 
-# 3. Copy backup over
+# 3. Only after preserving the original set, remove target-name sidecars.
+rm -f ./data/rs8kvn.db-wal ./data/rs8kvn.db-shm
+
+# 4. Copy backup over
 cp ./data/rs8kvn.db.backup.20260417_030000 ./data/rs8kvn.db
 
-# 4. Fix permissions (if needed)
+# 5. Fix permissions (if needed)
 chown 1000:1000 ./data/rs8kvn.db  # Docker user
 # or chown current-user if running binary
 
-# 5. Start bot
+# 6. Verify the restored copy BEFORE starting the bot
+sqlite3 ./data/rs8kvn.db "PRAGMA integrity_check;"  # must print: ok
+sqlite3 ./data/rs8kvn.db "SELECT COUNT(*) FROM subscriptions;"
+
+# 7. Start bot
 docker start rs8kvn_bot
+)
 ```
 
 **Verify:**
 ```bash
-sqlite3 ./data/rs8kvn.db "SELECT COUNT(*) FROM subscriptions;"
 docker logs rs8kvn_bot | grep -i "database initialized"
 ```
+
+> Note: automatic backups are integrity-checked on creation
+> (`PRAGMA integrity_check` + read of the `subscriptions` table). A copy that
+> fails verification is kept as `rs8kvn.db.backup.corrupt` (never deleted
+> silently) and the previous good backup stays in place — see `rs8kvn.log`
+> for the Warn entry with the reason.
 
 ### 3.4 Off-site Backups (recommended)
 
@@ -246,7 +275,7 @@ Currently backups are local only. For production, configure remote storage:
 | Endpoint | Description | Success | Failure |
 |----------|-------------|---------|---------|
 | `GET /healthz` | Liveness: DB ping | 200 | 503 |
-| `GET /readyz` | Readiness: all components initialized | 200 | 503 |
+| `GET /readyz` | Readiness: БД + доступность VPN-нод (`nodes`: Degraded при частичной, 503 при полной недоступности) | 200 | 503 |
 
 **Usage:**
 ```bash
@@ -297,6 +326,8 @@ If `SUBSERVER_ACCESS_LOG` is set, the bot appends every `/sub/{id}` request to t
 - `X-Hwid`, `X-Device-Os`, `X-Ver-Os`, `X-Device-Model`, and `User-Agent` request headers (sanitised: CR/LF/TAB replaced with spaces)
 
 The main application log records an error message when this access log cannot be opened. To disable it, set `SUBSERVER_ACCESS_LOG` to an empty value and restart the bot.
+
+**Троттлинг «Subscription not found».** Клиент, у которого остался конфиг удалённой подписки, продолжает опрашивать `/sub/{id}` — после массовых `/del` это штатное состояние, а не сбой. Каждый такой запрос считается в `subserver_not_found_total`, а в лог попадает только первая пара `sub_id + client_ip` за час (WARN), остальные — уровнем DEBUG (при `LOG_LEVEL=info` их нет вовсе). Реализация: `utils.IntervalGate` (`internal/utils/gate.go`), карта чистится при достижении 4096 записей. Раньше такие запросы писали WARN и ERROR на каждый вызов: одна мёртвая подписка давала ~719 строк в сутки.
 
 ### 4.4 Logs
 
@@ -355,35 +386,63 @@ The bot exposes a `/metrics` endpoint on the same port as health checks (default
 
 **Endpoint:** `GET /metrics`
 
+Если задан `METRICS_TOKEN`, эндпоинт требует `Authorization: Bearer <token>` (иначе 401). Пустое значение оставляет эндпоинт открытым для локального scrape; при публичном порту токен обязателен — метрики раскрывают имена нод и объёмы. Метка `path` нормализуется: известные маршруты и `/sub/:id`, `/i/:code`, всё прочее схлопывается в `other`, чтобы сканеры не создавали новые серии.
+
 **Результат аудита (2026-08-26):**
 
-Цель — держать только метрики, по которым есть алерт, SLO или оперативное действие. Сейчас объявлено 34 прикладных collector-а (без стандартных `go_*`, `process_*` и `promhttp_*`); это ещё приемлемо, но часть из них имеет невысокую диагностическую ценность. Платёжные метрики в целом добавлены правильно: отсутствуют user/order/provider ID labels, а суммы нормализуются до копеек и валюты.
+Цель — держать только метрики, по которым есть алерт, SLO или оперативное действие. Сейчас объявлено 50 прикладных collector-ов (без стандартных `go_*`, `process_*` и `promhttp_*`); это ещё приемлемо, но часть из них имеет невысокую диагностическую ценность. Платёжные метрики в целом добавлены правильно: отсутствуют user/order/provider ID labels, а суммы нормализуются до копеек и валюты.
 
 **Рекомендуемый обязательный набор:**
 
 - `http_requests_total`, `http_request_duration_seconds` — трафик, ошибки и latency API;
 - `bot_updates_total`, `bot_update_duration_seconds` — основной пользовательский канал;
 - `xui_requests_total`, `xui_request_duration_seconds` — доступность и latency VPN-панелей;
-- `db_queries_total`, `db_query_duration_seconds`, `db_pool_wait` — ошибки/замедление SQLite;
+- `db_queries_total{operation,result,table}`, `db_query_duration_seconds` — ошибки/замедление SQLite; метка `table` адресует виновника;
+- `db_pool_waits_total`, `db_pool_wait_seconds_total` — ожидания свободного соединения (counters, читать через `increase`);
 - `active_subscriptions` — все активные подписки;
 - `premium_subscriptions` — активные оплаченные Premium-подписки;
 - `free_subscriptions` — активные бесплатные подписки;
 - `trial_subscriptions` — активные trial-подписки; отозванные/неактивные отдельно не считаются;
-- `subscription_sync_total`, `subscription_sync_duration_seconds`, `bot_orphaned_clients_revoked_total` — целостность VPN-доступа;
+- `subscription_sync_total{result}`, `subscription_sync_duration_seconds`, `bot_orphaned_clients_revoked_total` — целостность VPN-доступа; `result="degraded"` — прогон вернул ошибку по части биндингов;
+- `subscription_expire_total{result}`, `subscriptions_expired_total` — прогоны экспирации и число реально отключённых подписок;
+- `app_info{version,revision}` — какая ревизия сейчас в проде; без неё «поведение поменялось» не отличить от «крутится старый образ»;
+- `node_up{node}` — доступность панели каждой нодой по последнему проходу синка (1/0); алерт на `== 0` включён;
+- `subscription_nodes{status}`, `subscription_nodes_parked` — состояние биндингов по статусам синка; рост `parked` означает, что пользователи на этих нодах не провижены;
+- `worker_restarts_total{worker}` — перезапуски фонового воркера после паники; любой рост — повод разобрать стек в логе;
+- `payment_reconcile_total{result}` — исходы сверки зависших pending-заказов (`confirmed_activated`, `expired`, `provider_error`, …); Сверка охватывает только заказы со сроком ссылки в последние 30 дней относительно границы с 10-минутным запасом; более старые pending-заказы требуют ручной проверки у провайдера.
 - `payment_operations_total`, `payment_operation_duration_seconds`, `payment_amount_cents_total`, `payment_issues_total` — платёжная воронка и инциденты;
 
-**Второстепенные:** cache hit/miss, Telegram API latency, subserver fetch детализация, worker run/latency и `db_pool_wait` полезны для расследований, но не требуют обязательных алертов.
+**Второстепенные:** cache hit/miss, Telegram API latency, subserver fetch детализация, worker run/latency и ожидания пула полезны для расследований, но не требуют обязательных алертов.
+
+**Алерты включены (Better Stack, 2026-11-02).** Восемь порогов, уведомления email + push на текущую команду:
+
+| Алерт | Условие | Источник |
+|---|---|---|
+| VPN node panel is down | `node_up < 1` за 5 мин | Node panel availability |
+| Parked subscription bindings | `subscription_nodes_parked > 0` | Parked bindings |
+| Background worker restarted after panic | рост `worker_restarts_total` | Worker restarts |
+| Sync worker stopped | rate `subscription_sync_total{result="ok"}` < 0.0005 за 30 мин | Sync runs by result |
+| Database query errors | > 0.05/с за 5 мин | DB Query Errors by Table |
+| HTTP 5xx responses | > 0.05/с за 5 мин | HTTP 5xx rate |
+| SQLite file too large | `db_file_bytes > 200 MiB` за час | SQLite size |
+| Payment integration issue | рост `payment_issues_total` | Payment issues by event |
+
+Принцип отбора: алерт ставится только там, где без него о поломке узнаёшь от пользователя. Всё остальное смотрят глазами на дашбордах (карта — `doc/betterstack-dashboards.md`).
+
+**Ограничения хранилища (проверено на живой базе):** перцентили не считаются — `histogramQuantile`/`quantileMerge`/`quantilePrometheusHistogramArrayMerge` возвращают верхнюю границу бакета для любого квантиля; среднее считается через `sumMerge(bucket_sum)/sumMerge(bucket_count)`. Counters читаются только через `avgMerge(rate_avg)` (в секунду) или `max−min` (за период). Имена хостовых и контейнерных метрик — без префиксов `node_*`/`container_*`.
+
+**Шум коллектора:** `filesystem_*` снимается со всех 25+ точек монтирования (tmpfs, overlay-слои, sysfs). В графики попадает только `/`; если объём мешает — фильтровать `mountpoint` в конфигурации коллектора (код приложения не участвует).
 
 **Кандидаты на удаление или исправление:**
 
-1. `db_pool_open`, `db_pool_in_use`, `db_pool_idle` удалены: при `MaxOpenConns=1` они почти не дают новой информации.
+1. `db_pool_open`, `db_pool_in_use`, `db_pool_idle` удалены: при пуле из 4 соединений и WAL они почти не дают новой информации. Ожидания пула оставлены — и как **counters** (`_total`), а не gauges: накопленное значение читается только через `increase()`.
 2. `subscription_reminder_runs_total` и `subscription_expire_total` оставлены только как контроль запуска фоновых workers; обязательные алерты на них не нужны.
 3. Детальные cache hit/miss duration-метрики удалены, чтобы не дублировать HTTP latency.
 4. В документации используется фактическое имя `payment_amount_cents_total`.
 
 **Labels:**
 
-- Оставить bounded labels: `status` (лучше числовой код или класс `2xx/4xx/5xx`), `method`, нормализованный route, `result`, `operation`, `currency`, `event`, `window`, `format`, `cache`, `target`.
+- Оставить bounded labels: `code` (числовой, сделан), `method`, нормализованный route, `result`, `operation` (формат `ресурс.действие`), `table` (из GORM-схемы), `currency`, `event`, `window`, `format`, `cache`, `target`.
 - Для HTTP желательно перейти от ручного `normalizePath` к router route pattern, чтобы новые динамические endpoints не создавали series по ID. Текущая нормализация покрывает только `/i/*` и `/sub/*`.
 - Не добавлять `telegram_id`, `user_id`, `order_id`, `subscription_id`, `provider_payment_id`, URL, payload, username или payment URL: это unbounded/high-cardinality и потенциально PII.
 - Для платежей полезно добавить только bounded `provider` (сейчас фактически всегда Platega) и, если появятся провайдеры, `payment_provider` в `payment_operations_total` и `payment_operation_duration_seconds`. Не добавлять `payment_method`, если его набор/значения не зафиксированы и он не нужен для отдельного алерта.
@@ -416,7 +475,7 @@ sum(rate(payment_amount_cents_total{operation="confirmed"}[24h]))
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `http_requests_total` | Counter | method, path, status | Application HTTP requests; `/metrics` and `/static/*` excluded |
+| `http_requests_total` | Counter | method, path, code | Application HTTP requests; `/metrics` and `/static/*` excluded; `code` — числовой статус |
 | `http_request_duration_seconds` | Histogram | method, path | Application HTTP latency; `/metrics` and `/static/*` excluded |
 | `premium_subscriptions` | Gauge | — | Текущее количество активных оплаченных Premium-подписок |
 | `bot_updates_total` | Counter | command, result | Bot updates processed (success/error/rate_limited) |
@@ -432,7 +491,14 @@ sum(rate(payment_amount_cents_total{operation="confirmed"}[24h]))
 | `payment_operations_total` | Counter | operation, result | Payment request/confirm/cancel attempts by outcome |
 | `payment_operation_duration_seconds` | Histogram | operation | Payment service operation latency |
 | `payment_amount_cents_total` | Counter | operation, currency | Monetary amounts in cents by outcome (`confirmed`, `chargeback`) — watch for chargeback totals vs confirmed |
-| `payment_issues_total` | Counter | event | Payment incidents requiring investigation or operator attention |
+| `payment_issues_total` | Counter | event | Payment incidents requiring investigation or operator attention (`callback_unauthorized`, `unknown_provider_id`, …) |
+| `payment_reconcile_total` | Counter | result | Stale pending order sweep outcomes (`confirmed_activated`, `expired`, `provider_error`, `still_pending`, …) |
+| `node_up` | Gauge | node | Node panel availability from the sync health probe (1 = up) |
+| `subscription_nodes` | Gauge | status | Subscription node bindings by sync status |
+| `subscription_nodes_parked` | Gauge | — | Bindings parked after exhausted retries or a panel refusal |
+| `worker_restarts_total` | Counter | worker | Background worker restarts after a recovered panic |
+
+Для примеров ниже задайте `METRICS_TOKEN` в окружении оператора. Если токен пуст, авторизация не требуется. Передайте такое же значение Prometheus через защищённый файл секрета, доступный процессу Prometheus; не храните токен в репозитории. Для открытого endpoint удалите блок `authorization` из конфигурации scrape.
 
 **Prometheus scrape config:**
 ```yaml
@@ -441,13 +507,19 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:8880']
     metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/rs8kvn_metrics_token
 ```
 
-**Grafana dashboard ideas:**
-- HTTP error rate: `rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])`
+**Дашборды и алерты:** Better Stack (источник `hip-01 docker`, ID `2288221`), карта из 8 дашбордов и 8 включённых алертов — в `doc/betterstack-dashboards.md`. Grafana не используется: метрики, логи и аптайм уже в одном сервисе, отдельный стек для приложения такого размера не нужен.
+
+Полезные запросы (PromQL-совместимые формулировки; в Better Stack те же идеи выражаются через `avgMerge(rate_avg)`):
+- HTTP error rate: `sum(rate(http_requests_total{code=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))`
 - Bot error rate: `rate(bot_updates_total{result="error"}[5m])`
-- XUI latency p99: `histogram_quantile(0.99, rate(xui_request_duration_seconds_bucket[5m]))`
+- XUI latency: только среднее — `sum(rate(xui_request_duration_seconds_sum[5m])) / sum(rate(xui_request_duration_seconds_count[5m]))`; `histogram_quantile` на хранилище Better Stack не работает
 - Active subscriptions: `active_subscriptions`
+- Устаревший деплой: проверить наличие `app_info{revision="<expected-commit-sha>"}` для ожидаемого коммита
 
 
 ## 5. Troubleshooting
@@ -653,7 +725,7 @@ curl http://localhost:8880/debug/pprof/goroutine?debug=1  # if enabled
 
 **Solutions:**
 1. **Пул соединений**: `MaxOpenConns=4`, `MaxIdleConnsDB=4`; SQLite использует WAL с busy timeout 5s. Не увеличивайте пул вслепую: SQLite допускает одного writer, а больше соединений не ускоряет конкурентные записи.
-2. **Сначала измерить**: `db_pool_wait` и `db_pool_wait_duration_seconds` — накопительные значения ожидания с начала процесса, не размер очереди. Сравнивайте прирост между scrape/рестартами и сопоставляйте с DB latency и логами `database is locked`.
+2. **Сначала измерить**: `db_pool_waits_total` и `db_pool_wait_seconds_total` — накопленные значения ожидания с начала процесса, не размер очереди. Сравнивайте прирост между scrape/рестартами и сопоставляйте с DB latency и логами `database is locked`.
 3. **Снизить конкурирующие записи** только по подтверждённой причине; trial cleanup каждые 3 часа, backup ежедневно.
 4. Рассматривать PostgreSQL при доказанной write contention/нагрузке, а не по одному высокому cumulative wait count.
 
