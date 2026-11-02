@@ -93,9 +93,9 @@ func TestClient_RequestMetricsUseConfiguredNode(t *testing.T) {
 	defer client.Close()
 
 	client.SetNode("metrics-test-node")
-	before := promtestutil.ToFloat64(metrics.XUIRequestsTotal.WithLabelValues("server", "success", "metrics-test-node"))
+	before := promtestutil.ToFloat64(metrics.XUIRequestsTotal.WithLabelValues("server.status", "success", "metrics-test-node"))
 	require.NoError(t, client.Ping(context.Background()))
-	require.Equal(t, before+1, promtestutil.ToFloat64(metrics.XUIRequestsTotal.WithLabelValues("server", "success", "metrics-test-node")))
+	require.Equal(t, before+1, promtestutil.ToFloat64(metrics.XUIRequestsTotal.WithLabelValues("server.status", "success", "metrics-test-node")))
 }
 
 func TestPing(t *testing.T) {
@@ -1221,12 +1221,13 @@ func TestExtractOperation(t *testing.T) {
 		url      string
 		expected string
 	}{
-		{"add client", "http://host/panel/api/clients/add", "clients"},
-		{"delete client", "http://host/panel/api/clients/del/email", "clients"},
-		{"update client", "http://host/panel/api/clients/update/email", "clients"},
-		{"traffic", "http://host/panel/api/clients/traffic/email", "clients"},
-		{"inbound", "http://host/panel/api/inbounds/get/1", "inbounds"},
-		{"server status", "http://host/panel/api/server/status", "server"},
+		{"add client", "http://host/panel/api/clients/add", "clients.add"},
+		{"delete client", "http://host/panel/api/clients/del/email", "clients.del"},
+		{"update client", "http://host/panel/api/clients/update/email", "clients.update"},
+		{"traffic", "http://host/panel/api/clients/traffic/email", "clients.traffic"},
+		{"get client", "http://host/panel/api/clients/get/email", "clients.get"},
+		{"inbound", "http://host/panel/api/inbounds/get/1", "inbounds.get"},
+		{"server status", "http://host/panel/api/server/status", "server.status"},
 		{"unknown path", "http://host/other/path", "unknown"},
 		{"empty", "", "unknown"},
 	}

@@ -22,8 +22,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// operationRegex extracts the API operation from the URL path.
-var operationRegex = regexp.MustCompile(`/panel/api/([^/]+)(?:/[^/]+)*`)
+// operationRegex extracts the API operation from the URL path. The first two
+// segments are kept: "clients.add", "clients.del", "clients.update",
+// "inbounds.get", "server.status". One segment ("clients") collapsed add,
+// update, delete and traffic reads into a single series, so a provisioning
+// failure was indistinguishable from a healthy read.
+var operationRegex = regexp.MustCompile(`/panel/api/([^/]+)(?:/([^/]+))?`)
 
 // Client — HTTP-клиент для взаимодействия с панелью 3x-ui.
 type Client struct {
@@ -341,11 +345,15 @@ func (c *Client) doHTTPRequest(ctx context.Context, method, url string, bodyFn f
 // extractOperation извлекает имя операции из URL панели.
 func extractOperation(urlStr string) string {
 	matches := operationRegex.FindStringSubmatch(urlStr)
-	if len(matches) >= 2 {
-		return matches[1]
+	if len(matches) < 2 || matches[1] == "" {
+		return "unknown"
 	}
 
-	return "unknown"
+	if len(matches) >= 3 && matches[2] != "" {
+		return matches[1] + "." + matches[2]
+	}
+
+	return matches[1]
 }
 
 // tgIDContextKey — ключ контекста для передачи Telegram ID в методы панели.
