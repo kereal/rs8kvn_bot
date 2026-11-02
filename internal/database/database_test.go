@@ -1876,3 +1876,37 @@ func TestDailyMaintenance_PrunesOldAuditLog(t *testing.T) {
 	assert.Zero(t, oldLeft, "записи старше срока хранения удаляются")
 	assert.Equal(t, int64(2), freshLeft, "свежие записи остаются")
 }
+
+// Тест поведения: обновление БД, проходящее через rebuild-миграцию, оставляет
+// копию файла до неё; обычное обновление копию не делает.
+func TestSnapshotBeforeRebuild(t *testing.T) {
+	assert.Equal(t, 32, pendingRebuildMigration(30, 41), "ближайшая rebuild-миграция в диапазоне")
+	assert.Equal(t, 0, pendingRebuildMigration(34, 41), "после 34 rebuild-миграций нет")
+
+	dbPath := filepath.Join(t.TempDir(), "snapshot.db")
+
+	db, err := NewService(dbPath)
+	require.NoError(t, err)
+
+	defer func() { require.NoError(t, db.Close()) }()
+
+	sqlDB, err := db.GetDB().DB()
+	require.NoError(t, err)
+
+	snapshotBeforeRebuild(sqlDB, databaseFilePath(sqlDB), 33, 34)
+
+	matches, err := filepath.Glob(dbPath + ".pre-migration.34.*")
+	require.NoError(t, err)
+	require.Len(t, matches, 1, "копия перед rebuild-миграцией должна быть создана")
+
+	info, err := os.Stat(matches[0])
+	require.NoError(t, err)
+	assert.Positive(t, info.Size())
+
+	// Обычный диапазон без rebuild-миграций копий не оставляет.
+	snapshotBeforeRebuild(sqlDB, databaseFilePath(sqlDB), 34, 41)
+
+	matches, err = filepath.Glob(dbPath + ".pre-migration.3[5-9].*")
+	require.NoError(t, err)
+	assert.Empty(t, matches)
+}

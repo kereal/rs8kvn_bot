@@ -113,6 +113,11 @@ func runMigrations(sqlDB *sql.DB) error {
 		}
 	}
 
+	// Перед деструктивными rebuild-миграциями снимаем копию файла БД: ошибка
+	// посередине такой миграции оставляет схему частично применённой, а
+	// откат — ручной. Путь файла восстанавливаем из DSN соединения.
+	snapshotBeforeRebuild(sqlDB, databaseFilePath(sqlDB), int(versionBefore), maxEmbeddedVersion) // #nosec G115 -- versions are bounded by the embedded migration count above
+
 	err = applyMigrations(sqlDB, maxEmbeddedVersion)
 	if err != nil {
 		return err
@@ -136,6 +141,19 @@ func runMigrations(sqlDB *sql.DB) error {
 	}
 
 	return nil
+}
+
+// databaseFilePath возвращает путь файла БД из DSN соединения без параметров
+// (mode, journal_mode и т.п.). Пустая строка — БД в памяти, копировать нечего.
+func databaseFilePath(sqlDB *sql.DB) string {
+	var seq, name, file string
+
+	err := sqlDB.QueryRow("PRAGMA database_list").Scan(&seq, &name, &file)
+	if err != nil || file == "" {
+		return ""
+	}
+
+	return file
 }
 
 // migrationState reads metadata using the transactional driver configuration.
