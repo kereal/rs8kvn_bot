@@ -217,6 +217,9 @@ type OrderRepository interface {
 	// AttachProviderPaymentID привязывает id провайдера к заказу, у которого его
 	// ещё нет (callback обогнал сохранение деталей).
 	AttachProviderPaymentID(ctx context.Context, orderID uint, provider string, providerPaymentID uuid.UUID) (bool, error)
+	// Реконсиляция зависших pending-заказов воркером.
+	GetStalePendingOrdersAfterID(ctx context.Context, before time.Time, afterID uint, limit int) ([]database.Order, error)
+	ExpirePendingOrder(ctx context.Context, orderID uint) (bool, error)
 	SaveOrderPaymentAmounts(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error
 	GetPaidOrdersWithoutProviderFee(ctx context.Context, limit int) ([]database.Order, error)
 	GetPaidOrdersWithoutProviderFeeAfterID(ctx context.Context, afterID uint, limit int) ([]database.Order, error)

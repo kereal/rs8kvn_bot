@@ -1742,3 +1742,65 @@ func TestSubscriptionNodeParking(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, nodeIDs, "ретрай в пределах ладдера не должен считаться парковкой")
 }
+
+// Тест поведения: сверка подбирает только pending-заказы с истёкшей ссылкой,
+// пропускает неопределённые транзакции и уважает пагинацию по id.
+func TestGetStalePendingOrdersAfterID(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	planID := testFreePlanID(t, svc)
+	sub := &Subscription{
+		TelegramID:     5151,
+		Username:       "staleuser",
+		ClientID:       "c-stale",
+		SubscriptionID: "s-stale",
+		Status:         "active",
+		PlanID:         planID,
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+
+	past := time.Now().UTC().Add(-time.Hour)
+	now := time.Now().UTC()
+
+	product := &Product{PlanID: planID, Name: "stale-product", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.GetDB().WithContext(ctx).Create(product).Error)
+
+	stale := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", CreatedAt: now, PaymentExpiresAt: &past, ProviderPaymentID: "t-1"}
+	fresh := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", CreatedAt: now, PaymentExpiresAt: ptrTime(now.Add(time.Hour)), ProviderPaymentID: "t-2"}
+	uncertain := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", CreatedAt: now, PaymentExpiresAt: &past, ProviderPaymentID: "t-3", PaymentCreationUncertain: true}
+	paid := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", CreatedAt: now, PaymentExpiresAt: &past, ProviderPaymentID: "t-4"}
+
+	// Партиальный уникальный индекс держит один pending на пару
+	// subscription/product, поэтому «свежий» заказ живёт с другим товаром.
+	otherProduct := &Product{PlanID: planID, Name: "fresh-product", DurationDays: 31, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.GetDB().WithContext(ctx).Create(otherProduct).Error)
+	fresh.ProductID = otherProduct.ID
+	fresh.ProviderPaymentID = "t-5"
+
+	uncertainProduct := &Product{PlanID: planID, Name: "uncertain-product", DurationDays: 32, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.GetDB().WithContext(ctx).Create(uncertainProduct).Error)
+	uncertain.ProductID = uncertainProduct.ID
+
+	for _, o := range []*Order{stale, fresh, uncertain, paid} {
+		require.NoError(t, svc.GetDB().WithContext(ctx).Create(o).Error)
+	}
+
+	orders, err := svc.GetStalePendingOrdersAfterID(ctx, now, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, orders, 1)
+	assert.Equal(t, stale.ID, orders[0].ID)
+
+	orders, err = svc.GetStalePendingOrdersAfterID(ctx, now, stale.ID, 10)
+	require.NoError(t, err)
+	assert.Empty(t, orders)
+
+	expired, err := svc.ExpirePendingOrder(ctx, stale.ID)
+	require.NoError(t, err)
+	assert.True(t, expired)
+
+	expired, err = svc.ExpirePendingOrder(ctx, stale.ID)
+	require.NoError(t, err)
+	assert.False(t, expired, "повторное истечение не должно перезаписывать статус")
+}

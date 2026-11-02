@@ -489,6 +489,8 @@ type ServiceStoreFake struct {
 	SaveOrderPaymentAmountsFunc                 func(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error
 	SavePaymentDetailsFunc                      func(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
 	AttachProviderPaymentIDFunc                 func(ctx context.Context, orderID uint, provider string, providerPaymentID uuid.UUID) (bool, error)
+	GetStalePendingOrdersAfterIDFunc            func(ctx context.Context, before time.Time, afterID uint, limit int) ([]database.Order, error)
+	ExpirePendingOrderFunc                      func(ctx context.Context, orderID uint) (bool, error)
 	UpdateRetryFunc                             func(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error
 	UpdateSubscriptionFunc                      func(ctx context.Context, sub *database.Subscription) error
 	UpdateSubscriptionNodeStatusFunc            func(ctx context.Context, subID, nodeID uint, status database.SyncStatus) error
@@ -1214,6 +1216,24 @@ func (m *ServiceStoreFake) ReleaseTrafficReminder(ctx context.Context, id uint, 
 	return errors.New("fake: ReleaseTrafficReminderFunc is not set")
 }
 
+func (m *ServiceStoreFake) GetStalePendingOrdersAfterID(
+	ctx context.Context, before time.Time, afterID uint, limit int,
+) ([]database.Order, error) {
+	if m.GetStalePendingOrdersAfterIDFunc != nil {
+		return m.GetStalePendingOrdersAfterIDFunc(ctx, before, afterID, limit)
+	}
+
+	return nil, nil
+}
+
+func (m *ServiceStoreFake) ExpirePendingOrder(ctx context.Context, orderID uint) (bool, error) {
+	if m.ExpirePendingOrderFunc != nil {
+		return m.ExpirePendingOrderFunc(ctx, orderID)
+	}
+
+	return false, nil
+}
+
 func (m *ServiceStoreFake) AttachProviderPaymentID(
 	ctx context.Context, orderID uint, provider string, providerPaymentID uuid.UUID,
 ) (bool, error) {
@@ -1742,6 +1762,18 @@ var (
 	_ interfaces.SubscriptionStore = (*BotStoreFake)(nil)
 	_ interfaces.OrderStore        = (*BotStoreFake)(nil)
 )
+
+// GetStalePendingOrdersAfterID реализует interfaces.OrderStore для узкого
+// фейка бота: реконсиляция заказов в его сценариях не участвует.
+func (m *BotStoreFake) GetStalePendingOrdersAfterID(
+	context.Context, time.Time, uint, int,
+) ([]database.Order, error) {
+	return nil, nil
+}
+
+func (m *BotStoreFake) ExpirePendingOrder(context.Context, uint) (bool, error) {
+	return false, nil
+}
 
 func (m *BotStoreFake) CancelBroadcast(ctx context.Context, id uint, now time.Time) (bool, error) {
 	if m.CancelBroadcastFunc != nil {

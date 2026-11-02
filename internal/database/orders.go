@@ -45,6 +45,44 @@ func (s *Service) GetOrderByProviderPaymentID(ctx context.Context, provider stri
 	return &order, nil
 }
 
+// GetStalePendingOrdersAfterID возвращает pending-заказы с истёкшим сроком
+// платёжной ссылки (payment_expires_at < before), начиная после afterID.
+// Заказы с неопределённым созданием транзакции пропускаются: у провайдера
+// может быть транзакция без сохранённого id, и такой заказ нельзя ни
+// подтвердить, ни истечь автоматически.
+func (s *Service) GetStalePendingOrdersAfterID(
+	ctx context.Context, before time.Time, afterID uint, limit int,
+) ([]Order, error) {
+	var orders []Order
+
+	result := s.db.WithContext(ctx).
+		Where("status = ? AND payment_creation_uncertain = ?", OrderStatusPending, false).
+		Where("payment_expires_at IS NOT NULL AND payment_expires_at < ?", before).
+		Where("id > ?", afterID).
+		Order("id ASC").
+		Limit(limit).
+		Find(&orders)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to load stale pending orders: %w", result.Error)
+	}
+
+	return orders, nil
+}
+
+// ExpirePendingOrder переводит pending-заказ в expired. CAS по статусу:
+// конкурентный callback, успевший оплатить заказ, не перезаписывается.
+func (s *Service) ExpirePendingOrder(ctx context.Context, orderID uint) (bool, error) {
+	result := s.db.WithContext(ctx).
+		Model(&Order{}).
+		Where("id = ? AND status = ?", orderID, OrderStatusPending).
+		Update("status", OrderStatusExpired)
+	if result.Error != nil {
+		return false, fmt.Errorf("expire pending order %d: %w", orderID, result.Error)
+	}
+
+	return result.RowsAffected > 0, nil
+}
+
 // AttachProviderPaymentID привязывает id транзакции провайдера к заказу, у
 // которого он ещё не записан. Это окно между CreateTransaction и
 // SavePaymentDetails: callback провайдера может обогнать сохранение. CAS по

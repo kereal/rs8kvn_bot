@@ -1165,6 +1165,170 @@ func (o *OrderService) SyncProviderFees(ctx context.Context, limit int) error {
 	return errors.Join(errs...)
 }
 
+// pendingOrderGrace — запас поверх срока платёжной ссылки: sweep не должен
+// опережать webhook, который провайдер мог отправить с задержкой.
+const pendingOrderGrace = 10 * time.Minute
+
+// reconcilePendingBudget ограничивает один проход реконсиляции: зависший
+// провайдер не должен растягивать тик планировщика.
+const reconcilePendingBudget = 60 * time.Second
+
+// ReconcilePendingOrders находит pending-заказы, чья платёжная ссылка истекла
+// с запасом, и сверяет их с провайдером: CONFIRMED — активирует, явный
+// терминальный отказ провайдера — истекает локально. Без этого прохода
+// потерянный webhook оставлял заказ с деньгами клиента в pending навсегда.
+func (o *OrderService) ReconcilePendingOrders(ctx context.Context, limit int) error {
+	if o.payment == nil {
+		return nil
+	}
+
+	budgetCtx, cancel := context.WithTimeout(ctx, reconcilePendingBudget)
+	defer cancel()
+
+	pageSize := limit
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+
+	before := time.Now().UTC().Add(-pendingOrderGrace)
+
+	var (
+		afterID uint
+		errs    []error
+	)
+
+	for {
+		orders, err := o.db.GetStalePendingOrdersAfterID(budgetCtx, before, afterID, pageSize)
+		if err != nil {
+			return fmt.Errorf("load stale pending orders after id %d: %w", afterID, err)
+		}
+
+		if len(orders) == 0 {
+			return errors.Join(errs...)
+		}
+
+		for i := range orders {
+			err = budgetCtx.Err()
+			if err != nil {
+				return errors.Join(append(errs, err)...)
+			}
+
+			reconcileErr := o.reconcilePendingOrder(budgetCtx, &orders[i])
+			if reconcileErr != nil {
+				errs = append(errs, reconcileErr)
+			}
+		}
+
+		lastID := orders[len(orders)-1].ID
+		if lastID <= afterID {
+			// Страница не продвинулась: без этого guard'а цикл вечен (баг
+			// выдачи или заглушка репозитория вернули те же строки).
+			return errors.Join(append(errs, fmt.Errorf("pending order page did not advance past id %d", afterID))...)
+		}
+
+		afterID = lastID
+	}
+}
+
+// reconcilePendingOrder сверяет один pending-заказ с провайдером.
+func (o *OrderService) reconcilePendingOrder(ctx context.Context, order *database.Order) error {
+	providerPaymentID, parseErr := platega.ParseTransactionID(order.ProviderPaymentID)
+	if parseErr != nil {
+		metrics.PaymentReconcileTotal.WithLabelValues("skipped_no_provider_id").Inc()
+		logger.Warn("pending order has no usable provider transaction id; manual reconciliation required",
+			zap.Uint("order_id", order.ID),
+			zap.String("provider_payment_id", order.ProviderPaymentID),
+			zap.Error(parseErr))
+
+		return nil
+	}
+
+	statusCtx, cancel := context.WithTimeout(ctx, paymentSyncTimeout)
+	defer cancel()
+
+	status, err := o.payment.GetTransactionStatus(statusCtx, providerPaymentID)
+	if err != nil {
+		if errors.Is(err, platega.ErrTransactionNotFound) {
+			// Провайдер не знает транзакцию: оплатить её уже нельзя.
+			return o.expireReconciledOrder(ctx, order, "provider_transaction_not_found")
+		}
+
+		metrics.PaymentReconcileTotal.WithLabelValues("provider_error").Inc()
+
+		return fmt.Errorf("fetch transaction status for order %d: %w", order.ID, err)
+	}
+
+	if status == nil {
+		metrics.PaymentReconcileTotal.WithLabelValues("provider_error").Inc()
+
+		return fmt.Errorf("fetch transaction status for order %d: empty response", order.ID)
+	}
+
+	switch strings.ToUpper(strings.TrimSpace(status.Status)) {
+	case "CONFIRMED":
+		confirmation, confirmErr := o.confirmPayment(ctx, providerPaymentID, fmt.Sprint(order.ID),
+			status.PaymentDetails.Amount, status.PaymentDetails.Currency)
+		if confirmErr != nil {
+			metrics.PaymentReconcileTotal.WithLabelValues("confirm_error").Inc()
+
+			return fmt.Errorf("confirm reconciled order %d: %w", order.ID, confirmErr)
+		}
+
+		result := "confirmed_pending"
+		if confirmation != nil && confirmation.Activated {
+			result = "confirmed_activated"
+		}
+
+		metrics.PaymentReconcileTotal.WithLabelValues(result).Inc()
+		logger.Info("pending order reconciled as paid",
+			zap.Uint("order_id", order.ID),
+			zap.String("result", result),
+			zap.String("provider_payment_id", providerPaymentID.String()))
+
+		return nil
+	case "CANCELED", "CANCELLED", "EXPIRED", "FAILED":
+		return o.expireReconciledOrder(ctx, order, "provider_status_"+strings.ToLower(status.Status))
+	default:
+		// PENDING и прочие нефинальные статусы: заказ остаётся pending, следующий
+		// проход проверит его снова.
+		metrics.PaymentReconcileTotal.WithLabelValues("still_pending").Inc()
+
+		return nil
+	}
+}
+
+// expireReconciledOrder истекает pending-заказ по итогам сверки с провайдером.
+func (o *OrderService) expireReconciledOrder(ctx context.Context, order *database.Order, reason string) error {
+	expired, err := o.db.ExpirePendingOrder(ctx, order.ID)
+	if err != nil {
+		metrics.PaymentReconcileTotal.WithLabelValues("expire_error").Inc()
+
+		return fmt.Errorf("expire reconciled order %d: %w", order.ID, err)
+	}
+
+	if !expired {
+		// Заказ успел оплатиться или истечь иначе — ничего не делаем.
+		metrics.PaymentReconcileTotal.WithLabelValues("expire_race").Inc()
+
+		return nil
+	}
+
+	metrics.PaymentReconcileTotal.WithLabelValues("expired").Inc()
+	logger.Info("pending order expired by reconciliation",
+		zap.Uint("order_id", order.ID),
+		zap.String("reason", reason))
+
+	auditErr := o.db.InsertAuditLog(ctx, database.AuditOrderExpired(order))
+	if auditErr != nil {
+		logger.Warn("audit log write failed",
+			zap.String("event", database.AuditEventOrderExpired),
+			zap.Uint("order_id", order.ID),
+			zap.Error(auditErr))
+	}
+
+	return nil
+}
+
 // persistProviderFee saves the provider commission from the transaction API.
 // It is called by the background fee worker, not from the payment callback.
 func (o *OrderService) persistProviderFee(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, callbackAmountCents int64) error {

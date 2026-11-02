@@ -242,6 +242,15 @@ var (
 		},
 	)
 
+	// PaymentReconcileTotal counts outcomes of the stale pending order sweep.
+	PaymentReconcileTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "payment_reconcile_total",
+			Help: "Outcomes of the stale pending payment order reconciliation",
+		},
+		[]string{"result"},
+	)
+
 	// WorkerRestartsTotal counts background worker restarts after a recovered panic.
 	WorkerRestartsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{

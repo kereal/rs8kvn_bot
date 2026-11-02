@@ -1564,3 +1564,122 @@ func TestOrderService_ConfirmPayment_DoesNotHijackOrderWithOtherProviderID(t *te
 	require.NoError(t, err)
 	assert.False(t, confirmation.Activated)
 }
+
+// Тест поведения: потерянный webhook с оплаченной транзакцией активируется
+// сверкой, а не остаётся pending навсегда.
+func TestOrderService_ReconcilePendingOrders_ConfirmsPaidOrder(t *testing.T) {
+	t.Parallel()
+
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440121")
+	order := &database.Order{
+		ID: 41, SubscriptionID: 10, ProductID: 15, Status: database.OrderStatusPending,
+		AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String(),
+	}
+	product := &database.Product{ID: 15, PlanID: 2, Name: "Premium", DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}
+	sub := &database.Subscription{ID: 10, TelegramID: 51, PlanID: 1, Status: "active"}
+
+	mock := &testutil.ServiceStoreFake{
+		GetStalePendingOrdersAfterIDFunc: func(_ context.Context, _ time.Time, afterID uint, _ int) ([]database.Order, error) {
+			if order.Status != database.OrderStatusPending || order.ID <= afterID {
+				return nil, nil
+			}
+
+			return []database.Order{*order}, nil
+		},
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+			return order, nil
+		},
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return product, nil
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return sub, nil
+		},
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
+			order.Status = database.OrderStatusPaid
+
+			return true, nil
+		},
+	}
+
+	provider := statusPaymentProvider{status: &platega.TransactionStatusResponse{
+		ID:     providerID.String(),
+		Status: "CONFIRMED",
+		PaymentDetails: struct {
+			Amount   json.Number `json:"amount"`
+			Currency string      `json:"currency"`
+		}{Amount: json.Number("23.00"), Currency: "RUB"},
+	}}
+
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
+
+	require.NoError(t, o.ReconcilePendingOrders(context.Background(), 10))
+	assert.Equal(t, database.OrderStatusPaid, order.Status, "оплаченный заказ должен активироваться сверкой")
+}
+
+// Тест поведения: провайдер ответил терминальным отказом — заказ истекает, а не
+// висит вечно.
+func TestOrderService_ReconcilePendingOrders_ExpiresCanceledOrder(t *testing.T) {
+	t.Parallel()
+
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440122")
+	order := &database.Order{
+		ID: 42, SubscriptionID: 11, ProductID: 16, Status: database.OrderStatusPending,
+		AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String(),
+	}
+	expired := 0
+
+	mock := &testutil.ServiceStoreFake{
+		GetStalePendingOrdersAfterIDFunc: func(_ context.Context, _ time.Time, afterID uint, _ int) ([]database.Order, error) {
+			if order.ID <= afterID {
+				return nil, nil
+			}
+
+			return []database.Order{*order}, nil
+		},
+		ExpirePendingOrderFunc: func(_ context.Context, orderID uint) (bool, error) {
+			expired++
+			assert.Equal(t, order.ID, orderID)
+
+			return true, nil
+		},
+	}
+
+	provider := statusPaymentProvider{status: &platega.TransactionStatusResponse{ID: providerID.String(), Status: "CANCELED"}}
+	o := NewOrderService(mock, nil, nil, provider, "", nil)
+
+	require.NoError(t, o.ReconcilePendingOrders(context.Background(), 10))
+	assert.Equal(t, 1, expired)
+}
+
+// Тест поведения: провайдер недоступен — заказ остаётся pending и ошибка
+// возвращается, чтобы деградация была видна в логах воркера.
+func TestOrderService_ReconcilePendingOrders_ProviderErrorKeepsOrder(t *testing.T) {
+	t.Parallel()
+
+	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440123")
+	order := &database.Order{
+		ID: 43, SubscriptionID: 12, ProductID: 17, Status: database.OrderStatusPending,
+		AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String(),
+	}
+
+	mock := &testutil.ServiceStoreFake{
+		GetStalePendingOrdersAfterIDFunc: func(_ context.Context, _ time.Time, afterID uint, _ int) ([]database.Order, error) {
+			if order.ID <= afterID {
+				return nil, nil
+			}
+
+			return []database.Order{*order}, nil
+		},
+		ExpirePendingOrderFunc: func(context.Context, uint) (bool, error) {
+			t.Fatal("заказ нельзя истекать, пока провайдер не ответил")
+
+			return false, nil
+		},
+	}
+
+	o := NewOrderService(mock, nil, nil, statusPaymentProvider{err: errors.New("provider timeout")}, "", nil)
+
+	require.Error(t, o.ReconcilePendingOrders(context.Background(), 10))
+	assert.Equal(t, database.OrderStatusPending, order.Status)
+}
