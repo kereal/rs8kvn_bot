@@ -2,7 +2,6 @@ package vpn
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -29,12 +28,24 @@ type capturedDeleteClient struct {
 	email string
 }
 
+type capturedUpdateClient struct {
+	inboundIDs   []int
+	currentEmail string
+	email        string
+	clientID     string
+	subID        string
+	trafficBytes int64
+	expiryTime   time.Time
+	resetDays    int
+}
+
 type fakeXUIClient struct {
 	addCalled     bool
 	deleteCalled  bool
 	updateCalled  bool
 	addCapture    *capturedAddClientWithID
 	deleteCapture *capturedDeleteClient
+	updateCapture *capturedUpdateClient
 	addErr        error
 	updateErr     error
 	deleteErr     error
@@ -65,6 +76,17 @@ func (f *fakeXUIClient) AddClientWithID(ctx context.Context, req xui.ClientReque
 
 func (f *fakeXUIClient) UpdateClient(ctx context.Context, req xui.ClientRequest) error {
 	f.updateCalled = true
+	f.updateCapture = &capturedUpdateClient{
+		inboundIDs:   req.InboundIDs,
+		currentEmail: req.CurrentEmail,
+		email:        req.Email,
+		clientID:     req.ClientID,
+		subID:        req.SubID,
+		trafficBytes: req.TrafficBytes,
+		expiryTime:   req.ExpiryTime,
+		resetDays:    req.ResetDays,
+	}
+
 	return f.updateErr
 }
 
@@ -144,28 +166,37 @@ func TestThreeXUIClient_DeleteSubscription_CallsDeleteClient(t *testing.T) {
 	assert.Equal(t, provision.Username, fake.deleteCapture.email)
 }
 
-// Sentinel'ы панели маппятся в семантику vpn напрямую (mapPanelError);
-// поведение продублировано тестами в client_test.go на все три операции.
-func TestThreeXUIClient_CreateSubscription_WrapsAlreadyExists(t *testing.T) {
+// Маппинг полей update: Username уезжает в Email (новое имя), CurrentEmail —
+// в CurrentEmail (адрес существующей записи для rename-семантики панели).
+func TestThreeXUIClient_UpdateSubscription_MapsFields(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeXUIClient{addErr: xui.ErrClientAlreadyExists}
-	client := NewThreeXUIClient(fake, []int{1})
+	fake := &fakeXUIClient{}
+	client := NewThreeXUIClient(fake, []int{3, 4})
 
-	err := client.CreateSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
-	assert.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSubscriptionAlreadyExists))
-}
+	ctx := context.Background()
+	provision := SubscriptionProvision{
+		ClientID:     "upd-uuid",
+		Username:     "newname",
+		CurrentEmail: "oldname",
+		SubID:        "sub-upd",
+		TrafficBytes: 2048,
+		ExpiryTime:   time.Unix(1800000000, 0).UTC(),
+		ResetDays:    14,
+	}
+	err := client.UpdateSubscription(ctx, provision)
 
-func TestThreeXUIClient_DeleteSubscription_WrapsNotFound(t *testing.T) {
-	t.Parallel()
-
-	fake := &fakeXUIClient{deleteErr: xui.ErrClientNotFound}
-	client := NewThreeXUIClient(fake, []int{1})
-
-	err := client.DeleteSubscription(context.Background(), SubscriptionProvision{ClientID: "uuid", Username: "user", SubID: "sub"})
-	assert.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSubscriptionNotFound))
+	require.NoError(t, err)
+	assert.True(t, fake.updateCalled, "UpdateSubscription must call UpdateClient on the underlying xui client")
+	require.NotNil(t, fake.updateCapture)
+	assert.Equal(t, []int{3, 4}, fake.updateCapture.inboundIDs)
+	assert.Equal(t, "oldname", fake.updateCapture.currentEmail, "CurrentEmail must carry the existing email for rename")
+	assert.Equal(t, "newname", fake.updateCapture.email, "Username must be mapped to the new Email")
+	assert.Equal(t, provision.ClientID, fake.updateCapture.clientID)
+	assert.Equal(t, provision.SubID, fake.updateCapture.subID)
+	assert.Equal(t, provision.TrafficBytes, fake.updateCapture.trafficBytes)
+	assert.Equal(t, provision.ExpiryTime, fake.updateCapture.expiryTime)
+	assert.Equal(t, provision.ResetDays, fake.updateCapture.resetDays)
 }
 
 // Поведение: сетевой сбой proxman (обрыв соединения) ретраится с бэкоффом,

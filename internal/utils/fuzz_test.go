@@ -1,10 +1,8 @@
-package xui
+package utils
 
 import (
 	"strings"
 	"testing"
-
-	"github.com/kereal/rs8kvn_bot/internal/utils"
 )
 
 func FuzzTruncateString(f *testing.F) {
@@ -32,10 +30,10 @@ func FuzzTruncateString(f *testing.F) {
 			return
 		}
 
-		result := utils.TruncateString(s, maxLen)
+		result := TruncateString(s, maxLen)
 		if maxLen == 0 {
 			if result != "" {
-				t.Errorf("utils.TruncateString(%q, 0) = %q, want ''", s, result)
+				t.Errorf("TruncateString(%q, 0) = %q, want ''", s, result)
 			}
 
 			return
@@ -44,17 +42,17 @@ func FuzzTruncateString(f *testing.F) {
 		r := []rune(s)
 		if len(r) <= maxLen {
 			if result != s {
-				t.Errorf("utils.TruncateString(%q, %d) = %q, want %q", s, maxLen, result, s)
+				t.Errorf("TruncateString(%q, %d) = %q, want %q", s, maxLen, result, s)
 			}
 		} else {
 			rr := []rune(result)
 			// result = r[:maxLen] + "..."
 			if len(rr) != maxLen+3 {
-				t.Errorf("utils.TruncateString(%q, %d) rune len = %d, want %d", s, maxLen, len(rr), maxLen+3)
+				t.Errorf("TruncateString(%q, %d) rune len = %d, want %d", s, maxLen, len(rr), maxLen+3)
 			}
 
 			if !strings.HasSuffix(result, "...") {
-				t.Errorf("utils.TruncateString(%q, %d) = %q, should end with '...'", s, maxLen, result)
+				t.Errorf("TruncateString(%q, %d) = %q, should end with '...'", s, maxLen, result)
 			}
 		}
 	})
