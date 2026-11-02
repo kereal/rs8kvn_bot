@@ -9,6 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	prometheus_testutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -162,4 +163,14 @@ func TestMetricsEndpoint(t *testing.T) {
 	assert.Contains(t, resp.Body.String(), "subscription_sync_total")
 	assert.Contains(t, resp.Body.String(), "subscription_expire_total")
 	assert.Contains(t, resp.Body.String(), "reconcile_orphaned_duration_seconds")
+}
+
+func TestSetBuildInfoPublishesSingleSeries(t *testing.T) {
+	t.Parallel()
+
+	SetBuildInfo("rs8kvn_bot@v2.7.0", "9d04409")
+	SetBuildInfo("rs8kvn_bot@v2.7.1", "3afc5bd")
+
+	assert.Equal(t, 1.0, prometheus_testutil.ToFloat64(AppInfo.WithLabelValues("rs8kvn_bot@v2.7.1", "3afc5bd")))
+	assert.Equal(t, 1, metricSamples(t, AppInfo), "после переинициализации должна остаться одна серия")
 }

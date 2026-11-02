@@ -55,6 +55,8 @@ func initLogger(cfg *config.Config) (*logger.Service, error) {
 		zap.String("built", buildTime))
 	logger.Info("Configuration loaded", zap.String("config", cfg.String()))
 
+	metrics.SetBuildInfo(getVersion(), getRevision())
+
 	return logService, nil
 }
 

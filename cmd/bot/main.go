@@ -168,6 +168,25 @@ func getVersion() string {
 	return "rs8kvn_bot@" + version
 }
 
+// getRevision returns the short VCS revision (or the ldflag commit) the binary
+// was built from, for the app_info metric. Empty when the build carries no VCS
+// data and no ldflag commit — tests and `go run` have none.
+func getRevision() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" && len(setting.Value) >= 7 {
+				return setting.Value[:7]
+			}
+		}
+	}
+
+	if commit != "unknown" && len(commit) >= 7 {
+		return commit[:7]
+	}
+
+	return "unknown"
+}
+
 // initBot инициализирует Telegram-бота: проверяет токен, создаёт BotAPI
 // и собирает bot.BotConfig с повторными попытками при сбоях подключения.
 func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {

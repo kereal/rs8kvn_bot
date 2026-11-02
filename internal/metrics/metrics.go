@@ -381,6 +381,17 @@ var (
 		},
 	)
 
+	// AppInfo identifies the running build. Without it a dashboard cannot tell
+	// which revision produced a change in behaviour, and a stale deployment
+	// looks identical to a fresh one.
+	AppInfo = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "app_info",
+			Help: "Build information of the running binary (value is always 1)",
+		},
+		[]string{"version", "revision"},
+	)
+
 	// PaymentOperationsTotal counts payment service operations by operation and result.
 	// Operation values: request, confirm, cancel. Result values: success, error.
 	PaymentOperationsTotal = promauto.NewCounterVec(
@@ -455,6 +466,13 @@ var TrafficNotificationRunsTotal = promauto.NewCounter(
 		Help: "Total number of traffic notification worker scans.",
 	},
 )
+
+// SetBuildInfo publishes the running build as a single app_info series. Reset
+// keeps exactly one label set even if the process re-initialises the logger.
+func SetBuildInfo(version, revision string) {
+	AppInfo.Reset()
+	AppInfo.WithLabelValues(version, revision).Set(1)
+}
 
 // InstrumentHTTP middleware records metrics for HTTP requests.
 func InstrumentHTTP(next http.Handler) http.Handler {
