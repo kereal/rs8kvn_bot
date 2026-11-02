@@ -1228,6 +1228,94 @@ func TestHandleSubscription_ConcurrentMissesShareOneFetch(t *testing.T) {
 	assert.Equal(t, int32(1), fetches.Load(), "одновременные промахи должны схлопнуться в один fan-out")
 }
 
+// TestHandleSubscription_LateMissAfterFlightServesFreshCache — регрессия на
+// TOCTOU-окно: запрос прошёл serveFromCache (miss), завис в loadSubscription;
+// лидер к тому времени завершил fan-out, записал кэш и освободил флайт.
+// Опоздавший становится новым лидером, но double-check внутри fn обязан
+// отдать свежий кэш вместо второго fan-out. Синхронизация только на
+// каналах — детерминированно на любом шедулере.
+func TestHandleSubscription_LateMissAfterFlightServesFreshCache(t *testing.T) {
+	t.Parallel()
+
+	var fetches, loads atomic.Int32
+
+	fetchStarted := make(chan struct{})
+	releaseFetch := make(chan struct{})
+	enteredLoad2 := make(chan struct{})
+	releaseLoad2 := make(chan struct{})
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fetches.Add(1) == 1 {
+			close(fetchStarted)
+		}
+
+		<-releaseFetch
+
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp#node")
+	}))
+	defer upstream.Close()
+
+	mockDB := testutil.NewSubscriptionRepositoryFake()
+	mockDB.GetWithPlanAndNodesFunc = func(context.Context, string) (*database.SubscriptionFull, error) {
+		if loads.Add(1) == 2 {
+			close(enteredLoad2)
+
+			<-releaseLoad2
+		}
+
+		return &database.SubscriptionFull{
+			Subscription: database.Subscription{ID: 1, Status: "active"},
+			Plan:         database.Plan{TrafficLimit: 1 << 30},
+			Nodes:        []database.Node{{ID: 1, Name: "src", IsActive: true, SubscriptionURL: upstream.URL + "/sub/"}},
+		}, nil
+	}
+
+	svc := newTestSubSvc(t)
+	ctx := context.Background()
+
+	type outcome struct {
+		res *SubscriptionResult
+		err error
+	}
+
+	leader := make(chan outcome, 1)
+
+	go func() {
+		res, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-late", "1.2.3.4", nil, "")
+		leader <- outcome{res, err}
+	}()
+
+	<-fetchStarted
+
+	straggler := make(chan outcome, 1)
+
+	go func() {
+		res, _, _, err := HandleSubscription(ctx, mockDB, svc, "sub-late", "1.2.3.4", nil, "")
+		straggler <- outcome{res, err}
+	}()
+
+	<-enteredLoad2
+
+	// Лидер дотягивает апстрим и завершает флайт (кэш записан, флайт снят),
+	// и только потом отпускаем опоздавшего — его double-check обязан попасть
+	// в свежую запись.
+	close(releaseFetch)
+
+	first := <-leader
+	require.NoError(t, first.err)
+	require.NotNil(t, first.res)
+
+	close(releaseLoad2)
+
+	second := <-straggler
+	require.NoError(t, second.err)
+	require.NotNil(t, second.res)
+
+	assert.Equal(t, int32(1), fetches.Load(), "опоздавший после закрытия флайта обязан взять свежий кэш, а не делать второй fan-out")
+	assert.Equal(t, first.res.Body, second.res.Body, "опоздавший должен получить тот же контент из кэша")
+}
+
 // Тест поведения: недобранный ответ (часть источников не ответила) не
 // кэшируется — иначе пользователь до конца TTL видит подписку без половины
 // серверов, хотя апстрим уже поднялся.

@@ -54,6 +54,15 @@ func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepositor
 	}
 
 	out := subSvc.flights.Do(cacheKey, func() flightResult {
+		// Double-check кэша внутри флайта: опоздавший после прохода serveFromCache
+		// (например, застряв в loadSubscription) может войти в Do уже после того,
+		// как лидер завершил fan-out и записал свежую запись, — без повторной
+		// проверки он стал бы новым лидером и устроил второй fan-out только что
+		// оправившимся источникам. Повторная проверка закрывает это окно.
+		if cachedBody, cachedHeaders, ok := subSvc.Get(cacheKey); ok {
+			return flightResult{result: &SubscriptionResult{Body: cachedBody, Headers: cachedHeaders}}
+		}
+
 		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		agg, success, total := fetchAndAggregateSources(fetchCtx, subID, subFull.Nodes, subSvc.sourceTimeout)
