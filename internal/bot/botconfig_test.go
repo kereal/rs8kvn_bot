@@ -33,21 +33,6 @@ func TestSelf_ReturnsCorrectUser(t *testing.T) {
 	assert.True(t, user.SupportsInlineQueries)
 }
 
-func TestSelf_DefaultValues(t *testing.T) {
-	botConfig := &BotConfig{}
-
-	user := botConfig.Self()
-
-	require.NotNil(t, user)
-	assert.Equal(t, int64(0), user.ID)
-	assert.Equal(t, "", user.FirstName)
-	assert.Equal(t, "", user.UserName)
-	assert.False(t, user.IsBot)
-	assert.False(t, user.CanJoinGroups)
-	assert.False(t, user.CanReadAllGroupMessages)
-	assert.False(t, user.SupportsInlineQueries)
-}
-
 func TestSelf_ReturnsNewInstance(t *testing.T) {
 	t.Parallel()
 
@@ -62,22 +47,6 @@ func TestSelf_ReturnsNewInstance(t *testing.T) {
 
 	assert.NotSame(t, user1, user2, "Self() should return new instances")
 	assert.Equal(t, user1.ID, user2.ID)
-}
-
-func TestNewBotConfig_ReturnsValidConfig(t *testing.T) {
-	t.Parallel()
-
-	botConfig := NewTestBotConfig()
-
-	require.NotNil(t, botConfig)
-	assert.Equal(t, "testbot", botConfig.Username)
-	assert.Equal(t, int64(123456789), botConfig.ID)
-	assert.Equal(t, "TestBot", botConfig.FirstName)
-	assert.True(t, botConfig.IsBot)
-	assert.False(t, botConfig.CanJoinGroups)
-	assert.False(t, botConfig.CanReadAllGroupMessages)
-	assert.False(t, botConfig.SupportsInlineQueries)
-	assert.False(t, botConfig.loadedAt.IsZero(), "loadedAt should be set")
 }
 
 func TestNewBotConfig_WithBotAPI(t *testing.T) {

@@ -9,10 +9,10 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 
-	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -82,21 +82,30 @@ func TestShowLoadingMessage_EditFails(t *testing.T) {
 		TelegramAdminID: 123456,
 	}
 	mockDB := testutil.NewBotStoreFake()
-	mockBot := testutil.NewBotAPI()
-	// First call fails (edit), second succeeds (send new)
-	mockBot.SendError = errors.New("edit error")
+	// Fail-once fake: the first call (edit of the existing message) fails,
+	// the second (if any) would succeed.
+	sendCalls := 0
+	mockBot := &testutil.BotAPI{
+		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			sendCalls++
+			if sendCalls == 1 {
+				return tgbotapi.Message{}, errors.New("edit error")
+			}
+
+			return tgbotapi.Message{MessageID: 555}, nil
+		},
+	}
 	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
 	chatID := int64(123456)
-	messageID := 100
 
-	// Reset error for second call
-	resultID := handler.showLoadingMessage(chatID, messageID)
+	resultID := handler.showLoadingMessage(chatID, 100)
 
-	// Should attempt to send new message if edit fails
-	assert.True(t, mockBot.SendCalledSafe())
-	// When edit fails and send new succeeds, should return new message ID
-	_ = resultID // Just acknowledge the result, don't make assertions about it
+	// Edit failure has no fallback to a fresh send: the caller gets 0 and
+	// createSubscription aborts with "failed to show loading message" instead
+	// of editing a message that does not exist.
+	assert.Equal(t, 1, sendCalls, "edit failure must not trigger a second send")
+	assert.Equal(t, 0, resultID, "edit failure must report 0 so the caller aborts")
 }
 
 func TestCreateSubscription_Success(t *testing.T) {
@@ -108,11 +117,7 @@ func TestCreateSubscription_Success(t *testing.T) {
 	mockDB := testutil.NewBotStoreFake()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	// DB-first: mock DB methods for Create() + ensureSubscriptionNodes()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -139,7 +144,7 @@ func TestCreateSubscription_Success(t *testing.T) {
 	handler.createSubscription(ctx, 123456, "testuser", 1)
 
 	assert.True(t, mockBot.SendCalledSafe())
-	assert.True(t, mockDB.CreateSubscriptionFunc != nil)
+	assert.Contains(t, mockBot.LastSentTextSafe(), "подписк", "successful create must land on the subscription screen")
 }
 
 func TestCreateSubscription_DbFirst_NoNodes_ReturnsSuccess(t *testing.T) {
@@ -151,11 +156,7 @@ func TestCreateSubscription_DbFirst_NoNodes_ReturnsSuccess(t *testing.T) {
 	mockDB := testutil.NewBotStoreFake()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	// DB-first: mock DB methods for Create() + ensureSubscriptionNodes().
 	// No nodes configured → createSubscription never reaches XUI; the
@@ -194,11 +195,7 @@ func TestCreateSubscription_DatabaseFailure_RollbackSuccess(t *testing.T) {
 	mockDB := testutil.NewBotStoreFake()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	// DB-first: mock DB methods - CreateSubscription fails
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -227,11 +224,7 @@ func TestCreateSubscription_CacheUpdate(t *testing.T) {
 	mockDB := testutil.NewBotStoreFake()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	// DB-first: mock DB methods for Create() + ensureSubscriptionNodes()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -368,8 +361,11 @@ func TestHandleCreateSubscription_ExpiredSubscription(t *testing.T) {
 	ctx := context.Background()
 	handler.handleCreateSubscription(ctx, 123456, "testuser", 1)
 
-	// Should create new subscription for expired user
-	assert.True(t, mockXUI.AddClientWithIDFunc != nil)
+	// An expired subscription is still a row: the handler shows the existing
+	// subscription screen and must NOT provision a new XUI client.
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Ваша подписка")
+	assert.False(t, mockXUI.AddClientWithIDCalled, "expired sub must not trigger a new XUI client")
 }
 
 func TestHandleCreateSubscription_DatabaseError(t *testing.T) {
@@ -402,12 +398,7 @@ func TestHandleCreateSubscription_NoSubscription(t *testing.T) {
 	mockDB := testutil.NewBotStoreFake()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -422,14 +413,24 @@ func TestHandleCreateSubscription_NoSubscription(t *testing.T) {
 		return clientConfig, nil
 	}
 
-	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
-		return nil
+	// DB-first plan/nodes wiring: no nodes configured → the create flow
+	// persists the row and answers the user without touching XUI.
+	mockDB.GetNodesByPlanIDFunc = func(ctx context.Context, planID uint) ([]database.Node, error) {
+		return nil, nil
+	}
+	mockDB.GetBySubscriptionIDFunc = func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
+		return nil, nil
 	}
 
 	ctx := context.Background()
 	handler.handleCreateSubscription(ctx, 123456, "testuser", 1)
 
-	assert.True(t, mockXUI.AddClientWithIDFunc != nil)
+	// No prior row → the create flow must run: the user ends up on the
+	// subscription screen (loading + final message), and the sub is persisted.
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.GreaterOrEqual(t, mockBot.SendCountSafe(), 2, "create flow sends loading + final message")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "подписк")
+	assert.False(t, mockXUI.AddClientWithIDCalled, "no nodes configured → no XUI client creation")
 }
 
 func TestHandleMySubscription_NotFound(t *testing.T) {
@@ -441,12 +442,7 @@ func TestHandleMySubscription_NotFound(t *testing.T) {
 	mockDB := testutil.NewBotStoreFake()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -468,12 +464,7 @@ func TestHandleMySubscription_DatabaseError(t *testing.T) {
 	mockDB := testutil.NewBotStoreFake()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, errors.New("database error")
@@ -495,12 +486,7 @@ func TestHandleMySubscription_ActiveSubscription(t *testing.T) {
 	mockDB := testutil.NewBotStoreFake()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	sub := &database.Subscription{
 		TelegramID: 123456,
@@ -557,12 +543,7 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 	mockDB := testutil.NewBotStoreFake()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	sub := &database.Subscription{
 		TelegramID: 123456,
@@ -601,7 +582,11 @@ func TestHandleMySubscription_TrafficFetchError(t *testing.T) {
 	assert.Contains(t, mockBot.LastSentTextSafe(), "измерение недоступно")
 }
 
-func TestHandleMySubscription_UsesCache(t *testing.T) {
+// TestHandleMySubscription_FetchesSubscriptionViaService documents the data
+// path: handleMySubscription reads the subscription through the service
+// (GetWithTraffic → DB), NOT through the handler-level subscription cache —
+// the pre-warmed cache entry is ignored on this screen.
+func TestHandleMySubscription_FetchesSubscriptionViaService(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
@@ -610,12 +595,7 @@ func TestHandleMySubscription_UsesCache(t *testing.T) {
 	mockDB := testutil.NewBotStoreFake()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	sub := &database.Subscription{
 		TelegramID: 123456,
@@ -625,7 +605,7 @@ func TestHandleMySubscription_UsesCache(t *testing.T) {
 		Status:    "active",
 	}
 
-	// Set cache
+	// Pre-warm the handler cache — it must be irrelevant for this path.
 	handler.cache.Set(123456, sub)
 
 	traffic := &xui.ClientTraffic{
@@ -637,7 +617,10 @@ func TestHandleMySubscription_UsesCache(t *testing.T) {
 		return traffic, nil
 	}
 
+	dbCalled := false
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		dbCalled = true
+
 		return sub, nil
 	}
 
@@ -645,6 +628,7 @@ func TestHandleMySubscription_UsesCache(t *testing.T) {
 	handler.handleMySubscription(ctx, 123456, "testuser", 1)
 
 	assert.True(t, mockBot.SendCalledSafe())
+	assert.True(t, dbCalled, "subscription screen must go through the service (DB), not the handler cache")
 }
 
 func TestHandleQRCode_DatabaseError(t *testing.T) {
@@ -821,46 +805,6 @@ func TestInvalidateCache(t *testing.T) {
 	assert.Nil(t, handler.cache.Get(chatID))
 }
 
-func TestHandleCreateSubscription_ZeroMessageID(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewBotStoreFake()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-
-	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		return nil, gorm.ErrRecordNotFound
-	}
-
-	clientConfig := &xui.ClientConfig{
-		ID:    "new-client-uuid",
-		SubID: "new-sub-id",
-	}
-
-	mockXUI.AddClientWithIDFunc = func(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
-		return clientConfig, nil
-	}
-
-	mockDB.CreateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription, inviteCode string) error {
-		return nil
-	}
-
-	ctx := context.Background()
-	// Pass 0 as messageID to test showLoadingMessage branch
-	handler.handleCreateSubscription(ctx, 123456, "testuser", 0)
-
-	assert.True(t, mockBot.SendCalledSafe())
-}
-
 func TestHandleQRCode_WithSubscription(t *testing.T) {
 	t.Parallel()
 
@@ -909,29 +853,33 @@ func TestHandleQRCode_NoSubscription(t *testing.T) {
 func TestHandleBackToSubscription(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		SiteURL:         "https://x.com",
-		GlobalSubURL:    "https://x.com/sub/",
-	}
-	mockDB := testutil.NewBotStoreFake()
-	mockBot := testutil.NewBotAPI()
-	clients := service.NodeClients{1: {Reader: testutil.NewXUIClient()}}
-	nodes := []database.Node{{ID: 1, IsActive: true, Host: "https://p", APIToken: "t", InboundIDs: "[1]"}}
-
-	require.NoError(t, mockDB.CreateSubscription(context.Background(), &database.Subscription{
-		TelegramID: 123456, Username: "testuser", ClientID: "c", SubscriptionID: "s", Status: "active",
-	}, ""))
-	svc := service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), svc, "")
-
-	ctx := context.Background()
-	handler.handleBackToSubscription(ctx, 123456, "testuser", 789)
-
 	// Back must only delete the QR photo; the subscription card stays open
-	// underneath, so no re-show (Bot.Send) is expected.
-	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to delete QR message")
-	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send must NOT re-show the card on Back")
+	// underneath, so no re-show (Bot.Send) is expected — even when the
+	// delete request itself fails.
+	tests := []struct {
+		name         string
+		requestError error
+	}{
+		{name: "delete succeeds"},
+		{name: "delete fails", requestError: errors.New("delete failed")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler, mockBot := newQRTestHandler(t)
+			if tt.requestError != nil {
+				mockBot.RequestError = tt.requestError
+			}
+
+			ctx := context.Background()
+			handler.handleBackToSubscription(ctx, 42, "u", 789)
+
+			assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to delete QR message")
+			assert.False(t, mockBot.SendCalledSafe(), "Bot.Send must NOT re-show the card on Back")
+		})
+	}
 }
 
 func TestNotifyAdmin_Success(t *testing.T) {
@@ -1039,44 +987,6 @@ func TestHandleCreateError_RollbackFailed(t *testing.T) {
 	assert.True(t, mockBot.SendCountSafe() >= 2, "Should send error message and admin notification")
 }
 
-func TestHandleCreateError_ConnectionRefused(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		SiteURL:         "https://vpn.site",
-	}
-	mockDB := testutil.NewBotStoreFake()
-	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	ctx := context.Background()
-	err := errors.New("xui add client: connection refused")
-	handler.handleCreateError(ctx, 123456, 100, "testuser", err)
-
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "Не удается подключиться", "message should mention connection issue")
-}
-
-func TestHandleCreateError_Authentication(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		SiteURL:         "https://vpn.site",
-	}
-	mockDB := testutil.NewBotStoreFake()
-	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	ctx := context.Background()
-	err := errors.New("xui add client: unauthorized")
-	handler.handleCreateError(ctx, 123456, 100, "testuser", err)
-
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "авторизации", "message should mention auth error")
-}
-
 func TestNotifyAdmin_SendError(t *testing.T) {
 	t.Parallel()
 
@@ -1093,23 +1003,6 @@ func TestNotifyAdmin_SendError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "notify admin")
-}
-
-func TestSendQRCode_QRGenerationError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewBotStoreFake()
-	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	ctx := context.Background()
-	// Empty URL still generates valid QR (empty image), so test with valid URL
-	handler.sendQRCode(ctx, 123456, 100, "https://example.com/sub", "Test caption")
-
-	assert.True(t, mockBot.SendCalledSafe())
 }
 
 func TestHandleQRCode_NilSubscription(t *testing.T) {
@@ -1142,11 +1035,7 @@ func TestCreateSubscription_WithPendingInvite(t *testing.T) {
 	mockDB := testutil.NewBotStoreFake()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	// DB-first: mock DB methods for Create() + ensureSubscriptionNodes()
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
@@ -1221,12 +1110,7 @@ func TestCreateSubscription_WithExpiredPendingInvite(t *testing.T) {
 	mockDB := testutil.NewBotStoreFake()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	clientConfig := &xui.ClientConfig{
 		ID:    "client-uuid-123",
@@ -1284,12 +1168,7 @@ func TestCreateSubscription_ShowLoadingMessageFails(t *testing.T) {
 	mockDB := testutil.NewBotStoreFake()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	mockBot.SendError = errors.New("send failed")
 
@@ -1304,32 +1183,3 @@ func TestCreateSubscription_ShowLoadingMessageFails(t *testing.T) {
 
 	assert.False(t, xuiCalled, "XUI should not be called when loading message fails")
 }
-
-func TestHandleBackToSubscription_DeleteFails(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		SiteURL:         "https://x.com",
-		GlobalSubURL:    "https://x.com/sub/",
-	}
-	mockDB := testutil.NewBotStoreFake()
-	mockBot := testutil.NewBotAPI()
-	mockBot.RequestError = errors.New("delete failed")
-	clients := service.NodeClients{1: {Reader: testutil.NewXUIClient()}}
-	nodes := []database.Node{{ID: 1, IsActive: true, Host: "https://p", APIToken: "t", InboundIDs: "[1]"}}
-
-	require.NoError(t, mockDB.CreateSubscription(context.Background(), &database.Subscription{
-		TelegramID: 123456, Username: "testuser", ClientID: "c", SubscriptionID: "s", Status: "active",
-	}, ""))
-	svc := service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), svc, "")
-
-	ctx := context.Background()
-	handler.handleBackToSubscription(ctx, 123456, "testuser", 789)
-
-	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to delete message")
-}
-
-// daysUntilReset and GenerateProgressBar tests have been moved to
-// internal/utils/format_test.go

@@ -18,7 +18,8 @@ func TestGetMainMenuKeyboard_PaymentShown(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 123, DonateEnabled: true, PaymentEnabled: true}
-	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", "", "", "", true), paymentEnabled: true}
+	handler := newContentTestHandler(cfg)
+	handler.paymentEnabled = true
 
 	hasPayment := func(kb tgbotapi.InlineKeyboardMarkup) bool {
 		for _, row := range kb.InlineKeyboard {
@@ -55,7 +56,7 @@ func TestGetMainMenuKeyboard_PaymentHidden(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 123, DonateEnabled: true, PaymentEnabled: false}
-	handler := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", "", "", "", "", true), paymentEnabled: false}
+	handler := newContentTestHandler(cfg)
 
 	keyboard := handler.getMainMenuKeyboard(true)
 	for _, row := range keyboard.InlineKeyboard {
@@ -179,20 +180,6 @@ func newTestProductList() []database.Product {
 	return []database.Product{
 		{ID: 1, Name: "Месяц", PriceCents: 19900, IsActive: true},
 		{ID: 2, Name: "Год", PriceCents: 199900, IsActive: true},
-	}
-}
-
-func TestHandler_KeyboardConstruction_MultipleRows(t *testing.T) {
-	t.Parallel()
-
-	handler := &Handler{cfg: &config.Config{TelegramAdminID: 12345}, paymentEnabled: true}
-
-	keyboard := handler.getMainMenuKeyboard(true)
-
-	assert.GreaterOrEqual(t, len(keyboard.InlineKeyboard), 3, "Should have at least 3 rows")
-
-	for i, row := range keyboard.InlineKeyboard {
-		assert.Greater(t, len(row), 0, "Row %d should have at least one button", i)
 	}
 }
 

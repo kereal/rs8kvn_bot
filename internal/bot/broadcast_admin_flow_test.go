@@ -6,11 +6,14 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -389,4 +392,189 @@ func TestFormatErrorList(t *testing.T) {
 	out := formatErrorList(many, 2)
 	assert.Contains(t, out, "… и ещё 1")
 	assert.NotContains(t, out, "3 (", "only the visible preview items may be rendered")
+}
+
+// G2: broadcast_deactivate_prompt_ / broadcast_deactivate_exec_ callbacks —
+// admin gate, confirmation prompt, success, partial-failure and error reports.
+
+func TestBroadcastDeactivatePrompt_NonAdmin(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockDB := testutil.NewBotStoreFake()
+	mockBot := testutil.NewBotAPI()
+	handler := newBroadcastTestHandler(mockDB, mockBot)
+
+	nonAdmin := &tgbotapi.User{ID: 999, UserName: "intruder"}
+	for _, data := range []string{"broadcast_deactivate_prompt_7", "broadcast_deactivate_exec_7"} {
+		require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+			From: nonAdmin, Data: data,
+			Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: 999}, MessageID: 1},
+		}}))
+
+		assert.False(t, mockBot.SendCalledSafe(), "non-admin %s must be silently ignored", data)
+	}
+}
+
+func TestBroadcastDeactivatePrompt_ShowsConfirmation(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockDB := testutil.NewBotStoreFake()
+	mockBot := testutil.NewBotAPI()
+	mockDB.GetBroadcastFunc = func(ctx context.Context, id uint) (*database.Broadcast, error) {
+		return &database.Broadcast{
+			ID: 7, Name: "Ноябрьская", BlockedCount: 3, UnreachableCount: 2,
+		}, nil
+	}
+	handler := newBroadcastTestHandler(mockDB, mockBot)
+
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "broadcast_deactivate_prompt_7",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+
+	assert.True(t, mockBot.SendCalledSafe(), "prompt must be sent to the admin")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Деактивация заблокировавших")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Рассылка \\#7 «Ноябрьская»")
+}
+
+func TestBroadcastDeactivatePrompt_BroadcastNotFound(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockDB := testutil.NewBotStoreFake()
+	mockBot := testutil.NewBotAPI()
+	mockDB.GetBroadcastFunc = func(ctx context.Context, id uint) (*database.Broadcast, error) {
+		return nil, errors.New("database error")
+	}
+	handler := newBroadcastTestHandler(mockDB, mockBot)
+
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "broadcast_deactivate_prompt_7",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Рассылка не найдена")
+}
+
+// newDeactivateTestHandler wires a handler with a real SubscriptionService over
+// the in-memory fake, so the exec callback can drive DeactivateBlockedBroadcastRecipients.
+func newDeactivateTestHandler(t *testing.T, mockDB *testutil.BotStoreFake, mockBot *testutil.BotAPI) *Handler {
+	t.Helper()
+
+	cfg := &config.Config{TelegramAdminID: broadcastTestAdminID}
+	mockXUI := testutil.NewXUIClient()
+	clients := service.NodeClients{1: {Reader: mockXUI}}
+	nodes := []database.Node{{ID: 1, IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
+	svc := service.NewSubscriptionService(mockDB, clients, nodes, cfg)
+
+	return NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), svc, "")
+}
+
+func TestBroadcastDeactivateExec_Success(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockDB := testutil.NewBotStoreFake()
+
+	mockBot := testutil.NewBotAPI()
+	mockDB.GetBroadcastRecipientsStatsFunc = func(ctx context.Context, broadcastID uint) (int64, int64, int64, int64, int64, database.BroadcastDeliveryReport, error) {
+		return 10, 5, 1, 0, 0, database.BroadcastDeliveryReport{Blocked: []int64{777}}, nil
+	}
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		return &database.Subscription{ID: 1, TelegramID: telegramID, SubscriptionID: "sub-777", Status: "active"}, nil
+	}
+	mockDB.UpdateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
+		return nil
+	}
+	handler := newDeactivateTestHandler(t, mockDB, mockBot)
+
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "broadcast_deactivate_exec_7",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "✅ Выключено пользователей: 1")
+}
+
+func TestBroadcastDeactivateExec_Error(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockDB := testutil.NewBotStoreFake()
+
+	mockBot := testutil.NewBotAPI()
+	mockDB.GetBroadcastRecipientsStatsFunc = func(ctx context.Context, broadcastID uint) (int64, int64, int64, int64, int64, database.BroadcastDeliveryReport, error) {
+		return 0, 0, 0, 0, 0, database.BroadcastDeliveryReport{}, errors.New("database error")
+	}
+	handler := newDeactivateTestHandler(t, mockDB, mockBot)
+
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "broadcast_deactivate_exec_7",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "❌ Ошибка при деактивации пользователей рассылки #7")
+}
+
+func TestBroadcastDeactivateExec_PartialFailure(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockDB := testutil.NewBotStoreFake()
+
+	mockBot := testutil.NewBotAPI()
+	// Two blocked users: one revokes cleanly, the second's subscription lookup fails
+	// → aggregated error with a partial result report.
+	mockDB.GetBroadcastRecipientsStatsFunc = func(ctx context.Context, broadcastID uint) (int64, int64, int64, int64, int64, database.BroadcastDeliveryReport, error) {
+		return 10, 5, 2, 0, 0, database.BroadcastDeliveryReport{Blocked: []int64{777, 888}}, nil
+	}
+	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+		if telegramID == 888 {
+			return nil, errors.New("database error")
+		}
+
+		return &database.Subscription{ID: 1, TelegramID: telegramID, SubscriptionID: "sub-777", Status: "active"}, nil
+	}
+	mockDB.UpdateSubscriptionFunc = func(ctx context.Context, sub *database.Subscription) error {
+		return nil
+	}
+	handler := newDeactivateTestHandler(t, mockDB, mockBot)
+
+	require.NoError(t, handler.HandleCallback(ctx, tgbotapi.Update{CallbackQuery: &tgbotapi.CallbackQuery{
+		From: broadcastTestAdmin(), Data: "broadcast_deactivate_exec_7",
+		Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: broadcastTestAdminID}, MessageID: 1},
+	}}))
+
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "⚠️ Рассылка #7", "partial failure must be reported")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "выключено 1 из 1", "failed target is not counted as a target")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "ошибок 1")
+}
+
+// G6: broadcast draft session TTL (moved from the integration-tagged
+// admin_test.go — no SQLite fixture needed, this is pure session logic).
+func TestBroadcastSession_TTLExpiry(t *testing.T) {
+	t.Parallel()
+
+	mockDB := testutil.NewBotStoreFake()
+	mockBot := testutil.NewBotAPI()
+	handler := newBroadcastTestHandler(mockDB, mockBot)
+
+	chatID := broadcastTestAdminID
+
+	handler.startBroadcastSession(chatID)
+	require.NotNil(t, handler.getBroadcastSession(chatID))
+
+	handler.broadcastMu.Lock()
+	s := handler.broadcastSessions[chatID]
+	s.createdAt = time.Now().Add(-broadcastSessionTTL - time.Minute)
+	handler.broadcastMu.Unlock()
+
+	require.Nil(t, handler.getBroadcastSession(chatID), "session older than the TTL must be expired")
+	require.False(t, handler.broadcastSessionActive(chatID))
 }

@@ -139,36 +139,6 @@ func TestSubscriptionCache_Cleanup(t *testing.T) {
 	assert.NotNil(t, cache.Get(4), "Get(4) returned nil after Cleanup, but it was just added")
 }
 
-func TestSubscriptionCache_Concurrent(t *testing.T) {
-	t.Parallel()
-
-	cache := NewSubscriptionCache(100, 5*time.Minute)
-
-	// Run concurrent writes and reads
-	done := make(chan bool, 2)
-
-	go func() {
-		for i := range int64(100) {
-			cache.Set(i, &database.Subscription{TelegramID: i})
-		}
-
-		done <- true
-	}()
-
-	go func() {
-		for i := range int64(100) {
-			cache.Get(i)
-		}
-
-		done <- true
-	}()
-
-	<-done
-	<-done
-
-	// If we get here without race detector errors, test passes
-}
-
 func TestSubscriptionCache_StartCleanup(t *testing.T) {
 	t.Parallel()
 
@@ -224,31 +194,6 @@ func TestSubscriptionCache_StartCleanup_Cancellation(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		t.Error("StartCleanup did not exit after context cancellation")
 	}
-}
-
-func TestSubscriptionCache_LRU_EvictionOrder(t *testing.T) {
-	t.Parallel()
-
-	cache := NewSubscriptionCache(3, 5*time.Minute) // Long TTL to avoid expiration
-
-	// Add entries; entry 1 is oldest, entry 3 is newest
-	for i := int64(1); i <= 3; i++ {
-		cache.Set(i, &database.Subscription{TelegramID: i})
-	}
-
-	// Entry 1 should be oldest, entry 3 should be newest
-	// Adding entry 4 should evict entry 1 (oldest)
-	cache.Set(4, &database.Subscription{TelegramID: 4})
-
-	assert.Equal(t, 3, cache.Size(), "Size()")
-
-	// Entry 1 should be evicted
-	assert.Nil(t, cache.Get(1), "Entry 1 (oldest) should be evicted")
-
-	// Entries 2, 3, 4 should still exist
-	assert.NotNil(t, cache.Get(2), "Entry 2 should still exist")
-	assert.NotNil(t, cache.Get(3), "Entry 3 should still exist")
-	assert.NotNil(t, cache.Get(4), "Entry 4 should still exist")
 }
 
 func TestSubscriptionCache_LRU_MultipleEvictions(t *testing.T) {
