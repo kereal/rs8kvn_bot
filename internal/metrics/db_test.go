@@ -2,6 +2,8 @@ package metrics
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -105,4 +107,21 @@ func closeDB(t *testing.T, db *gorm.DB) {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, sqlDB.Close())
+}
+
+// Тест поведения: размеры файла БД и WAL публикуются в gauge — иначе рост БД
+// виден только по диску.
+func TestCollectDatabaseFileSize(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	require.NoError(t, os.WriteFile(dbPath, []byte("0123456789"), 0o600))
+	require.NoError(t, os.WriteFile(dbPath+"-wal", []byte("wal"), 0o600))
+
+	CollectDatabaseFileSize(dbPath)
+
+	require.Equal(t, float64(10), testutil.ToFloat64(DBFileBytes))
+	require.Equal(t, float64(3), testutil.ToFloat64(DBWALBytes))
 }

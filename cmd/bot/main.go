@@ -337,6 +337,9 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 		defer wg.Done()
 
 		runSupervised(ctx, "DB pool metrics collector", func(ctx context.Context) {
+			// Первый замер сразу: иначе до первого тика gauge показывает 0.
+			metrics.CollectDatabaseFileSize(cfg.DatabasePath)
+
 			ticker := time.NewTicker(10 * time.Second)
 			defer ticker.Stop()
 
