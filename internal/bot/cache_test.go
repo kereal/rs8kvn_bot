@@ -163,9 +163,8 @@ func TestSubscriptionCache_StartCleanup(t *testing.T) {
 		return cache.Get(1) == nil
 	}, 100*time.Millisecond, 1*time.Millisecond, "entries should expire")
 
-	// Expired entries should be removed by background cleanup
-	// Note: Size may be 0 or contain only non-expired entries
-	cache.Cleanup() // Force cleanup to ensure accurate count
+	// Wait for the background cleanup itself, not the lazy eviction by Get.
+	assert.Eventually(t, func() bool { return cache.Size() == 0 }, 100*time.Millisecond, 1*time.Millisecond)
 	assert.Equal(t, 0, cache.Size(), "Size() after cleanup (all entries expired)")
 }
 

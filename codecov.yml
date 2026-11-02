@@ -1,0 +1,24 @@
+# Конфиг Codecov. CI грузит один артефакт: .github/workflows/docker.yml,
+# `go test -race -coverprofile=coverage.out ./...` — без build-тегов, поэтому
+# tests/ (e2e/smoke/integration) в покрытие не попадают физически; ignore ниже
+# фиксирует это намерением, а не случайностью.
+#
+# Пороги относительные (threshold), а не абсолютные: абсолютный target
+# провоцирует гонку за процентами на прослойке вроде main.go.
+
+ignore:
+  - "cmd/**"                 # wiring бинарника: флаги, запуск, supervisor — проверяются smoke/e2e
+  - "internal/testutil/**"   # тестовые хелперы: не _test.go, иначе Codecov считает их непротестированным прод-кодом
+  - "tests/**"               # тегированные сюиты: вне coverage.out по построению
+
+coverage:
+  status:
+    project:
+      default:
+        threshold: 2%        # просадка суммарного покрытия <=2% не валит чек (старые тесты legitimately удаляются)
+    patch:
+      default:
+        threshold: 10%       # не-covered error-ветки в диффе (снимок БД, recovery) не должны блокировать PR
+
+comment:
+  require_changes: true      # комментить только когда покрытие реально изменилось, не на каждый push

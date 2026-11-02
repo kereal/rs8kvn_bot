@@ -120,7 +120,8 @@ type Server struct {
 
 	// notFoundLog не даёт клиенту, который опрашивает удалённую подписку,
 	// залить лог: одна запись в час на пару sub_id+IP вместо каждого запроса.
-	notFoundLog *utils.IntervalGate
+	notFoundLog               *utils.IntervalGate
+	unauthorizedCallbackAlert *utils.IntervalGate
 }
 
 // NewServer constructs a web server and parses the embedded templates. It does
@@ -129,7 +130,7 @@ func NewServer(addr string, db interfaces.WebRepository, cfg *config.Config, bot
 	trialTmpl := template.Must(template.New("trial.html").Funcs(template.FuncMap{"formatTime": func(t time.Time) string { return t.Format("02.01.2006 15:04") }}).ParseFS(staticFiles, "templates/trial.html"))
 	errorTmpl := template.Must(template.New("error.html").ParseFS(staticFiles, "templates/error.html"))
 
-	return &Server{addr: addr, db: db, cfg: cfg, botUsername: botUsername, subService: subService, subServer: subServer, checkers: make(map[string]func(context.Context) ComponentHealth), inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`), startTime: time.Now(), trialTemplate: trialTmpl, errorTemplate: errorTmpl, notFoundLog: utils.NewIntervalGate(subserverNotFoundLogInterval, subserverNotFoundLogPruneAt)}
+	return &Server{addr: addr, db: db, cfg: cfg, botUsername: botUsername, subService: subService, subServer: subServer, checkers: make(map[string]func(context.Context) ComponentHealth), inviteCodeRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`), startTime: time.Now(), trialTemplate: trialTmpl, errorTemplate: errorTmpl, notFoundLog: utils.NewIntervalGate(subserverNotFoundLogInterval, subserverNotFoundLogPruneAt), unauthorizedCallbackAlert: utils.NewIntervalGate(time.Minute, 1)}
 }
 
 // SetBot wires Telegram delivery for payment notifications and administrator alerts.
@@ -415,9 +416,13 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		// ни алерта. Провайдер уже списал деньги, а следов в системе нет.
 		logger.Warn("payment callback rejected: signature mismatch",
 			zap.String("remote_addr", r.RemoteAddr))
-		s.notifyPaymentCallbackIssue(r.Context(), platega.CallbackPayload{},
-			"callback_unauthorized", "signature mismatch",
-			"verify PLATEGA_MERCHANT_ID/PLATEGA_SECRET and the provider signing configuration")
+		if s.unauthorizedCallbackAlert.Allow("signature", time.Now()) {
+			s.notifyPaymentCallbackIssue(r.Context(), platega.CallbackPayload{},
+				"callback_unauthorized", "signature mismatch",
+				"verify PLATEGA_MERCHANT_ID/PLATEGA_SECRET and the provider signing configuration")
+		} else {
+			metrics.PaymentIssuesTotal.WithLabelValues("callback_unauthorized").Inc()
+		}
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 
 		return

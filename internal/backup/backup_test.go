@@ -642,3 +642,28 @@ func TestBackupDatabase_MissingSubscriptionsTableMarkedCorrupt(t *testing.T) {
 	_, err = os.Stat(dbPath + ".backup")
 	assert.True(t, os.IsNotExist(err), "No .backup should be published when verification fails")
 }
+
+func TestBackupIgnoresCorruptFiles(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "db")
+	require.NoError(t, os.WriteFile(dbPath+".backup", []byte("valid"), 0600))
+	require.NoError(t, os.WriteFile(dbPath+".backup.corrupt", []byte("corrupt"), 0600))
+	require.NoError(t, RotateBackups(dbPath, 1))
+	infos, err := GetBackupInfo(dbPath)
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+	assert.NotContains(t, infos[0].Path, ".corrupt")
+	assert.FileExists(t, dbPath+".backup.corrupt")
+}
+
+func TestVerifyBackupCopyCleansSidecarsOnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "copy")
+	for _, suffix := range []string{"-wal", "-shm"} {
+		require.NoError(t, os.WriteFile(path+suffix, []byte("sidecar"), 0600))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.Error(t, verifyBackupCopy(ctx, path))
+	for _, suffix := range []string{"-wal", "-shm"} {
+		assert.NoFileExists(t, path+suffix)
+	}
+}

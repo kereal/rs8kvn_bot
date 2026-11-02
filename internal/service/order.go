@@ -1175,8 +1175,9 @@ const reconcilePendingBudget = 60 * time.Second
 
 // ReconcilePendingOrders находит pending-заказы, чья платёжная ссылка истекла
 // с запасом, и сверяет их с провайдером: CONFIRMED — активирует, явный
-// терминальный отказ провайдера — истекает локально. Без этого прохода
-// потерянный webhook оставлял заказ с деньгами клиента в pending навсегда.
+// терминальный отказ провайдера — истекает локально. Выборка охватывает
+// последние 30 дней относительно границы с запасом; более старые pending-заказы
+// требуют отдельной проверки оператором.
 func (o *OrderService) ReconcilePendingOrders(ctx context.Context, limit int) error {
 	if o.payment == nil {
 		return nil
@@ -1266,7 +1267,7 @@ func (o *OrderService) reconcilePendingOrder(ctx context.Context, order *databas
 
 	switch strings.ToUpper(strings.TrimSpace(status.Status)) {
 	case "CONFIRMED":
-		confirmation, confirmErr := o.confirmPayment(ctx, providerPaymentID, fmt.Sprint(order.ID),
+		confirmation, confirmErr := o.ConfirmPayment(ctx, providerPaymentID, fmt.Sprint(order.ID),
 			status.PaymentDetails.Amount, status.PaymentDetails.Currency)
 		if confirmErr != nil {
 			metrics.PaymentReconcileTotal.WithLabelValues("confirm_error").Inc()

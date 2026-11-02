@@ -56,7 +56,8 @@ func TestIntervalGate(t *testing.T) {
 		assert.True(t, g.Allow("a", gateBase))
 		// len(seen)=1 < pruneAt: "a" ещё держится
 		assert.True(t, g.Allow("b", gateBase.Add(2*time.Minute)))
-		// len(seen)=2 >= pruneAt: просроченный "a" вытесняется
+		// len(seen)=2 >= pruneAt: просроченный "a" вытесняется,
+		// освобождённого слота хватает — полная очистка не нужна
 		assert.True(t, g.Allow("c", gateBase.Add(2*time.Minute)))
 
 		g.mu.Lock()
@@ -71,16 +72,19 @@ func TestIntervalGate(t *testing.T) {
 		assert.True(t, hasC)
 	})
 
-	t.Run("prune keeps fresh keys and zero disables pruning", func(t *testing.T) {
+	t.Run("prune evicts fresh keys when map is full and zero disables pruning", func(t *testing.T) {
 		t.Parallel()
 
 		g := NewIntervalGate(time.Minute, 2)
 
 		assert.True(t, g.Allow("a", gateBase))
 		assert.True(t, g.Allow("b", gateBase))
-		// "a" и "b" ещё свежие: prune нечего удалять, новый ключ добавляется.
+		// "a" и "b" свежие, но len(seen) >= pruneAt: карта забита, вытеснить
+		// нечего — fallback-очистка стирает всю карту, выживает новый ключ.
 		assert.True(t, g.Allow("c", gateBase.Add(time.Second)))
-		assert.Len(t, g.seen, 3)
+		assert.Len(t, g.seen, 1, "забитая свежими ключами карта очищается целиком")
+		_, hasC := g.seen["c"]
+		assert.True(t, hasC)
 
 		// pruneAt=0: очистка отключена, карта растёт неограниченно.
 		g0 := NewIntervalGate(time.Minute, 0)

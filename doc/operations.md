@@ -80,11 +80,12 @@ ${EDITOR:-vi} docker-compose.yml
 docker compose pull
 docker compose up -d --no-deps rs8kvn_bot
 
-# 4. Проверить health, readiness, метрики и логи
+# 4. Задайте METRICS_TOKEN в окружении, если защита метрик включена.
+# Проверить health, readiness, метрики и логи
 docker inspect rs8kvn_bot --format '{{.State.Health.Status}}'
 curl -fsS http://127.0.0.1:8880/healthz
 curl -fsS http://127.0.0.1:8880/readyz
-curl -fsS http://127.0.0.1:8880/metrics | grep -E 'app_info|db_pool_wait|subserver_not_found|subscription_(renewals|reanimations)_total|xui_requests_total'
+curl -fsS -H "Authorization: Bearer ${METRICS_TOKEN}" http://127.0.0.1:8880/metrics | grep -E 'app_info|db_pool_wait|subserver_not_found|subscription_(renewals|reanimations)_total|xui_requests_total'
 docker logs --since 10m rs8kvn_bot
 ```
 
@@ -195,16 +196,24 @@ chmod 600 ./data/backup.manual
 ### 3.3 Restore from Backup
 
 ```bash
+# Run the restore in a subshell that stops on any error.
+(
+set -e
 # 1. Stop bot
 docker stop rs8kvn_bot
 
-# 2. Rename current DB (for safety)
-mv ./data/rs8kvn.db ./data/rs8kvn.db.before-restore-$(date +%s)
+# 2. Preserve the DB and any sidecars together, including committed WAL data.
+#    The unique directory prevents overwriting an earlier safety copy.
+saved_dir=$(mktemp -d ./data/before-restore.XXXXXXXX)
+saved_db="$saved_dir/rs8kvn.db"
+mv ./data/rs8kvn.db "$saved_db"
+for suffix in -wal -shm; do
+  if [ -e "./data/rs8kvn.db${suffix}" ]; then
+    mv "./data/rs8kvn.db${suffix}" "${saved_db}${suffix}"
+  fi
+done
 
-# 3. Remove stale WAL/SHM sidecars next to the target DB.
-#    Обязательно: старые -wal/-shm поверх восстановленной БД приведут к
-#    потере данных или повреждению новой базы (это же касается sidecar'ов
-#    переименованной копии из шага 2 — им они больше не нужны).
+# 3. Only after preserving the original set, remove target-name sidecars.
 rm -f ./data/rs8kvn.db-wal ./data/rs8kvn.db-shm
 
 # 4. Copy backup over
@@ -220,6 +229,7 @@ sqlite3 ./data/rs8kvn.db "SELECT COUNT(*) FROM subscriptions;"
 
 # 7. Start bot
 docker start rs8kvn_bot
+)
 ```
 
 **Verify:**
@@ -399,7 +409,7 @@ The bot exposes a `/metrics` endpoint on the same port as health checks (default
 - `node_up{node}` — доступность панели каждой нодой по последнему проходу синка (1/0); алерт на `== 0` включён;
 - `subscription_nodes{status}`, `subscription_nodes_parked` — состояние биндингов по статусам синка; рост `parked` означает, что пользователи на этих нодах не провижены;
 - `worker_restarts_total{worker}` — перезапуски фонового воркера после паники; любой рост — повод разобрать стек в логе;
-- `payment_reconcile_total{result}` — исходы сверки зависших pending-заказов (`confirmed_activated`, `expired`, `provider_error`, …);
+- `payment_reconcile_total{result}` — исходы сверки зависших pending-заказов (`confirmed_activated`, `expired`, `provider_error`, …); Сверка охватывает только заказы со сроком ссылки в последние 30 дней относительно границы с 10-минутным запасом; более старые pending-заказы требуют ручной проверки у провайдера.
 - `payment_operations_total`, `payment_operation_duration_seconds`, `payment_amount_cents_total`, `payment_issues_total` — платёжная воронка и инциденты;
 
 **Второстепенные:** cache hit/miss, Telegram API latency, subserver fetch детализация, worker run/latency и ожидания пула полезны для расследований, но не требуют обязательных алертов.
@@ -488,6 +498,8 @@ sum(rate(payment_amount_cents_total{operation="confirmed"}[24h]))
 | `subscription_nodes_parked` | Gauge | — | Bindings parked after exhausted retries or a panel refusal |
 | `worker_restarts_total` | Counter | worker | Background worker restarts after a recovered panic |
 
+Для примеров ниже задайте `METRICS_TOKEN` в окружении оператора. Если токен пуст, авторизация не требуется. Передайте такое же значение Prometheus через защищённый файл секрета, доступный процессу Prometheus; не храните токен в репозитории. Для открытого endpoint удалите блок `authorization` из конфигурации scrape.
+
 **Prometheus scrape config:**
 ```yaml
 scrape_configs:
@@ -495,16 +507,19 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:8880']
     metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/rs8kvn_metrics_token
 ```
 
 **Дашборды и алерты:** Better Stack (источник `hip-01 docker`, ID `2288221`), карта из 8 дашбордов и 8 включённых алертов — в `doc/betterstack-dashboards.md`. Grafana не используется: метрики, логи и аптайм уже в одном сервисе, отдельный стек для приложения такого размера не нужен.
 
 Полезные запросы (PromQL-совместимые формулировки; в Better Stack те же идеи выражаются через `avgMerge(rate_avg)`):
-- HTTP error rate: `rate(http_requests_total{code=~"5.."}[5m]) / rate(http_requests_total[5m])`
+- HTTP error rate: `sum(rate(http_requests_total{code=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))`
 - Bot error rate: `rate(bot_updates_total{result="error"}[5m])`
 - XUI latency: только среднее — `sum(rate(xui_request_duration_seconds_sum[5m])) / sum(rate(xui_request_duration_seconds_count[5m]))`; `histogram_quantile` на хранилище Better Stack не работает
 - Active subscriptions: `active_subscriptions`
-- Устаревший деплой: сравнить `app_info{revision}` с ожидаемым коммитом
+- Устаревший деплой: проверить наличие `app_info{revision="<expected-commit-sha>"}` для ожидаемого коммита
 
 
 ## 5. Troubleshooting

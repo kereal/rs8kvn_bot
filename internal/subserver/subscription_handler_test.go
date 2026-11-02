@@ -1316,3 +1316,32 @@ func TestHandleSubscription_PerSourceTimeout(t *testing.T) {
 	assert.Equal(t, 1, total)
 	assert.Less(t, time.Since(start), 300*time.Millisecond, "дедлайн источника должен срабатывать раньше его ответа")
 }
+
+func TestHandleSubscription_LeaderCancellationDoesNotCancelFetch(t *testing.T) {
+	started := make(chan struct{})
+	proceed := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-proceed
+		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp#node")
+	}))
+	defer upstream.Close()
+	db := testutil.NewSubscriptionRepositoryFake()
+	db.GetWithPlanAndNodesFunc = func(context.Context, string) (*database.SubscriptionFull, error) {
+		return &database.SubscriptionFull{Subscription: database.Subscription{ID: 1, Status: "active"}, Plan: database.Plan{TrafficLimit: 1 << 30}, Nodes: []database.Node{{ID: 1, Name: "src", IsActive: true, SubscriptionURL: upstream.URL + "/sub/"}}}, nil
+	}
+	svc := newTestSubSvc(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, _, _, err := HandleSubscription(ctx, db, svc, "sub-cancel", "1.2.3.4", nil, "")
+		done <- err
+	}()
+	<-started
+	cancel()
+	close(proceed)
+	require.NoError(t, <-done)
+	_, _, ok := svc.Get(subscriptionCacheKey("sub-cancel", DetectOutputFormat("", "")))
+	assert.True(t, ok, "complete shared fetch should be cached")
+}

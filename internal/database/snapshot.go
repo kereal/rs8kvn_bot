@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -59,12 +60,12 @@ func snapshotBeforeRebuild(sqlDB *sql.DB, dbPath string, current, max int) {
 
 	// #nosec G304 -- путь приходит из собственной конфигурации (PRAGMA
 	// database_list текущего соединения), а не от пользователя.
-	data, readErr := os.ReadFile(dbPath)
-	if readErr != nil {
-		logger.Warn("snapshot before rebuild migration: read database failed",
+	src, openErr := os.Open(dbPath)
+	if openErr != nil {
+		logger.Warn("snapshot before rebuild migration: open database failed",
 			zap.Int("migration", version),
 			zap.String("path", dbPath),
-			zap.Error(readErr))
+			zap.Error(openErr))
 
 		return
 	}
@@ -72,20 +73,60 @@ func snapshotBeforeRebuild(sqlDB *sql.DB, dbPath string, current, max int) {
 	snapshotPath := fmt.Sprintf("%s.pre-migration.%d.%s", dbPath,
 		version, time.Now().UTC().Format("20060102T150405Z"))
 
-	// #nosec G703 -- snapshotPath построен из того же доверенного пути БД.
-	writeErr := os.WriteFile(snapshotPath, data, 0o600)
-	if writeErr != nil {
-		logger.Warn("snapshot before rebuild migration: write snapshot failed",
+	// Временный файл в каталоге БД: os.CreateTemp создаёт его с правами
+	// 0600, а rename в пределах одной файловой системы атомарен.
+	tmp, createErr := os.CreateTemp(filepath.Dir(dbPath),
+		filepath.Base(dbPath)+".pre-migration.*")
+	if createErr != nil {
+		logger.Warn("snapshot before rebuild migration: create temp file failed",
 			zap.Int("migration", version),
-			zap.String("path", snapshotPath),
-			zap.Error(writeErr))
+			zap.String("path", dbPath),
+			zap.Error(createErr))
+
+		_ = src.Close()
 
 		return
+	}
+
+	tmpPath := tmp.Name()
+	_, copyErr := io.Copy(tmp, src)
+	closeSrcErr := src.Close()
+	closeErr := tmp.Close()
+
+	if copyErr != nil || closeSrcErr != nil || closeErr != nil {
+		_ = os.Remove(tmpPath)
+		logger.Warn("snapshot before rebuild migration: copy database failed",
+			zap.Int("migration", version),
+			zap.String("path", snapshotPath),
+			zap.NamedError("copy", copyErr),
+			zap.NamedError("close_src", closeSrcErr),
+			zap.NamedError("close_tmp", closeErr))
+
+		return
+	}
+
+	// Переименовываем только после успешной записи: сбой копирования не
+	// оставляет битого снапшота по целевому пути.
+	renameErr := os.Rename(tmpPath, snapshotPath)
+	if renameErr != nil {
+		_ = os.Remove(tmpPath)
+		logger.Warn("snapshot before rebuild migration: rename snapshot failed",
+			zap.Int("migration", version),
+			zap.String("path", snapshotPath),
+			zap.Error(renameErr))
+
+		return
+	}
+
+	var size int64
+	info, statErr := os.Stat(snapshotPath)
+	if statErr == nil {
+		size = info.Size()
 	}
 
 	logger.Info("database snapshot taken before rebuild migration",
 		zap.Int("migration", version),
 		zap.String("name", rebuildMigrations[version]),
 		zap.String("path", filepath.Clean(snapshotPath)),
-		zap.Int("bytes", len(data)))
+		zap.Int64("bytes", size))
 }

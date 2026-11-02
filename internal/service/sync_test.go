@@ -2788,3 +2788,15 @@ func TestSyncService_SyncNodes_IncompleteFanoutRetriesInsteadOfParking(t *testin
 	require.NotNil(t, retryAt[0])
 	assert.True(t, retryAt[0].Before(parkedRetryAt), "узел не должен быть запаркован")
 }
+
+func TestReleaseRecoveredNodes_SkipsPreviouslyHealthyNode(t *testing.T) {
+	db := testutil.NewServiceStoreFake()
+	db.GetNodesWithParkedSyncFunc = func(context.Context, time.Time) ([]uint, error) { return []uint{7}, nil }
+	called := false
+	db.ReleaseParkedNodesOnNodeFunc = func(context.Context, uint, time.Time) (int64, error) { called = true; return 0, nil }
+	svc := NewSyncService(db, NodeClients{7: {Reader: &testutil.XUIClient{}}}, nil)
+	previous := map[uint]bool{7: true}
+	svc.nodeHealth.Store(&previous)
+	svc.releaseRecoveredNodes(context.Background())
+	assert.False(t, called)
+}

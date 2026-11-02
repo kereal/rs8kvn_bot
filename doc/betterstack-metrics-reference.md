@@ -274,16 +274,18 @@ GROUP BY time
 ORDER BY time
 ```
 
-### Histograms (percentiles)
+### Histograms (среднее за период)
 
-Для `*_seconds` histogram метрик используй **quantileMerge** для percentiles:
+Перцентили для `*_seconds` histogram метрик в Better Stack **не считаются**:
+`histogramQuantile(p)`, `quantileMerge(p)(value_quantiles)` и
+`quantilePrometheusHistogramArrayMerge(p)(bucket_quantiles)` для любого
+квантиля возвращают верхнюю границу последнего бакета (проверено на живой базе
+2026-11-02). Корректная статистика — только среднее:
 
 ```sql
 SELECT
   {{time}} AS time,
-  quantileMerge(0.50)(value_quantiles) AS "p50",
-  quantileMerge(0.95)(value_quantiles) AS "p95",
-  quantileMerge(0.99)(value_quantiles) AS "p99"
+  sumMerge(bucket_sum) / sumMerge(bucket_count) AS "Mean"
 FROM {{source}}
 WHERE dt BETWEEN {{start_time}} AND {{end_time}}
   AND name = 'payment_operation_duration_seconds'
