@@ -122,21 +122,22 @@ var (
 		[]string{"operation"},
 	)
 
-	// DBPoolWait is the cumulative number of waits for a database connection
-	// since process start (sql.DBStats.WaitCount).
-	DBPoolWait = promauto.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "db_pool_wait",
-			Help: "Cumulative number of waits for a database connection",
+	// DBPoolWaitsTotal is the cumulative number of waits for a database
+	// connection since process start (sql.DBStats.WaitCount). It only grows, so
+	// it is a counter: rate() and increase() carry the real meaning.
+	DBPoolWaitsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "db_pool_waits_total",
+			Help: "Total number of waits for a database connection",
 		},
 	)
 
-	// DBPoolWaitDurationSeconds is cumulative time spent waiting for a database
+	// DBPoolWaitSecondsTotal is cumulative time spent waiting for a database
 	// connection, in seconds (sql.DBStats.WaitDuration).
-	DBPoolWaitDurationSeconds = promauto.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "db_pool_wait_duration_seconds",
-			Help: "Cumulative time spent waiting for a database connection in seconds",
+	DBPoolWaitSecondsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "db_pool_wait_seconds_total",
+			Help: "Total time spent waiting for a database connection in seconds",
 		},
 	)
 
@@ -390,6 +391,17 @@ var (
 		},
 	)
 
+	// SubserverRequestsTotal counts subscription requests by delivered format:
+	// xray, singbox, clash. The mix is a product signal that otherwise only
+	// exists inside User-Agent access logs.
+	SubserverRequestsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "subserver_requests_total",
+			Help: "Total subscription requests by delivered output format",
+		},
+		[]string{"format"},
+	)
+
 	// SubserverNotFoundTotal counts requests for unknown or revoked
 	// subscriptions. Removing a user leaves the link inside the client, and the
 	// client keeps polling it; the rate tracks that residue rather than errors.
@@ -489,6 +501,9 @@ var TrafficNotificationRunsTotal = promauto.NewCounter(
 // workerResults — фиксированный набор исходов прогонов воркеров.
 var workerResults = []string{"ok", "degraded"}
 
+// outputFormats — фиксированный набор форматов выдачи подписки.
+var outputFormats = []string{"xray", "singbox", "clash"}
+
 // init публикует нулевые серии известных label-наборов. Без этого Vec-метрика
 // до первого события не экспортируется вовсе, и «воркер не падал ни разу»
 // неотличимо от «воркер не запускается»: rate() по отсутствующей серии — пусто,
@@ -497,6 +512,10 @@ func init() {
 	for _, result := range workerResults {
 		SubscriptionSyncTotal.WithLabelValues(result)
 		SubscriptionExpireTotal.WithLabelValues(result)
+	}
+
+	for _, format := range outputFormats {
+		SubserverRequestsTotal.WithLabelValues(format)
 	}
 }
 

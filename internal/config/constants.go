@@ -58,7 +58,7 @@ const (
 
 	// MaxOpenConns is the maximum number of open connections. SQLite in WAL
 	// mode multiplexes many concurrent readers over one writer, so a small pool
-	// is safe and avoids connection-pool waits (db_pool_wait) seen with 1.
+	// is safe and avoids connection-pool waits (db_pool_waits_total) seen with 1.
 	MaxOpenConns = 4
 
 	// MaxIdleConnsDB is the maximum number of idle connections

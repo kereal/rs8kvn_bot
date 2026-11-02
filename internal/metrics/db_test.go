@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -107,13 +108,19 @@ func TestCollectDBPoolMetrics_ExportsWaitStats(t *testing.T) {
 	db := openTestDB(t)
 	defer closeDB(t, db)
 
-	CollectDBPoolMetrics(context.Background(), db)
-
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
-	stats := sqlDB.Stats()
-	require.Equal(t, float64(stats.WaitCount), testutil.ToFloat64(DBPoolWait))
-	require.Equal(t, stats.WaitDuration.Seconds(), testutil.ToFloat64(DBPoolWaitDurationSeconds))
+
+	waitsBefore := testutil.ToFloat64(DBPoolWaitsTotal)
+	secondsBefore := testutil.ToFloat64(DBPoolWaitSecondsTotal)
+
+	CollectDBPoolMetrics(context.Background(), db)
+	CollectDBPoolMetrics(context.Background(), db)
+
+	// Приращение, а не абсолют: повторный сбор не должен удваивать счётчик.
+	assert.InDelta(t, sqlDB.Stats().WaitCount, testutil.ToFloat64(DBPoolWaitsTotal)-waitsBefore, 0.0001)
+	assert.InDelta(t, sqlDB.Stats().WaitDuration.Seconds(),
+		testutil.ToFloat64(DBPoolWaitSecondsTotal)-secondsBefore, 0.0001)
 }
 
 func openTestDB(t *testing.T) *gorm.DB {

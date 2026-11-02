@@ -114,16 +114,32 @@ func statementTable(tx *gorm.DB) string {
 	return "other"
 }
 
-// CollectDBPoolMetrics collects database connection pool statistics.
+// dbPoolWaitsObserved и dbPoolWaitSecondsObserved хранят последнее прочитанное
+// значение sql.DBStats: счётчик должен получать приращение, а не абсолют.
+// CollectDBPoolMetrics вызывается из одного горутина.
+var (
+	dbPoolWaitsObserved       float64
+	dbPoolWaitSecondsObserved float64
+)
+
+// CollectDBPoolMetrics adds the delta of the connection pool wait statistics.
+// Repeated calls are safe: the delta between calls is what gets added.
 func CollectDBPoolMetrics(_ context.Context, db *gorm.DB) {
 	sqlDB, err := db.DB()
 	if err != nil {
 		return
 	}
 
+	// sql.DBStats отдаёт накопленные значения с момента старта процесса.
+	// Абсолютных чисел здесь нет: это счётчики, и читать их надо через
+	// increase()/rate(), иначе смысл теряется.
 	stats := sqlDB.Stats()
-	DBPoolWait.Set(float64(stats.WaitCount))
-	DBPoolWaitDurationSeconds.Set(stats.WaitDuration.Seconds())
+	DBPoolWaitsTotal.Add(float64(stats.WaitCount) - dbPoolWaitsObserved)
+	dbPoolWaitsObserved = float64(stats.WaitCount)
+
+	waitSeconds := stats.WaitDuration.Seconds()
+	DBPoolWaitSecondsTotal.Add(waitSeconds - dbPoolWaitSecondsObserved)
+	dbPoolWaitSecondsObserved = waitSeconds
 }
 
 // CollectDatabaseFileSize публикует размеры файла БД и её WAL. Ошибки чтения

@@ -11,6 +11,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 
 	"go.uber.org/zap"
 )
@@ -29,6 +30,7 @@ import (
 // and cache revalidation. Analytics and last_request errors do not block delivery.
 func HandleSubscription(ctx context.Context, db interfaces.SubscriptionRepository, subSvc *Service, subID, clientIP string, requestHeaders map[string]string, formatParam string) (*SubscriptionResult, int, int, error) {
 	outFormat := DetectOutputFormat(formatParam, requestHeaders["user-agent"])
+	metrics.SubserverRequestsTotal.WithLabelValues(outFormat.String()).Inc()
 	cacheKey := subscriptionCacheKey(subID, outFormat)
 
 	// 1. Try to serve from cache first.
