@@ -1620,6 +1620,10 @@ func TestService_CleanupExpiredTrials_RecordsError(t *testing.T) {
 
 // ==================== Helper Functions ====================
 
+// parkedRetryThresholdForTest отделяет парковку от обычного бэккофф-ретрая
+// (ладдер не превышает 60 минут).
+const parkedRetryThresholdForTest = 61 * time.Minute
+
 func newTestService(t *testing.T) *Service {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -1675,4 +1679,66 @@ func createTestSubscription(t *testing.T, svc *Service, telegramID int64, userna
 	require.NoError(t, svc.CreateSubscription(context.Background(), prepareForCreate(t, svc, sub), ""))
 
 	return sub
+}
+
+// Тест поведения: парковка биндинга (retry_at в далёком будущем) видна как
+// «запаркованная» и снимается освобождением ноды; обычный бэккофф-ретрай
+// (< 61 минуты) парковкой не считается.
+func TestSubscriptionNodeParking(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	planID := testFreePlanID(t, svc)
+	node := &Node{Name: "park-node", IsActive: true, Host: "http://p", APIToken: "t", InboundIDs: `[1]`}
+	require.NoError(t, svc.GetDB().WithContext(ctx).Create(node).Error)
+
+	sub := &Subscription{
+		TelegramID:     4242,
+		Username:       "parkuser",
+		ClientID:       "c-park",
+		SubscriptionID: "s-park",
+		Status:         "active",
+		PlanID:         planID,
+		ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+	}
+	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+
+	parkedAt := time.Date(9999, 12, 31, 23, 59, 0, 0, time.UTC)
+	parkedErr := "inbound not found: [2]"
+	retrySoon := time.Now().UTC().Add(30 * time.Minute)
+
+	require.NoError(t, svc.CreateSubscriptionNode(ctx, &SubscriptionNode{SubscriptionID: sub.ID, NodeID: node.ID, Status: SyncStatusPendingAdd}))
+	require.NoError(t, svc.UpdateRetry(ctx, sub.ID, node.ID, 3, &parkedAt, &parkedErr))
+
+	parkedAfter := time.Now().UTC().Add(parkedRetryThresholdForTest)
+
+	nodeIDs, err := svc.GetNodesWithParkedSync(ctx, parkedAfter)
+	require.NoError(t, err)
+	assert.Equal(t, []uint{node.ID}, nodeIDs)
+
+	parked, err := svc.CountParkedSubscriptionNodes(ctx, parkedAfter)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), parked)
+
+	counts, err := svc.CountSubscriptionNodesByStatus(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), counts[string(SyncStatusPendingAdd)])
+
+	released, err := svc.ReleaseParkedNodesOnNode(ctx, node.ID, parkedAfter)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), released)
+
+	rows, err := svc.GetBySubscriptionID(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Zero(t, rows[0].RetryCount)
+	assert.Nil(t, rows[0].RetryAt)
+	assert.Nil(t, rows[0].LastError)
+
+	// Обычный бэккофф-ретрай парковкой не считается и освобождением не снимается.
+	require.NoError(t, svc.UpdateRetry(ctx, sub.ID, node.ID, 1, &retrySoon, &parkedErr))
+
+	nodeIDs, err = svc.GetNodesWithParkedSync(ctx, parkedAfter)
+	require.NoError(t, err)
+	assert.Empty(t, nodeIDs, "ретрай в пределах ладдера не должен считаться парковкой")
 }

@@ -473,14 +473,18 @@ type ServiceStoreFake struct {
 	GetPaidOrdersWithoutProviderFeeFunc         func(ctx context.Context, limit int) ([]database.Order, error)
 	GetPendingBySubscriptionIDFunc              func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
 	GetPendingSyncFunc                          func(ctx context.Context) ([]database.SubscriptionNode, error)
+	GetNodesWithParkedSyncFunc                  func(ctx context.Context, parkedAfter time.Time) ([]uint, error)
 	GetPlanByIDFunc                             func(ctx context.Context, planID uint) (*database.Plan, error)
 	GetPlanByNameFunc                           func(ctx context.Context, name string) (*database.Plan, error)
 	GetProductByIDFunc                          func(ctx context.Context, id uint) (*database.Product, error)
 	GetTrialSubscriptionBySubIDFunc             func(ctx context.Context, subscriptionID string) (*database.Subscription, error)
 	InsertAuditLogFunc                          func(ctx context.Context, e *database.AuditLog) error
+	CountSubscriptionNodesByStatusFunc          func(ctx context.Context) (map[string]int64, error)
+	CountParkedSubscriptionNodesFunc            func(ctx context.Context, parkedAfter time.Time) (int64, error)
 	MarkActiveNodesPendingUpdateFunc            func(ctx context.Context, subID uint, targetNodeIDs []uint) error
 	MarkPaymentCreationUncertainFunc            func(ctx context.Context, orderID uint, uncertain bool) (bool, error)
 	ReleaseReminderFunc                         func(ctx context.Context, id uint, bit int, expiresAt time.Time) error
+	ReleaseParkedNodesOnNodeFunc                func(ctx context.Context, nodeID uint, parkedAfter time.Time) (int64, error)
 	ReleaseTrafficReminderFunc                  func(ctx context.Context, id uint, bit int) error
 	SaveOrderPaymentAmountsFunc                 func(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error
 	SavePaymentDetailsFunc                      func(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
@@ -1042,6 +1046,40 @@ func (m *ServiceStoreFake) GetPendingSync(ctx context.Context) ([]database.Subsc
 	}
 
 	return nil, nil
+}
+
+func (m *ServiceStoreFake) GetNodesWithParkedSync(ctx context.Context, parkedAfter time.Time) ([]uint, error) {
+	if m.GetNodesWithParkedSyncFunc != nil {
+		return m.GetNodesWithParkedSyncFunc(ctx, parkedAfter)
+	}
+
+	return nil, nil
+}
+
+func (m *ServiceStoreFake) ReleaseParkedNodesOnNode(
+	ctx context.Context, nodeID uint, parkedAfter time.Time,
+) (int64, error) {
+	if m.ReleaseParkedNodesOnNodeFunc != nil {
+		return m.ReleaseParkedNodesOnNodeFunc(ctx, nodeID, parkedAfter)
+	}
+
+	return 0, nil
+}
+
+func (m *ServiceStoreFake) CountSubscriptionNodesByStatus(ctx context.Context) (map[string]int64, error) {
+	if m.CountSubscriptionNodesByStatusFunc != nil {
+		return m.CountSubscriptionNodesByStatusFunc(ctx)
+	}
+
+	return map[string]int64{}, nil
+}
+
+func (m *ServiceStoreFake) CountParkedSubscriptionNodes(ctx context.Context, parkedAfter time.Time) (int64, error) {
+	if m.CountParkedSubscriptionNodesFunc != nil {
+		return m.CountParkedSubscriptionNodesFunc(ctx, parkedAfter)
+	}
+
+	return 0, nil
 }
 
 func (m *ServiceStoreFake) GetPlanByID(ctx context.Context, planID uint) (*database.Plan, error) {

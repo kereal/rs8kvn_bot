@@ -12,6 +12,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
@@ -962,6 +963,12 @@ func CalculateRetryAt(retryCount int) time.Time {
 func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 	logger.Debug("sync pending nodes started")
 
+	// Парковка терминальна, но не вечна: нода, которая снова отвечает,
+	// освобождает свои запаркованные биндинги до выборки pending, чтобы они
+	// попали в этот же проход.
+	s.releaseRecoveredNodes(ctx)
+	s.refreshSyncGauges(ctx)
+
 	pendingNodes, err := s.db.GetPendingSync(ctx)
 	if err != nil {
 		return fmt.Errorf("sync pending nodes: %w", err)
@@ -1081,6 +1088,96 @@ func (s *SyncService) SyncPendingNodes(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// parkedRetryThreshold отделяет парковку (retry_at в далёком будущем) от
+// обычной ступени ладдера, которая не превышает 60 минут.
+const parkedRetryThreshold = 61 * time.Minute
+
+// syncStatusGauges перечисляет статусы, для которых gauge выставляется всегда:
+// иначе исчезнувший статус оставлял бы в /metrics устаревшее значение.
+var syncStatusGauges = []database.SyncStatus{
+	database.SyncStatusActive,
+	database.SyncStatusPendingAdd,
+	database.SyncStatusPendingRemove,
+	database.SyncStatusPendingUpdate,
+}
+
+// releaseRecoveredNodes снимает парковку с биндингов тех нод, которые снова
+// отвечают на Ping. Пока панель отказывает, повторять бессмысленно — поэтому
+// парковка ставится сразу; но после восстановления панели или ротации токена
+// повод повторять уже есть. Без этого запаркованные подписки оставались без
+// провизии до смены плана или оплаты, то есть навсегда.
+func (s *SyncService) releaseRecoveredNodes(ctx context.Context) {
+	parkedAfter := time.Now().UTC().Add(parkedRetryThreshold)
+
+	nodeIDs, err := s.db.GetNodesWithParkedSync(ctx, parkedAfter)
+	if err != nil {
+		logger.Warn("sync: failed to list nodes with parked bindings", zap.Error(err))
+
+		return
+	}
+
+	for _, nodeID := range nodeIDs {
+		if ctx.Err() != nil {
+			return
+		}
+
+		reader, ok := s.clients.Reader(nodeID)
+		if !ok {
+			continue
+		}
+
+		pingErr := reader.Ping(ctx)
+		if pingErr != nil {
+			logger.Debug("sync: node still unavailable, parked bindings kept",
+				zap.Uint("node_id", nodeID),
+				zap.Error(pingErr))
+
+			continue
+		}
+
+		released, relErr := s.db.ReleaseParkedNodesOnNode(ctx, nodeID, parkedAfter)
+		if relErr != nil {
+			logger.Warn("sync: failed to release parked bindings",
+				zap.Uint("node_id", nodeID),
+				zap.Error(relErr))
+
+			continue
+		}
+
+		if released > 0 {
+			logger.Info("sync: released parked bindings after node recovery",
+				zap.Uint("node_id", nodeID),
+				zap.Int64("released", released))
+		}
+	}
+}
+
+// refreshSyncGauges обновляет метрики состояния биндингов: без них парковка и
+// рост pending видны только по логам.
+func (s *SyncService) refreshSyncGauges(ctx context.Context) {
+	counts, err := s.db.CountSubscriptionNodesByStatus(ctx)
+	if err != nil {
+		logger.Warn("sync: failed to count subscription nodes by status", zap.Error(err))
+
+		return
+	}
+
+	for _, status := range syncStatusGauges {
+		metrics.SubscriptionNodes.WithLabelValues(string(status)).Set(float64(counts[string(status)]))
+	}
+
+	parkedAfter := time.Now().UTC().Add(parkedRetryThreshold)
+
+	parked, err := s.db.CountParkedSubscriptionNodes(ctx, parkedAfter)
+	if err != nil {
+		logger.Warn("sync: failed to count parked bindings", zap.Error(err))
+
+		return
+	}
+
+	metrics.SubscriptionNodesParked.Set(float64(parked))
 }
 
 // ApplyPlanToSubscription loads the subscription, marks its active nodes as

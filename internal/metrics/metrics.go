@@ -212,6 +212,25 @@ var (
 		},
 	)
 
+	// SubscriptionNodes tracks subscription node bindings by sync status.
+	SubscriptionNodes = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "subscription_nodes",
+			Help: "Subscription node bindings by sync status",
+		},
+		[]string{"status"},
+	)
+
+	// SubscriptionNodesParked counts bindings parked after the retry ladder was
+	// exhausted or the panel refused the request. Non-zero means users on those
+	// nodes are not provisioned until the node answers again.
+	SubscriptionNodesParked = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "subscription_nodes_parked",
+			Help: "Subscription node bindings parked after exhausted retries or a panel refusal",
+		},
+	)
+
 	// WorkerRestartsTotal counts background worker restarts after a recovered panic.
 	WorkerRestartsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{

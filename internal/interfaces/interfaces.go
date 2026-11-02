@@ -317,6 +317,13 @@ type SyncStore interface {
 	UpsertSubscriptionNode(ctx context.Context, sn *database.SubscriptionNode) error
 	MarkActiveNodesPendingUpdate(ctx context.Context, subID uint, targetNodeIDs []uint) error
 	UpdateRetry(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error
+	// Parked-node recovery: парковка снимается, когда нода снова отвечает.
+	GetNodesWithParkedSync(ctx context.Context, parkedAfter time.Time) ([]uint, error)
+	ReleaseParkedNodesOnNode(ctx context.Context, nodeID uint, parkedAfter time.Time) (int64, error)
+	// CountSubscriptionNodesByStatus и CountParkedSubscriptionNodes питают
+	// gauge-метрики состояния синка.
+	CountSubscriptionNodesByStatus(ctx context.Context) (map[string]int64, error)
+	CountParkedSubscriptionNodes(ctx context.Context, parkedAfter time.Time) (int64, error)
 }
 
 // OrderStore is the persistence seam of service.OrderService: order lifecycle,

@@ -3040,3 +3040,69 @@ func TestApplyPlanToSubscriptionInTx_NilTransaction(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil transaction")
 }
+
+// Тест поведения: нода, которая снова отвечает на Ping, освобождает свои
+// запаркованные биндинги — иначе подписка остаётся без провизии навсегда.
+func TestSyncPendingNodes_ReleasesParkedBindingsWhenNodeRecovers(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.NewServiceStoreFake()
+
+	var releasedNodeID uint
+
+	db.GetNodesWithParkedSyncFunc = func(context.Context, time.Time) ([]uint, error) {
+		return []uint{7}, nil
+	}
+	db.ReleaseParkedNodesOnNodeFunc = func(_ context.Context, nodeID uint, _ time.Time) (int64, error) {
+		releasedNodeID = nodeID
+
+		return 3, nil
+	}
+	db.CountSubscriptionNodesByStatusFunc = func(context.Context) (map[string]int64, error) {
+		return map[string]int64{}, nil
+	}
+	db.CountParkedSubscriptionNodesFunc = func(context.Context, time.Time) (int64, error) {
+		return 0, nil
+	}
+
+	node := database.Node{ID: 7, Name: "recovered", IsActive: true, Host: "http://n7", APIToken: "t"}
+	reader := &testutil.XUIClient{PingFunc: func(context.Context) error { return nil }}
+
+	svc := NewSyncService(db, NodeClients{7: {Reader: reader}}, []database.Node{node})
+
+	require.NoError(t, svc.SyncPendingNodes(context.Background()))
+	assert.Equal(t, uint(7), releasedNodeID, "запаркованные биндинги должны быть освобождены после успешного Ping")
+}
+
+// Тест поведения: пока панель не отвечает, парковка сохраняется — повторять
+// отказ бессмысленно, а освобождение вернуло бы бесконечный цикл ретраев.
+func TestSyncPendingNodes_KeepsParkedBindingsWhenNodeStillDown(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.NewServiceStoreFake()
+
+	var releaseCalled bool
+
+	db.GetNodesWithParkedSyncFunc = func(context.Context, time.Time) ([]uint, error) {
+		return []uint{7}, nil
+	}
+	db.ReleaseParkedNodesOnNodeFunc = func(context.Context, uint, time.Time) (int64, error) {
+		releaseCalled = true
+
+		return 0, nil
+	}
+	db.CountSubscriptionNodesByStatusFunc = func(context.Context) (map[string]int64, error) {
+		return map[string]int64{}, nil
+	}
+	db.CountParkedSubscriptionNodesFunc = func(context.Context, time.Time) (int64, error) {
+		return 1, nil
+	}
+
+	node := database.Node{ID: 7, Name: "down", IsActive: true, Host: "http://n7", APIToken: "t"}
+	reader := &testutil.XUIClient{PingFunc: func(context.Context) error { return errors.New("connection refused") }}
+
+	svc := NewSyncService(db, NodeClients{7: {Reader: reader}}, []database.Node{node})
+
+	require.NoError(t, svc.SyncPendingNodes(context.Background()))
+	assert.False(t, releaseCalled, "пока Ping падает, биндинги не освобождаются")
+}
