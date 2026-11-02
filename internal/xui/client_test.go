@@ -1401,6 +1401,100 @@ func TestPanelContract_Get_ObtainRecordNotFound(t *testing.T) {
 	assert.ErrorIs(t, getErr, ErrClientNotFound)
 }
 
+func TestPanelContract_Get_NullObjIsClientNotFound(t *testing.T) {
+	t.Parallel()
+
+	// Панель отдаёт success=true с obj=null, когда карточки нет: это
+	// ErrClientNotFound (как и у traffic/{email}), иначе sync считает пропажу
+	// клиента инфраструктурным сбоем и не уходит в pending_add.
+	server := newPanelFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/panel/api/clients/get/ghost@example.com", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"msg":"","obj":null}`)
+	})
+
+	client, err := NewClient(server.URL, testAPIToken)
+	require.NoError(t, err)
+	defer client.Close()
+
+	record, getErr := client.GetClientByEmail(context.Background(), "ghost@example.com")
+	require.Error(t, getErr)
+	assert.Nil(t, record)
+	assert.ErrorIs(t, getErr, ErrClientNotFound)
+}
+
+func TestPanelContract_Update_ScopedPerFlowGroup(t *testing.T) {
+	t.Parallel()
+
+	// Панель v3.11 применяет update ко всем привязанным инбаундам, если не
+	// передан ?inboundIds=. Инбаунд 1 (tcp → XTLS Vision) и инбаунд 2 (ws → без
+	// flow) попадают в разные flow-группы; каждый вызов обязан нести свой
+	// фильтр, иначе вызов группы 2 (flow="") стирает Vision на инбаунде 1.
+	type panelCall struct {
+		inboundIDs string
+		flow       string
+	}
+
+	calls := make(chan panelCall, 4)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/panel/api/inbounds/get/", func(w http.ResponseWriter, r *http.Request) {
+		network := "tcp"
+		if strings.HasSuffix(r.URL.Path, "/2") {
+			network = "ws"
+		}
+
+		stream, marshalErr := json.Marshal(map[string]string{"network": network})
+		require.NoError(t, marshalErr)
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"success":true,"obj":{"id":1,"streamSettings":%q}}`, string(stream))
+	})
+	mux.HandleFunc("/panel/api/clients/update/", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(body, &payload))
+
+		flow, _ := payload["flow"].(string)
+		calls <- panelCall{inboundIDs: r.URL.Query().Get("inboundIds"), flow: flow}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client, err := NewClient(server.URL, testAPIToken)
+	require.NoError(t, err)
+	defer client.Close()
+
+	err = client.UpdateClient(context.Background(), ClientRequest{
+		InboundIDs:   []int{1, 2},
+		CurrentEmail: "user@example.com",
+		Email:        "user@example.com",
+		ClientID:     "uuid",
+		SubID:        "sub",
+		TrafficBytes: 1 << 30,
+		ExpiryTime:   time.Now().Add(24 * time.Hour),
+		ResetDays:    30,
+	})
+	require.NoError(t, err)
+
+	byInbound := map[string]string{}
+
+	for range 2 {
+		call := <-calls
+		byInbound[call.inboundIDs] = call.flow
+	}
+
+	assert.Equal(t, map[string]string{
+		"1": "xtls-rprx-vision",
+		"2": "",
+	}, byInbound, "each update call must be scoped to its own flow group")
+}
+
 func TestPanelContract_Add_AlreadyInUse(t *testing.T) {
 	t.Parallel()
 

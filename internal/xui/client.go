@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -631,7 +632,14 @@ func (c *Client) doUpdateClient(ctx context.Context, inboundIDs []int, req Clien
 		clientObj["enable"] = *req.Enable
 	}
 
-	updateURL := fmt.Sprintf("%s/panel/api/clients/update/%s", c.host, url.PathEscape(req.CurrentEmail))
+	// Панель v3.11 применяет update ко ВСЕМ привязанным инбаундам, если не
+	// указан ?inboundIds= (controller/client.go: parseInboundIdsQuery →
+	// ClientService.UpdateByEmail(..., inboundFilter)). Без фильтра каждый вызов
+	// flow-группы переписывал бы клиента во всех инбаундах и накладывал свой
+	// flow на чужие группы: вызов группы с flow="" стирал бы Vision с
+	// reality-инбаунда. См. doc/architecture.md, «Контракт API панели 3x-ui» §4.5.
+	updateURL := fmt.Sprintf("%s/panel/api/clients/update/%s?inboundIds=%s",
+		c.host, url.PathEscape(req.CurrentEmail), inboundIDsQuery(inboundIDs))
 
 	respBody, err := c.doHTTPRequest(ctx, http.MethodPost, updateURL, func() (io.Reader, error) {
 		return marshalJSON(clientObj)
@@ -768,8 +776,12 @@ func (c *Client) doGetClientByEmail(ctx context.Context, email string) (*ClientR
 		return nil, err
 	}
 
+	// Тот же класс ответа, что и у traffic/{email}: success=true с пустым obj
+	// означает «клиента нет», а не сбой разбора. Без sentinel'а вызывающий
+	// считает это инфраструктурной ошибкой и не переводит pending_update в
+	// pending_add.
 	if isNullObj(obj) {
-		return nil, fmt.Errorf("get client %s: unexpected empty obj", email)
+		return nil, fmt.Errorf("%w: get client %s returned empty obj", ErrClientNotFound, email)
 	}
 
 	var record ClientRecord
@@ -874,6 +886,22 @@ func (c *Client) Close() error {
 	}
 
 	return nil
+}
+
+// inboundIDsQuery собирает значение ?inboundIds= для панели: список ID через
+// запятую, как его разбирает parseInboundIdsQuery.
+func inboundIDsQuery(ids []int) string {
+	var b strings.Builder
+
+	for i, id := range ids {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+
+		b.WriteString(strconv.Itoa(id))
+	}
+
+	return b.String()
 }
 
 // getExpiresAtMillis конвертирует время истечения в миллисекунды Unix.
