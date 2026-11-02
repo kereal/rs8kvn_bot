@@ -451,6 +451,7 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 
 		runSupervised(ctx, "Subscription sync worker", func(ctx context.Context) {
 			syncWorker := scheduler.NewSubscriptionSyncWorker(syncSvc, orderSvc)
+			syncWorker.SetSubscriptionService(subService)
 			syncWorker.Run(ctx)
 		})
 	}()

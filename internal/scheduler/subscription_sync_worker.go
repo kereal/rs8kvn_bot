@@ -18,6 +18,7 @@ import (
 type SubscriptionSyncWorker struct {
 	syncSvc  *service.SyncService
 	orderSvc *service.OrderService
+	subSvc   *service.SubscriptionService
 	db       interfaces.AuditLogWriter
 	// lastReconcile — время последней реконсиляции зависших pending-заказов:
 	// сверка с провайдером идёт раз в час, а не на каждом 5-минутном тике.
@@ -37,6 +38,14 @@ func NewSubscriptionSyncWorker(syncSvc *service.SyncService, orderSvc ...*servic
 	}
 
 	return worker
+}
+
+// SetSubscriptionService подключает сервис подписок для периодического
+// обновления гейджей. Гейджи обновлялись только на мутациях, поэтому после
+// рестарта показывали ноль до первого изменения, а в тихое время — прошлые
+// сутки. Опционально: без сервиса воркер работает как раньше.
+func (w *SubscriptionSyncWorker) SetSubscriptionService(svc *service.SubscriptionService) {
+	w.subSvc = svc
 }
 
 // SetAuditDB подключает хранилище журнала аудита. Опционально: без него
@@ -67,6 +76,12 @@ func (w *SubscriptionSyncWorker) Run(ctx context.Context) {
 
 func (w *SubscriptionSyncWorker) process(ctx context.Context) {
 	start := time.Now()
+
+	// Гейджи состояния подписок обновляются в том же проходе: отдельный
+	// горутин с таймером здесь ничего не даёт, кроме лишнего состояния.
+	if w.subSvc != nil {
+		w.subSvc.RefreshActiveSubscriptionsMetric(ctx)
+	}
 
 	err := w.syncSvc.SyncPendingNodes(ctx)
 	if err != nil {

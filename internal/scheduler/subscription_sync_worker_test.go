@@ -2,8 +2,10 @@ package scheduler
 
 import (
 	"context"
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"os"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -123,4 +126,22 @@ func TestSubscriptionSyncWorker_ReconcileRunsHourly(t *testing.T) {
 	worker.lastReconcile = time.Now().Add(-2 * time.Hour)
 	worker.process(context.Background())
 	assert.Equal(t, 2, calls, "после часового интервала сверка возобновляется")
+}
+
+// Поведение: гейджи подписок обновляются прогоном воркера, а не только
+// мутациями — иначе после рестарта они показывают ноль до первого изменения.
+func TestSyncWorker_RefreshesSubscriptionGauges(t *testing.T) {
+	db := testutil.NewSubscriptionRepositoryFake()
+	db.CountActiveSubscriptionsFunc = func(context.Context) (int64, error) { return 42, nil }
+
+	cfg := &config.Config{}
+	subSvc := service.NewSubscriptionService(db, nil, nil, cfg)
+	syncSvc := service.NewSyncService(db, nil, nil)
+
+	worker := NewSubscriptionSyncWorker(syncSvc)
+	worker.SetSubscriptionService(subSvc)
+	worker.process(context.Background())
+
+	assert.Equal(t, 42.0, promtestutil.ToFloat64(metrics.ActiveSubscriptions),
+		"прогон воркера должен обновлять гейдж активных подписок")
 }
