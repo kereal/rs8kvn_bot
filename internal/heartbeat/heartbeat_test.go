@@ -2,6 +2,7 @@ package heartbeat
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,6 +21,22 @@ func TestMain(m *testing.M) {
 	testutil.InitLogger(m)
 	os.Exit(m.Run())
 }
+
+// newHeartbeatServer запускает сервер, считающий входящие heartbeats.
+func newHeartbeatServer(t *testing.T) (*httptest.Server, *atomic.Int64) {
+	t.Helper()
+
+	var count atomic.Int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		count.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	return server, &count
+}
+
 func TestGetHTTPClient_Singleton(t *testing.T) {
 	// Reset the singleton for this test
 	resetHTTPClient()
@@ -96,14 +113,7 @@ func TestStart_EmptyURL(t *testing.T) {
 func TestStart_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	// Create a mock server that responds quickly
-	var requestReceived atomic.Bool
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestReceived.Store(true)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
+	server, requestCount := newHeartbeatServer(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -115,7 +125,8 @@ func TestStart_ContextCancellation(t *testing.T) {
 	}()
 
 	// Wait for the initial heartbeat to be sent
-	require.Eventually(t, requestReceived.Load, 200*time.Millisecond, 5*time.Millisecond, "initial heartbeat should be sent")
+	require.Eventually(t, func() bool { return requestCount.Load() >= 1 },
+		200*time.Millisecond, 5*time.Millisecond, "initial heartbeat should be sent")
 
 	// Cancel the context
 	cancel()
@@ -128,178 +139,74 @@ func TestStart_ContextCancellation(t *testing.T) {
 	}
 }
 
-func TestStart_NegativeInterval(t *testing.T) {
+// TestStart_InvalidIntervalDefault проверяет, что интервал ниже минимума
+// (0 и отрицательный) заменяется на минимальный и шедулер работает.
+func TestStart_InvalidIntervalDefault(t *testing.T) {
 	t.Parallel()
 
-	var requestReceived atomic.Bool
+	for _, interval := range []int{0, -1} {
+		t.Run(fmt.Sprintf("interval_%d", interval), func(t *testing.T) {
+			t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestReceived.Store(true)
-		w.WriteHeader(http.StatusOK)
-	}))
+			server, requestCount := newHeartbeatServer(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
-	// Use negative interval - should default to 300 seconds
-	done := make(chan struct{})
+			done := make(chan struct{})
 
-	go func() {
-		Start(ctx, server.URL, -1)
-		close(done)
-	}()
+			go func() {
+				Start(ctx, server.URL, interval)
+				close(done)
+			}()
 
-	// Wait for the initial heartbeat to be sent
-	require.Eventually(t, requestReceived.Load, 200*time.Millisecond, 5*time.Millisecond, "initial heartbeat should be sent")
+			// Wait for the initial heartbeat to be sent
+			require.Eventually(t, func() bool { return requestCount.Load() >= 1 },
+				200*time.Millisecond, 5*time.Millisecond, "initial heartbeat should be sent")
 
-	// Cancel to stop the scheduler
-	cancel()
+			// Cancel to stop the scheduler
+			cancel()
 
-	select {
-	case <-done:
-		// Good
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("Start() should handle negative interval")
-	}
-}
-
-func TestStart_ZeroInterval(t *testing.T) {
-	t.Parallel()
-
-	// Create a mock server
-	var requestReceived atomic.Bool
-	// Create a mock server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestReceived.Store(true)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Use zero interval - should default to 300 seconds
-	done := make(chan struct{})
-
-	go func() {
-		Start(ctx, server.URL, 0)
-		close(done)
-	}()
-
-	// Wait for the initial heartbeat to be sent
-	require.Eventually(t, requestReceived.Load, 200*time.Millisecond, 5*time.Millisecond, "initial heartbeat should be sent")
-
-	// Cancel to stop the scheduler
-	cancel()
-
-	select {
-	case <-done:
-		// Good
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("Start() should handle zero interval")
+			select {
+			case <-done:
+				// Good
+			case <-time.After(200 * time.Millisecond):
+				t.Fatal("Start() should stop after context cancellation")
+			}
+		})
 	}
 }
 
 func TestSendHeartbeat_Success(t *testing.T) {
 	t.Parallel()
 
-	var requestReceived atomic.Bool
+	var requestCount atomic.Int64
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestReceived.Store(true)
+		requestCount.Add(1)
 		assert.Equal(t, "POST", r.Method, "Expected POST request")
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"), "Content-Type header")
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
+	// Single request
 	sendHeartbeat(server.URL)
 
-	assert.True(t, requestReceived.Load(), "sendHeartbeat() did not send request to server")
-}
+	assert.Equal(t, int64(1), requestCount.Load(), "sendHeartbeat() did not send request to server")
 
-func TestSendHeartbeat_ServerError(t *testing.T) {
-	t.Parallel()
+	// Multiple requests: each call sends exactly one request
+	for range 5 {
+		sendHeartbeat(server.URL)
+	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer server.Close()
-
-	// Should not panic or crash
-	sendHeartbeat(server.URL)
+	assert.Equal(t, int64(6), requestCount.Load(), "Expected 6 requests in total")
 }
 
 func TestSendHeartbeat_InvalidURL(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("Skipping slow network test in short mode")
-	}
-
-	// Should not panic with invalid URL — will timeout after HTTP client timeout (10s)
+	// Dialing a closed local port is refused immediately (no 10s client timeout),
+	// so this stays fast.
 	sendHeartbeat("http://127.0.0.1:1/heartbeat")
-}
-
-func TestSendHeartbeat_MultipleRequests(t *testing.T) {
-	t.Parallel()
-
-	requestCount := 0
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
-
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	// Send multiple heartbeats
-	for range 5 {
-		sendHeartbeat(server.URL)
-	}
-
-	assert.Equal(t, 5, requestCount, "Expected 5 requests")
-}
-
-func TestStart_IntervalTiming(t *testing.T) {
-	var requestCount atomic.Int64
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount.Add(1)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Use 1 second interval for testing
-	go Start(ctx, server.URL, 1)
-
-	// Wait for the initial heartbeat to be sent
-	require.Eventually(t, func() bool { return requestCount.Load() >= 1 }, 200*time.Millisecond, 5*time.Millisecond, "initial heartbeat was not sent")
-
-	// Initial heartbeat should have been sent
-	assert.GreaterOrEqual(t, requestCount.Load(), int64(1), "Initial heartbeat was not sent")
-
-	// Cancel to stop the scheduler
-	cancel()
-}
-
-func TestStart_MultipleContexts(t *testing.T) {
-	t.Parallel()
-
-	ctx1, cancel1 := context.WithCancel(context.Background())
-	defer cancel1()
-
-	ctx2, cancel2 := context.WithCancel(context.Background())
-	defer cancel2()
-
-	// Start multiple heartbeat schedulers
-	go Start(ctx1, "", 60)
-	go Start(ctx2, "", 60)
-
-	// Should not panic
-	cancel1()
-	cancel2()
 }

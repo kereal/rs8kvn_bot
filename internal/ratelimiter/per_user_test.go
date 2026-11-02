@@ -26,18 +26,6 @@ func TestPerUserRateLimiter_Allow_CreatesBucket(t *testing.T) {
 	assert.Equal(t, 1, rl.BucketCount())
 }
 
-func TestPerUserRateLimiter_Allow_DifferentUsers(t *testing.T) {
-	t.Parallel()
-
-	rl := NewPerUserRateLimiter(3, 0)
-
-	// Each user gets their own bucket
-	assert.True(t, rl.Allow(1))
-	assert.True(t, rl.Allow(2))
-	assert.True(t, rl.Allow(3))
-	assert.Equal(t, 3, rl.BucketCount())
-}
-
 func TestPerUserRateLimiter_Allow_SameUserDepletes(t *testing.T) {
 	t.Parallel()
 
@@ -53,11 +41,17 @@ func TestPerUserRateLimiter_Allow_DoesNotCrossUsers(t *testing.T) {
 
 	rl := NewPerUserRateLimiter(1, 0)
 
+	// Each user gets their own bucket
 	assert.True(t, rl.Allow(1))
+	assert.True(t, rl.Allow(2))
+	assert.True(t, rl.Allow(3))
+	assert.Equal(t, 3, rl.BucketCount())
+
+	// Users deplete independently
 	assert.False(t, rl.Allow(1)) // user 1 depleted
-	assert.True(t, rl.Allow(2))  // user 2 has own bucket
 	assert.False(t, rl.Allow(2)) // user 2 depleted
 	assert.False(t, rl.Allow(1)) // user 1 still depleted
+	assert.True(t, rl.Allow(4))  // user 4 has own bucket
 }
 
 func TestPerUserRateLimiter_Wait_Success(t *testing.T) {

@@ -13,75 +13,10 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestRegisterDBMetrics_Create(t *testing.T) {
-	db := openTestDB(t)
-	defer closeDB(t, db)
-
-	RegisterDBMetrics(db)
-
-	type TestModel struct {
-		ID  uint
-		Val string
-	}
-
-	require.NoError(t, db.AutoMigrate(&TestModel{}))
-	require.NoError(t, db.WithContext(context.Background()).Create(&TestModel{Val: "a"}).Error)
-}
-
-func TestRegisterDBMetrics_Query(t *testing.T) {
-	db := openTestDB(t)
-	defer closeDB(t, db)
-
-	RegisterDBMetrics(db)
-
-	type TestModel struct {
-		ID  uint
-		Val string
-	}
-
-	require.NoError(t, db.AutoMigrate(&TestModel{}))
-	require.NoError(t, db.Create(&TestModel{Val: "a"}).Error)
-
-	var results []TestModel
-	require.NoError(t, db.WithContext(context.Background()).Find(&results).Error)
-}
-
-func TestRegisterDBMetrics_Update(t *testing.T) {
-	db := openTestDB(t)
-	defer closeDB(t, db)
-
-	RegisterDBMetrics(db)
-
-	type TestModel struct {
-		ID  uint
-		Val string
-	}
-
-	require.NoError(t, db.AutoMigrate(&TestModel{}))
-	require.NoError(t, db.Create(&TestModel{Val: "a"}).Error)
-
-	require.NoError(t, db.WithContext(context.Background()).Model(&TestModel{}).Where("id = ?", 1).Update("val", "b").Error)
-}
-
-func TestRegisterDBMetrics_Delete(t *testing.T) {
-	db := openTestDB(t)
-	defer closeDB(t, db)
-
-	RegisterDBMetrics(db)
-
-	type TestModel struct {
-		ID  uint
-		Val string
-	}
-
-	require.NoError(t, db.AutoMigrate(&TestModel{}))
-	require.NoError(t, db.Create(&TestModel{Val: "a"}).Error)
-
-	require.NoError(t, db.WithContext(context.Background()).Delete(&TestModel{}, 1).Error)
-}
-
 // Тест поведения: метка table называет таблицу, по которой ошибся запрос —
-// иначе разбор инцидента упирается в «query error» без адреса.
+// иначе разбор инцидента упирается в «query error» без адреса. Каждая операция
+// GORM (create/query/update/delete) должна попасть в свою серию
+// operation/success/table.
 func TestRegisterDBMetrics_RecordsTableLabel(t *testing.T) {
 	db := openTestDB(t)
 	defer closeDB(t, db)
@@ -95,12 +30,38 @@ func TestRegisterDBMetrics_RecordsTableLabel(t *testing.T) {
 
 	require.NoError(t, db.AutoMigrate(&LabelModel{}))
 
-	before := testutil.ToFloat64(DBQueriesTotal.WithLabelValues("create", "success", "label_models"))
-	require.NoError(t, db.WithContext(context.Background()).Create(&LabelModel{Val: "a"}).Error)
-	after := testutil.ToFloat64(DBQueriesTotal.WithLabelValues("create", "success", "label_models"))
+	type op struct {
+		name string
+		run  func() error
+	}
 
-	if after <= before {
-		t.Fatalf("ожидалась серия create/success/label_models, до=%v после=%v", before, after)
+	ops := []op{
+		{"create", func() error {
+			return db.WithContext(context.Background()).Create(&LabelModel{Val: "a"}).Error
+		}},
+		{"query", func() error {
+			var rows []LabelModel
+			return db.WithContext(context.Background()).Find(&rows).Error
+		}},
+		{"update", func() error {
+			return db.WithContext(context.Background()).Model(&LabelModel{}).
+				Where("id = ?", 1).Update("val", "b").Error
+		}},
+		{"delete", func() error {
+			return db.WithContext(context.Background()).Delete(&LabelModel{}, 1).Error
+		}},
+	}
+
+	for _, o := range ops {
+		t.Run(o.name, func(t *testing.T) {
+			table := db.NamingStrategy.TableName("LabelModel")
+
+			before := testutil.ToFloat64(DBQueriesTotal.WithLabelValues(o.name, "success", table))
+			require.NoError(t, o.run())
+			after := testutil.ToFloat64(DBQueriesTotal.WithLabelValues(o.name, "success", table))
+
+			assert.Greater(t, after, before, "ожидалась серия %s/success/%s, до=%v после=%v", o.name, table, before, after)
+		})
 	}
 }
 
