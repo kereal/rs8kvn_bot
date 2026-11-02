@@ -154,6 +154,8 @@ func metricSamples(t *testing.T, collector prometheus.Collector) int {
 func TestMetricsEndpoint(t *testing.T) {
 	t.Parallel()
 
+	SetBuildInfo("rs8kvn_bot@test", "0000000")
+
 	handler := promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{})
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
@@ -166,6 +168,19 @@ func TestMetricsEndpoint(t *testing.T) {
 	assert.Contains(t, resp.Body.String(), "subscription_sync_total")
 	assert.Contains(t, resp.Body.String(), "subscription_expire_total")
 	assert.Contains(t, resp.Body.String(), "reconcile_orphaned_duration_seconds")
+	assert.Contains(t, resp.Body.String(), "db_pool_waits_total")
+	assert.Contains(t, resp.Body.String(), "subserver_not_found_total")
+
+	body := resp.Body.String()
+	for _, want := range []string{"app_info", "subserver_requests_total", "subscriptions_expired_total"} {
+		assert.Contains(t, body, want)
+	}
+
+	// Нулевые серии публикуются заранее: иначе «событий не было» и «метрика
+	// сломана» выглядят одинаково.
+	assert.Contains(t, body, `subscription_sync_total{result="ok"} 0`)
+	assert.Contains(t, body, `subscription_sync_total{result="degraded"} 0`)
+	assert.Contains(t, body, `subserver_requests_total{format="clash"} 0`)
 }
 
 func TestSetBuildInfoPublishesSingleSeries(t *testing.T) {
