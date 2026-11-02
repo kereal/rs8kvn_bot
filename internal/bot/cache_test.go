@@ -177,15 +177,16 @@ func TestSubscriptionCache_StartCleanup(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	// Start background cleanup
-	go cache.StartCleanup(ctx, 2*time.Millisecond)
-
-	// Add entries with short TTL
+	// Entries are added before the cleanup loop starts: с 2-миллисекундным
+	// тикером фоновая чистка могла вытеснить записи между Set и проверкой
+	// размера, и тест падал на ровном месте.
 	for i := int64(1); i <= 3; i++ {
 		cache.Set(i, &database.Subscription{TelegramID: i})
 	}
 
 	assert.Equal(t, 3, cache.Size(), "Size()")
+
+	go cache.StartCleanup(ctx, 2*time.Millisecond)
 
 	// Wait for entries to expire
 	assert.Eventually(t, func() bool {
