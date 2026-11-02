@@ -1128,7 +1128,11 @@ func (s *SyncService) releaseRecoveredNodes(ctx context.Context) {
 		return
 	}
 
+	prev := s.nodeHealth.Load()
 	for _, nodeID := range nodeIDs {
+		if prev != nil && (*prev)[nodeID] {
+			continue
+		}
 		if ctx.Err() != nil {
 			return
 		}

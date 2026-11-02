@@ -645,8 +645,12 @@ func TestHandlePaymentCallback_UnauthorizedIsReported(t *testing.T) {
 	srv.handlePaymentCallback(rec, req)
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 
+	rec = httptest.NewRecorder()
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+
 	after := promtestutil.ToFloat64(metrics.PaymentIssuesTotal.WithLabelValues("callback_unauthorized"))
-	assert.Equal(t, float64(1), after-before, "отказ по подписи должен попадать в payment_issues_total")
+	assert.Equal(t, float64(2), after-before, "отказ по подписи должен попадать в payment_issues_total")
 
 	messages := bot.GetAllSentMessages()
 	require.Len(t, messages, 1, "администратор должен получить алерт об отказе")

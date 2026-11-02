@@ -45,8 +45,10 @@ func (s *Service) GetOrderByProviderPaymentID(ctx context.Context, provider stri
 	return &order, nil
 }
 
+const stalePendingOrderLookback = 30 * 24 * time.Hour
+
 // GetStalePendingOrdersAfterID возвращает pending-заказы с истёкшим сроком
-// платёжной ссылки (payment_expires_at < before), начиная после afterID.
+// платёжной ссылки (before - 30 дней <= payment_expires_at < before), начиная после afterID.
 // Заказы с неопределённым созданием транзакции пропускаются: у провайдера
 // может быть транзакция без сохранённого id, и такой заказ нельзя ни
 // подтвердить, ни истечь автоматически.
@@ -57,7 +59,7 @@ func (s *Service) GetStalePendingOrdersAfterID(
 
 	result := s.db.WithContext(ctx).
 		Where("status = ? AND payment_creation_uncertain = ?", OrderStatusPending, false).
-		Where("payment_expires_at IS NOT NULL AND payment_expires_at < ?", before).
+		Where("payment_expires_at IS NOT NULL AND payment_expires_at >= ? AND payment_expires_at < ?", before.Add(-stalePendingOrderLookback), before).
 		Where("id > ?", afterID).
 		Order("id ASC").
 		Limit(limit).

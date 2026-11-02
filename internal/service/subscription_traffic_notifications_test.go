@@ -836,6 +836,12 @@ func TestGetWithTraffic_PanelLimitOverridesPlanDisplay(t *testing.T) {
 			wantLimit:  10,
 		},
 		{
+			name:       "sub-GiB panel total: plan stays",
+			panelTotal: gib / 2,
+			planBytes:  10 * gib,
+			wantLimit:  10,
+		},
+		{
 			name:       "panel total missing: plan stays",
 			panelTotal: 0,
 			planBytes:  10 * gib,
@@ -1189,4 +1195,22 @@ func TestProcessTrafficNotifications_AllNodesFailedSkipsSubscription(t *testing.
 	require.Equal(t, []uint{uint(database.TrafficBit90)}, *claimedBits,
 		"the next subscription must be processed normally after a skipped one")
 	require.Equal(t, 1, bot.SendCount, "the next subscription must get its 90% warning")
+}
+
+func TestProcessTrafficNotifications_PartialPreservesWarning(t *testing.T) {
+	svc, bot, db, client, claimed, messages := trafficNotifySetup(t, &xui.ClientTraffic{Up: 50, Enable: true}, 100, nil)
+	db.GetBySubscriptionIDFunc = func(context.Context, uint) ([]database.SubscriptionNode, error) {
+		return []database.SubscriptionNode{{NodeID: 1, Status: database.SyncStatusActive}, {NodeID: 2, Status: database.SyncStatusActive}}, nil
+	}
+	svc.nodes = append(svc.nodes, database.Node{ID: 2, IsActive: true, Host: "http://node2"})
+	svc.clients[2] = NodeAccess{Reader: client}
+	svc.clients[1] = NodeAccess{Reader: &testutil.XUIClient{GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) { return nil, errors.New("offline") }}}
+	released := false
+	db.ReleaseTrafficReminderFunc = func(context.Context, uint, int) error { released = true; return nil }
+	sub := &database.Subscription{ID: 1, TelegramID: 42, PlanID: 1, TrafficRemindersSent: database.TrafficBit90}
+	require.NoError(t, svc.ProcessTrafficNotifications(context.Background(), sub))
+	assert.False(t, released, "partial traffic must not clear the warning")
+	assert.Empty(t, *claimed)
+	assert.Empty(t, *messages)
+	assert.Zero(t, bot.SendCount)
 }

@@ -136,7 +136,7 @@
 
 ### Subserver
 - **Source Fetches** — `subserver_source_fetch_total{result,format}`
-- **Source fetch latency (mean)** — `subserver_source_fetch_duration_seconds{format}`
+- **Source fetch latency (mean)** — `subserver_source_fetch_duration_seconds{result}`
 - **No Items** — `subserver_no_items_total`
 - **Subscriber requests by format** — `subserver_requests_total{xray|singbox|clash}`
 - **Dead subscription requests** — `subserver_not_found_total`: клиенты, у которых остался конфиг удалённой подписки (после массовых `/del` это норма, а не сбой)

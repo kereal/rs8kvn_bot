@@ -40,6 +40,9 @@ func (g *IntervalGate) Allow(key string, now time.Time) bool {
 				delete(g.seen, k)
 			}
 		}
+		if len(g.seen) >= g.pruneAt {
+			clear(g.seen)
+		}
 	}
 
 	g.seen[key] = now

@@ -17,10 +17,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// trafficQuotaWarningNumerator and trafficQuotaWarningDenominator define the
+// trafficQuotaWarningDenominator defines the
 // fixed 90% threshold without floating-point rounding at the boundary.
 const (
-	trafficQuotaWarningNumerator   int64 = 9
 	trafficQuotaWarningDenominator int64 = 10
 	maxInt64                             = int64(^uint64(0) >> 1)
 )
@@ -84,6 +83,7 @@ func (s *SubscriptionService) processTraffic(ctx context.Context, sub *database.
 		return nil
 	}
 
+	partial := false
 	snapshots := make([]trafficSnapshot, 0, len(nodes))
 	for _, n := range nodes {
 		traffic, tErr := n.reader.GetClientTraffic(ctx, n.email)
@@ -97,6 +97,7 @@ func (s *SubscriptionService) processTraffic(ctx context.Context, sub *database.
 					zap.String("email", n.email))
 				continue
 			}
+			partial = true
 			logger.Warn("traffic notifications: GetClientTraffic failed on node; skipping node",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", n.nodeID),
@@ -104,12 +105,14 @@ func (s *SubscriptionService) processTraffic(ctx context.Context, sub *database.
 			continue
 		}
 		if traffic == nil {
+			partial = true
 			logger.Warn("traffic notifications: source returned empty traffic snapshot; skipping node",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", n.nodeID))
 			continue
 		}
 		if traffic.Up < 0 || traffic.Down < 0 {
+			partial = true
 			logger.Warn("traffic notifications: source returned negative traffic; skipping node",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", n.nodeID),
@@ -118,6 +121,7 @@ func (s *SubscriptionService) processTraffic(ctx context.Context, sub *database.
 			continue
 		}
 		if traffic.Up > maxInt64-traffic.Down {
+			partial = true
 			logger.Warn("traffic notifications: source traffic overflows int64; skipping node",
 				zap.Uint("subscription_id", sub.ID),
 				zap.Uint("node_id", n.nodeID))
@@ -145,6 +149,15 @@ func (s *SubscriptionService) processTraffic(ctx context.Context, sub *database.
 		}
 		used += snapshot.traffic.Up + snapshot.traffic.Down
 		anyEnabled = anyEnabled || snapshot.traffic.Enable
+	}
+
+	// ceil(90% of limit), computed without multiplying potentially large values.
+	warningReached := used >= limit-limit/trafficQuotaWarningDenominator
+	if partial && used < limit {
+		if sendNotifications && warningReached {
+			return s.notifyNinety(ctx, sub)
+		}
+		return nil
 	}
 
 	switch {
@@ -200,7 +213,7 @@ func (s *SubscriptionService) processTraffic(ctx context.Context, sub *database.
 			return text, tgbotapi.InlineKeyboardMarkup{}, nil
 		})
 
-	case sendNotifications && used*trafficQuotaWarningDenominator >= limit*trafficQuotaWarningNumerator:
+	case sendNotifications && warningReached:
 		// Still enabled and approaching the cap: warm the user once.
 		return s.notifyNinety(ctx, sub)
 	case sendNotifications:

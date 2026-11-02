@@ -124,6 +124,11 @@ func checkpointWAL(ctx context.Context, dbPath string) error {
 // Вызывается до переименования временного файла, чтобы испорченная копия не
 // затёрла последний хороший бэкап; исходная БД при ошибке не затрагивается.
 func verifyBackupCopy(ctx context.Context, backupPath string) error {
+	defer func() {
+		_ = os.Remove(backupPath + "-wal")
+		_ = os.Remove(backupPath + "-shm")
+	}()
+
 	err := ctx.Err()
 	if err != nil {
 		return err
@@ -363,6 +368,9 @@ func RotateBackups(dbPath string, keep int) error {
 
 	backups := make([]backupInfo, 0, len(matches))
 	for _, match := range matches {
+		if strings.HasSuffix(match, ".corrupt") {
+			continue
+		}
 		info, statErr := os.Stat(match)
 		if statErr == nil {
 			backups = append(backups, backupInfo{path: match, modTime: info.ModTime()})
@@ -435,6 +443,9 @@ func GetBackupInfo(dbPath string) ([]BackupInfo, error) {
 
 	infos := make([]BackupInfo, 0, len(matches))
 	for _, match := range matches {
+		if strings.HasSuffix(match, ".corrupt") {
+			continue
+		}
 		info, err := os.Stat(match)
 		if err != nil {
 			continue

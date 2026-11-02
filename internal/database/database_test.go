@@ -1784,7 +1784,11 @@ func TestGetStalePendingOrdersAfterID(t *testing.T) {
 	require.NoError(t, svc.GetDB().WithContext(ctx).Create(uncertainProduct).Error)
 	uncertain.ProductID = uncertainProduct.ID
 
-	for _, o := range []*Order{stale, fresh, uncertain, paid} {
+	oldProduct := &Product{PlanID: planID, Name: "old-product", DurationDays: 33, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.GetDB().WithContext(ctx).Create(oldProduct).Error)
+	old := &Order{SubscriptionID: sub.ID, ProductID: oldProduct.ID, Status: OrderStatusPending, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", CreatedAt: now, PaymentExpiresAt: ptrTime(now.Add(-stalePendingOrderLookback - time.Second)), ProviderPaymentID: "t-old"}
+
+	for _, o := range []*Order{stale, fresh, uncertain, paid, old} {
 		require.NoError(t, svc.GetDB().WithContext(ctx).Create(o).Error)
 	}
 
@@ -1794,6 +1798,17 @@ func TestGetStalePendingOrdersAfterID(t *testing.T) {
 	assert.Equal(t, stale.ID, orders[0].ID)
 
 	orders, err = svc.GetStalePendingOrdersAfterID(ctx, now, stale.ID, 10)
+	require.NoError(t, err)
+	assert.Empty(t, orders)
+
+	// The lookback boundary is inclusive; the upper bound remains exclusive.
+	require.NoError(t, svc.GetDB().Model(stale).Update("payment_expires_at", now.Add(-stalePendingOrderLookback)).Error)
+	orders, err = svc.GetStalePendingOrdersAfterID(ctx, now, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, orders, 1)
+	assert.Equal(t, stale.ID, orders[0].ID)
+	require.NoError(t, svc.GetDB().Model(stale).Update("payment_expires_at", now).Error)
+	orders, err = svc.GetStalePendingOrdersAfterID(ctx, now, 0, 10)
 	require.NoError(t, err)
 	assert.Empty(t, orders)
 

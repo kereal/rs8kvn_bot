@@ -195,8 +195,8 @@ func (s *SubscriptionService) GetWithTraffic(ctx context.Context, telegramID int
 		}
 
 		// divergence > 1% от плана (в целочисленной арифметике, без float).
-		if divergence*100 > planBytes {
-			displayLimitGB = int(float64(panelTotal) / 1024 / 1024 / 1024)
+		if panelGB := panelTotal / (1024 * 1024 * 1024); panelGB > 0 && divergence > planBytes/100 {
+			displayLimitGB = int(panelGB)
 		}
 	}
 
