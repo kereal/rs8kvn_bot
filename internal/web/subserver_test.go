@@ -319,8 +319,11 @@ func TestHandleSubscription_SourceFetchError(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
 	srv.handleSubscription(w, r)
 
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	assert.Equal(t, "Subscription not found", w.Body.String())
+	// Подписка жива, упал апстрим: 404 означал бы «вас удалили», поэтому
+	// клиенту отдаётся 503 с паузой.
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Equal(t, "Subscription sources unavailable", w.Body.String())
+	assert.Equal(t, "60", w.Header().Get("Retry-After"))
 }
 
 // TestHandleSubscription_DatabaseError_Returns500GenericBody verifies the audit #5

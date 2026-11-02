@@ -1047,9 +1047,27 @@ func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 			zap.String("client_ip", clientIP),
 			zap.Error(err))
 
-		if errors.Is(err, gorm.ErrRecordNotFound) ||
-			errors.Is(err, subserver.ErrNoSubscriptionItems) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
+			return
+		}
+
+		if errors.Is(err, subserver.ErrNoSubscriptionItems) {
+			// Нет ни одного пригодного элемента — две разные причины.
+			// Ни один источник не ответил: подписка жива, упал апстрим, и
+			// отдавать 404 значит сказать клиенту «вас удалили». Просим
+			// повторить позже.
+			if total > 0 && success == 0 {
+				response.Header().Set("Retry-After", subserverRetryAfterSeconds)
+				writeSubscriptionText(response, http.StatusServiceUnavailable, "Subscription sources unavailable")
+
+				return
+			}
+
+			// Источники ответили, но пригодных узлов нет: для клиента это
+			// то же самое, что отсутствие подписки.
+			writeSubscriptionText(response, http.StatusNotFound, "Subscription not found")
+
 			return
 		}
 
@@ -1095,6 +1113,10 @@ func (s *Server) logSubscriptionAccess(rec *statusRecorder, r *http.Request, cli
 
 // writeSubscriptionText writes a plain-text subscription response with the
 // supplied status code and a consistent content type.
+// subserverRetryAfterSeconds — пауза, которую клиент выдерживает перед
+// повторной попыткой, пока источники подписки недоступны.
+const subserverRetryAfterSeconds = "60"
+
 func writeSubscriptionText(w http.ResponseWriter, statusCode int, body string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(statusCode)
