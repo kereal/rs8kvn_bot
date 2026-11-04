@@ -1,8 +1,10 @@
 package subserver
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 
@@ -73,6 +75,21 @@ func buildXrayOutbound(cfg *serverConfig) (map[string]any, error) {
 	if cfg.Port == 0 {
 		return nil, fmt.Errorf("missing port")
 	}
+
+	err := checkTransportSecurity(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate/normalise cert pins once at the entry: the core aborts the whole
+	// profile on a malformed pinnedPeerCertSha256 (hex SHA-256 or it errors),
+	// so a broken pin must fail this node here, not every client later.
+	pins, err := normalizeCertPins(cfg.PinSHA256)
+	if err != nil {
+		return nil, fmt.Errorf("cert pin: %w", err)
+	}
+
+	cfg.PinSHA256 = pins
 
 	var outbound map[string]any
 
@@ -232,7 +249,7 @@ func buildHysteria2Xray(cfg *serverConfig) map[string]any {
 		"hysteriaSettings": map[string]any{"version": 2, "auth": password},
 		"security":         "tls",
 	}
-	tlsSettings := map[string]any{"allowInsecure": cfg.AllowInsecure}
+	tlsSettings := map[string]any{}
 	if cfg.SNI != "" {
 		tlsSettings["serverName"] = cfg.SNI
 	}
@@ -242,6 +259,7 @@ func buildHysteria2Xray(cfg *serverConfig) map[string]any {
 	if alpn := splitComma(cfg.Alpn); len(alpn) > 0 {
 		tlsSettings["alpn"] = alpn
 	}
+	applyXrayCertPins(tlsSettings, cfg)
 	streamSettings["tlsSettings"] = tlsSettings
 	if cfg.Obfs != "" {
 		streamSettings["finalmask"] = map[string]any{
@@ -310,9 +328,7 @@ func buildStreamSettings(cfg *serverConfig, protocol string) map[string]any {
 			ts["fingerprint"] = cfg.Fingerprint
 		}
 
-		if cfg.AllowInsecure {
-			ts["allowInsecure"] = true
-		}
+		applyXrayCertPins(ts, cfg)
 
 		if cfg.Alpn != "" {
 			ts["alpn"] = splitComma(cfg.Alpn)
@@ -371,18 +387,122 @@ func buildStreamSettings(cfg *serverConfig, protocol string) map[string]any {
 	return ss
 }
 
+// applyXrayCertPins renders the certificate-trust fields that replaced
+// allowInsecure in Xray-core 26.7.28. The old field is never emitted: a true
+// value makes the new core abort the WHOLE profile with a removed-feature
+// error (the only accepted replacements are pinnedPeerCertSha256 and
+// verifyPeerCertByName; both are comma-separated strings and are silently
+// ignored by cores old enough to lack them). Without pins an allowInsecure
+// node degrades to a failing handshake on that single outbound instead of
+// poisoning every client on an updated core. PinSHA256 is validated and
+// normalised by normalizeCertPins in buildXrayOutbound before this runs.
+func applyXrayCertPins(ts map[string]any, cfg *serverConfig) {
+	if cfg.PinSHA256 != "" {
+		ts["pinnedPeerCertSha256"] = cfg.PinSHA256
+	}
+
+	if cfg.Vcn != "" {
+		ts["verifyPeerCertByName"] = cfg.Vcn
+	}
+}
+
 // resolveXraySecurity determines the Xray security layer from the normalised
 // config. VLESS/Trojan carry it in Security; VMess in TLS; the rest default to none.
+// A boolean-ish TLS marker ("true"/"1" — seen in flat panel JSON, same form the
+// sing-box builder accepts) resolves to plain TLS; passing it through verbatim
+// makes Xray abort the outbound with Unknown security "true".
 func resolveXraySecurity(cfg *serverConfig) string {
-	if cfg.Security != "" {
-		return cfg.Security
+	sec := cfg.Security
+	if sec == "" {
+		sec = cfg.TLS
 	}
 
-	if cfg.TLS != "" {
-		return cfg.TLS
+	switch strings.ToLower(sec) {
+	case "true", "1":
+		return "tls"
+	case "false", "0", "":
+		return "none"
 	}
 
-	return "none"
+	return sec
+}
+
+// normalizeCertPins mirrors Xray-core's pinnedPeerCertSha256 parsing
+// (infra/conf/transport_internet.go): comma-separated values, spaces trimmed,
+// colons stripped (OpenSSL form), each decoding as hex to exactly 32 bytes —
+// anything else makes the core abort the WHOLE profile at build time. It
+// returns the canonical lowercase-hex, comma-joined form; an all-empty list
+// yields "" without error, exactly like the core skipping empty elements.
+func normalizeCertPins(pins string) (string, error) {
+	if pins == "" {
+		return "", nil
+	}
+
+	parts := strings.Split(pins, ",")
+	out := make([]string, 0, len(parts))
+
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+
+		raw, err := hex.DecodeString(strings.ReplaceAll(p, ":", ""))
+		if err != nil {
+			return "", fmt.Errorf("pin %q is not hex: %w", p, err)
+		}
+
+		if len(raw) != 32 {
+			return "", fmt.Errorf("pin %q: want 32-byte hex SHA-256, got %d bytes", p, len(raw))
+		}
+
+		out = append(out, strings.ToLower(hex.EncodeToString(raw)))
+	}
+
+	return strings.Join(out, ","), nil
+}
+
+// checkTransportSecurity quarantines plaintext VLESS/Trojan nodes before the
+// renderer emits them. Xray-core (2026+) refuses to build a vless/trojan
+// outbound whose transport security is none unless the server address is a
+// private IP or private domain, and the failure aborts the ENTIRE profile
+// ("vless without TLS or other encryption is prohibited…") — one plaintext
+// node would make every subscription unimportable on new clients. The batch
+// converter skips the offending node, so the rest of the profile survives.
+// sing-box and Mihomo still accept plaintext, so only the Xray path filters.
+func checkTransportSecurity(cfg *serverConfig) error {
+	switch strings.ToLower(cfg.Type) {
+	case "vless", "trojan":
+	default:
+		return nil
+	}
+
+	if resolveXraySecurity(cfg) != "none" || isPrivateAddress(cfg.Address) {
+		return nil
+	}
+
+	return fmt.Errorf("%s without transport security at public address %s is rejected by Xray-core", cfg.Type, cfg.Address)
+}
+
+// isPrivateAddress mirrors Xray-core's requiresTransportSecurity exemption:
+// RFC1918/loopback/link-local IPs and local/reserved domains need no TLS.
+func isPrivateAddress(addr string) bool {
+	if ip := net.ParseIP(addr); ip != nil {
+		return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
+	}
+
+	h := strings.TrimSuffix(strings.ToLower(addr), ".")
+	if h == "localhost" {
+		return true
+	}
+
+	for _, sfx := range []string{".local", ".localhost", ".internal", ".home", ".lan", ".in-addr.arpa"} {
+		if strings.HasSuffix(h, sfx) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func splitComma(s string) []string {

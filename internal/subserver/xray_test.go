@@ -98,7 +98,7 @@ func TestConvertSingleJSONToXray_VLESSWSNoTLS(t *testing.T) {
     name: SE_27
     network: ws
     port: "8880"
-    server: 162.159.156.214
+    server: 10.0.0.5
     type: vless
     uuid: 25322a43-4ef3-45cc-9e96-db44bcccd7be
     ws-opts:
@@ -272,4 +272,225 @@ func TestConvertSingleJSONToXray_Hysteria2(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(withoutObfs, &got))
 	require.NotContains(t, got["streamSettings"].(map[string]any), "finalmask")
+}
+
+// TestConvertSingleJSONToXray_NoAllowInsecure pins the Xray-core 26.7.28+
+// contract: allowInsecure must NEVER appear in a rendered outbound. The core
+// rejects a true value with a removed-feature error that aborts loading of
+// the whole profile (happ/v2rayNG popup "The feature allowInsecure has been
+// removed"), taking every node down instead of just the affected one.
+func TestConvertSingleJSONToXray_NoAllowInsecure(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"hysteria2":  `{"type":"hysteria2","address":"hy2.example","port":443,"password":"secret","sni":"front.example","allowInsecure":true}`,
+		"vless_tls":  `{"type":"vless","address":"v.example","port":443,"uuid":"aaaa","security":"tls","sni":"v.example","network":"ws","path":"/x","allowInsecure":true}`,
+		"trojan_tls": `{"type":"trojan","address":"t.example","port":443,"password":"pw","tls":"true","allowInsecure":true}`,
+	}
+
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			out, err := ConvertSingleJSONToXray(json.RawMessage(raw))
+			require.NoError(t, err)
+			assert.NotContains(t, string(out), "allowInsecure")
+		})
+	}
+}
+
+// TestConvertSingleJSONToXray_CertPins verifies the allowInsecure replacements
+// (pinnedPeerCertSha256 from pcs/pinSHA256, verifyPeerCertByName from vcn)
+// reach tlsSettings as a canonical lowercase-hex comma-separated string: pins
+// are validated exactly like Xray-core parses them (hex, 32 bytes, OpenSSL
+// colons tolerated), because a malformed value aborts the whole profile build
+// on the client.
+func TestConvertSingleJSONToXray_CertPins(t *testing.T) {
+	t.Parallel()
+
+	const (
+		pin1 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+		pin2 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+	)
+
+	t.Run("hysteria2_pinSHA256", func(t *testing.T) {
+		t.Parallel()
+
+		out, err := ConvertSingleJSONToXray(json.RawMessage(
+			`{"type":"hysteria2","address":"hy2.example","port":443,"password":"secret","sni":"front.example","allowInsecure":true,"pinSHA256":"` + pin1 + "," + pin2 + `"}`,
+		))
+		require.NoError(t, err)
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(out, &got))
+		ts := got["streamSettings"].(map[string]any)["tlsSettings"].(map[string]any)
+		assert.Equal(t, pin1+","+pin2, ts["pinnedPeerCertSha256"])
+	})
+
+	t.Run("vless_tls_pcs_vcn", func(t *testing.T) {
+		t.Parallel()
+
+		out, err := ConvertSingleJSONToXray(json.RawMessage(
+			`{"type":"vless","address":"v.example","port":443,"uuid":"aaaa","security":"tls","sni":"v.example","network":"ws","path":"/x","allowInsecure":true,"pcs":"` + pin1 + `","vcn":"v.example"}`,
+		))
+		require.NoError(t, err)
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(out, &got))
+		ts := got["streamSettings"].(map[string]any)["tlsSettings"].(map[string]any)
+		assert.Equal(t, pin1, ts["pinnedPeerCertSha256"])
+		assert.Equal(t, "v.example", ts["verifyPeerCertByName"])
+	})
+
+	t.Run("openssl_colons_and_uppercase_normalised", func(t *testing.T) {
+		t.Parallel()
+
+		out, err := ConvertSingleJSONToXray(json.RawMessage(
+			`{"type":"vless","address":"v.example","port":443,"uuid":"aaaa","security":"tls","pcs":"E3:B0:C4:42:98:FC:1C:14:9A:FB:F4:C8:99:6F:B9:24:27:AE:41:E4:64:9B:93:4C:A4:95:99:1B:78:52:B8:55"}`,
+		))
+		require.NoError(t, err)
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(out, &got))
+		ts := got["streamSettings"].(map[string]any)["tlsSettings"].(map[string]any)
+		assert.Equal(t, pin1, ts["pinnedPeerCertSha256"])
+	})
+
+	t.Run("invalid_pin_rejects_node", func(t *testing.T) {
+		t.Parallel()
+
+		// Not hex at all, and a 1-byte hash: both make the core abort the
+		// whole profile, so the node must fail here instead.
+		for _, pcs := range []string{"zz", "aabb"} {
+			_, err := ConvertSingleJSONToXray(json.RawMessage(
+				`{"type":"vless","address":"v.example","port":443,"uuid":"aaaa","security":"tls","pcs":"` + pcs + `"}`,
+			))
+			require.Error(t, err, "pcs=%q", pcs)
+		}
+	})
+}
+
+// TestConvertSingleJSONToXray_BoolTLSMarker: flat panel JSON may mark TLS as
+// "tls":"true"; it must resolve to Xray security "tls", not the literal
+// string (the core rejects Unknown security "true").
+func TestConvertSingleJSONToXray_BoolTLSMarker(t *testing.T) {
+	t.Parallel()
+
+	out, err := ConvertSingleJSONToXray(json.RawMessage(
+		`{"type":"trojan","address":"t.example","port":443,"password":"pw","tls":"true","sni":"t.example","pcs":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}`,
+	))
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(out, &got))
+	ss := got["streamSettings"].(map[string]any)
+	assert.Equal(t, "tls", ss["security"])
+	assert.Equal(t, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", ss["tlsSettings"].(map[string]any)["pinnedPeerCertSha256"])
+}
+
+// TestConvertJSONConfigsToXray_PlaintextQuarantine: plaintext vless/trojan at
+// public addresses are skipped (new Xray cores abort the whole profile on
+// them), while TLS/reality nodes and private-address plaintext nodes survive.
+func TestConvertJSONConfigsToXray_PlaintextQuarantine(t *testing.T) {
+	t.Parallel()
+
+	batch := []json.RawMessage{
+		json.RawMessage(`{"type":"vless","address":"nl4.example.sbs","port":80,"uuid":"u1","network":"ws","remark":"NL_4"}`),
+		json.RawMessage(`{"type":"trojan","address":"203.0.113.9","port":80,"password":"pw","remark":"TJ_PUB"}`),
+		json.RawMessage(`{"type":"vless","address":"10.0.0.5","port":2082,"uuid":"u2","network":"tcp","remark":"LAB"}`),
+		json.RawMessage(`{"type":"vless","address":"ru1.example.sbs","port":443,"uuid":"u3","security":"reality","pbk":"k","sid":"d1","remark":"RU_1"}`),
+	}
+
+	outs, err := ConvertJSONConfigsToXray(batch)
+	require.NoError(t, err)
+	require.Len(t, outs, 2)
+
+	var tags []string
+	for _, o := range outs {
+		var m map[string]any
+		require.NoError(t, json.Unmarshal(o, &m))
+		tags = append(tags, m["tag"].(string))
+	}
+	assert.Equal(t, []string{"LAB", "RU_1"}, tags)
+}
+
+// TestConvertSingleJSONToXray_PlaintextPublicErrors: the single-node entry
+// point surfaces the rejection instead of emitting a config new cores refuse.
+func TestConvertSingleJSONToXray_PlaintextPublicErrors(t *testing.T) {
+	t.Parallel()
+
+	_, err := ConvertSingleJSONToXray(json.RawMessage(
+		`{"type":"vless","address":"nl4.example.sbs","port":80,"uuid":"u1"}`,
+	))
+	require.ErrorContains(t, err, "without transport security")
+}
+
+// TestResolveXraySecurityMarkers: boolean-ish security markers from flat panel
+// JSON map to real values; "0"/"false"/"" mean no protection.
+func TestResolveXraySecurityMarkers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct{ in, want string }{
+		{"true", "tls"}, {"1", "tls"}, {"TRUE", "tls"},
+		{"false", "none"}, {"0", "none"}, {"", "none"},
+		{"tls", "tls"}, {"reality", "reality"},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, resolveXraySecurity(&serverConfig{Security: tt.in}), "security=%q", tt.in)
+	}
+}
+
+// TestIsPrivateAddress: localhost (bare), loopback/RFC1918 IPs and local
+// domains are exempt from the plaintext ban; public addresses are not.
+func TestIsPrivateAddress(t *testing.T) {
+	t.Parallel()
+
+	for _, addr := range []string{"localhost", "LOCALHOST.", "127.0.0.1", "::1", "10.0.0.5", "192.168.1.1", "fe80::1", "nas.local", "box.lan", "api.internal", "10.0.0.10.in-addr.arpa"} {
+		assert.True(t, isPrivateAddress(addr), "addr=%q", addr)
+	}
+
+	for _, addr := range []string{"example.com", "1.1.1.1", "8.8.8.8", "203.0.113.9", "tr5.example.sbs"} {
+		assert.False(t, isPrivateAddress(addr), "addr=%q", addr)
+	}
+}
+
+// TestNormalizeCertPins mirrors the core's parser: colons/spaces tolerated,
+// canonical lowercase hex out; malformed entries error (they would abort the
+// client's whole profile), empty entries are skipped.
+func TestNormalizeCertPins(t *testing.T) {
+	t.Parallel()
+
+	const p1 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	const p2 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+	got, err := normalizeCertPins(" E3:B0:C4:42:98:FC:1C:14:9A:FB:F4:C8:99:6F:B9:24:27:AE:41:E4:64:9B:93:4C:A4:95:99:1B:78:52:B8:55 ,, " + p2)
+	require.NoError(t, err)
+	assert.Equal(t, p1+","+p2, got)
+
+	got, err = normalizeCertPins(",,")
+	require.NoError(t, err)
+	assert.Empty(t, got)
+
+	for _, bad := range []string{"zz", "aabb", p1[:63] + "g"} {
+		_, err := normalizeCertPins(bad)
+		require.Error(t, err, "pin=%q", bad)
+	}
+}
+
+// TestConvertJSONConfigsToXray_InvalidPinSkipped: a node carrying a malformed
+// pin is quarantined (the core aborts the whole profile on such a value)
+// while the rest of the batch survives.
+func TestConvertJSONConfigsToXray_InvalidPinSkipped(t *testing.T) {
+	t.Parallel()
+
+	outs, err := ConvertJSONConfigsToXray([]json.RawMessage{
+		json.RawMessage(`{"type":"vless","address":"bad.example","port":443,"uuid":"u1","security":"tls","pcs":"aabb","remark":"BAD_PIN"}`),
+		json.RawMessage(`{"type":"vless","address":"ok.example","port":443,"uuid":"u2","security":"tls","pcs":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","remark":"OK"}`),
+	})
+	require.NoError(t, err)
+	require.Len(t, outs, 1)
+
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(outs[0], &m))
+	assert.Equal(t, "OK", m["tag"])
 }

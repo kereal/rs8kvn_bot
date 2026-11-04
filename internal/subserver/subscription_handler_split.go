@@ -841,6 +841,14 @@ func parseShareLink(link string) (*serverConfig, error) {
 	}
 	cfg.SNI, cfg.Fingerprint = q.Get("sni"), q.Get("fp")
 	cfg.PublicKey, cfg.ShortID = q.Get("pbk"), q.Get("sid")
+	// Certificate pins survive link→config→Xray re-renders: pcs is the
+	// vless/trojan spelling, pinSHA256 the hysteria2 one (same leaf hash).
+	cfg.PinSHA256 = q.Get("pinSHA256")
+	if cfg.PinSHA256 == "" {
+		cfg.PinSHA256 = q.Get("pcs")
+	}
+
+	cfg.Vcn = q.Get("vcn")
 	cfg.Network, cfg.Path = q.Get("type"), q.Get("path")
 	cfg.Host, cfg.Flow = q.Get("host"), q.Get("flow")
 	cfg.Alpn, cfg.Method = q.Get("alpn"), q.Get("method")
