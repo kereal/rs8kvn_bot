@@ -1,6 +1,7 @@
 package subserver
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -79,6 +80,16 @@ func buildXrayOutbound(cfg *serverConfig) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Validate/normalise cert pins once at the entry: the core aborts the whole
+	// profile on a malformed pinnedPeerCertSha256 (hex SHA-256 or it errors),
+	// so a broken pin must fail this node here, not every client later.
+	pins, err := normalizeCertPins(cfg.PinSHA256)
+	if err != nil {
+		return nil, fmt.Errorf("cert pin: %w", err)
+	}
+
+	cfg.PinSHA256 = pins
 
 	var outbound map[string]any
 
@@ -383,7 +394,8 @@ func buildStreamSettings(cfg *serverConfig, protocol string) map[string]any {
 // verifyPeerCertByName; both are comma-separated strings and are silently
 // ignored by cores old enough to lack them). Without pins an allowInsecure
 // node degrades to a failing handshake on that single outbound instead of
-// poisoning every client on an updated core.
+// poisoning every client on an updated core. PinSHA256 is validated and
+// normalised by normalizeCertPins in buildXrayOutbound before this runs.
 func applyXrayCertPins(ts map[string]any, cfg *serverConfig) {
 	if cfg.PinSHA256 != "" {
 		ts["pinnedPeerCertSha256"] = cfg.PinSHA256
@@ -408,11 +420,46 @@ func resolveXraySecurity(cfg *serverConfig) string {
 	switch strings.ToLower(sec) {
 	case "true", "1":
 		return "tls"
-	case "false", "":
+	case "false", "0", "":
 		return "none"
 	}
 
 	return sec
+}
+
+// normalizeCertPins mirrors Xray-core's pinnedPeerCertSha256 parsing
+// (infra/conf/transport_internet.go): comma-separated values, spaces trimmed,
+// colons stripped (OpenSSL form), each decoding as hex to exactly 32 bytes —
+// anything else makes the core abort the WHOLE profile at build time. It
+// returns the canonical lowercase-hex, comma-joined form; an all-empty list
+// yields "" without error, exactly like the core skipping empty elements.
+func normalizeCertPins(pins string) (string, error) {
+	if pins == "" {
+		return "", nil
+	}
+
+	parts := strings.Split(pins, ",")
+	out := make([]string, 0, len(parts))
+
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+
+		raw, err := hex.DecodeString(strings.ReplaceAll(p, ":", ""))
+		if err != nil {
+			return "", fmt.Errorf("pin %q is not hex: %w", p, err)
+		}
+
+		if len(raw) != 32 {
+			return "", fmt.Errorf("pin %q: want 32-byte hex SHA-256, got %d bytes", p, len(raw))
+		}
+
+		out = append(out, strings.ToLower(hex.EncodeToString(raw)))
+	}
+
+	return strings.Join(out, ","), nil
 }
 
 // checkTransportSecurity quarantines plaintext VLESS/Trojan nodes before the
@@ -445,6 +492,10 @@ func isPrivateAddress(addr string) bool {
 	}
 
 	h := strings.TrimSuffix(strings.ToLower(addr), ".")
+	if h == "localhost" {
+		return true
+	}
+
 	for _, sfx := range []string{".local", ".localhost", ".internal", ".home", ".lan", ".in-addr.arpa"} {
 		if strings.HasSuffix(h, sfx) {
 			return true

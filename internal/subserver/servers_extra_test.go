@@ -438,3 +438,27 @@ func TestToServerConfig_PcsAlias(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "bb", cfg.PinSHA256)
 }
+
+// TestConvertSingleJSONToLink_Trojan_PcsVcn: trojan links carry pcs/vcn like
+// vless ones (see TestConvertSingleJSONToLink_VLESS_PcsVcn).
+func TestConvertSingleJSONToLink_Trojan_PcsVcn(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{
+		"type": "trojan",
+		"address": "tj.example.com",
+		"port": 443,
+		"password": "pw",
+		"security": "tls",
+		"sni": "tj.example.com",
+		"pcs": "aabb",
+		"vcn": "tj.example.com",
+		"remark": "TJ-Pin"
+	}`)
+
+	link, err := ConvertSingleJSONToLink(raw)
+	require.NoError(t, err)
+	assert.Contains(t, link, "pcs=aabb")
+	assert.Contains(t, link, "vcn=tj.example.com")
+	assert.NotContains(t, link, "allowInsecure")
+}
