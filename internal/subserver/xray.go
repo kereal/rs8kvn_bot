@@ -232,7 +232,7 @@ func buildHysteria2Xray(cfg *serverConfig) map[string]any {
 		"hysteriaSettings": map[string]any{"version": 2, "auth": password},
 		"security":         "tls",
 	}
-	tlsSettings := map[string]any{"allowInsecure": cfg.AllowInsecure}
+	tlsSettings := map[string]any{}
 	if cfg.SNI != "" {
 		tlsSettings["serverName"] = cfg.SNI
 	}
@@ -242,6 +242,7 @@ func buildHysteria2Xray(cfg *serverConfig) map[string]any {
 	if alpn := splitComma(cfg.Alpn); len(alpn) > 0 {
 		tlsSettings["alpn"] = alpn
 	}
+	applyXrayCertPins(tlsSettings, cfg)
 	streamSettings["tlsSettings"] = tlsSettings
 	if cfg.Obfs != "" {
 		streamSettings["finalmask"] = map[string]any{
@@ -310,9 +311,7 @@ func buildStreamSettings(cfg *serverConfig, protocol string) map[string]any {
 			ts["fingerprint"] = cfg.Fingerprint
 		}
 
-		if cfg.AllowInsecure {
-			ts["allowInsecure"] = true
-		}
+		applyXrayCertPins(ts, cfg)
 
 		if cfg.Alpn != "" {
 			ts["alpn"] = splitComma(cfg.Alpn)
@@ -371,18 +370,43 @@ func buildStreamSettings(cfg *serverConfig, protocol string) map[string]any {
 	return ss
 }
 
+// applyXrayCertPins renders the certificate-trust fields that replaced
+// allowInsecure in Xray-core 26.7.28. The old field is never emitted: a true
+// value makes the new core abort the WHOLE profile with a removed-feature
+// error (the only accepted replacements are pinnedPeerCertSha256 and
+// verifyPeerCertByName; both are comma-separated strings and are silently
+// ignored by cores old enough to lack them). Without pins an allowInsecure
+// node degrades to a failing handshake on that single outbound instead of
+// poisoning every client on an updated core.
+func applyXrayCertPins(ts map[string]any, cfg *serverConfig) {
+	if cfg.PinSHA256 != "" {
+		ts["pinnedPeerCertSha256"] = cfg.PinSHA256
+	}
+
+	if cfg.Vcn != "" {
+		ts["verifyPeerCertByName"] = cfg.Vcn
+	}
+}
+
 // resolveXraySecurity determines the Xray security layer from the normalised
 // config. VLESS/Trojan carry it in Security; VMess in TLS; the rest default to none.
+// A boolean-ish TLS marker ("true"/"1" — seen in flat panel JSON, same form the
+// sing-box builder accepts) resolves to plain TLS; passing it through verbatim
+// makes Xray abort the outbound with Unknown security "true".
 func resolveXraySecurity(cfg *serverConfig) string {
-	if cfg.Security != "" {
-		return cfg.Security
+	sec := cfg.Security
+	if sec == "" {
+		sec = cfg.TLS
 	}
 
-	if cfg.TLS != "" {
-		return cfg.TLS
+	switch strings.ToLower(sec) {
+	case "true", "1":
+		return "tls"
+	case "false", "":
+		return "none"
 	}
 
-	return "none"
+	return sec
 }
 
 func splitComma(s string) []string {

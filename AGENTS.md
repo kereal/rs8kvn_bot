@@ -139,3 +139,17 @@ Everything else only changes subscription status (`revoked`, free-plan downgrade
 - Sentinel errors (`database.ErrSubscriptionNotFound`, `xui.ErrClientNotFound`) are the preferred way to signal expected "not found" states. Callers must use `errors.Is` to distinguish them from infrastructure errors.
 - **Traffic notifications** (`SubscriptionService.ProcessTrafficNotifications` / `SubscriptionTrafficWorker`): best-effort on traffic-limited plans only (`traffic_limit > 0`). Per-node failures are `Warn`-logged and skipped; per-subscription failures are `Warn`-logged and the scan continues. The worker NEVER re-enables a client whose quota is still exceeded — exhausted is a pure revenue CTA. It re-enables (via `UpdateClient(Enable=true)`) only when the counter was reset below the limit but the client is still disabled. Idempotency via `traffic_reminders_sent` bitmask (migration 038).
 
+
+## Xray JSON profiles: allowInsecure is DEAD (Xray-core 26.7.28+)
+
+Новые ядра (happ/v2rayNG после обновления) **отказываются грузить весь
+профиль**, если в любом outbound есть `tlsSettings.allowInsecure: true`
+(«The feature "allowInsecure" has been removed»). Генерация Xray JSON
+(`internal/subserver/xray.go`) НИКОГДА не испускает `allowInsecure`;
+доверие к сертификату — только через `pinnedPeerCertSha256` (pcs/pinSHA256)
+и `verifyPeerCertByName` (vcn), которые старые ядра молча игнорируют.
+Вход: плоский JSON узла с ключами `pcs`/`pinSHA256`/`vcn` (новый 3x-ui их
+уже отдаёт), нормализация в `serverConfig.PinSHA256`/`Vcn`. Share-ссылки
+сохраняют `allowInsecure=1`/`insecure=1` — их конвертируют клиенты сами.
+Sing-box (`tls.insecure`) и Mihomo (`skip-cert-verify`) полем не затронуты.
+Регресс: `TestConvertSingleJSONToXray_NoAllowInsecure`.

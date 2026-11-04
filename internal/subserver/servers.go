@@ -67,17 +67,26 @@ type serverConfig struct {
 	Path          string `json:"path"`
 	TLS           string `json:"tls"`
 	AllowInsecure bool   `json:"allowInsecure"`
-	Alpn          string `json:"alpn"`
-	HeaderType    string `json:"headerType"`
-	PortNumber    int    `json:"portNumber"`
-	Method        string `json:"method"`
-	Plugin        string `json:"plugin"`
-	PluginOpts    string `json:"pluginOpts"`
-	Key           string `json:"key"`
-	Crypt         string `json:"crypt"`
-	Obfs          string `json:"obfs"`
-	ObfsPassword  string `json:"obfsPassword"`
-	ObfsParam     string `json:"obfsParam"`
+	// Pcs/Vcn/PinSHA256: certificate-trust fields replacing allowInsecure.
+	// Xray-core 26.7.28+ rejects allowInsecure outright ("feature removed"),
+	// so profiles must carry pins instead: "pcs" (pinnedPeerCertSha256, the
+	// vless/trojan flat-JSON and share-link key) or "pinSHA256" (hysteria2
+	// share-link key), normalised into PinSHA256, plus "vcn"
+	// (verifyPeerCertByName). Older cores silently ignore both fields.
+	Pcs          string `json:"pcs"`
+	PinSHA256    string `json:"pinSHA256"`
+	Vcn          string `json:"vcn"`
+	Alpn         string `json:"alpn"`
+	HeaderType   string `json:"headerType"`
+	PortNumber   int    `json:"portNumber"`
+	Method       string `json:"method"`
+	Plugin       string `json:"plugin"`
+	PluginOpts   string `json:"pluginOpts"`
+	Key          string `json:"key"`
+	Crypt        string `json:"crypt"`
+	Obfs         string `json:"obfs"`
+	ObfsPassword string `json:"obfsPassword"`
+	ObfsParam    string `json:"obfsParam"`
 }
 
 // toServerConfig unmarshals raw JSON into a serverConfig and normalises
@@ -108,6 +117,12 @@ func toServerConfig(raw json.RawMessage) (*serverConfig, error) {
 
 	if cfg.Tag != "" && cfg.Remark == "" {
 		cfg.Remark = cfg.Tag
+	}
+
+	// pinSHA256 is the hysteria2 spelling of the same leaf-cert hash; pcs
+	// covers vless/trojan flat-JSON and share-link inputs.
+	if cfg.PinSHA256 == "" {
+		cfg.PinSHA256 = cfg.Pcs
 	}
 
 	return &cfg, nil
@@ -214,6 +229,14 @@ func buildVLESSServerLink(cfg *serverConfig) (string, error) {
 
 	if cfg.AllowInsecure {
 		params.Set("allowInsecure", "1")
+	}
+
+	if cfg.PinSHA256 != "" {
+		params.Set("pcs", cfg.PinSHA256)
+	}
+
+	if cfg.Vcn != "" {
+		params.Set("vcn", cfg.Vcn)
 	}
 
 	if cfg.SNI != "" {
@@ -388,6 +411,14 @@ func buildTrojanServerLink(cfg *serverConfig) (string, error) {
 		params.Set("allowInsecure", "1")
 	}
 
+	if cfg.PinSHA256 != "" {
+		params.Set("pcs", cfg.PinSHA256)
+	}
+
+	if cfg.Vcn != "" {
+		params.Set("vcn", cfg.Vcn)
+	}
+
 	password := cfg.Password
 	if password == "" {
 		password = cfg.UUID
@@ -443,6 +474,13 @@ func buildHysteriaServerLink(cfg *serverConfig, protocol string) (string, error)
 
 	if cfg.AllowInsecure {
 		params.Set("insecure", "1")
+	}
+
+	// Hysteria2 share-link spec spells the leaf-cert hash pinSHA256; clients
+	// on Xray-core 26.7.28+ rely on it because allowInsecure/insecure can no
+	// longer be honoured (3x-ui emits the same pin + insecure pair).
+	if cfg.PinSHA256 != "" {
+		params.Set("pinSHA256", cfg.PinSHA256)
 	}
 
 	if cfg.Fingerprint != "" {

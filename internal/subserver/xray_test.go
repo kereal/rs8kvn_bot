@@ -273,3 +273,82 @@ func TestConvertSingleJSONToXray_Hysteria2(t *testing.T) {
 	require.NoError(t, json.Unmarshal(withoutObfs, &got))
 	require.NotContains(t, got["streamSettings"].(map[string]any), "finalmask")
 }
+
+// TestConvertSingleJSONToXray_NoAllowInsecure pins the Xray-core 26.7.28+
+// contract: allowInsecure must NEVER appear in a rendered outbound. The core
+// rejects a true value with a removed-feature error that aborts loading of
+// the whole profile (happ/v2rayNG popup "The feature allowInsecure has been
+// removed"), taking every node down instead of just the affected one.
+func TestConvertSingleJSONToXray_NoAllowInsecure(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"hysteria2":  `{"type":"hysteria2","address":"hy2.example","port":443,"password":"secret","sni":"front.example","allowInsecure":true}`,
+		"vless_tls":  `{"type":"vless","address":"v.example","port":443,"uuid":"aaaa","security":"tls","sni":"v.example","network":"ws","path":"/x","allowInsecure":true}`,
+		"trojan_tls": `{"type":"trojan","address":"t.example","port":443,"password":"pw","tls":"true","allowInsecure":true}`,
+	}
+
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			out, err := ConvertSingleJSONToXray(json.RawMessage(raw))
+			require.NoError(t, err)
+			assert.NotContains(t, string(out), "allowInsecure")
+		})
+	}
+}
+
+// TestConvertSingleJSONToXray_CertPins verifies the allowInsecure replacements
+// (pinnedPeerCertSha256 from pcs/pinSHA256, verifyPeerCertByName from vcn)
+// reach tlsSettings in the Xray-expected comma-separated string form.
+func TestConvertSingleJSONToXray_CertPins(t *testing.T) {
+	t.Parallel()
+
+	t.Run("hysteria2_pinSHA256", func(t *testing.T) {
+		t.Parallel()
+
+		out, err := ConvertSingleJSONToXray(json.RawMessage(
+			`{"type":"hysteria2","address":"hy2.example","port":443,"password":"secret","sni":"front.example","allowInsecure":true,"pinSHA256":"aa,bb"}`,
+		))
+		require.NoError(t, err)
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(out, &got))
+		ts := got["streamSettings"].(map[string]any)["tlsSettings"].(map[string]any)
+		assert.Equal(t, "aa,bb", ts["pinnedPeerCertSha256"])
+	})
+
+	t.Run("vless_tls_pcs_vcn", func(t *testing.T) {
+		t.Parallel()
+
+		out, err := ConvertSingleJSONToXray(json.RawMessage(
+			`{"type":"vless","address":"v.example","port":443,"uuid":"aaaa","security":"tls","sni":"v.example","network":"ws","path":"/x","allowInsecure":true,"pcs":"cc","vcn":"v.example"}`,
+		))
+		require.NoError(t, err)
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(out, &got))
+		ts := got["streamSettings"].(map[string]any)["tlsSettings"].(map[string]any)
+		assert.Equal(t, "cc", ts["pinnedPeerCertSha256"])
+		assert.Equal(t, "v.example", ts["verifyPeerCertByName"])
+	})
+}
+
+// TestConvertSingleJSONToXray_BoolTLSMarker: flat panel JSON may mark TLS as
+// "tls":"true"; it must resolve to Xray security "tls", not the literal
+// string (the core rejects Unknown security "true").
+func TestConvertSingleJSONToXray_BoolTLSMarker(t *testing.T) {
+	t.Parallel()
+
+	out, err := ConvertSingleJSONToXray(json.RawMessage(
+		`{"type":"trojan","address":"t.example","port":443,"password":"pw","tls":"true","sni":"t.example","pcs":"aa"}`,
+	))
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(out, &got))
+	ss := got["streamSettings"].(map[string]any)
+	assert.Equal(t, "tls", ss["security"])
+	assert.Equal(t, "aa", ss["tlsSettings"].(map[string]any)["pinnedPeerCertSha256"])
+}

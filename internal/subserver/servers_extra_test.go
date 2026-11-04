@@ -373,3 +373,68 @@ func TestTruncateString_Cyrillic(t *testing.T) {
 	result := utils.TruncateString("привет мир", 4)
 	assert.Equal(t, "прив...", result)
 }
+
+// TestConvertSingleJSONToLink_Hysteria2_PinSHA256: hysteria2 links carry the
+// leaf-cert hash as pinSHA256 so Xray-core 26.7.28+ clients can trust
+// self-signed nodes without the removed allowInsecure (mirrors what 3x-ui's
+// own subscription emits: pinSHA256 plus legacy insecure).
+func TestConvertSingleJSONToLink_Hysteria2_PinSHA256(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{
+		"type": "hysteria2",
+		"address": "hy2.example.com",
+		"port": 443,
+		"password": "hy2-pass",
+		"sni": "hy2-real.example.com",
+		"allowInsecure": true,
+		"pinSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		"remark": "Hy2-Pin"
+	}`)
+
+	link, err := ConvertSingleJSONToLink(raw)
+	require.NoError(t, err)
+	assert.Contains(t, link, "pinSHA256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+	assert.Contains(t, link, "insecure=1")
+	assert.Contains(t, link, "sni=hy2-real.example.com")
+}
+
+// TestConvertSingleJSONToLink_VLESS_PcsVcn: pcs/vcn are the v2rayN-era link
+// params for pinnedPeerCertSha256/verifyPeerCertByName.
+func TestConvertSingleJSONToLink_VLESS_PcsVcn(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{
+		"type": "vless",
+		"address": "v.example.com",
+		"port": 443,
+		"uuid": "aaaa-bbbb",
+		"security": "tls",
+		"sni": "v.example.com",
+		"network": "ws",
+		"path": "/ws",
+		"pcs": "aabb",
+		"vcn": "v.example.com",
+		"remark": "V-Pin"
+	}`)
+
+	link, err := ConvertSingleJSONToLink(raw)
+	require.NoError(t, err)
+	assert.Contains(t, link, "pcs=aabb")
+	assert.Contains(t, link, "vcn=v.example.com")
+	assert.NotContains(t, link, "allowInsecure")
+}
+
+// TestToServerConfig_PcsAlias normalises the hysteria2 pinSHA256 spelling into
+// the canonical PinSHA256 and lets an explicit pinSHA256 win over pcs.
+func TestToServerConfig_PcsAlias(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := toServerConfig(json.RawMessage(`{"type":"vless","address":"a","port":1,"pcs":"aa"}`))
+	require.NoError(t, err)
+	assert.Equal(t, "aa", cfg.PinSHA256)
+
+	cfg, err = toServerConfig(json.RawMessage(`{"type":"hysteria2","address":"a","port":1,"pcs":"aa","pinSHA256":"bb"}`))
+	require.NoError(t, err)
+	assert.Equal(t, "bb", cfg.PinSHA256)
+}
