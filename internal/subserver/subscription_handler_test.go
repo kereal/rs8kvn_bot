@@ -813,7 +813,7 @@ func TestApplyProfileTitleSuffix(t *testing.T) {
 func TestHandleSubscription_PaidSubscription_ProfileTitleSuffix(t *testing.T) {
 	t.Parallel()
 
-	vlessLink := "vless://uuid@server:443#TitleTest"
+	vlessLink := "vless://uuid@server:443?security=tls#TitleTest"
 	encodedBody := base64.StdEncoding.EncodeToString([]byte(vlessLink))
 	title := "My Profile"
 
@@ -1184,7 +1184,7 @@ func TestHandleSubscription_ConcurrentMissesShareOneFetch(t *testing.T) {
 		<-release
 
 		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp#node")
+		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp&security=tls#node")
 	}))
 	defer upstream.Close()
 	defer unblock()
@@ -1374,7 +1374,7 @@ func TestHandleSubscription_PartialSourcesAreNotCached(t *testing.T) {
 	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		goodFetches.Add(1)
 		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp#good")
+		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp&security=tls#good")
 	}))
 	defer good.Close()
 

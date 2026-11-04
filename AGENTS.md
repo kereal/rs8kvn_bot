@@ -153,3 +153,15 @@ Everything else only changes subscription status (`revoked`, free-plan downgrade
 сохраняют `allowInsecure=1`/`insecure=1` — их конвертируют клиенты сами.
 Sing-box (`tls.insecure`) и Mihomo (`skip-cert-verify`) полем не затронуты.
 Регресс: `TestConvertSingleJSONToXray_NoAllowInsecure`.
+
+## Xray JSON profiles: plaintext VLESS/Trojan — quarantine (2026-11+)
+
+Следующее ограничение новых ядер: `vless`/`trojan` outbound **без transport
+security** ядро собирает только на private IP / локальном домене
+(`requiresTransportSecurity`, ошибка «vless without TLS … is prohibited
+unless the server address is a private IP or domain») — снова падает ВЕСЬ
+профиль. `buildXrayOutbound` возвращает ошибку на такой ноде, батч-конвертер
+её скипает (Warn) — остальные узлы живы. Только Xray-путь: sing-box и Mihomo
+plaintext принимают. Публичные CF-worker узлы (ws на IP Cloudflare без TLS)
+на новых ядрах не работают в принципе — это не баг конвертера.
+Регресс: `TestConvertJSONConfigsToXray_PlaintextQuarantine`.

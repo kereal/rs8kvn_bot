@@ -3,6 +3,7 @@ package subserver
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 
@@ -72,6 +73,11 @@ func buildXrayOutbound(cfg *serverConfig) (map[string]any, error) {
 
 	if cfg.Port == 0 {
 		return nil, fmt.Errorf("missing port")
+	}
+
+	err := checkTransportSecurity(cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	var outbound map[string]any
@@ -407,6 +413,45 @@ func resolveXraySecurity(cfg *serverConfig) string {
 	}
 
 	return sec
+}
+
+// checkTransportSecurity quarantines plaintext VLESS/Trojan nodes before the
+// renderer emits them. Xray-core (2026+) refuses to build a vless/trojan
+// outbound whose transport security is none unless the server address is a
+// private IP or private domain, and the failure aborts the ENTIRE profile
+// ("vless without TLS or other encryption is prohibited…") — one plaintext
+// node would make every subscription unimportable on new clients. The batch
+// converter skips the offending node, so the rest of the profile survives.
+// sing-box and Mihomo still accept plaintext, so only the Xray path filters.
+func checkTransportSecurity(cfg *serverConfig) error {
+	switch strings.ToLower(cfg.Type) {
+	case "vless", "trojan":
+	default:
+		return nil
+	}
+
+	if resolveXraySecurity(cfg) != "none" || isPrivateAddress(cfg.Address) {
+		return nil
+	}
+
+	return fmt.Errorf("%s without transport security at public address %s is rejected by Xray-core", cfg.Type, cfg.Address)
+}
+
+// isPrivateAddress mirrors Xray-core's requiresTransportSecurity exemption:
+// RFC1918/loopback/link-local IPs and local/reserved domains need no TLS.
+func isPrivateAddress(addr string) bool {
+	if ip := net.ParseIP(addr); ip != nil {
+		return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
+	}
+
+	h := strings.TrimSuffix(strings.ToLower(addr), ".")
+	for _, sfx := range []string{".local", ".localhost", ".internal", ".home", ".lan", ".in-addr.arpa"} {
+		if strings.HasSuffix(h, sfx) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func splitComma(s string) []string {

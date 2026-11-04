@@ -98,7 +98,7 @@ func TestConvertSingleJSONToXray_VLESSWSNoTLS(t *testing.T) {
     name: SE_27
     network: ws
     port: "8880"
-    server: 162.159.156.214
+    server: 10.0.0.5
     type: vless
     uuid: 25322a43-4ef3-45cc-9e96-db44bcccd7be
     ws-opts:
@@ -351,4 +351,41 @@ func TestConvertSingleJSONToXray_BoolTLSMarker(t *testing.T) {
 	ss := got["streamSettings"].(map[string]any)
 	assert.Equal(t, "tls", ss["security"])
 	assert.Equal(t, "aa", ss["tlsSettings"].(map[string]any)["pinnedPeerCertSha256"])
+}
+
+// TestConvertJSONConfigsToXray_PlaintextQuarantine: plaintext vless/trojan at
+// public addresses are skipped (new Xray cores abort the whole profile on
+// them), while TLS/reality nodes and private-address plaintext nodes survive.
+func TestConvertJSONConfigsToXray_PlaintextQuarantine(t *testing.T) {
+	t.Parallel()
+
+	batch := []json.RawMessage{
+		json.RawMessage(`{"type":"vless","address":"nl4.example.sbs","port":80,"uuid":"u1","network":"ws","remark":"NL_4"}`),
+		json.RawMessage(`{"type":"trojan","address":"203.0.113.9","port":80,"password":"pw","remark":"TJ_PUB"}`),
+		json.RawMessage(`{"type":"vless","address":"10.0.0.5","port":2082,"uuid":"u2","network":"tcp","remark":"LAB"}`),
+		json.RawMessage(`{"type":"vless","address":"ru1.example.sbs","port":443,"uuid":"u3","security":"reality","pbk":"k","sid":"d1","remark":"RU_1"}`),
+	}
+
+	outs, err := ConvertJSONConfigsToXray(batch)
+	require.NoError(t, err)
+	require.Len(t, outs, 2)
+
+	var tags []string
+	for _, o := range outs {
+		var m map[string]any
+		require.NoError(t, json.Unmarshal(o, &m))
+		tags = append(tags, m["tag"].(string))
+	}
+	assert.Equal(t, []string{"LAB", "RU_1"}, tags)
+}
+
+// TestConvertSingleJSONToXray_PlaintextPublicErrors: the single-node entry
+// point surfaces the rejection instead of emitting a config new cores refuse.
+func TestConvertSingleJSONToXray_PlaintextPublicErrors(t *testing.T) {
+	t.Parallel()
+
+	_, err := ConvertSingleJSONToXray(json.RawMessage(
+		`{"type":"vless","address":"nl4.example.sbs","port":80,"uuid":"u1"}`,
+	))
+	require.ErrorContains(t, err, "without transport security")
 }

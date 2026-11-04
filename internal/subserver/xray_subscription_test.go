@@ -148,9 +148,9 @@ func TestBuildResponseOneProfilePerNode(t *testing.T) {
 	svc := newTestSubSvc(t)
 	result, err := buildResponse(svc, "multi", aggregatedSources{
 		jsonConfigs: []json.RawMessage{
-			json.RawMessage(`{"type":"vless","address":"one.example","port":443,"uuid":"id-1","remark":"node-one"}`),
-			json.RawMessage(`{"type":"vless","address":"two.example","port":443,"uuid":"id-2","remark":"node-two"}`),
-			json.RawMessage(`{"type":"trojan","address":"three.example","port":443,"password":"secret","remark":"node-three"}`),
+			json.RawMessage(`{"type":"vless","address":"one.example","port":443,"security":"tls","uuid":"id-1","remark":"node-one"}`),
+			json.RawMessage(`{"type":"vless","address":"two.example","port":443,"security":"tls","uuid":"id-2","remark":"node-two"}`),
+			json.RawMessage(`{"type":"trojan","address":"three.example","port":443,"security":"tls","password":"secret","remark":"node-three"}`),
 		},
 	}, 0, "", OutputXray, true)
 	require.NoError(t, err)
@@ -623,7 +623,7 @@ func TestBuildResponseHysteria2Outbound(t *testing.T) {
 
 func TestXrayTemplateRoutingAndDNS(t *testing.T) {
 	t.Parallel()
-	result, err := buildResponse(newTestSubSvc(t), "template", aggregatedSources{jsonConfigs: []json.RawMessage{json.RawMessage(`{"type":"vless","address":"node.example","port":443,"uuid":"id","remark":"node-one"}`)}}, 0, "", OutputXray, true)
+	result, err := buildResponse(newTestSubSvc(t), "template", aggregatedSources{jsonConfigs: []json.RawMessage{json.RawMessage(`{"type":"vless","address":"node.example","port":443,"security":"tls","uuid":"id","remark":"node-one"}`)}}, 0, "", OutputXray, true)
 	require.NoError(t, err)
 
 	configs := decodeSubscription(t, result.Body)
@@ -684,9 +684,9 @@ func TestBuildResponseReservedTagsFallback(t *testing.T) {
 
 	result, err := buildResponse(newTestSubSvc(t), "reserved-tags", aggregatedSources{
 		jsonConfigs: []json.RawMessage{
-			json.RawMessage(`{"type":"vless","address":"one.example","port":443,"uuid":"id-1","remark":"direct"}`),
-			json.RawMessage(`{"type":"vless","address":"two.example","port":443,"uuid":"id-2","remark":"block"}`),
-			json.RawMessage(`{"type":"vless","address":"three.example","port":443,"uuid":"id-3","remark":"proxy-2"}`),
+			json.RawMessage(`{"type":"vless","address":"one.example","port":443,"security":"tls","uuid":"id-1","remark":"direct"}`),
+			json.RawMessage(`{"type":"vless","address":"two.example","port":443,"security":"tls","uuid":"id-2","remark":"block"}`),
+			json.RawMessage(`{"type":"vless","address":"three.example","port":443,"security":"tls","uuid":"id-3","remark":"proxy-2"}`),
 		},
 	}, 0, "", OutputXray, true)
 	require.NoError(t, err)
