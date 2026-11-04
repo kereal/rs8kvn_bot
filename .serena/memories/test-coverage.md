@@ -1,8 +1,35 @@
 # Test Coverage Analysis — rs8kvn_bot
 
-**Последняя проверка:** 2026-08-21
+**Последняя проверка:** 2026-11-02
 **Метод:** `go test -coverprofile=/tmp/coverage.out ./...` и `go tool cover -func=/tmp/coverage.out`
-**Общее покрытие:** 66.2% в последнем запуске
+**Общее покрытие:** 70.2% (2026-11-02, после чистки набора — см. секцию ниже)
+
+## Чистка тестового набора (2026-11-02, dev, 8 коммитов d5d162c..754d052)
+
+Аудит 110 тест-файлов / 1455 тест-функций. Итог: −5520 строк нетто, 1455→1212 Test-функций,
+покрытие 70.2%, race/lint 0. Ключевые решения (НЕ откатывать без причины):
+- Удалены межпакетные клоны: internal/bot/database_test.go (копия internal/database), admin_test.go
+  (integration-тег; TTL-тест перенесён в broadcast_admin_flow_test без тега, split-message покрыт
+  split_message_test).
+- subserver: мёртвый прод ConvertJSONToShareLinks жил в _test.go (не компилировался в бинарь) — удалён
+  вместе с 9 обёртками и base64StdEncode; DetectFormat-золотые слиты в таблицу; hits/misses-атомик в
+  cache.go мёртвый (метрики CacheHits/MissesTotal отдельные).
+- xui: PanelContract_* — канон контрактов v3.11.0; старым Success/not-found тестам предпочтение не отдавать.
+- web middleware: мёртвая ветка expectedToken=="" удалена; health map-echo (SetReady/RegisterChecker) удалены.
+- e2e удалены как unit-дубли: cache_test.go, edge_cases_test.go, health_test.go целиком; AutoRelogin_On401
+  (механизма auto-relogin в базе нет — только классификатор bot/errors.go).
+- scheduler: fakeRepo удалён → testutil.NewSubscriptionRepositoryFake (ВАЖНО: структурный литерал фейка
+  даёт nil-embedded ServiceStoreFake → SIGSEGV, строить только конструктором).
+- config: constants_test схлопнут в TestConstants_UncoveredInvariants; Config.String маскирует токен —
+  тест проверяет РЕАЛЬНОЕ значение.
+- Новые guard'ы: admin_del_test.go (/del — единственный продуктовый путь удаления), deactivate
+  prompt/exec колбэки, broadcastSessionTTL, IntervalGate (utils/gate_test.go), RequestPayment
+  повторный линк (защита от двойного списания), ClaimReminder/ReleaseReminder (нет двойного письма
+  после продления), fetch-node URL, AllowInsecure render, expire sec/ms.
+- Флаки устранены: ConcurrentMissesShareOneFetch (release-барьер вместо sleep-окна),
+  SavesRedirectPaymentDetails (без wall-clock допуска).
+
+**Последняя проверка (историческая):** 2026-08-21
 
 Пакетные значения ниже — исторический снимок от 2026-06-26, а не актуальный CI-отчёт. Для текущих значений всегда использовать команду выше.
 

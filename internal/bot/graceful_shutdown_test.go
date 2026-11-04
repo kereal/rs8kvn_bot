@@ -2,92 +2,12 @@ package bot
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 )
-
-func TestBot_GracefulShutdown(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID:  123456789,
-		TelegramBotToken: "test_token",
-	}
-
-	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewBotStoreFake()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "test")
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	handler.StartCacheCleanup(ctx, 20*time.Millisecond)
-	handler.StartRateLimiterCleanup(ctx, 20*time.Millisecond, 100*time.Millisecond)
-
-	cancel()
-
-	done := make(chan struct{})
-
-	go func() {
-		handler.WaitForBackgroundGoroutines()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		t.Log("Background goroutines stopped after cancel")
-	case <-time.After(2 * time.Second):
-		t.Error("Shutdown timeout - background goroutines did not stop after cancel")
-	}
-}
-
-func TestServer_GracefulShutdown(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping in short mode")
-	}
-
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramBotToken: "test_token",
-		WebServerPort:    18880,
-	}
-
-	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewBotStoreFake()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "test")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	handler.StartCacheCleanup(ctx, time.Minute)
-	handler.StartRateLimiterCleanup(ctx, time.Minute, 5*time.Minute)
-
-	var wg sync.WaitGroup
-
-	wg.Go(func() {
-		<-ctx.Done()
-	})
-
-	cancel()
-
-	done := make(chan struct{})
-
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		t.Log("All goroutines stopped gracefully")
-	case <-time.After(2 * time.Second):
-		t.Error("Shutdown timeout - goroutines leaked")
-	}
-}
 
 func TestGracefulShutdown_StopsAllBackgroundLoops(t *testing.T) {
 	t.Parallel()

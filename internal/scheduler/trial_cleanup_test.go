@@ -29,29 +29,6 @@ func newTestSubService(t testing.TB, db *database.Service) *service.Subscription
 	return service.NewSubscriptionService(db, nil, nil, cfg)
 }
 
-func TestTrialCleanupScheduler_New(t *testing.T) {
-	t.Parallel()
-
-	db, err := testutil.NewTestDatabaseService(t)
-	require.NoError(t, err)
-	subService := newTestSubService(t, db)
-	scheduler := NewTrialCleanupScheduler(subService)
-
-	assert.NotNil(t, scheduler)
-}
-
-func TestTrialCleanupScheduler_RunCleanup_NoExpiredTrials(t *testing.T) {
-	t.Parallel()
-
-	db, err := testutil.NewTestDatabaseService(t)
-	require.NoError(t, err)
-	subService := newTestSubService(t, db)
-	scheduler := NewTrialCleanupScheduler(subService)
-
-	ctx := context.Background()
-	scheduler.runCleanup(ctx)
-}
-
 func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 	t.Parallel()
 
@@ -108,35 +85,6 @@ func TestTrialCleanupScheduler_RunCleanup_WithExpiredTrials(t *testing.T) {
 	if len(remaining) > 0 {
 		assert.Equal(t, "active-sub", remaining[0].SubscriptionID)
 	}
-}
-
-func TestTrialCleanupScheduler_RunCleanup_XUIFailure(t *testing.T) {
-	t.Parallel()
-
-	db, err := testutil.NewTestDatabaseService(t)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-
-	expiredSub := &database.Subscription{
-		TelegramID:     -2001,
-		ClientID:       "client-xui-fail",
-		SubscriptionID: "sub-xui-fail",
-		PlanID:         1,
-		Status:         "active",
-		CreatedAt:      time.Now().Add(-2 * time.Hour),
-	}
-	err = db.CreateSubscription(ctx, expiredSub, "")
-	require.NoError(t, err)
-
-	subService := newTestSubService(t, db)
-	scheduler := NewTrialCleanupScheduler(subService)
-
-	scheduler.runCleanup(ctx)
-
-	remaining, err := db.GetAllSubscriptions(ctx)
-	require.NoError(t, err)
-	assert.Empty(t, remaining)
 }
 
 func TestTrialCleanupScheduler_FallbackDeprovisionEvenWithSyncService(t *testing.T) {

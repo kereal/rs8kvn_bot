@@ -42,11 +42,16 @@ func TestCache_SetAndGet(t *testing.T) {
 	body := []byte("test-body")
 	headers := map[string]string{"content-type": "text/plain"}
 	cache.Set("key1", body, headers)
+	cache.Set("key2", []byte("other-body"), nil)
 
 	gotBody, gotHeaders, ok := cache.Get("key1")
 	assert.True(t, ok)
 	assert.Equal(t, body, gotBody)
 	assert.Equal(t, headers, gotHeaders)
+
+	gotBody2, _, ok2 := cache.Get("key2")
+	assert.True(t, ok2)
+	assert.Equal(t, []byte("other-body"), gotBody2)
 }
 
 func TestCache_TTLExpiry(t *testing.T) {
@@ -89,24 +94,6 @@ func TestCache_Cleanup(t *testing.T) {
 	}, 10*time.Second, 10*time.Millisecond, "all entries should be cleaned up after TTL")
 }
 
-func TestCache_Isolation(t *testing.T) {
-	t.Parallel()
-
-	cache := NewCache(time.Minute)
-	defer cache.Stop()
-
-	cache.Set("key1", []byte("body1"), nil)
-	cache.Set("key2", []byte("body2"), nil)
-
-	body1, _, ok1 := cache.Get("key1")
-	body2, _, ok2 := cache.Get("key2")
-
-	assert.True(t, ok1)
-	assert.True(t, ok2)
-	assert.Equal(t, []byte("body1"), body1)
-	assert.Equal(t, []byte("body2"), body2)
-}
-
 func TestCache_Delete(t *testing.T) {
 	t.Parallel()
 
@@ -133,6 +120,14 @@ func TestCache_BodyCopy(t *testing.T) {
 
 	gotBody, _, _ := cache.Get("key1")
 	assert.Equal(t, []byte("original-body"), gotBody)
+
+	// Regression (cache.go bytes.Clone): mutating the slice RETURNED by Get
+	// must not corrupt the cached entry for the next Get.
+	gotBody[0] = 'Y'
+
+	againBody, _, okAgain := cache.Get("key1")
+	assert.True(t, okAgain)
+	assert.Equal(t, []byte("original-body"), againBody)
 }
 
 func TestCache_HeadersCopy(t *testing.T) {
@@ -170,9 +165,15 @@ func TestCache_SetEvictsBeyondLimit(t *testing.T) {
 		c.Set(fmt.Sprintf("key-%d", i), body, nil)
 	}
 
+	// Все записи жили один TTL, поэтому expiresAt монотонен по времени вставки:
+	// вытесниться должны именно первые 50 вставленных ключей, а не произвольные.
 	c.mu.RLock()
 	size := len(c.entries)
+	_, firstGone := c.entries["key-0"]
+	_, lastKept := c.entries[fmt.Sprintf("key-%d", MaxCacheEntries+49)]
 	c.mu.RUnlock()
 
-	assert.LessOrEqual(t, size, MaxCacheEntries, "кэш не должен превышать MaxCacheEntries")
+	assert.Equal(t, MaxCacheEntries, size, "после вытеснения размер равен пределу")
+	assert.False(t, firstGone, "первая вставленная запись (ближайший expire) должна быть вытеснена")
+	assert.True(t, lastKept, "последняя вставленная запись должна остаться")
 }

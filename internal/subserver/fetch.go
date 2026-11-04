@@ -217,8 +217,3 @@ func isValidSubscription(data string) bool {
 
 	return false
 }
-
-// base64StdEncode is a short-hand for standard base64 encoding.
-func base64StdEncode(data []byte) string {
-	return base64.StdEncoding.EncodeToString(data)
-}

@@ -3,7 +3,6 @@ package database
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,39 +10,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newAuditTestService создаёт in-memory сервис БД с применёнными миграциями.
-func newAuditTestService(t *testing.T) *Service {
-	t.Helper()
-
-	db, err := NewService(filepath.Join(t.TempDir(), "audit_test.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, db.Close()) })
-
-	return db
-}
-
-// createAuditTestSub создаёт подписку с корректным FK на free-план.
-func createAuditTestSub(t *testing.T, db *Service, telegramID int64, clientID, subID string) *Subscription {
-	t.Helper()
-
-	plan, err := db.GetPlanByName(context.Background(), FreePlanName)
-	require.NoError(t, err)
-
-	sub := &Subscription{TelegramID: telegramID, ClientID: clientID, SubscriptionID: subID, PlanID: plan.ID, Status: string(SubscriptionStatusActive)}
-	require.NoError(t, db.db.WithContext(context.Background()).Create(sub).Error)
-
-	return sub
-}
-
 // TestAuditLog_InsertAndQuery verifies the append-only write path and the
 // entity-scoped read helpers on a real migrated SQLite database.
 func TestAuditLog_InsertAndQuery(t *testing.T) {
 	t.Parallel()
 
-	db := newAuditTestService(t)
+	db := newTestService(t)
 	ctx := context.Background()
 
-	sub := createAuditTestSub(t, db, 1001, "c1", "s1")
+	sub := createTestSubscription(t, db, 1001, "c1", "c1")
 
 	// Создание подписки: событие с new_state и details.
 	created := AuditSubscriptionCreated(sub, "INVITE1")
@@ -104,10 +79,10 @@ func TestAuditLog_InsertAndQuery(t *testing.T) {
 func TestAuditLog_SurvivesSubscriptionDeletion(t *testing.T) {
 	t.Parallel()
 
-	db := newAuditTestService(t)
+	db := newTestService(t)
 	ctx := context.Background()
 
-	sub := createAuditTestSub(t, db, 1002, "c2", "s2")
+	sub := createTestSubscription(t, db, 1002, "c2", "c2")
 
 	event := AuditSubscriptionDeleted(sub, 42)
 	require.NoError(t, db.InsertAuditLog(ctx, event))
@@ -168,7 +143,7 @@ func TestAuditLog_MarshalSemantics(t *testing.T) {
 func TestAuditLog_TableSchema(t *testing.T) {
 	t.Parallel()
 
-	db := newAuditTestService(t)
+	db := newTestService(t)
 	ctx := context.Background()
 
 	rows, err := db.db.WithContext(ctx).Raw(

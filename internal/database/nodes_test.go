@@ -41,7 +41,7 @@ func TestGetPlanByName_NotFound(t *testing.T) {
 
 	svc := newTestService(t)
 	plan, err := svc.GetPlanByName(context.Background(), "nonexistent")
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrPlanNotFound)
 	assert.Nil(t, plan)
 }
 
@@ -50,7 +50,7 @@ func TestGetPlanByID_NotFound(t *testing.T) {
 
 	svc := newTestService(t)
 	plan, err := svc.GetPlanByID(context.Background(), 9999)
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrPlanNotFound)
 	assert.Nil(t, plan)
 }
 
@@ -186,7 +186,7 @@ func TestNodeRepository_GetNodeByID_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := svc.GetNodeByID(ctx, 99999)
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrNodeNotFound)
 }
 
 func TestNodeRepository_ListEnabled(t *testing.T) {

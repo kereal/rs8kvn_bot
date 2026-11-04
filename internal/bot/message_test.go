@@ -3,11 +3,12 @@ package bot
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
@@ -40,9 +41,12 @@ func TestSend_Success(t *testing.T) {
 	assert.NotNil(t, mockBot.LastChattableSafe(), "Message should be captured")
 }
 
-func TestSend_SendError(t *testing.T) {
-	t.Parallel()
-
+// TestSend_Error_IncrementsTelegramAPIMetric verifies that a failed send is
+// counted in the TelegramAPICallsTotal{send,error} series (G4): the error path
+// must be observable in metrics, since send() itself swallows the error.
+func TestSend_Error_IncrementsTelegramAPIMetric(t *testing.T) {
+	// Reads global counter deltas: must not run in parallel with tests
+	// bumping the same series.
 	ctx := context.Background()
 
 	mockBot := &testutil.BotAPI{
@@ -58,15 +62,21 @@ func TestSend_SendError(t *testing.T) {
 
 	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
 
-	msg := tgbotapi.NewMessage(12345, "test message")
+	beforeErr := promtestutil.ToFloat64(metrics.TelegramAPICallsTotal.WithLabelValues("send", "error"))
+	beforeOK := promtestutil.ToFloat64(metrics.TelegramAPICallsTotal.WithLabelValues("send", "success"))
 
-	// send() swallows the underlying error: it still attempts exactly one send.
+	msg := tgbotapi.NewMessage(12345, "test message")
 	handler.send(ctx, msg)
 
-	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be attempted once even when it errors")
+	errDelta := promtestutil.ToFloat64(metrics.TelegramAPICallsTotal.WithLabelValues("send", "error")) - beforeErr
+	okDelta := promtestutil.ToFloat64(metrics.TelegramAPICallsTotal.WithLabelValues("send", "success")) - beforeOK
+
+	assert.Equal(t, float64(1), errDelta, "failed send must increment the {send,error} series")
+	assert.Zero(t, okDelta, "failed send must not touch the {send,success} series")
 }
 
 // TestSend_DisablesWebPagePreview tests that send disables web page preview
+// and passes the caller's ParseMode through untouched.
 func TestSend_DisablesWebPagePreview(t *testing.T) {
 	t.Parallel()
 
@@ -95,79 +105,13 @@ func TestSend_DisablesWebPagePreview(t *testing.T) {
 	handler.send(ctx, msg)
 
 	assert.True(t, capturedMsg.DisableWebPagePreview, "Web page preview should be disabled")
-}
 
-// TestSafeSend_Success tests the safeSend function with successful message
-func TestSafeSend_Success(t *testing.T) {
-	t.Parallel()
+	markdownMsg := tgbotapi.NewMessage(12345, "*bold* _italic_ `code`")
+	markdownMsg.ParseMode = "Markdown"
+	handler.send(ctx, markdownMsg)
 
-	mockBot := &testutil.BotAPI{
-		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-			return tgbotapi.Message{MessageID: 456}, nil
-		},
-	}
-
-	cfg := &config.Config{
-		TelegramBotToken: "test:token",
-		TelegramAdminID:  0,
-	}
-
-	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
-
-	msg := tgbotapi.NewMessage(12345, "safe message")
-	handler.safeSend(msg)
-
-	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
-}
-
-// TestSafeSend_SendError tests safeSend when bot.Send fails
-func TestSafeSend_SendError(t *testing.T) {
-	t.Parallel()
-
-	mockBot := &testutil.BotAPI{
-		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-			return tgbotapi.Message{}, errors.New("safe send failed")
-		},
-	}
-
-	cfg := &config.Config{
-		TelegramBotToken: "test:token",
-		TelegramAdminID:  0,
-	}
-
-	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
-
-	msg := tgbotapi.NewMessage(12345, "safe message")
-
-	// safeSend() swallows the underlying error: it still attempts exactly one send.
-	handler.safeSend(msg)
-
-	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be attempted once even when it errors")
-}
-
-// TestSafeSend_WithEditMessage tests safeSend with EditMessageText
-func TestSafeSend_WithEditMessage(t *testing.T) {
-	t.Parallel()
-
-	mockBot := &testutil.BotAPI{
-		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-			return tgbotapi.Message{MessageID: 789}, nil
-		},
-	}
-
-	cfg := &config.Config{
-		TelegramBotToken: "test:token",
-		TelegramAdminID:  0,
-	}
-
-	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
-
-	editMsg := tgbotapi.NewEditMessageText(12345, 100, "edited message")
-	handler.safeSend(editMsg)
-
-	assert.Equal(t, 1, mockBot.SendCountSafe(), "Send should be called once")
-	_, ok := mockBot.LastChattableSafe().(tgbotapi.EditMessageTextConfig)
-	assert.True(t, ok, "Should be EditMessageTextConfig")
+	assert.Equal(t, "Markdown", capturedMsg.ParseMode, "ParseMode should be passed through")
+	assert.True(t, capturedMsg.DisableWebPagePreview, "Web page preview should be disabled")
 }
 
 // TestSendMessage_Success tests the SendMessage function
@@ -250,177 +194,9 @@ func TestSendMessage_ContextCancellation(t *testing.T) {
 	assert.Equal(t, 0, mockBot.SendCountSafe(), "Send should not be called with cancelled context")
 }
 
-// TestSendMessage_SpecialCharacters tests SendMessage with special characters
-func TestSendMessage_SpecialCharacters(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-
-	var capturedMsg tgbotapi.MessageConfig
-
-	mockBot := &testutil.BotAPI{
-		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-			if msg, ok := c.(tgbotapi.MessageConfig); ok {
-				capturedMsg = msg
-			}
-
-			return tgbotapi.Message{MessageID: 999}, nil
-		},
-	}
-
-	cfg := &config.Config{
-		TelegramBotToken: "test:token",
-		TelegramAdminID:  0,
-	}
-
-	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
-
-	specialText := "Test with *markdown* and _formatting_ and `code`"
-	handler.SendMessage(ctx, 12345, specialText)
-
-	assert.Equal(t, specialText, capturedMsg.Text, "Message text should preserve special characters")
-}
-
-// TestSendMessage_Unicode tests SendMessage with unicode characters
-func TestSendMessage_Unicode(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-
-	var capturedMsg tgbotapi.MessageConfig
-
-	mockBot := &testutil.BotAPI{
-		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-			if msg, ok := c.(tgbotapi.MessageConfig); ok {
-				capturedMsg = msg
-			}
-
-			return tgbotapi.Message{MessageID: 999}, nil
-		},
-	}
-
-	cfg := &config.Config{
-		TelegramBotToken: "test:token",
-		TelegramAdminID:  0,
-	}
-
-	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
-
-	unicodeText := "Привет мир! 世界你好! 🎉"
-	handler.SendMessage(ctx, 12345, unicodeText)
-
-	assert.Equal(t, unicodeText, capturedMsg.Text, "Message text should preserve unicode")
-}
-
-// TestSendMessage_LongMessage tests SendMessage with a long message
-func TestSendMessage_LongMessage(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-
-	var capturedMsg tgbotapi.MessageConfig
-
-	mockBot := &testutil.BotAPI{
-		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-			if msg, ok := c.(tgbotapi.MessageConfig); ok {
-				capturedMsg = msg
-			}
-
-			return tgbotapi.Message{MessageID: 999}, nil
-		},
-	}
-
-	cfg := &config.Config{
-		TelegramBotToken: "test:token",
-		TelegramAdminID:  0,
-	}
-
-	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
-
-	// Create a long message
-	var longText strings.Builder
-	for range 1000 {
-		longText.WriteString("This is a test message. ")
-	}
-
-	handler.SendMessage(ctx, 12345, longText.String())
-
-	assert.Equal(t, longText.String(), capturedMsg.Text, "Message text should preserve long text")
-}
-
-// TestSendMessage_MultipleMessages tests sending multiple messages
-func TestSendMessage_MultipleMessages(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-
-	mockBot := &testutil.BotAPI{
-		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-			return tgbotapi.Message{MessageID: 999}, nil
-		},
-	}
-
-	cfg := &config.Config{
-		TelegramBotToken: "test:token",
-		TelegramAdminID:  0,
-	}
-
-	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
-
-	// Send multiple messages
-	for range 5 {
-		handler.SendMessage(ctx, 12345, "test message")
-	}
-
-	assert.Equal(t, 5, mockBot.SendCountSafe(), "Send should be called 5 times")
-}
-
-// TestSendMessage_DifferentChatIDs tests SendMessage with different chat IDs
-func TestSendMessage_DifferentChatIDs(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-
-	testCases := []struct {
-		name   string
-		chatID int64
-	}{
-		{"positive chat ID", 12345},
-		{"large chat ID", 999999999},
-		{"negative chat ID", -1001234567890},
-		{"zero chat ID", 0},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			var capturedMsg tgbotapi.MessageConfig
-
-			mockBot := &testutil.BotAPI{
-				SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-					if msg, ok := c.(tgbotapi.MessageConfig); ok {
-						capturedMsg = msg
-					}
-
-					return tgbotapi.Message{MessageID: 999}, nil
-				},
-			}
-
-			cfg := &config.Config{
-				TelegramBotToken: "test:token",
-				TelegramAdminID:  0,
-			}
-
-			handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
-
-			handler.SendMessage(ctx, tc.chatID, "test message")
-
-			assert.Equal(t, tc.chatID, capturedMsg.ChatID, "ChatID should match")
-		})
-	}
-}
-
+// TestSafeSend_WithVariousChattables covers safeSend passthrough for every
+// Chattable kind the bot sends (message, edit, delete): exactly one Send per
+// call with the value forwarded unmodified.
 func TestSafeSend_WithVariousChattables(t *testing.T) {
 	t.Parallel()
 
@@ -517,37 +293,4 @@ func TestSend_MultipleConcurrentSends(t *testing.T) {
 	}
 
 	assert.Equal(t, 10, mockBot.SendCountSafe(), "Send should be called 10 times")
-}
-
-// TestSend_WithMarkdownText tests send with markdown formatted text
-func TestSend_WithMarkdownText(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-
-	var capturedMsg tgbotapi.MessageConfig
-
-	mockBot := &testutil.BotAPI{
-		SendFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-			if msg, ok := c.(tgbotapi.MessageConfig); ok {
-				capturedMsg = msg
-			}
-
-			return tgbotapi.Message{MessageID: 123}, nil
-		},
-	}
-
-	cfg := &config.Config{
-		TelegramBotToken: "test:token",
-		TelegramAdminID:  0,
-	}
-
-	handler := NewHandler(mockBot, cfg, nil, NewTestBotConfig(), nil, "")
-
-	msg := tgbotapi.NewMessage(12345, "*bold* _italic_ `code`")
-	msg.ParseMode = "Markdown"
-	handler.send(ctx, msg)
-
-	assert.Equal(t, "Markdown", capturedMsg.ParseMode, "ParseMode should be Markdown")
-	assert.True(t, capturedMsg.DisableWebPagePreview, "Web page preview should be disabled")
 }

@@ -30,8 +30,6 @@ type Cache struct {
 	ttl     time.Duration
 	stopCh  chan struct{}
 	stopped atomic.Bool
-	hits    atomic.Int64
-	misses  atomic.Int64
 }
 
 // NewCache creates a new Cache with the given TTL and starts the cleanup loop.
@@ -55,13 +53,11 @@ func (c *Cache) Get(key string) ([]byte, map[string]string, bool) {
 	c.mu.RUnlock()
 
 	if !ok || expired {
-		c.misses.Add(1)
 		metrics.CacheMissesTotal.WithLabelValues("subserver").Inc()
 
 		return nil, nil, false
 	}
 
-	c.hits.Add(1)
 	metrics.CacheHitsTotal.WithLabelValues("subserver").Inc()
 
 	return bytes.Clone(entry.body), cloneHeaders(entry.headers), true

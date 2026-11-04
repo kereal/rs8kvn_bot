@@ -11,7 +11,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	prometheus_testutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestShouldSkipHTTPMetrics(t *testing.T) {
@@ -71,39 +70,6 @@ func TestCodeLabel(t *testing.T) {
 		rr := &responseRecorder{statusCode: tt.code}
 		assert.Equal(t, tt.want, rr.codeLabel(), "статус %d должен оставаться числом", tt.code)
 	}
-}
-
-func TestNewMetricsInitialized(t *testing.T) {
-	require.NotNil(t, HTTPRequestsTotal)
-	require.NotNil(t, HTTPRequestDuration)
-	require.NotNil(t, BotUpdatesTotal)
-	require.NotNil(t, BotUpdateDuration)
-	require.NotNil(t, XUIRequestsTotal)
-	require.NotNil(t, XUIRequestDuration)
-	require.NotNil(t, DBQueriesTotal)
-	require.NotNil(t, DBQueryDuration)
-	require.NotNil(t, CacheHitsTotal)
-	require.NotNil(t, CacheMissesTotal)
-	require.NotNil(t, ActiveSubscriptions)
-	require.NotNil(t, PremiumSubscriptions)
-	require.NotNil(t, FreeSubscriptions)
-	require.NotNil(t, SubscriptionCreatesTotal)
-	require.NotNil(t, SubscriptionRenewalsTotal)
-	require.NotNil(t, SubscriptionReanimationsTotal)
-	require.NotNil(t, SubscriptionSyncTotal)
-	require.NotNil(t, SubscriptionSyncDuration)
-	require.NotNil(t, SubscriptionExpireTotal)
-	require.NotNil(t, SubscriptionExpireDuration)
-	require.NotNil(t, ReconcileOrphanedDuration)
-	require.NotNil(t, OrphanedClientsRevokedTotal)
-	require.NotNil(t, SubserverSourceFetchTotal)
-	require.NotNil(t, SubserverSourceFetchDuration)
-	require.NotNil(t, SubserverCacheInvalidationsTotal)
-	require.NotNil(t, SubserverNoItemsTotal)
-	require.NotNil(t, PaymentOperationsTotal)
-	require.NotNil(t, PaymentOperationDuration)
-	require.NotNil(t, PaymentAmountCentsTotal)
-	require.NotNil(t, PaymentIssuesTotal)
 }
 
 func TestInstrumentHTTPSkipsMetricsAndStatic(t *testing.T) {

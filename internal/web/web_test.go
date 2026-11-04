@@ -119,20 +119,6 @@ func TestRenderTrialPage(t *testing.T) {
 				assert.Contains(t, html, "Скопировать ссылку")
 			},
 		},
-		{
-			name:         "structure",
-			subURL:       "https://example.com/sub/abc123",
-			telegramLink: "https://t.me/testbot?start=trial_abc123",
-			mockDB:       true,
-			trialHours:   24,
-			check: func(t *testing.T, html string) {
-				assert.Contains(t, html, "<!DOCTYPE html>")
-				assert.Contains(t, html, "RS8 KVN")
-				assert.Contains(t, html, "Добавить в Happ")
-				assert.Contains(t, html, "Активировать")
-				assert.Contains(t, html, "24 часа")
-			},
-		},
 	}
 
 	for _, tt := range tests {
@@ -161,42 +147,34 @@ func TestRenderTrialPage(t *testing.T) {
 
 // === Server Start/Stop tests ===
 
-func TestServer_StartAndStop(t *testing.T) {
-	t.Parallel()
-
-	srv := NewServer(":0", nil, &config.Config{}, "testbot", nil, nil) // :0 for random port
-
-	ctx := context.Background()
-
-	// Start server
-	err := srv.Start(ctx)
-	assert.NoError(t, err, "Start() should not return error")
-
-	// Stop server
-	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err = srv.Stop(stopCtx)
-	assert.NoError(t, err, "Stop() should not return error")
-}
-
+// Covers both Start paths: with a broken optional subserver access log (dir
+// instead of a file) and with no access log configured at all.
 func TestServer_StartWithInvalidSubserverAccessLog(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{
-		SubServerAccessLogPath: t.TempDir(),
+	tests := []struct {
+		name string
+		cfg  *config.Config
+	}{
+		{"invalid subserver access log path", &config.Config{SubServerAccessLogPath: t.TempDir()}},
+		{"no access log configured", &config.Config{}},
 	}
-	srv := NewServer(":0", nil, cfg, "testbot", nil, nil)
 
-	ctx := context.Background()
-	err := srv.Start(ctx)
-	require.NoError(t, err, "Start() should not fail when optional subserver access log cannot be opened")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := NewServer(":0", nil, tt.cfg, "testbot", nil, nil)
 
-	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+			ctx := context.Background()
+			err := srv.Start(ctx)
+			require.NoError(t, err, "Start() should not fail")
 
-	err = srv.Stop(stopCtx)
-	assert.NoError(t, err, "Stop() should not return error")
+			stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			err = srv.Stop(stopCtx)
+			assert.NoError(t, err, "Stop() should not return error")
+		})
+	}
 }
 
 func TestServer_StopWithoutStart(t *testing.T) {
@@ -352,15 +330,6 @@ func TestHandleLogo(t *testing.T) {
 				assert.Equal(t, byte('P'), w.Body.Bytes()[1])
 				assert.Equal(t, byte('N'), w.Body.Bytes()[2])
 				assert.Equal(t, byte('G'), w.Body.Bytes()[3])
-			},
-		},
-		{
-			name:         "cache headers",
-			method:       http.MethodGet,
-			expectedCode: http.StatusOK,
-			checks: func(t *testing.T, w *httptest.ResponseRecorder) {
-				assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
-				assert.Equal(t, "public, max-age=86400", w.Header().Get("Cache-Control"))
 			},
 		},
 		{

@@ -63,7 +63,7 @@ func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T)
 			return nil, nil
 		},
 	}
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{})
 
 	const workers = 4
 
@@ -203,7 +203,7 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 			return nil, nil
 		},
 	}
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{})
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -301,7 +301,7 @@ func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 			return nil, nil
 		},
 	}
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", nil)
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", nil)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -534,7 +534,7 @@ func TestCancelPaymentByProvider_SameOrderParallelChargebacksTransitionOnce(t *t
 		},
 	}
 	adminBot := testutil.NewBotAPI()
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
 	o.SetAdminBot(adminBot)
 
 	const workers = 4
@@ -639,7 +639,7 @@ func TestCancelPaymentByProvider_SameOrderParallelPendingCancelsIdempotent(t *te
 		},
 	}
 	adminBot := testutil.NewBotAPI()
-	o := NewOrderService(mock, nil, nil, fakePaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
 	o.SetAdminBot(adminBot)
 
 	const workers = 4

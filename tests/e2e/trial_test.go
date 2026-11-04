@@ -43,37 +43,11 @@ func TestE2E_TrialBind_Parameterized(t *testing.T) {
 			},
 		},
 		{
-			name: "already_has_subscription",
-			setup: func(t *testing.T, ctx context.Context, env *e2eTestEnv) string {
-				existingSub := &database.Subscription{
-					TelegramID:     env.chatID,
-					Username:       env.username,
-					ClientID:       "existing-client",
-					SubscriptionID: "existing-sub",
-					Status:         "active",
-				}
-				createE2ESub(t, env.db, existingSub)
-
-				trialSubID := "trial-xyz-789"
-				_, err := env.db.CreateTrialSubscription(ctx, "test_invite_code", trialSubID, "trial-client-id", time.Now().Add(24*time.Hour))
-				require.NoError(t, err)
-
-				return trialSubID
-			},
-			wantSent:    true,
-			wantMessage: "уже есть активная подписка",
-			checkSub:    nil,
-		},
-		{
-			name: "not_found",
-			setup: func(t *testing.T, ctx context.Context, env *e2eTestEnv) string {
-				return "trial_nonexistent"
-			},
-			wantSent:    true,
-			wantMessage: "Не удалось активировать",
-			checkSub:    nil,
-		},
-		{
+			// Merged case: after the trial is bound the user already has an
+			// active subscription, so a repeated activation hits the same
+			// "уже есть активная подписка" branch as a bind with a pre-existing
+			// subscription (unit TestHandleCreateSubscription_ExistingActiveSubscription
+			// covers that branch directly).
 			name: "already_activated",
 			setup: func(t *testing.T, ctx context.Context, env *e2eTestEnv) string {
 				trialSubID := "trial-double-123"
@@ -88,6 +62,15 @@ func TestE2E_TrialBind_Parameterized(t *testing.T) {
 			},
 			wantSent:    true,
 			wantMessage: "уже есть активная подписка",
+			checkSub:    nil,
+		},
+		{
+			name: "not_found",
+			setup: func(t *testing.T, ctx context.Context, env *e2eTestEnv) string {
+				return "trial_nonexistent"
+			},
+			wantSent:    true,
+			wantMessage: "Не удалось активировать",
 			checkSub:    nil,
 		},
 	}

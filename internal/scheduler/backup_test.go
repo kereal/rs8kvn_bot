@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,23 +11,13 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func init() {
 	_, _ = logger.Init("", "error")
-}
-
-func TestBackupScheduler_New(t *testing.T) {
-	t.Parallel()
-
-	scheduler := NewBackupScheduler("/tmp/test.db", 2, 7)
-
-	assert.NotNil(t, scheduler)
-	assert.Equal(t, "/tmp/test.db", scheduler.dbPath)
-	assert.Equal(t, 2, scheduler.hour)
-	assert.Equal(t, 7, scheduler.retention)
 }
 
 func TestBackupScheduler_Start_ContextCancel(t *testing.T) {
@@ -62,7 +54,9 @@ func TestBackupScheduler_Start_ContextCancel(t *testing.T) {
 	}
 }
 
-func TestBackupScheduler_CalculateNextBackup(t *testing.T) {
+// TestBackupScheduler_MaintenanceHook verifies the daily maintenance hook runs
+// AFTER the backup completes (not before), per the SetMaintenance contract.
+func TestBackupScheduler_MaintenanceHook(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
@@ -70,23 +64,57 @@ func TestBackupScheduler_CalculateNextBackup(t *testing.T) {
 
 	f, err := os.Create(dbPath)
 	require.NoError(t, err)
+	require.NoError(t, f.Close())
 
-	err = f.Close()
-	if err != nil {
-		t.Logf("Warning: failed to close file: %v", err)
-	}
+	maintenanceCalled := false
+	scheduler := NewBackupScheduler(dbPath, 3, 7)
+	scheduler.SetMaintenance(func(context.Context) error {
+		maintenanceCalled = true
 
-	scheduler := NewBackupScheduler(dbPath, 2, 7)
+		// The hook runs after the backup: the fresh backup artifact must
+		// already exist on disk while the hook is executing.
+		backups, globErr := filepath.Glob(dbPath + ".backup*")
+		assert.NoError(t, globErr)
+		assert.NotEmpty(t, backups, "backup artifact must exist while the maintenance hook runs")
 
-	_ = scheduler
+		return nil
+	})
 
-	now := time.Now()
+	scheduler.runOnce(context.Background())
 
-	next := time.Date(now.Year(), now.Month(), now.Day(), 2, 0, 0, 0, now.Location())
-	if now.After(next) {
-		next = next.Add(24 * time.Hour)
-	}
+	assert.True(t, maintenanceCalled, "maintenance hook must be invoked after the backup")
+}
 
-	duration := time.Until(next)
-	assert.Greater(t, duration, 0*time.Second)
+// TestBackupScheduler_RunOnce_BackupSuccessMaintenanceError покрывает обе
+// ветки runOnce, не покрытые на пустом файле в MaintenanceHook: успешный
+// бэкап (валидная SQLite-база) и ошибку хука обслуживания — она логируется
+// и глотается по контракту, runOnce не паникует.
+func TestBackupScheduler_RunOnce_BackupSuccessMaintenanceError(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	_, err = db.Exec("CREATE TABLE subscriptions (id INTEGER PRIMARY KEY, status TEXT)")
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	maintenanceCalled := false
+	scheduler := NewBackupScheduler(dbPath, 3, 7)
+	scheduler.SetMaintenance(func(context.Context) error {
+		maintenanceCalled = true
+
+		return errors.New("audit retention vacuum failed")
+	})
+
+	require.NotPanics(t, func() { scheduler.runOnce(context.Background()) })
+
+	assert.True(t, maintenanceCalled, "maintenance hook must run and its error be swallowed")
+	// DailyBackup ротирует артефакт: .backup переименовывается в .backup.<timestamp>.
+	artifacts, globErr := filepath.Glob(dbPath + ".backup*")
+	assert.NoError(t, globErr)
+	assert.NotEmpty(t, artifacts, "valid database must produce a backup artifact")
+	assert.NoFileExists(t, dbPath+".backup.corrupt", "valid database must not be marked corrupt")
 }

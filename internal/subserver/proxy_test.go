@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
@@ -29,74 +28,6 @@ func TestFetchFromNode_ResponseSizeLimit(t *testing.T) {
 	assert.Contains(t, err.Error(), "exceeds")
 }
 
-func TestDetectFormat_Plain(t *testing.T) {
-	t.Parallel()
-
-	body := []byte("vless://abc@server.com:443\nvmess://data")
-	assert.Equal(t, FormatPlain, DetectFormat(body))
-}
-
-func TestDetectFormat_Plain_Golden(t *testing.T) {
-	t.Parallel()
-
-	data, err := os.ReadFile("../testdata/subserver/vless_single.txt")
-	require.NoError(t, err)
-	assert.Equal(t, FormatPlain, DetectFormat(data))
-}
-
-func TestDetectFormat_Base64(t *testing.T) {
-	t.Parallel()
-
-	plain := "vless://abc@server.com:443\nvmess://data"
-	encoded := base64.StdEncoding.EncodeToString([]byte(plain))
-	assert.Equal(t, FormatBase64, DetectFormat([]byte(encoded)))
-}
-
-func TestDetectFormat_Base64_Golden(t *testing.T) {
-	t.Parallel()
-
-	data, err := os.ReadFile("../testdata/subserver/base64_encoded.txt")
-	require.NoError(t, err)
-	assert.Equal(t, FormatBase64, DetectFormat(data))
-}
-
-func TestDetectFormat_JSON(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`{"type":"vless","address":"x.com","port":443,"uuid":"abc","encryption":"none"}`)
-	assert.Equal(t, FormatJSON, DetectFormat(body))
-}
-
-func TestDetectFormat_JSONArray(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`[{"type":"vless","address":"x.com","port":443,"uuid":"abc","encryption":"none"}]`)
-	assert.Equal(t, FormatJSON, DetectFormat(body))
-}
-
-func TestDetectFormat_InvalidBase64(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, FormatUnknown, DetectFormat([]byte("not-valid-base64!!!")))
-}
-
-func TestDetectFormat_Empty(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, FormatUnknown, DetectFormat([]byte("")))
-	assert.Equal(t, FormatUnknown, DetectFormat([]byte("  ")))
-}
-
-func TestBase64StdEncode(t *testing.T) {
-	t.Parallel()
-
-	// Fixed golden values: base64StdEncode is a thin wrapper over the stdlib, so
-	// pin known encodings instead of recomputing expectations with the same
-	// function (which would make the test a tautology).
-	assert.Equal(t, "YWI=", base64StdEncode([]byte("ab")))
-	assert.Equal(t, "", base64StdEncode(nil))
-}
-
 func TestAggregateFormat_RawBase64(t *testing.T) {
 	t.Parallel()
 
@@ -107,14 +38,4 @@ func TestAggregateFormat_RawBase64(t *testing.T) {
 	aggregateFormat(&agg, FormatBase64, []byte(encoded), database.Node{Name: "raw-base64"}, "sub-raw")
 
 	assert.Equal(t, []string{"vless://one@example.com:443", "trojan://pass@example.com:443"}, agg.items)
-}
-
-func TestConvertJSONToShareLinks_VLESS_ThroughProxy(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`{"type":"vless","address":"x.com","port":443,"uuid":"abc","encryption":"none","remark":"Test"}`)
-	links, err := ConvertJSONToShareLinks(body)
-	require.NoError(t, err)
-	require.Len(t, links, 1)
-	assert.Contains(t, links[0], "vless://abc@x.com:443")
 }

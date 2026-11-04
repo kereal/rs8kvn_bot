@@ -8,6 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// testBotToken is a syntactically valid placeholder token used by Load() tests.
+const testBotToken = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+
 // TestMain isolates the Load() tests from payment environment variables that
 // may be exported in the host shell or a local .env (e.g. a development
 // environment with PAYMENT_ENABLED=true and a placeholder merchant ID). The
@@ -22,64 +25,42 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestLoad_DefaultValues(t *testing.T) {
-	require.NoError(t, os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"))
-	require.NoError(t, os.Setenv("TELEGRAM_ADMIN_ID", "123456"))
-	require.NoError(t, os.Setenv("LOG_LEVEL", "info"))
+// setLoadEnv resets the shared baseline environment for a Load() test and
+// applies per-test overrides on top. All variables are registered with
+// t.Setenv, so they are restored automatically when the test finishes.
+// GLOBAL_SUB_URL is part of the baseline because validate() rejects configs
+// without it; per-test overrides may replace any value.
+func setLoadEnv(t *testing.T, overrides map[string]string) {
+	t.Helper()
 
-	defer func() {
-		err := os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		if err != nil {
-			t.Logf("Warning: Unsetenv failed: %v", err)
-		}
-
-		err = os.Unsetenv("TELEGRAM_ADMIN_ID")
-		if err != nil {
-			t.Logf("Warning: Unsetenv failed: %v", err)
-		}
-
-		err = os.Unsetenv("LOG_LEVEL")
-		if err != nil {
-			t.Logf("Warning: Unsetenv failed: %v", err)
-		}
-	}()
-
-	// Isolate from host environment — SUBSERVER_ACCESS_LOG may be set in .env
-	err := os.Unsetenv("SUBSERVER_ACCESS_LOG")
-	if err != nil {
-		t.Logf("Warning: Unsetenv failed: %v", err)
+	t.Setenv("SUBSERVER_ACCESS_LOG", "")
+	for k, v := range map[string]string{
+		"TELEGRAM_BOT_TOKEN": testBotToken,
+		"TELEGRAM_ADMIN_ID":  "123456",
+		"LOG_LEVEL":          "info",
+		"GLOBAL_SUB_URL":     "https://vpn.example.com/sub/",
+	} {
+		t.Setenv(k, v)
 	}
+	for k, v := range overrides {
+		t.Setenv(k, v)
+	}
+}
 
-	require.NoError(t, os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/"))
-
-	defer os.Unsetenv("GLOBAL_SUB_URL")
-
-	// Isolate from host environment / .env — empty value is treated as unset
-	// by LoadEnv, so the default (true) is preserved.
-	t.Setenv("NOTIFICATIONS_ENABLED", "")
+func TestLoad_DefaultValues(t *testing.T) {
+	setLoadEnv(t, map[string]string{"NOTIFICATIONS_ENABLED": ""})
 
 	cfg, err := Load()
 	require.NoError(t, err, "Load() error")
 
-	assert.Equal(t, "123456789:ABCdefGHIjklMNOpqrsTUVwxyz", cfg.TelegramBotToken, "TelegramBotToken")
+	assert.Equal(t, testBotToken, cfg.TelegramBotToken, "TelegramBotToken")
 	assert.Equal(t, int64(123456), cfg.TelegramAdminID, "TelegramAdminID")
 	assert.Empty(t, cfg.SubServerAccessLogPath, "SubServerAccessLogPath")
 	assert.True(t, cfg.NotificationsEnabled, "NotificationsEnabled should default to true")
 }
 
 func TestLoad_NotificationsDisabled(t *testing.T) {
-	require.NoError(t, os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"))
-	require.NoError(t, os.Setenv("TELEGRAM_ADMIN_ID", "123456"))
-	require.NoError(t, os.Setenv("LOG_LEVEL", "info"))
-	require.NoError(t, os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/"))
-	require.NoError(t, os.Setenv("NOTIFICATIONS_ENABLED", "false"))
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("GLOBAL_SUB_URL")
-		os.Unsetenv("NOTIFICATIONS_ENABLED")
-	}()
+	setLoadEnv(t, map[string]string{"NOTIFICATIONS_ENABLED": "false"})
 
 	cfg, err := Load()
 	require.NoError(t, err, "Load() error")
@@ -87,26 +68,13 @@ func TestLoad_NotificationsDisabled(t *testing.T) {
 }
 
 func TestLoad_CustomValues(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "999999")
-
-	os.Setenv("HEARTBEAT_INTERVAL", "120")
-	os.Setenv("DATABASE_PATH", "/custom/path/db.db")
-	os.Setenv("LOG_LEVEL", "debug")
-	os.Setenv("WEB_SERVER_PORT", "9090")
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-	os.Setenv("SUBSERVER_ACCESS_LOG", "./data/subserver-test.log")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("HEARTBEAT_INTERVAL")
-		os.Unsetenv("DATABASE_PATH")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("WEB_SERVER_PORT")
-		os.Unsetenv("GLOBAL_SUB_URL")
-		os.Unsetenv("SUBSERVER_ACCESS_LOG")
-	}()
+	setLoadEnv(t, map[string]string{
+		"HEARTBEAT_INTERVAL":   "120",
+		"DATABASE_PATH":        "/custom/path/db.db",
+		"LOG_LEVEL":            "debug",
+		"WEB_SERVER_PORT":      "9090",
+		"SUBSERVER_ACCESS_LOG": "./data/subserver-test.log",
+	})
 
 	cfg, err := Load()
 	require.NoError(t, err, "Load() error")
@@ -117,29 +85,14 @@ func TestLoad_CustomValues(t *testing.T) {
 }
 
 func TestLoad_MissingBotToken(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("LOG_LEVEL", "info")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("LOG_LEVEL")
-	}()
+	setLoadEnv(t, map[string]string{"TELEGRAM_BOT_TOKEN": ""})
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error when BOT_TOKEN is empty")
 }
 
 func TestLoad_InvalidTelegramAdminID(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "invalid")
-	os.Setenv("LOG_LEVEL", "info")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("LOG_LEVEL")
-	}()
+	setLoadEnv(t, map[string]string{"TELEGRAM_ADMIN_ID": "invalid"})
 
 	_, err := Load()
 	require.Error(t, err, "Load() should error for invalid TELEGRAM_ADMIN_ID")
@@ -147,288 +100,94 @@ func TestLoad_InvalidTelegramAdminID(t *testing.T) {
 }
 
 func TestLoad_InvalidHeartbeatInterval_Zero(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("HEARTBEAT_INTERVAL", "0")
-	os.Setenv("HEARTBEAT_URL", "https://example.com/heartbeat")
-	os.Setenv("LOG_LEVEL", "info")
-
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("HEARTBEAT_INTERVAL")
-		os.Unsetenv("HEARTBEAT_URL")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
+	setLoadEnv(t, map[string]string{
+		"HEARTBEAT_INTERVAL": "0",
+		"HEARTBEAT_URL":      "https://example.com/heartbeat",
+	})
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error for HEARTBEAT_INTERVAL=0")
 }
 
 func TestLoad_ValidHeartbeatInterval_MinValue(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("HEARTBEAT_INTERVAL", "60")
-	os.Setenv("HEARTBEAT_URL", "https://example.com/heartbeat")
-	os.Setenv("LOG_LEVEL", "info")
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("HEARTBEAT_INTERVAL")
-		os.Unsetenv("HEARTBEAT_URL")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
+	setLoadEnv(t, map[string]string{
+		"HEARTBEAT_INTERVAL": "60",
+		"HEARTBEAT_URL":      "https://example.com/heartbeat",
+	})
 
 	cfg, err := Load()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 60, cfg.HeartbeatInterval)
 }
 
 func TestLoad_InvalidWebServerPort_Zero(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("WEB_SERVER_PORT", "0")
-	os.Setenv("LOG_LEVEL", "info")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("WEB_SERVER_PORT")
-		os.Unsetenv("LOG_LEVEL")
-	}()
+	setLoadEnv(t, map[string]string{"WEB_SERVER_PORT": "0"})
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error for WEB_SERVER_PORT=0")
 }
 
 func TestLoad_InvalidWebServerPort_Max(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("WEB_SERVER_PORT", "65536")
-	os.Setenv("LOG_LEVEL", "info")
+	for _, port := range []string{"65536", "70000"} {
+		t.Run(port, func(t *testing.T) {
+			setLoadEnv(t, map[string]string{"WEB_SERVER_PORT": port})
 
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("WEB_SERVER_PORT")
-		os.Unsetenv("LOG_LEVEL")
-	}()
-
-	_, err := Load()
-	assert.Error(t, err, "Load() should error for WEB_SERVER_PORT=65536 (max is 65535)")
+			_, err := Load()
+			assert.Error(t, err, "Load() should error for WEB_SERVER_PORT=%s (max is 65535)", port)
+		})
+	}
 }
 
 func TestLoad_ValidWebServerPort_Max(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("WEB_SERVER_PORT", "65535")
-	os.Setenv("LOG_LEVEL", "info")
-
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("WEB_SERVER_PORT")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
+	setLoadEnv(t, map[string]string{"WEB_SERVER_PORT": "65535"})
 
 	cfg, err := Load()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 65535, cfg.WebServerPort)
 }
 
 func TestLoad_ValidTelegramAdminID(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("LOG_LEVEL", "info")
-
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
+	setLoadEnv(t, nil)
 
 	cfg, err := Load()
-	assert.NoError(t, err, "Load() should allow valid ADMIN_ID")
+	require.NoError(t, err, "Load() should allow valid ADMIN_ID")
 	assert.Equal(t, int64(123456), cfg.TelegramAdminID)
 }
 
-func TestLoad_InvalidTrialDurationHours_Zero(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("TRIAL_DURATION_HOURS", "0")
-	os.Setenv("SITE_URL", "https://example.com")
-	os.Setenv("LOG_LEVEL", "info")
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("TRIAL_DURATION_HOURS")
-		os.Unsetenv("SITE_URL")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
-
-	_, err := Load()
-	assert.Error(t, err, "Load() should error for TRIAL_DURATION_HOURS=0")
-}
-
 func TestLoad_ValidTrialDurationHours_Min(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("TRIAL_DURATION_HOURS", "1")
-	os.Setenv("SITE_URL", "https://example.com")
-	os.Setenv("LOG_LEVEL", "info")
-
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("TRIAL_DURATION_HOURS")
-		os.Unsetenv("SITE_URL")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
+	setLoadEnv(t, map[string]string{"TRIAL_DURATION_HOURS": "1"})
 
 	cfg, err := Load()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 1, cfg.TrialDurationHours)
 }
 
 func TestLoad_ValidTrialDurationHours_Max(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("TRIAL_DURATION_HOURS", "168")
-	os.Setenv("SITE_URL", "https://example.com")
-	os.Setenv("LOG_LEVEL", "info")
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("TRIAL_DURATION_HOURS")
-		os.Unsetenv("SITE_URL")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
+	setLoadEnv(t, map[string]string{"TRIAL_DURATION_HOURS": "168"})
 
 	cfg, err := Load()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 168, cfg.TrialDurationHours)
 }
 
-func TestLoad_InvalidTrialDurationHours_OverMax(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("TRIAL_DURATION_HOURS", "169")
-	os.Setenv("SITE_URL", "https://example.com")
-	os.Setenv("LOG_LEVEL", "info")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("TRIAL_DURATION_HOURS")
-		os.Unsetenv("SITE_URL")
-		os.Unsetenv("LOG_LEVEL")
-	}()
-
-	_, err := Load()
-	assert.Error(t, err, "Load() should error for TRIAL_DURATION_HOURS=169 (max is 168)")
-}
-
-func TestLoad_InvalidTrialRateLimit_Zero(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("TRIAL_RATE_LIMIT", "0")
-	os.Setenv("SITE_URL", "https://example.com")
-	os.Setenv("LOG_LEVEL", "info")
-
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("TRIAL_RATE_LIMIT")
-		os.Unsetenv("SITE_URL")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
-
-	_, err := Load()
-	assert.Error(t, err, "Load() should error for TRIAL_RATE_LIMIT=0")
-}
-
 func TestLoad_ValidTrialRateLimit_Min(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("TRIAL_RATE_LIMIT", "1")
-	os.Setenv("SITE_URL", "https://example.com")
-	os.Setenv("LOG_LEVEL", "info")
-
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("TRIAL_RATE_LIMIT")
-		os.Unsetenv("SITE_URL")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
+	setLoadEnv(t, map[string]string{"TRIAL_RATE_LIMIT": "1"})
 
 	cfg, err := Load()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 1, cfg.TrialRateLimit)
 }
 
 func TestLoad_ValidTrialRateLimit_Max(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("TRIAL_RATE_LIMIT", "100")
-	os.Setenv("SITE_URL", "https://example.com")
-	os.Setenv("LOG_LEVEL", "info")
-
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("TRIAL_RATE_LIMIT")
-		os.Unsetenv("SITE_URL")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
+	setLoadEnv(t, map[string]string{"TRIAL_RATE_LIMIT": "100"})
 
 	cfg, err := Load()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 100, cfg.TrialRateLimit)
 }
 
 func TestLoad_InvalidHeartbeatInterval(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("HEARTBEAT_INTERVAL", "invalid")
-	os.Setenv("LOG_LEVEL", "info")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("HEARTBEAT_INTERVAL")
-		os.Unsetenv("LOG_LEVEL")
-	}()
+	setLoadEnv(t, map[string]string{"HEARTBEAT_INTERVAL": "invalid"})
 
 	_, err := Load()
 	require.Error(t, err, "Load() should error for invalid HEARTBEAT_INTERVAL")
@@ -471,19 +230,23 @@ func TestValidateURL(t *testing.T) {
 	}
 }
 
+// TestConfig_String verifies the "secret not in logs" contract: the bot token
+// must be masked and its real value must never appear in String() output.
 func TestConfig_String(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramBotToken: testBotToken,
 		TelegramAdminID:  123456,
+		GlobalSubURL:     "https://vpn.example.com/sub/secretid",
 	}
 
 	str := cfg.String()
 
-	assert.Contains(t, str, "TelegramBotToken", "String() should include TelegramBotToken")
+	assert.Contains(t, str, "TelegramBotToken=***", "String() should mask TelegramBotToken")
+	assert.NotContains(t, str, testBotToken, "String() must never leak the real bot token")
+	assert.NotContains(t, str, "secretid", "String() must mask GlobalSubURL path")
 	assert.Contains(t, str, "123456", "String() should include TelegramAdminID")
-	assert.NotContains(t, str, "some-token", "String() should mask API token")
 }
 
 func TestMaskURL(t *testing.T) {
@@ -519,7 +282,7 @@ func TestConfig_Validate_InvalidPaymentMerchantUUID(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramBotToken:   testBotToken,
 		TelegramAdminID:    123456,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
@@ -542,7 +305,7 @@ func TestConfig_Validate_Valid(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramBotToken:   testBotToken,
 		TelegramAdminID:    123456,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
@@ -561,7 +324,7 @@ func TestConfig_Validate_SentryDSN_Valid(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramBotToken:   testBotToken,
 		TelegramAdminID:    123456,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
@@ -581,7 +344,7 @@ func TestConfig_Validate_SentryDSN_Invalid(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramBotToken: testBotToken,
 		TelegramAdminID:  123456,
 		SentryDSN:        "invalid-dsn",
 	}
@@ -590,30 +353,11 @@ func TestConfig_Validate_SentryDSN_Invalid(t *testing.T) {
 	assert.Error(t, err, "validate() should error on invalid SentryDSN")
 }
 
-func TestConfig_Validate_WithSubPath(t *testing.T) {
-	t.Parallel()
-
-	cfg := &Config{
-		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:    123456,
-		HeartbeatInterval:  60,
-		LogLevel:           "info",
-		WebServerPort:      DefaultWebServerPort,
-		SiteURL:            "https://vpn.site",
-		TrialDurationHours: 3,
-		TrialRateLimit:     3,
-		GlobalSubURL:       "https://vpn.example.com/sub/",
-	}
-
-	err := cfg.validate()
-	assert.NoError(t, err, "validate() should not error with SubPath")
-}
-
 func TestConfig_Validate_WithHeartbeatURL(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramBotToken:   testBotToken,
 		TelegramAdminID:    123456,
 		HeartbeatInterval:  60,
 		LogLevel:           "info",
@@ -645,7 +389,7 @@ func TestConfig_Validate_NegativeAdminID(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramBotToken: testBotToken,
 		TelegramAdminID:  -1,
 	}
 
@@ -657,50 +401,13 @@ func TestConfig_Validate_InvalidLogLevel(t *testing.T) {
 	t.Parallel()
 
 	cfg := &Config{
-		TelegramBotToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramBotToken: testBotToken,
 		TelegramAdminID:  123456,
 		LogLevel:         "invalid",
 	}
 
 	err := cfg.validate()
 	assert.Error(t, err, "validate() should error on invalid LogLevel")
-}
-
-func TestConfig_Validate_InvalidWebServerPort_TooLow(t *testing.T) {
-	t.Parallel()
-
-	cfg := &Config{
-		TelegramBotToken:  "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:   123456,
-		HeartbeatInterval: 60,
-		LogLevel:          "info",
-		WebServerPort:     0,
-	}
-
-	err := cfg.validate()
-	assert.Error(t, err, "validate() should error on WebServerPort = 0")
-}
-
-func TestConfig_Validate_InvalidWebServerPort_TooHigh(t *testing.T) {
-	t.Parallel()
-
-	cfg := &Config{
-		TelegramBotToken:  "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
-		TelegramAdminID:   123456,
-		HeartbeatInterval: 60,
-		LogLevel:          "info",
-		WebServerPort:     70000,
-	}
-
-	err := cfg.validate()
-	assert.Error(t, err, "validate() should error on WebServerPort = 70000")
-}
-
-func TestMaskURL_Empty(t *testing.T) {
-	t.Parallel()
-
-	result := maskURL("")
-	assert.Equal(t, "(not set)", result, "maskURL(\"\")")
 }
 
 func TestMaskURL_ValidURL(t *testing.T) {
@@ -725,19 +432,7 @@ func TestMaskURL_ValidURL(t *testing.T) {
 }
 
 func TestLoad_TrialDurationHours_TooLow(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("LOG_LEVEL", "info")
-	os.Setenv("TRIAL_DURATION_HOURS", "0")
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("TRIAL_DURATION_HOURS")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
+	setLoadEnv(t, map[string]string{"TRIAL_DURATION_HOURS": "0"})
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error when TRIAL_DURATION_HOURS is too low")
@@ -745,59 +440,19 @@ func TestLoad_TrialDurationHours_TooLow(t *testing.T) {
 }
 
 func TestLoad_TrialDurationHours_TooHigh(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("LOG_LEVEL", "info")
-	os.Setenv("TRIAL_DURATION_HOURS", "200")
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
+	for _, hours := range []string{"169", "200"} {
+		t.Run(hours, func(t *testing.T) {
+			setLoadEnv(t, map[string]string{"TRIAL_DURATION_HOURS": hours})
 
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("TRIAL_DURATION_HOURS")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
-
-	_, err := Load()
-	assert.Error(t, err, "Load() should error when TRIAL_DURATION_HOURS is too high")
-	assert.Contains(t, err.Error(), "TRIAL_DURATION_HOURS", "Error should mention TRIAL_DURATION_HOURS")
-}
-
-func TestLoad_TrialDurationHours_Valid(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("LOG_LEVEL", "info")
-	os.Setenv("TRIAL_DURATION_HOURS", "24")
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("TRIAL_DURATION_HOURS")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
-
-	cfg, err := Load()
-	require.NoError(t, err, "Load() should not error with valid TRIAL_DURATION_HOURS")
-	assert.Equal(t, 24, cfg.TrialDurationHours, "TrialDurationHours")
+			_, err := Load()
+			assert.Error(t, err, "Load() should error when TRIAL_DURATION_HOURS=%s exceeds 168", hours)
+			assert.Contains(t, err.Error(), "TRIAL_DURATION_HOURS", "Error should mention TRIAL_DURATION_HOURS")
+		})
+	}
 }
 
 func TestLoad_TrialRateLimit_TooLow(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("LOG_LEVEL", "info")
-	os.Setenv("TRIAL_RATE_LIMIT", "0")
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("TRIAL_RATE_LIMIT")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
+	setLoadEnv(t, map[string]string{"TRIAL_RATE_LIMIT": "0"})
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error when TRIAL_RATE_LIMIT is too low")
@@ -805,59 +460,15 @@ func TestLoad_TrialRateLimit_TooLow(t *testing.T) {
 }
 
 func TestLoad_TrialRateLimit_TooHigh(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("LOG_LEVEL", "info")
-	os.Setenv("TRIAL_RATE_LIMIT", "150")
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("TRIAL_RATE_LIMIT")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
+	setLoadEnv(t, map[string]string{"TRIAL_RATE_LIMIT": "150"})
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error when TRIAL_RATE_LIMIT is too high")
 	assert.Contains(t, err.Error(), "TRIAL_RATE_LIMIT", "Error should mention TRIAL_RATE_LIMIT")
 }
 
-func TestLoad_TrialRateLimit_Valid(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("LOG_LEVEL", "info")
-	os.Setenv("TRIAL_RATE_LIMIT", "5")
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("TRIAL_RATE_LIMIT")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
-
-	cfg, err := Load()
-	require.NoError(t, err, "Load() should not error with valid TRIAL_RATE_LIMIT")
-	assert.Equal(t, 5, cfg.TrialRateLimit, "TrialRateLimit")
-}
-
 func TestLoad_SiteURL_Invalid(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("LOG_LEVEL", "info")
-	os.Setenv("SITE_URL", "not-a-valid-url")
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("SITE_URL")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
+	setLoadEnv(t, map[string]string{"SITE_URL": "not-a-valid-url"})
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error with invalid SITE_URL")
@@ -865,63 +476,19 @@ func TestLoad_SiteURL_Invalid(t *testing.T) {
 }
 
 func TestLoad_SiteURL_MissingScheme(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("LOG_LEVEL", "info")
-	os.Setenv("SITE_URL", "example.com")
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("SITE_URL")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
+	setLoadEnv(t, map[string]string{"SITE_URL": "example.com"})
 
 	_, err := Load()
 	assert.Error(t, err, "Load() should error when SITE_URL is missing scheme")
 	assert.Contains(t, err.Error(), "SITE_URL", "Error should mention SITE_URL")
 }
 
-func TestLoad_SiteURL_Valid(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("LOG_LEVEL", "info")
-	os.Setenv("SITE_URL", "https://vpn.example.com")
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("SITE_URL")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
-
-	cfg, err := Load()
-	require.NoError(t, err, "Load() should not error with valid SITE_URL")
-	assert.Equal(t, "https://vpn.example.com", cfg.SiteURL, "SiteURL")
-}
-
 func TestLoad_AllTrialSettings(t *testing.T) {
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_ADMIN_ID", "123456")
-	os.Setenv("LOG_LEVEL", "info")
-	os.Setenv("TRIAL_DURATION_HOURS", "48")
-	os.Setenv("TRIAL_RATE_LIMIT", "10")
-	os.Setenv("SITE_URL", "https://trial.example.com")
-	os.Setenv("GLOBAL_SUB_URL", "https://vpn.example.com/sub/")
-
-	defer func() {
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_ADMIN_ID")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("TRIAL_DURATION_HOURS")
-		os.Unsetenv("TRIAL_RATE_LIMIT")
-		os.Unsetenv("SITE_URL")
-		os.Unsetenv("GLOBAL_SUB_URL")
-	}()
+	setLoadEnv(t, map[string]string{
+		"TRIAL_DURATION_HOURS": "48",
+		"TRIAL_RATE_LIMIT":     "10",
+		"SITE_URL":             "https://trial.example.com",
+	})
 
 	cfg, err := Load()
 	require.NoError(t, err, "Load() should not error with all valid settings")
@@ -934,7 +501,7 @@ func TestLoad_AllTrialSettings(t *testing.T) {
 
 func FuzzLoad_InvalidEnvValues(f *testing.F) {
 	baseEnvs := map[string]string{
-		"TELEGRAM_BOT_TOKEN": "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		"TELEGRAM_BOT_TOKEN": testBotToken,
 		"TELEGRAM_ADMIN_ID":  "123456",
 		"LOG_LEVEL":          "info",
 		"GLOBAL_SUB_URL":     "https://vpn.example.com/sub/",
@@ -992,7 +559,7 @@ func TestConfig_Validate_AuditRetention(t *testing.T) {
 	assert.Equal(t, 180, DefaultAuditLogRetentionDays)
 
 	base := &Config{
-		TelegramBotToken:      "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramBotToken:      testBotToken,
 		TelegramAdminID:       123456,
 		HeartbeatInterval:     60,
 		LogLevel:              "info",

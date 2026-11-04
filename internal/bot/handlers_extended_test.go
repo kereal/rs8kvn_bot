@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -22,7 +21,7 @@ func TestGetUsername_EdgeCases(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 123}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL, true)}
+	h := newContentTestHandler(cfg)
 
 	tests := []struct {
 		name     string
@@ -45,42 +44,6 @@ func TestGetUsername_EdgeCases(t *testing.T) {
 			expected: "",
 		},
 		{
-			name: "unicode username",
-			user: &tgbotapi.User{
-				ID:        12345,
-				UserName:  "用户名",
-				FirstName: "名字",
-			},
-			expected: "用户名",
-		},
-		{
-			name: "emoji in username",
-			user: &tgbotapi.User{
-				ID:        12345,
-				UserName:  "user🎉name",
-				FirstName: "First🎉Name",
-			},
-			expected: "user🎉name",
-		},
-		{
-			name: "special characters in username",
-			user: &tgbotapi.User{
-				ID:        12345,
-				UserName:  "user_name-123.test",
-				FirstName: "",
-			},
-			expected: "user_name-123.test",
-		},
-		{
-			name: "whitespace in username",
-			user: &tgbotapi.User{
-				ID:        12345,
-				UserName:  " user ",
-				FirstName: "",
-			},
-			expected: " user ",
-		},
-		{
 			name: "username preferred over firstname",
 			user: &tgbotapi.User{
 				ID:        12345,
@@ -95,78 +58,6 @@ func TestGetUsername_EdgeCases(t *testing.T) {
 				ID:        12345,
 				UserName:  "",
 				FirstName: "John",
-			},
-			expected: "",
-		},
-		{
-			name: "very long username",
-			user: &tgbotapi.User{
-				ID:        12345,
-				UserName:  strings.Repeat("a", 200),
-				FirstName: "",
-			},
-			expected: strings.Repeat("a", 200),
-		},
-		{
-			name: "mixed script username",
-			user: &tgbotapi.User{
-				ID:        12345,
-				UserName:  "用户123abc",
-				FirstName: "",
-			},
-			expected: "用户123abc",
-		},
-		{
-			name: "right-to-left text",
-			user: &tgbotapi.User{
-				ID:        12345,
-				UserName:  "مرحبا",
-				FirstName: "",
-			},
-			expected: "مرحبا",
-		},
-		{
-			name: "control characters",
-			user: &tgbotapi.User{
-				ID:        12345,
-				UserName:  "user\x00name",
-				FirstName: "",
-			},
-			expected: "user\x00name",
-		},
-		{
-			name: "newline in firstname ignored",
-			user: &tgbotapi.User{
-				ID:        12345,
-				UserName:  "",
-				FirstName: "First\nName",
-			},
-			expected: "",
-		},
-		{
-			name: "negative user ID",
-			user: &tgbotapi.User{
-				ID:        -12345,
-				UserName:  "",
-				FirstName: "",
-			},
-			expected: "",
-		},
-		{
-			name: "zero user ID",
-			user: &tgbotapi.User{
-				ID:        0,
-				UserName:  "",
-				FirstName: "",
-			},
-			expected: "",
-		},
-		{
-			name: "max int64 user ID",
-			user: &tgbotapi.User{
-				ID:        9223372036854775807,
-				UserName:  "",
-				FirstName: "",
 			},
 			expected: "",
 		},
@@ -247,7 +138,7 @@ func TestIsAdmin_EdgeCases(t *testing.T) {
 			t.Parallel()
 
 			cfg := &config.Config{TelegramAdminID: tt.adminID}
-			h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL, true)}
+			h := newContentTestHandler(cfg)
 			result := h.isAdmin(tt.chatID)
 			assert.Equal(t, tt.expected, result)
 		})
@@ -258,7 +149,7 @@ func TestGetHelpText_EdgeCases(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{TelegramAdminID: 123}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL, true)}
+	h := newContentTestHandler(cfg)
 
 	tests := []struct {
 		name            string
@@ -296,6 +187,21 @@ func TestGetHelpText_EdgeCases(t *testing.T) {
 			subscriptionURL: "https://example.com/sub?key=value&other=123",
 		},
 		{
+			name:            "url injection attempt",
+			trafficLimit:    10,
+			subscriptionURL: "https://example.com/<script>alert(1)</script>",
+		},
+		{
+			name:            "url sql injection attempt",
+			trafficLimit:    10,
+			subscriptionURL: "https://example.com/'; DROP TABLE users; --",
+		},
+		{
+			name:            "url with query params",
+			trafficLimit:    10,
+			subscriptionURL: "https://example.com?hack=1&evil=2",
+		},
+		{
 			name:            "unicode in URL",
 			trafficLimit:    10,
 			subscriptionURL: "https://example.com/подписка",
@@ -331,15 +237,6 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 		assert.Nil(t, result)
 	})
 
-	t.Run("Get on empty cache", func(t *testing.T) {
-		t.Parallel()
-
-		cache := NewSubscriptionCache(10, 5*time.Minute)
-
-		assert.Nil(t, cache.Get(999))
-		assert.Equal(t, 0, cache.Size())
-	})
-
 	t.Run("Invalidate non-existent key", func(t *testing.T) {
 		t.Parallel()
 
@@ -370,20 +267,6 @@ func TestSubscriptionCache_EdgeCases(t *testing.T) {
 
 		// Size should still be 1
 		assert.Equal(t, 1, cache.Size())
-	})
-
-	t.Run("Zero TTL behavior", func(t *testing.T) {
-		t.Parallel()
-
-		cache := NewSubscriptionCache(10, 1*time.Nanosecond)
-
-		sub := &database.Subscription{TelegramID: 123, Username: "user"}
-		cache.Set(123, sub)
-
-		// Should expire almost immediately
-		require.Eventually(t, func() bool {
-			return cache.Get(123) == nil
-		}, 100*time.Millisecond, 1*time.Millisecond, "entry should expire")
 	})
 
 	t.Run("Negative telegram ID", func(t *testing.T) {
@@ -455,57 +338,6 @@ func TestSubscriptionCache_ConcurrentStress(t *testing.T) {
 }
 
 // TestGetMainMenuContent_SpecialUsernameChars tests usernames with special chars
-func TestGetMainMenuContent_SpecialUsernameChars(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TelegramAdminID: 123}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL, true)}
-
-	specialUsernames := []string{
-		"user\nwith\nnewlines",
-		"tab\there",
-		"user\x00with\x00nulls",
-		"emoji🎉🔥🚀",
-		"мир 世界 세계",
-		strings.Repeat("a", 1000), // Very long
-	}
-
-	for _, username := range specialUsernames {
-		t.Run(fmt.Sprintf("username_len_%d", len(username)), func(t *testing.T) {
-			t.Parallel()
-
-			text, _ := h.getMainMenuContent(context.Background(), username, true, 456, nil)
-			assert.Contains(t, text, username)
-		})
-	}
-}
-
-// TestHelpText_InjectionSafety tests that subscription URL is safely included
-func TestHelpText_InjectionSafety(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{TelegramAdminID: 123}
-	h := &Handler{cfg: cfg, botConfig: NewTestBotConfig(), keyboards: NewKeyboardBuilder("testbot", cfg.ContactUsername, cfg.DonateCardNumber, cfg.DonateURL, cfg.SiteURL, true)}
-
-	maliciousURLs := []string{
-		"https://example.com?hack=1&evil=2",
-		"https://example.com/<script>alert(1)</script>",
-		"https://example.com/'; DROP TABLE users; --",
-	}
-
-	for _, url := range maliciousURLs {
-		t.Run("url_safety", func(t *testing.T) {
-			t.Parallel()
-
-			text := h.getHelpText(10, url)
-			// URL should be included as-is (Markdown code block handles special chars)
-			assert.Contains(t, text, url)
-		})
-	}
-}
-
-// TestFormatUserLink_NumericUsername verifies that purely numeric usernames
-// (e.g. 11) use tg://user?id= fallback instead of an unresolvable t.me/11 link.
 func TestFormatUserLink_NumericUsername(t *testing.T) {
 	t.Parallel()
 

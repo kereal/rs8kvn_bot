@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -82,7 +81,9 @@ func TestHandleSubscription_InvalidCode(t *testing.T) {
 	}
 }
 
-func TestHandleSubscription_AccessLog(t *testing.T) {
+// TestHandleSubscription_UnknownSubscription verifies that a DB-level
+// gorm.ErrRecordNotFound maps to 404 "Subscription not found" (not 5xx).
+func TestHandleSubscription_UnknownSubscription(t *testing.T) {
 	t.Parallel()
 
 	db := testutil.NewSubscriptionRepositoryFake()
@@ -433,34 +434,4 @@ func TestHandleSubscription_DevicesTracking(t *testing.T) {
 	assert.Equal(t, "v2rayn/1.0", devices[0]["user-agent"])
 	_, err = time.Parse(time.RFC3339, devices[0]["timestamp"])
 	assert.NoError(t, err, "timestamp should be RFC3339")
-}
-
-func TestHandleSubscription_SourceWithoutSubURL(t *testing.T) {
-	t.Parallel()
-
-	db := testutil.NewSubscriptionRepositoryFake()
-	db.GetWithPlanAndNodesFunc = func(ctx context.Context, _ string) (*database.SubscriptionFull, error) {
-		return &database.SubscriptionFull{
-			Subscription: database.Subscription{ID: 1, Status: "active"},
-			Plan:         database.Plan{TrafficLimit: 1 << 30},
-			Nodes: []database.Node{
-				{ID: 1, Name: "nosuburl", IsActive: true, SubscriptionURL: ""},
-			},
-		}, nil
-	}
-	srv := testServer(t, db, &config.Config{})
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/sub/test123", nil)
-	srv.handleSubscription(w, r)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	assert.Equal(t, "Subscription not found", w.Body.String())
-}
-
-func init() {
-	err := testutil.InitLogger(nil)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to initialize logger:", err)
-	}
 }

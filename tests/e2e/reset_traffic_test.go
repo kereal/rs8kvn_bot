@@ -8,10 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/service"
-	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	"github.com/kereal/rs8kvn_bot/internal/web"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -21,20 +19,6 @@ import (
 
 // resetTrafficPaymentID is a canonical UUID for the reset-traffic test.
 const resetTrafficPaymentID = "660e8400-e29b-41d4-a716-446655440099"
-
-type fixedResetTrafficProvider struct{}
-
-func (fixedResetTrafficProvider) CreateTransaction(_ context.Context, _ platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
-	return &platega.CreateTransactionResponse{
-		TransactionID: resetTrafficPaymentID,
-		URL:           "https://pay.example/checkout",
-		ExpiresIn:     "00:15:00",
-	}, nil
-}
-
-func (fixedResetTrafficProvider) GetTransactionStatus(_ context.Context, _ uuid.UUID) (*platega.TransactionStatusResponse, error) {
-	return nil, fmt.Errorf("status not configured")
-}
 
 // TestE2E_PaymentCycle_ResetTraffic verifies that the full payment cycle
 // (free→premium) triggers ResetTraffic on the VPN panel, ensuring the
@@ -71,7 +55,7 @@ func TestE2E_PaymentCycle_ResetTraffic(t *testing.T) {
 	assert.NotEqual(t, premiumPlan.ID, freeSub.PlanID, "user should start on the free plan")
 
 	// Wire the payment provider.
-	orderSvc := service.NewOrderService(env.db, env.subService, env.syncService, fixedResetTrafficProvider{}, env.botConfig.Username, env.cfg)
+	orderSvc := service.NewOrderService(env.db, env.subService, env.syncService, fixedPaymentProvider{transactionID: resetTrafficPaymentID}, env.botConfig.Username, env.cfg)
 	orderSvc.SetAdminBot(env.botAPI)
 	env.handler.SetOrderService(orderSvc)
 

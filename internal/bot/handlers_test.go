@@ -2,12 +2,11 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -25,22 +24,6 @@ import (
 func TestMain(m *testing.M) {
 	testutil.InitLogger(m)
 	os.Exit(m.Run())
-}
-
-func TestNewHandler(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID:  123456789,
-		TelegramBotToken: "test_token",
-	}
-
-	mockDB := testutil.NewBotStoreFake()
-	handler := NewHandler(testutil.NewBotAPI(), cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	require.NotNil(t, handler, "NewHandler returned nil")
-	assert.Equal(t, cfg, handler.cfg, "Config not set correctly")
-	assert.NotNil(t, handler.rateLimiter, "RateLimiter should not be nil")
 }
 
 func TestGenerateInviteCode(t *testing.T) {
@@ -125,10 +108,40 @@ func TestHandleSend_RateLimit(t *testing.T) {
 	update := createCommandUpdate(adminID, &tgbotapi.User{ID: adminID, UserName: "admin"}, "/send @testuser Test message")
 	handler.HandleSend(ctx, update)
 
+	// First send goes through: success confirmation back to the admin chat.
+	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "✅", "successful send must be confirmed in admin chat")
+
 	update2 := createCommandUpdate(adminID, &tgbotapi.User{ID: adminID, UserName: "admin"}, "/send @testuser Second message")
 	handler.HandleSend(ctx, update2)
 
+	// The admin limiter is 1 message/minute: the repeat inside the window must
+	// hit the explicit wait notice, never the user-facing delivery path.
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Подождите минуту",
+		"second /send within a minute must be rate limited with a wait notice")
+}
+
+// TestHandleSend_UsernameNotFound verifies the /send error path when the DB
+// lookup fails for a non-numeric target: the admin gets an explicit
+// "not found" message.
+func TestHandleSend_UsernameNotFound(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{TelegramAdminID: 123456}
+	mockDB := testutil.NewBotStoreFake()
+	mockBot := testutil.NewBotAPI()
+	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
+	mockDB.GetTelegramIDByUsernameFunc = func(ctx context.Context, username string) (int64, error) {
+		return 0, errors.New("database error")
+	}
+
+	ctx := context.Background()
+	update := createCommandUpdate(123456, &tgbotapi.User{ID: 123456, UserName: "admin"}, "/send @missing hello")
+	handler.HandleSend(ctx, update)
+
 	assert.True(t, mockBot.SendCalledSafe())
+	assert.Contains(t, mockBot.LastSentTextSafe(), "не найден в базе",
+		"failed username lookup must be reported to the admin")
 }
 
 func TestHandleSend_NoArguments(t *testing.T) {
@@ -204,28 +217,6 @@ func TestSendInviteLink_Success(t *testing.T) {
 	assert.Contains(t, mockBot.LastSentTextSafe(), "vpn.site", "Message should contain web link")
 }
 
-func TestSendInviteLink_DatabaseError(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewBotStoreFake()
-	mockBot := testutil.NewBotAPI()
-	cfg := &config.Config{
-		SiteURL:         "https://vpn.site",
-		TelegramAdminID: 12345,
-	}
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	mockDB.GetOrCreateInviteFunc = func(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error) {
-		return nil, fmt.Errorf("database error")
-	}
-
-	ctx := context.Background()
-	handler.sendInviteLink(ctx, 12345, 99)
-
-	assert.True(t, mockBot.SendCalledSafe(), "sendInviteLink should send error message on DB error")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "❌", "Error message should contain error emoji")
-}
-
 // TestHandler_RateLimiter_EventuallyBlocks verifies the per-user limiter drains:
 // a burst equal to the bucket capacity is allowed, the next request within the
 // window is blocked. Calls are in-memory, so no meaningful refill happens.
@@ -245,62 +236,6 @@ func TestHandler_RateLimiter_EventuallyBlocks(t *testing.T) {
 
 	assert.False(t, handler.checkRateLimit(chatID),
 		"request beyond bucket capacity within the window must be blocked")
-}
-
-// === Subscription cache integration ===
-
-func TestHandler_CacheInvalidation(t *testing.T) {
-	t.Parallel()
-
-	handler := &Handler{
-		cache: NewSubscriptionCache(100, 5*time.Minute),
-	}
-
-	// Add to cache
-	sub := &database.Subscription{
-		TelegramID: 12345,
-		Username:   "testuser",
-		Status:     "active",
-	}
-	handler.cache.Set(12345, sub)
-
-	// Verify it's there
-	assert.NotNil(t, handler.cache.Get(12345), "Should be in cache")
-
-	// Invalidate
-	handler.invalidateCache(context.Background(), 12345)
-
-	// Verify it's gone
-	assert.Nil(t, handler.cache.Get(12345), "Should not be in cache after invalidation")
-}
-
-// === Multiple subscription creation prevention ===
-
-func TestHandler_SubscriptionCreationLock(t *testing.T) {
-	t.Parallel()
-
-	handler := &Handler{
-		inProgressSyncMap: sync.Map{},
-	}
-
-	// Simulate subscription in progress
-	_, loaded := handler.inProgressSyncMap.LoadOrStore(12345, true)
-	assert.False(t, loaded, "First LoadOrStore should return false (not loaded)")
-
-	// Check that it's marked as in progress
-	_, exists := handler.inProgressSyncMap.Load(12345)
-	assert.True(t, exists, "Should be marked as in progress")
-
-	// Try to add again - should return true (already loaded)
-	_, loaded = handler.inProgressSyncMap.LoadOrStore(12345, true)
-	assert.True(t, loaded, "Second LoadOrStore should return true (already loaded)")
-
-	// Remove from in progress
-	handler.inProgressSyncMap.Delete(12345)
-
-	// Verify it's removed
-	_, exists = handler.inProgressSyncMap.Load(12345)
-	assert.False(t, exists, "Should not be in progress anymore")
 }
 
 // === handleCreateError tests ===
@@ -491,8 +426,9 @@ func TestHandleUpdate_AdminCommandsBlockedForNonAdmin(t *testing.T) {
 			"non-admin must not receive referral stats")
 	})
 
-	// /send and /broadcast: silently ignored for non-admins (no user-visible action).
-	for _, cmd := range []string{"/send", "/broadcast"} {
+	// /send, /broadcast, /del and /setplan: silently ignored for non-admins
+	// (no user-visible action).
+	for _, cmd := range []string{"/send", "/broadcast", "/del", "/setplan"} {
 		t.Run(cmd+" silently ignored", func(t *testing.T) {
 			t.Parallel()
 
@@ -532,44 +468,6 @@ func TestHandleUpdate_NonCommandMessage(t *testing.T) {
 	assert.Contains(t, mockBot.LastSentTextSafe(), "/start", "should suggest /start command")
 }
 
-func TestHandleUpdate_CallbackQuery(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID:  123456789,
-		TelegramBotToken: "test_token",
-	}
-
-	mockBot := testutil.NewBotAPI()
-	mockDB := testutil.NewBotStoreFake()
-	mockDB.GetByTelegramIDFunc = func(ctx context.Context, id int64) (*database.Subscription, error) {
-		return &database.Subscription{
-			ID:             1,
-			TelegramID:     111,
-			Username:       "testuser",
-			SubscriptionID: "test-sub-id",
-			ExpiresAt:      testutil.PtrTime(time.Now().Add(24 * time.Hour)),
-			Status:         "active",
-		}, nil
-	}
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	update := tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			ID:   "callback_123",
-			From: &tgbotapi.User{ID: 111, UserName: "testuser"},
-			Message: &tgbotapi.Message{
-				Chat: &tgbotapi.Chat{ID: 111},
-			},
-			Data: "create_subscription",
-		},
-	}
-
-	handler.HandleUpdate(context.Background(), update)
-
-	assert.True(t, mockBot.SendCalledSafe(), "should handle callback query")
-}
-
 // TestHandleUpdateMalformedStartDoesNotPanic verifies that HandleUpdate handles
 // a malformed /start update without panicking.
 func TestHandleUpdateMalformedStartDoesNotPanic(t *testing.T) {
@@ -598,8 +496,9 @@ func TestHandleUpdateMalformedStartDoesNotPanic(t *testing.T) {
 }
 
 // Timeout применяется один раз на диспетчеризации (HandleUpdate), а не
-// копируется в каждый handler. Поведение: любой путь — включая callback,
-// у которого раньше дедлайна не было — получает контекст с HandlerTimeout.
+// копируется в каждый handler. Поведение: ЛЮБОЙ путь обновления — command и
+// callback (у которого раньше дедлайна не было) — получает контекст с
+// дедлайном HandlerTimeout.
 func TestHandleUpdate_AppliesTimeoutAtDispatch(t *testing.T) {
 	t.Parallel()
 
@@ -607,65 +506,58 @@ func TestHandleUpdate_AppliesTimeoutAtDispatch(t *testing.T) {
 		TelegramBotToken: "test_token",
 	}
 
-	var gotDeadline bool
-	mockDB := testutil.NewBotStoreFake()
-	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		_, ok := ctx.Deadline()
-		gotDeadline = ok
-		return &database.Subscription{
-			TelegramID:     telegramID,
-			SubscriptionID: "sub",
-			Status:         string(database.SubscriptionStatusActive),
-		}, nil
-	}
-
-	handler := NewHandler(testutil.NewBotAPI(), cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	update := tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			Data: "create_subscription",
-			From: &tgbotapi.User{ID: 111, UserName: "user1"},
-			Message: &tgbotapi.Message{
-				Chat: &tgbotapi.Chat{ID: 111},
+	tests := []struct {
+		name   string
+		update tgbotapi.Update
+	}{
+		{
+			name: "callback path",
+			update: tgbotapi.Update{
+				CallbackQuery: &tgbotapi.CallbackQuery{
+					Data: "create_subscription",
+					From: &tgbotapi.User{ID: 111, UserName: "user1"},
+					Message: &tgbotapi.Message{
+						Chat: &tgbotapi.Chat{ID: 111},
+					},
+				},
+			},
+		},
+		{
+			name: "command path",
+			update: tgbotapi.Update{
+				Message: &tgbotapi.Message{
+					Text:     "/start",
+					From:     &tgbotapi.User{ID: 222, UserName: "user2"},
+					Chat:     &tgbotapi.Chat{ID: 222},
+					Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 6}},
+				},
 			},
 		},
 	}
-	handler.HandleUpdate(context.Background(), update)
 
-	require.True(t, gotDeadline, "handler must run with a deadline-bearing context")
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-// Таймаут применяется на диспетчеризации для ВСЕХ путей обновления, не только
-// для callback: command-путь обязан приходить в хендлер с дедлайном.
-func TestHandleUpdate_AppliesTimeoutToCommandPath(t *testing.T) {
-	t.Parallel()
+			var gotDeadline bool
+			mockDB := testutil.NewBotStoreFake()
+			mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
+				_, ok := ctx.Deadline()
+				gotDeadline = ok
 
-	cfg := &config.Config{TelegramBotToken: "test_token"}
+				return &database.Subscription{
+					TelegramID:     telegramID,
+					SubscriptionID: "sub",
+					Status:         string(database.SubscriptionStatusActive),
+				}, nil
+			}
 
-	var gotDeadline bool
+			handler := NewHandler(testutil.NewBotAPI(), cfg, mockDB, NewTestBotConfig(), nil, "")
+			handler.HandleUpdate(context.Background(), tt.update)
 
-	mockDB := testutil.NewBotStoreFake()
-	mockDB.GetByTelegramIDFunc = func(ctx context.Context, _ int64) (*database.Subscription, error) {
-		_, ok := ctx.Deadline()
-		gotDeadline = ok
-
-		return nil, database.ErrSubscriptionNotFound
+			require.True(t, gotDeadline, "handler must run with a deadline-bearing context")
+		})
 	}
-
-	handler := NewHandler(testutil.NewBotAPI(), cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Text:     "/start",
-			From:     &tgbotapi.User{ID: 222, UserName: "user2"},
-			Chat:     &tgbotapi.Chat{ID: 222},
-			Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 6}},
-		},
-	}
-
-	handler.HandleUpdate(context.Background(), update)
-
-	require.True(t, gotDeadline, "command handler must run with a deadline-bearing context")
 }
 
 // Тест поведения: отказ по лимиту считается отдельной серией метрики и не

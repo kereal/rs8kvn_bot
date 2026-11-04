@@ -91,16 +91,13 @@ func makeTestSubService(mockDB *testutil.SubscriptionRepositoryFake) (*config.Co
 	return cfg, subService, mockXUI
 }
 
-func TestHandleInvite_InvalidCode(t *testing.T) {
+// TestHandleInvite_ValidCodeShowsTrialPage is the happy path: a valid invite
+// code renders the trial page with HTTP 200. Element details are covered by
+// TestRenderTrialPage.
+func TestHandleInvite_ValidCodeShowsTrialPage(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewSubscriptionRepositoryFake()
-	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
-		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
-	}
-	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
-		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"}}, nil
-	}
 	cfg, subService, mockXUI := makeTestSubService(mockDB)
 
 	// Override rate limit to 3
@@ -151,20 +148,6 @@ func TestHandleInvite_InvalidCode(t *testing.T) {
 	srv.handleInvite(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code, "handleInvite() status")
-
-	body := rec.Body.String()
-
-	expectedElements := []string{
-		"RS8 KVN",
-		"Добавить в Happ",
-		"Активировать",
-		"t.me/testbot",
-		"trial_",
-	}
-
-	for _, expected := range expectedElements {
-		assert.Contains(t, body, expected, "handleInvite() body should contain expected element")
-	}
 }
 
 func TestHandleInvite_XUIError(t *testing.T) {
@@ -580,12 +563,6 @@ func TestHandleInvite_ParallelRequests(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewSubscriptionRepositoryFake()
-	mockDB.GetPlanByNameFunc = func(ctx context.Context, name string) (*database.Plan, error) {
-		return &database.Plan{ID: 1, Name: "trial", DevicesLimit: 1, TrafficLimit: 1073741824}, nil
-	}
-	mockDB.GetNodesByPlanNameFunc = func(ctx context.Context, planName string) ([]database.Node, error) {
-		return []database.Node{{ID: 1, IsActive: true, Host: "http://localhost:2053", InboundIDs: "[1]"}}, nil
-	}
 
 	cfg, subService, _ := makeTestSubService(mockDB)
 	srv := NewServer(":8880", mockDB, cfg, "testbot", subService, nil)

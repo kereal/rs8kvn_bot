@@ -36,6 +36,20 @@ func hasPremiumButton(msgs []tgbotapi.MessageConfig) bool {
 	return false
 }
 
+// stubSubAndPlan wires a fixed subscription (ID 7, TelegramID 42) and a plan
+// with the given traffic limit into the harness' fake store. Call before
+// GetWithTraffic; the returned value is unused after stubbing.
+func (h *trafficRegistryHarness) stubSubAndPlan(svc *SubscriptionService, trafficLimit int64) *database.Subscription {
+	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
+	db := svc.db.(*testutil.ServiceStoreFake)
+	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
+	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
+		return &database.Plan{ID: 1, TrafficLimit: trafficLimit}, nil
+	}
+
+	return sub
+}
+
 // trafficNotifySetup builds a service wired to one active 3x-ui node whose
 // traffic and update behavior are controlled by the provided callbacks.
 // It captures every sent message and claimed bit so tests can inspect what the
@@ -107,10 +121,6 @@ func TestProcessTrafficNotifications_NinetyPercent(t *testing.T) {
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, bot.SendCount, 1, "90% warning must be sent")
 	require.True(t, hasPremiumButton(*sentMsgs), "90% warning must offer the Premium menu")
-
-	// Second call: bot.Send still succeeds but claim returns true each time in
-	// the mock, so sendOnce proceeds; dedup is enforced by real DB claim logic.
-	require.NoError(t, svc.ProcessTrafficNotifications(context.Background(), sub))
 }
 
 func TestProcessTrafficNotifications_ExhaustedDisabled(t *testing.T) {
@@ -347,7 +357,12 @@ func TestProcessTrafficNotifications_NodeBindingErrorSkipsWithoutUpdate(t *testi
 	require.Equal(t, 0, bot.SendCount, "must not notify when node bindings cannot be loaded")
 }
 
-func TestProcessTrafficNotifications_PartialNodeFailureSkipsAction(t *testing.T) {
+// TestProcessTrafficNotifications_DisabledWithoutExhaustedBitStaysDisabled:
+// the counter is below the limit but the panel disabled the client. The skip
+// comes from the exhausted-bit guard (TrafficRemindersSent&Exhausted==0):
+// only a previously exhausted subscription may be re-enabled, so this pass
+// neither re-enables nor notifies.
+func TestProcessTrafficNotifications_DisabledWithoutExhaustedBitStaysDisabled(t *testing.T) {
 	t.Parallel()
 
 	used := int64(1) * 1024 * 1024 * 1024
@@ -364,12 +379,16 @@ func TestProcessTrafficNotifications_PartialNodeFailureSkipsAction(t *testing.T)
 			}, nil
 		},
 	}
+	// Обе ноды отвечают: частичный снимок раньше `used < limit` выходит из
+	// проверки, поэтому полный снимок обязателен — иначе skip засчитывается
+	// из-за недоступной ноды, а не из-за отсутствующего exhausted-бита.
 	client1 := &testutil.XUIClient{
 		GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) { return traffic, nil },
 		UpdateClientFunc:     func(context.Context, xui.ClientRequest) error { updated = true; return nil },
 	}
 	client2 := &testutil.XUIClient{
-		GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) { return nil, errors.New("node unavailable") },
+		GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) { return traffic, nil },
+		UpdateClientFunc:     func(context.Context, xui.ClientRequest) error { updated = true; return nil },
 	}
 	bot := testutil.NewBotAPI()
 	svc := NewSubscriptionService(db, NodeClients{1: {Reader: client1}, 2: {Reader: client2}}, []database.Node{
@@ -380,8 +399,8 @@ func TestProcessTrafficNotifications_PartialNodeFailureSkipsAction(t *testing.T)
 
 	sub := &database.Subscription{ID: 16, TelegramID: 123466, Username: "partial", PlanID: 1}
 	require.NoError(t, svc.ProcessTrafficNotifications(context.Background(), sub))
-	require.False(t, updated, "must not re-enable on an incomplete node snapshot")
-	require.Equal(t, 0, bot.SendCount, "must not notify on an incomplete node snapshot")
+	require.False(t, updated, "no exhausted bit: the client must not be re-enabled")
+	require.Equal(t, 0, bot.SendCount, "no exhausted bit: the pass must not notify")
 }
 
 func TestProcessTrafficNotifications_RejectsInvalidTraffic(t *testing.T) {
@@ -511,44 +530,17 @@ func TestGetWithTraffic_SkipsNodesWithoutReader(t *testing.T) {
 	}
 	svc := newTrafficRegistryHarness(t, h)(1)
 
-	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
-	db := svc.db.(*testutil.ServiceStoreFake)
-	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
-	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
-		return &database.Plan{ID: 1, TrafficLimit: 10 * 1024 * 1024 * 1024}, nil
-	}
+	h.stubSubAndPlan(svc, 10*1024*1024*1024)
 
 	_, info, err := svc.GetWithTraffic(context.Background(), 42)
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, h.trafficCalls, "only the node with a reader may be polled")
 	assert.InDelta(t, 3.0/1024/1024, info.UsedGB, 1e-9)
+	assert.True(t, info.Available, "a successful read keeps the figure measured")
+	assert.Equal(t, 10, info.LimitGB, "LimitGB derives from the plan traffic limit")
 	wantReset := describeTrafficReset(time.Now(), xui.ClientConfig{TrafficReset: "monthly", TrafficResetDay: 1}).Text
 	assert.Equal(t, wantReset, info.ResetInfo)
-}
-
-func TestGetWithTraffic_ReaderErrorDoesNotBreakAggregation(t *testing.T) {
-	t.Parallel()
-
-	h := &trafficRegistryHarness{
-		readerErr: errors.New("connection refused"),
-		bindings:  map[uint]database.SyncStatus{1: database.SyncStatusActive},
-	}
-	svc := newTrafficRegistryHarness(t, h)(1)
-
-	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
-	db := svc.db.(*testutil.ServiceStoreFake)
-	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
-	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
-		return &database.Plan{ID: 1, TrafficLimit: 10 * 1024 * 1024 * 1024}, nil
-	}
-
-	_, info, err := svc.GetWithTraffic(context.Background(), 42)
-	require.NoError(t, err)
-
-	assert.Zero(t, info.UsedGB)
-	assert.Equal(t, "неизвестно", info.ResetInfo, "no panel data means the reset date is unknown, not absent")
-	assert.Zero(t, h.profileCalls, "profile must not be read without a successful traffic source")
 }
 
 func TestGetWithTraffic_ResetLineScenarios(t *testing.T) {
@@ -636,12 +628,7 @@ func TestGetWithTraffic_NoLimitSkipsProfileRead(t *testing.T) {
 	h := &trafficRegistryHarness{bindings: map[uint]database.SyncStatus{1: database.SyncStatusActive}}
 	svc := newTrafficRegistryHarness(t, h)(1)
 
-	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
-	db := svc.db.(*testutil.ServiceStoreFake)
-	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
-	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
-		return &database.Plan{ID: 1, TrafficLimit: 0}, nil
-	}
+	h.stubSubAndPlan(svc, 0)
 
 	_, info, err := svc.GetWithTraffic(context.Background(), 42)
 	require.NoError(t, err)
@@ -661,12 +648,7 @@ func TestGetWithTraffic_InactiveBindingNotPolled(t *testing.T) {
 	}
 	svc := newTrafficRegistryHarness(t, h)(1)
 
-	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
-	db := svc.db.(*testutil.ServiceStoreFake)
-	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
-	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
-		return &database.Plan{ID: 1, TrafficLimit: 10 * 1024 * 1024 * 1024}, nil
-	}
+	h.stubSubAndPlan(svc, 10*1024*1024*1024)
 
 	_, info, err := svc.GetWithTraffic(context.Background(), 42)
 	require.NoError(t, err)
@@ -687,12 +669,7 @@ func TestGetWithTraffic_NoReadersOnActiveBindings(t *testing.T) {
 	}
 	svc := newTrafficRegistryHarness(t, h)(0)
 
-	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
-	db := svc.db.(*testutil.ServiceStoreFake)
-	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
-	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
-		return &database.Plan{ID: 1, TrafficLimit: 10 * 1024 * 1024 * 1024}, nil
-	}
+	h.stubSubAndPlan(svc, 10*1024*1024*1024)
 
 	_, info, err := svc.GetWithTraffic(context.Background(), 42)
 	require.NoError(t, err)
@@ -707,32 +684,6 @@ func TestGetWithTraffic_NoReadersOnActiveBindings(t *testing.T) {
 	assert.NotContains(t, msg, "0.00 из 10 Гб")
 }
 
-// TestGetWithTraffic_PartialReadersSumReadableOnly checks a mixed fleet: the
-// sum covers the readable nodes and the figure is measured (Available=true).
-func TestGetWithTraffic_PartialReadersSumReadableOnly(t *testing.T) {
-	t.Parallel()
-
-	h := &trafficRegistryHarness{
-		traffic:  &xui.ClientTraffic{Up: 1024, Down: 2048},
-		bindings: map[uint]database.SyncStatus{1: database.SyncStatusActive, 2: database.SyncStatusActive},
-	}
-	svc := newTrafficRegistryHarness(t, h)(1)
-
-	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
-	db := svc.db.(*testutil.ServiceStoreFake)
-	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
-	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
-		return &database.Plan{ID: 1, TrafficLimit: 10 * 1024 * 1024 * 1024}, nil
-	}
-
-	_, info, err := svc.GetWithTraffic(context.Background(), 42)
-	require.NoError(t, err)
-
-	assert.Equal(t, 1, h.trafficCalls, "only readable nodes are polled")
-	assert.True(t, info.Available)
-	assert.InDelta(t, 3.0/1024/1024, info.UsedGB, 1e-9)
-}
-
 // TestGetWithTraffic_AllReadsFailShowsUnavailable checks that when readers
 // exist but every panel read fails, the card is honest: Available=false and
 // «измерение недоступно» instead of a misleading 0.00.
@@ -745,18 +696,15 @@ func TestGetWithTraffic_AllReadsFailShowsUnavailable(t *testing.T) {
 	}
 	svc := newTrafficRegistryHarness(t, h)(1)
 
-	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
-	db := svc.db.(*testutil.ServiceStoreFake)
-	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
-	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
-		return &database.Plan{ID: 1, TrafficLimit: 10 * 1024 * 1024 * 1024}, nil
-	}
+	h.stubSubAndPlan(svc, 10*1024*1024*1024)
 
 	_, info, err := svc.GetWithTraffic(context.Background(), 42)
 	require.NoError(t, err)
 
 	assert.False(t, info.Available, "all reads failed: traffic is not measured")
 	assert.Zero(t, info.UsedGB)
+	assert.Equal(t, "неизвестно", info.ResetInfo, "no panel data means the reset date is unknown, not absent")
+	assert.Zero(t, h.profileCalls, "profile must not be read without a successful traffic source")
 
 	msg := FormatSubscriptionMessage("📋 *Ваша подписка*", "активна", info, "https://example.test/sub/abc")
 	assert.Contains(t, msg, "📊 Трафик: измерение недоступно")
@@ -785,12 +733,7 @@ func TestGetWithTraffic_PartialReadFailureStillMeasured(t *testing.T) {
 	}
 	h.svc.clients[2] = NodeAccess{Reader: failReader, Type: database.NodeType3xUI}
 
-	sub := &database.Subscription{ID: 7, TelegramID: 42, Username: "user", PlanID: 1}
-	db := svc.db.(*testutil.ServiceStoreFake)
-	db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) { return sub, nil }
-	db.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
-		return &database.Plan{ID: 1, TrafficLimit: 10 * 1024 * 1024 * 1024}, nil
-	}
+	h.stubSubAndPlan(svc, 10*1024*1024*1024)
 
 	_, info, err := svc.GetWithTraffic(context.Background(), 42)
 	require.NoError(t, err)
@@ -1032,34 +975,39 @@ func TestFormatSubscriptionMessage_Golden(t *testing.T) {
 	}
 }
 
-// TestRegistryReaderIsSingleCapabilityCheck pins R3: the only reader
-// capability check lives on NodeClients.Reader, and unknown IDs as well as
-// reader-less node types report no capability.
-func TestRegistryReaderIsSingleCapabilityCheck(t *testing.T) {
+// TestProcessTrafficNotifications_NilBotIsSilentNoop: with the notification
+// worker disabled (no bot wired), the pass is a silent noop — no reminder bit
+// is claimed, so the real notification worker can later fire on schedule.
+func TestProcessTrafficNotifications_NilBotIsSilentNoop(t *testing.T) {
 	t.Parallel()
 
-	registry := NodeClients{
-		1: {Provision: &mockVPNClient{}, Reader: &testutil.XUIClient{}, Type: database.NodeType3xUI},
-		2: {Type: database.NodeTypeProxman},
+	var claimedBits []uint
+
+	db := &testutil.ServiceStoreFake{
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return &database.Plan{ID: 1, TrafficLimit: 100 * 1024 * 1024 * 1024}, nil
+		},
+		GetBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			return []database.SubscriptionNode{{NodeID: 1, Status: database.SyncStatusActive}}, nil
+		},
+		ClaimTrafficReminderFunc: func(ctx context.Context, id uint, bit int) (bool, error) {
+			claimedBits = append(claimedBits, uint(bit))
+
+			return true, nil
+		},
+	}
+	client := &testutil.XUIClient{
+		GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) {
+			return &xui.ClientTraffic{Up: 95 * 1024 * 1024 * 1024, Down: 0, Enable: true}, nil
+		},
 	}
 
-	_, ok := registry.Reader(1)
-	assert.True(t, ok, "3x-ui node has a reader")
+	// No SetBot: notifications are disabled for this service instance.
+	svc := NewSubscriptionService(db, NodeClients{1: {Reader: client}}, []database.Node{{ID: 1, IsActive: true, Host: "http://node1", InboundIDs: "[1]"}}, &config.Config{})
 
-	_, ok = registry.Reader(2)
-	assert.False(t, ok, "proxman node has no reader")
-
-	_, ok = registry.Reader(3)
-	assert.False(t, ok, "unknown node has no reader")
-
-	_, ok = registry.Provision(1)
-	assert.True(t, ok)
-
-	_, ok = registry.Provision(2)
-	assert.False(t, ok, "node without provision slot reports no capability")
-
-	_, ok = registry.Provision(3)
-	assert.False(t, ok, "unknown node reports no capability")
+	sub := &database.Subscription{ID: 30, TelegramID: 123480, Username: "nobot", PlanID: 1}
+	require.NoError(t, svc.ProcessTrafficNotifications(context.Background(), sub))
+	assert.Empty(t, claimedBits, "nil bot: no reminder bit may be claimed")
 }
 
 // trafficNotifySetupTwoNodes wires a service to two active 3x-ui nodes with
@@ -1107,57 +1055,47 @@ func trafficNotifySetupTwoNodes(t *testing.T, limit int64, client1, client2 *tes
 	return svc, bot, db, &claimedBits, &sentMsgs
 }
 
+// TestProcessTrafficNotifications_ClientNotFoundOnOneNodeStillDecides checks
+// that a failed read on one node (missing client or transport error) does not
+// abort the pass: the exhausted decision fires from the surviving node's
+// snapshot instead of being lost to the failed one.
 func TestProcessTrafficNotifications_ClientNotFoundOnOneNodeStillDecides(t *testing.T) {
 	t.Parallel()
 
-	// Node 1 no longer has the client (xui.ErrClientNotFound); node 2 reports
-	// exhausted quota. The pass must not abort: the exhausted decision fires
-	// from node 2's snapshot instead of being lost to the missing client.
-	used := int64(101) * 1024 * 1024 * 1024
-	client1 := &testutil.XUIClient{
-		GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) {
-			return nil, xui.ErrClientNotFound
-		},
+	tests := []struct {
+		name     string
+		node1Err error
+	}{
+		{"client removed from panel", xui.ErrClientNotFound},
+		{"transport error", errors.New("connection refused")},
 	}
-	client2 := &testutil.XUIClient{
-		GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) {
-			return &xui.ClientTraffic{Up: used, Down: 0, Enable: false}, nil
-		},
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Node 1 fails with tt.node1Err; node 2 reports exhausted quota.
+			used := int64(101) * 1024 * 1024 * 1024
+			client1 := &testutil.XUIClient{
+				GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) {
+					return nil, tt.node1Err
+				},
+			}
+			client2 := &testutil.XUIClient{
+				GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) {
+					return &xui.ClientTraffic{Up: used, Down: 0, Enable: false}, nil
+				},
+			}
+			svc, bot, _, claimedBits, sentMsgs := trafficNotifySetupTwoNodes(t, 100*1024*1024*1024, client1, client2)
+
+			sub := &database.Subscription{ID: 20, TelegramID: 123470, Username: "ghost-node", PlanID: 1}
+			require.NoError(t, svc.ProcessTrafficNotifications(context.Background(), sub))
+			require.Equal(t, []uint{uint(database.TrafficBitExhausted)}, *claimedBits,
+				"exhausted decision must fire from the healthy node despite the failed read on node 1")
+			require.GreaterOrEqual(t, bot.SendCount, 1, "exhausted notification must be sent")
+			require.True(t, hasPremiumButton(*sentMsgs), "exhausted notification must offer the Premium menu")
+		})
 	}
-	svc, bot, _, claimedBits, sentMsgs := trafficNotifySetupTwoNodes(t, 100*1024*1024*1024, client1, client2)
-
-	sub := &database.Subscription{ID: 20, TelegramID: 123470, Username: "ghost-node", PlanID: 1}
-	require.NoError(t, svc.ProcessTrafficNotifications(context.Background(), sub))
-	require.Equal(t, []uint{uint(database.TrafficBitExhausted)}, *claimedBits,
-		"exhausted decision must fire from the healthy node despite the missing client on node 1")
-	require.GreaterOrEqual(t, bot.SendCount, 1, "exhausted notification must be sent")
-	require.True(t, hasPremiumButton(*sentMsgs), "exhausted notification must offer the Premium menu")
-}
-
-func TestProcessTrafficNotifications_TransportErrorOnOneNodeStillDecides(t *testing.T) {
-	t.Parallel()
-
-	// Node 1 is unreachable (transport error); node 2 reports exhausted quota.
-	// The pass must not abort on the failed node: the decision is made from
-	// node 2's successful snapshot.
-	used := int64(150) * 1024 * 1024 * 1024
-	client1 := &testutil.XUIClient{
-		GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) {
-			return nil, errors.New("connection refused")
-		},
-	}
-	client2 := &testutil.XUIClient{
-		GetClientTrafficFunc: func(context.Context, string) (*xui.ClientTraffic, error) {
-			return &xui.ClientTraffic{Up: used, Down: 0, Enable: false}, nil
-		},
-	}
-	svc, bot, _, claimedBits, _ := trafficNotifySetupTwoNodes(t, 100*1024*1024*1024, client1, client2)
-
-	sub := &database.Subscription{ID: 23, TelegramID: 123473, Username: "halffail", PlanID: 1}
-	require.NoError(t, svc.ProcessTrafficNotifications(context.Background(), sub))
-	require.Equal(t, []uint{uint(database.TrafficBitExhausted)}, *claimedBits,
-		"exhausted decision must be made from the surviving node")
-	require.GreaterOrEqual(t, bot.SendCount, 1, "exhausted notification must be sent despite one failed node")
 }
 
 func TestProcessTrafficNotifications_AllNodesFailedSkipsSubscription(t *testing.T) {

@@ -41,45 +41,10 @@ func TestMessageFormat_NoDoubleEscape(t *testing.T) {
 			input: "hello world",
 			want:  "hello world",
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			result := utils.EscapeMarkdown(tt.input)
-			assert.Equal(t, tt.want, result, "Should escape special chars")
-		})
-	}
-}
-
-func TestMessageFormat_EscapedMessageContent(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{
-			name:  "username_with_underscore",
-			input: "user_name",
-			want:  "user\\_name",
-		},
-		{
-			name:  "text_with_asterisk",
-			input: "hello *world*",
-			want:  "hello \\*world\\*",
-		},
 		{
 			name:  "text_with_brackets",
 			input: "test [link]",
 			want:  "test \\[link\\]",
-		},
-		{
-			name:  "clean_text",
-			input: "hello world",
-			want:  "hello world",
 		},
 		{
 			name:  "special_chars",
@@ -93,7 +58,7 @@ func TestMessageFormat_EscapedMessageContent(t *testing.T) {
 			t.Parallel()
 
 			result := utils.EscapeMarkdown(tt.input)
-			assert.Equal(t, tt.want, result)
+			assert.Equal(t, tt.want, result, "Should escape special chars")
 		})
 	}
 }

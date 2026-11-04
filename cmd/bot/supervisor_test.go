@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
@@ -92,6 +93,61 @@ func TestRunSupervised_StopsOnContextCancel(t *testing.T) {
 	})
 
 	assert.Equal(t, int32(1), runs.Load(), "после отмены контекста перезапуска быть не должно")
+}
+
+// Тест поведения: backoff растёт до максимума и сбрасывается после стабильного прогона.
+func TestRunSupervised_BackoffEscalation(t *testing.T) {
+	setBackoff := func(t *testing.T, initial, max, stable time.Duration) {
+		t.Helper()
+		prevInitial, prevMax, prevStable := supervisorInitialBackoff, supervisorMaxBackoff, supervisorStableRun
+		supervisorInitialBackoff, supervisorMaxBackoff, supervisorStableRun = initial, max, stable
+		t.Cleanup(func() {
+			supervisorInitialBackoff, supervisorMaxBackoff, supervisorStableRun = prevInitial, prevMax, prevStable
+		})
+	}
+
+	t.Run("backoff grows between restarts", func(t *testing.T) {
+		setBackoff(t, 10*time.Millisecond, 40*time.Millisecond, time.Hour)
+		var delays []time.Duration
+		runs := 0
+		runSupervisedWithWait(context.Background(), "test-backoff-grow", func(context.Context) {
+			runs++
+			if runs == 5 {
+				return
+			}
+			panic("boom")
+		}, func(_ context.Context, delay time.Duration) bool {
+			delays = append(delays, delay)
+			return true
+		})
+		assert.Equal(t, 5, runs)
+		assert.Equal(t, []time.Duration{10 * time.Millisecond, 20 * time.Millisecond, 40 * time.Millisecond, 40 * time.Millisecond}, delays)
+	})
+
+	t.Run("backoff resets after stable run", func(t *testing.T) {
+		// Виртуальное время исключает задержки планировщика; запас относительно
+		// таймаута отправки паники не замедляет тест.
+		synctest.Test(t, func(t *testing.T) {
+			setBackoff(t, 10*time.Millisecond, 40*time.Millisecond, 30*time.Second)
+			var delays []time.Duration
+			runs := 0
+			runSupervisedWithWait(context.Background(), "test-backoff-reset", func(context.Context) {
+				runs++
+				if runs == 3 {
+					time.Sleep(time.Minute)
+				}
+				if runs == 4 {
+					return
+				}
+				panic("boom")
+			}, func(_ context.Context, delay time.Duration) bool {
+				delays = append(delays, delay)
+				return true
+			})
+			assert.Equal(t, 4, runs)
+			assert.Equal(t, []time.Duration{10 * time.Millisecond, 20 * time.Millisecond, 10 * time.Millisecond}, delays)
+		})
+	})
 }
 
 type stubNodeHealth struct {

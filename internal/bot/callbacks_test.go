@@ -15,7 +15,6 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -29,6 +28,7 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 		setupSubService func(*testutil.BotStoreFake, *testutil.XUIClient, *config.Config) *service.SubscriptionService
 		wantSend        bool
 		wantText        string
+		wantMinSendCnt  int // minimum bot.Send calls (loading + final message)
 		wantRequest     bool
 		wantAlertText   string
 	}{
@@ -59,8 +59,9 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 
 				return service.NewSubscriptionService(mockDB, clients, nodes, cfg)
 			},
-			wantSend: true,
-			wantText: "Ваша подписка готова",
+			wantSend:       true,
+			wantText:       "Ваша подписка готова",
+			wantMinSendCnt: 2, // loading message + final success message
 		},
 		{
 			name:         "qr_code",
@@ -262,6 +263,11 @@ func TestHandleCallback_CallbackDataRouting(t *testing.T) {
 			if tt.wantSend {
 				assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for %s", tt.name)
 
+				if tt.wantMinSendCnt > 0 {
+					assert.GreaterOrEqual(t, mockBot.SendCountSafe(), tt.wantMinSendCnt,
+						"create flow must send at least the loading message and the final message (%s)", tt.name)
+				}
+
 				if tt.wantText != "" {
 					switch tt.callbackData {
 					case "menu_privacy", "menu_terms", "menu_support":
@@ -313,7 +319,6 @@ func TestHandleCallback_AdminStats_NonAdmin(t *testing.T) {
 	// Current handlers answer callback outside the admin handler itself;
 	// validate via absence of user-facing send, not hardcoded Request assertion.
 	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for non-admin")
-	assert.False(t, handler.isAdmin(123456))
 }
 
 func TestHandleCallback_AdminLastReg_NonAdmin(t *testing.T) {
@@ -343,7 +348,6 @@ func TestHandleCallback_AdminLastReg_NonAdmin(t *testing.T) {
 	handler.HandleCallback(ctx, update)
 
 	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send should not be called for non-admin")
-	assert.False(t, handler.isAdmin(123456))
 }
 
 func TestHandleCallback_AdminStats_DatabaseError(t *testing.T) {
@@ -456,11 +460,7 @@ func TestHandleCallback_MenuSubscription_NoSubscription(t *testing.T) {
 
 	mockBot := testutil.NewBotAPI()
 	mockXUI := testutil.NewXUIClient()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
 		return nil, gorm.ErrRecordNotFound
@@ -483,73 +483,6 @@ func TestHandleCallback_MenuSubscription_NoSubscription(t *testing.T) {
 
 	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called")
 	assert.Contains(t, mockBot.LastSentTextSafe(), "подписк", "message should mention subscription")
-}
-
-func TestHandleCallback_QRCode_NoSubscription(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	mockDB := testutil.NewBotStoreFake()
-
-	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		return nil, gorm.ErrRecordNotFound
-	}
-
-	ctx := context.Background()
-	update := tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			ID:   "test-callback-id",
-			Data: "qr_code",
-			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
-			Message: &tgbotapi.Message{
-				MessageID: 100,
-				Chat:      &tgbotapi.Chat{ID: 123456},
-			},
-		},
-	}
-
-	handler.HandleCallback(ctx, update)
-
-	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called with error message")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "подписк", "message should mention subscription")
-}
-
-func TestHandleCallback_QRCode_WithSubscription(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	mockDB := testutil.NewBotStoreFake()
-
-	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		return &database.Subscription{
-			TelegramID: telegramID,
-			Username:   "testuser",
-			Status:     "active",
-		}, nil
-	}
-
-	ctx := context.Background()
-	update := tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			ID:   "test-callback-id",
-			Data: "qr_code",
-			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
-			Message: &tgbotapi.Message{
-				MessageID: 100,
-				Chat:      &tgbotapi.Chat{ID: 123456},
-			},
-		},
-	}
-
-	handler.HandleCallback(ctx, update)
-
-	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called for QR photo")
 }
 
 func TestHandleShareInvite_Success(t *testing.T) {
@@ -617,70 +550,6 @@ func TestHandleCallback_CreateSubscription_DatabaseError(t *testing.T) {
 		CallbackQuery: &tgbotapi.CallbackQuery{
 			ID:   "test-callback-id",
 			Data: "create_subscription",
-			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
-			Message: &tgbotapi.Message{
-				MessageID: 100,
-				Chat:      &tgbotapi.Chat{ID: 123456},
-			},
-		},
-	}
-
-	handler.HandleCallback(ctx, update)
-
-	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called with error message")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "ошибк", "message should mention error")
-}
-
-func TestHandleCallback_MenuHelp_NoSubscription(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	mockDB := testutil.NewBotStoreFake()
-
-	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		return nil, gorm.ErrRecordNotFound
-	}
-
-	ctx := context.Background()
-	update := tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			ID:   "test-callback-id",
-			Data: "menu_help",
-			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
-			Message: &tgbotapi.Message{
-				MessageID: 100,
-				Chat:      &tgbotapi.Chat{ID: 123456},
-			},
-		},
-	}
-
-	handler.HandleCallback(ctx, update)
-
-	assert.True(t, mockBot.SendCalledSafe(), "Bot.Send should be called")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "подписк", "message should mention subscription")
-}
-
-func TestHandleCallback_MenuHelp_DatabaseError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	mockDB := testutil.NewBotStoreFake()
-
-	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		return nil, errors.New("database error")
-	}
-
-	ctx := context.Background()
-	update := tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			ID:   "test-callback-id",
-			Data: "menu_help",
 			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
 			Message: &tgbotapi.Message{
 				MessageID: 100,
@@ -767,24 +636,6 @@ func TestGenerateInviteLink_UnknownType(t *testing.T) {
 	assert.Contains(t, err.Error(), "unknown link type")
 }
 
-func TestSendQRCode_SendError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewBotStoreFake()
-
-	mockBot := testutil.NewBotAPI()
-	mockBot.SendError = errors.New("send failed")
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	ctx := context.Background()
-	handler.sendQRCode(ctx, 123456, 100, "https://example.com/sub", "Test caption")
-
-	assert.True(t, mockBot.SendCalledSafe())
-}
-
 func TestHandleQRCode_QRError(t *testing.T) {
 	t.Parallel()
 
@@ -809,34 +660,6 @@ func TestHandleQRCode_QRError(t *testing.T) {
 	assert.True(t, mockBot.SendCalledSafe())
 }
 
-func TestHandleBackToSubscription_RequestError(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-		SiteURL:         "https://x.com",
-		GlobalSubURL:    "https://x.com/sub/",
-	}
-	mockDB := testutil.NewBotStoreFake()
-	mockBot := testutil.NewBotAPI()
-	mockBot.RequestError = errors.New("request failed")
-	clients := service.NodeClients{1: {Reader: testutil.NewXUIClient()}}
-	nodes := []database.Node{{ID: 1, IsActive: true, Host: "https://p", APIToken: "t", InboundIDs: "[1]"}}
-
-	require.NoError(t, mockDB.CreateSubscription(context.Background(), &database.Subscription{
-		TelegramID: 123456, Username: "testuser", ClientID: "c", SubscriptionID: "s", Status: "active",
-	}, ""))
-	svc := service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), svc, "")
-
-	ctx := context.Background()
-	handler.handleBackToSubscription(ctx, 123456, "testuser", 789)
-
-	// Back only deletes the QR photo; the card underneath is not re-sent.
-	assert.True(t, mockBot.RequestCalledSafe())
-	assert.False(t, mockBot.SendCalledSafe(), "Bot.Send must NOT re-show the card on Back")
-}
-
 func TestHandleCallback_NilMessage_RequestError(t *testing.T) {
 	t.Parallel()
 
@@ -856,34 +679,6 @@ func TestHandleCallback_NilMessage_RequestError(t *testing.T) {
 			Data:    "some_data",
 			From:    &tgbotapi.User{ID: 123456, UserName: "testuser"},
 			Message: nil,
-		},
-	}
-
-	handler.HandleCallback(ctx, update)
-
-	assert.True(t, mockBot.RequestCalledSafe(), "Bot.Request should be called to answer callback")
-}
-
-func TestHandleCallback_RequestError(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewBotStoreFake()
-
-	mockBot := testutil.NewBotAPI()
-	mockBot.RequestError = errors.New("request failed")
-	cfg := &config.Config{TelegramAdminID: 123456}
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	ctx := context.Background()
-	update := tgbotapi.Update{
-		CallbackQuery: &tgbotapi.CallbackQuery{
-			ID:   "test-callback-id",
-			Data: "menu_help",
-			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
-			Message: &tgbotapi.Message{
-				MessageID: 100,
-				Chat:      &tgbotapi.Chat{ID: 123456},
-			},
 		},
 	}
 

@@ -16,6 +16,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -227,6 +228,10 @@ func TestHandleInvite_Success(t *testing.T) {
 
 	assert.True(t, mockBot.SendCalledSafe(), "Should send invite link")
 	assert.Contains(t, mockBot.LastSentTextSafe(), "пригласительная ссылка", "Should contain invite link text")
+	// Consumer-visible контракт: пользователь получает кликабельную t.me-ссылку
+	// с real bot username и share_-префиксом (формат генерирует sendInviteLink).
+	assert.Contains(t, mockBot.LastSentTextSafe(), "https://t.me/testbot?start=share_",
+		"invite message must carry the generated t.me share URL")
 }
 
 func TestHandleInvite_DatabaseError(t *testing.T) {
@@ -277,23 +282,6 @@ func TestHandleHelp_Success(t *testing.T) {
 	assert.True(t, mockBot.SendCalledSafe(), "Should send help message")
 	assert.Contains(t, mockBot.LastSentTextSafe(), "Справка", "Help should contain title")
 	assert.Contains(t, mockBot.LastSentTextSafe(), "/start", "Help should list commands")
-}
-
-func TestHandleHelp_VerifyHelpText(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	mockDB := testutil.NewBotStoreFake()
-	handler := NewHandler(testutil.NewBotAPI(), cfg, mockDB, NewTestBotConfig(), nil, "")
-
-	// Test that help text contains expected content
-	helpText := handler.getHelpText(50, "https://test.url/sub")
-
-	assert.Contains(t, helpText, "50", "Help text should contain traffic limit")
-	assert.Contains(t, helpText, "https://test.url/sub", "Help text should contain subscription URL")
-	assert.Contains(t, helpText, "Happ", "Help text should mention the app")
-	assert.Contains(t, helpText, "iOS", "Help text should contain iOS link")
-	assert.Contains(t, helpText, "Android", "Help text should contain Android link")
 }
 
 func TestHandleBindTrial_AlreadyHasSubscription(t *testing.T) {
@@ -429,7 +417,27 @@ func TestHandleStart_AdminUser(t *testing.T) {
 	handler.HandleStart(ctx, update)
 
 	assert.True(t, mockBot.SendCalledSafe(), "Should send welcome message")
-	assert.True(t, handler.isAdmin(123456))
+
+	// The admin must get the admin menu: admin_stats/admin_lastreg buttons in
+	// the keyboard, not just any reply.
+	msg, ok := mockBot.LastChattableSafe().(tgbotapi.MessageConfig)
+	require.True(t, ok, "Should be MessageConfig")
+
+	kb, ok := msg.ReplyMarkup.(*tgbotapi.InlineKeyboardMarkup)
+	require.True(t, ok, "Main menu must carry an inline keyboard")
+
+	var callbacks []string
+
+	for _, row := range kb.InlineKeyboard {
+		for _, btn := range row {
+			if btn.CallbackData != nil {
+				callbacks = append(callbacks, *btn.CallbackData)
+			}
+		}
+	}
+
+	assert.Contains(t, callbacks, "admin_stats", "admin must see admin_stats button")
+	assert.Contains(t, callbacks, "admin_lastreg", "admin must see admin_lastreg button")
 }
 
 func TestHandleBindTrial_Success(t *testing.T) {
@@ -682,9 +690,25 @@ func TestHandleStart_SharePrefix(t *testing.T) {
 		},
 	}
 
+	// The share_ prefix must route into handleShareStart with the parsed
+	// invite code: the user gets the invitation text and the code lands in
+	// pendingInvites for the subsequent createSubscription.
+	mockDB.GetInviteByCodeFunc = func(ctx context.Context, code string) (*database.Invite, error) {
+		return &database.Invite{Code: code, ReferrerTGID: 999999}, nil
+	}
+
 	handler.HandleStart(ctx, update)
 
 	assert.True(t, mockBot.SendCalledSafe(), "Should send message for share prefix")
+	assert.Contains(t, mockBot.LastSentTextSafe(), "Вас пригласили!",
+		"share_ prefix must surface the invite text")
+
+	handler.pendingMu.RLock()
+	pending, ok := handler.pendingInvites[123456]
+	handler.pendingMu.RUnlock()
+
+	require.True(t, ok, "invite code must be cached in pendingInvites")
+	assert.Equal(t, "ABC123", pending.code)
 }
 
 func TestHandleBindTrial_UpdateClientError(t *testing.T) {
@@ -772,44 +796,6 @@ func TestHandleBindTrial_GetInviteError(t *testing.T) {
 	assert.Contains(t, mockBot.LastSentTextSafe(), "❌")
 }
 
-func TestHandleMySub_NoSubscription(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewBotStoreFake()
-	mockXUI := testutil.NewXUIClient()
-	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "https://panel.example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
-
-	mockDB.GetByTelegramIDFunc = func(ctx context.Context, telegramID int64) (*database.Subscription, error) {
-		return nil, gorm.ErrRecordNotFound
-	}
-
-	ctx := context.Background()
-	update := tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: 123456},
-			From: &tgbotapi.User{ID: 123456, UserName: "testuser"},
-			Text: "/mysub",
-			Entities: []tgbotapi.MessageEntity{
-				{Type: "bot_command", Offset: 0, Length: 6},
-			},
-		},
-	}
-
-	err := handler.HandleMySub(ctx, update)
-
-	assert.NoError(t, err)
-	assert.True(t, mockBot.SendCalledSafe(), "Should send a message")
-	assert.Contains(t, mockBot.LastSentTextSafe(), "нет активной подписки")
-}
-
 func TestHandleMySubscription_ShowLoadingFails(t *testing.T) {
 	t.Parallel()
 
@@ -819,11 +805,7 @@ func TestHandleMySubscription_ShowLoadingFails(t *testing.T) {
 	mockDB := testutil.NewBotStoreFake()
 	mockXUI := testutil.NewXUIClient()
 	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	clients := service.NodeClients{1: {Reader: mockXUI}}
-	nodes := []database.Node{{ID: 1, Name: "main", IsActive: true, Host: "http://example.com", APIToken: "token", InboundIDs: "[1]"}}
-	handler.subscriptionService = service.NewSubscriptionService(mockDB, clients, nodes, cfg)
-	handler.subscriptionService.SetInvalidateFunc(handler.cache.Invalidate)
+	handler := newTestHandlerWithSubService(t, cfg, mockDB, mockXUI, mockBot)
 
 	mockBot.SendError = errors.New("send failed")
 

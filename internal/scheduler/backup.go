@@ -53,25 +53,30 @@ func (s *BackupScheduler) Start(ctx context.Context) {
 
 		select {
 		case <-time.After(sleepDuration):
-			logger.Info("Running scheduled database backup")
-
-			err := backup.DailyBackup(ctx, s.dbPath, s.retention)
-			if err != nil {
-				logger.Error("Backup failed", zap.Error(err))
-			} else {
-				logger.Info("Database backup completed successfully")
-			}
-
-			if s.maintenance != nil {
-				maintErr := s.maintenance(ctx)
-				if maintErr != nil {
-					logger.Warn("Daily database maintenance failed", zap.Error(maintErr))
-				}
-			}
+			s.runOnce(ctx)
 
 		case <-ctx.Done():
 			logger.Info("Backup scheduler stopped")
 			return
+		}
+	}
+}
+
+// runOnce performs a single backup followed by the daily maintenance hook.
+func (s *BackupScheduler) runOnce(ctx context.Context) {
+	logger.Info("Running scheduled database backup")
+
+	err := backup.DailyBackup(ctx, s.dbPath, s.retention)
+	if err != nil {
+		logger.Error("Backup failed", zap.Error(err))
+	} else {
+		logger.Info("Database backup completed successfully")
+	}
+
+	if s.maintenance != nil {
+		maintErr := s.maintenance(ctx)
+		if maintErr != nil {
+			logger.Warn("Daily database maintenance failed", zap.Error(maintErr))
 		}
 	}
 }

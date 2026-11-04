@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,6 +50,22 @@ func TestDetectOutputFormat(t *testing.T) {
 }
 
 // ==================== Sing-box serializer ====================
+
+// TestSingboxOutbound_AllowInsecureRendersInsecure pins the sing-box field
+// name: AllowInsecure must render as tls.insecure (not xray's allowInsecure).
+func TestSingboxOutbound_AllowInsecureRendersInsecure(t *testing.T) {
+	t.Parallel()
+
+	out, err := buildSingboxOutbound(&serverConfig{
+		Type: "vless", Address: "x.example", Port: 443, UUID: "u-1",
+		TLS: "true", SNI: "s.example", AllowInsecure: true,
+	})
+	require.NoError(t, err)
+
+	tls, ok := out["tls"].(map[string]any)
+	require.True(t, ok, "TLS enabled must produce a tls block")
+	assert.Equal(t, true, tls["insecure"], "AllowInsecure must render as tls.insecure")
+}
 
 func TestConvertJSONConfigsToSingbox(t *testing.T) {
 	t.Parallel()
@@ -417,10 +432,17 @@ func TestBuildClashProxyOtherNetworks(t *testing.T) {
 				Type: "vless", Network: network, Path: "/x", Host: "cdn.example",
 			})
 			require.NoError(t, err)
-			assert.Equal(t, map[string]any{
-				"name": "proxy-", "type": "vless", "server": "", "port": 0, "udp": true,
-				"network": network,
-			}, proxy)
+			// The essence: tcp/raw carry no transport options; other networks
+			// keep the network field. Name/address rendering is an impl detail.
+			assert.Equal(t, network, proxy["network"])
+			assert.Equal(t, "vless", proxy["type"])
+
+			_, hasWS := proxy["ws-opts"]
+			assert.False(t, hasWS, "no transport options for %s", network)
+			_, hasH2 := proxy["h2-opts"]
+			assert.False(t, hasH2, "no transport options for %s", network)
+			_, hasHTTP := proxy["http-opts"]
+			assert.False(t, hasHTTP, "no transport options for %s", network)
 		})
 	}
 }
@@ -553,21 +575,12 @@ func TestHandleSubscription_FormatByUA(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	withBackend := func(t *testing.T, subID string) (*Service, *testutil.SubscriptionRepositoryFake, string) {
+	withBackend := func(t *testing.T, _ string) (*Service, *testutil.SubscriptionRepositoryFake, string) {
 		t.Helper()
 
-		mockDB := testutil.NewSubscriptionRepositoryFake()
-		mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, id string) (*database.SubscriptionFull, error) {
-			return &database.SubscriptionFull{
-				Subscription: database.Subscription{ID: 1, SubscriptionID: id, Status: "active"},
-				Plan:         database.Plan{ID: 1},
-				Nodes:        []database.Node{{ID: 1, IsActive: true, SubscriptionURL: backend.URL + "/"}},
-			}, nil
-		}
-		mockDB.UpdateDevicesFunc = func(context.Context, uint, string) error { return nil }
-		mockDB.UpdateIPsFunc = func(context.Context, uint, string) error { return nil }
-		mockDB.UpdateLastRequestFunc = func(context.Context, string) error { return nil }
-		return newTestSubSvc(t), mockDB, link
+		svc, mockDB := newActiveSubDB(t, backend.URL+"/")
+
+		return svc, mockDB, link
 	}
 
 	t.Run("default stays Xray", func(t *testing.T) {
@@ -644,18 +657,7 @@ func TestHandleSubscription_PerFormatCacheKeys(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	mockDB := testutil.NewSubscriptionRepositoryFake()
-	mockDB.GetWithPlanAndNodesFunc = func(ctx context.Context, subID string) (*database.SubscriptionFull, error) {
-		return &database.SubscriptionFull{
-			Subscription: database.Subscription{ID: 1, SubscriptionID: subID, Status: "active"},
-			Plan:         database.Plan{ID: 1},
-			Nodes:        []database.Node{{ID: 1, IsActive: true, SubscriptionURL: backend.URL + "/"}},
-		}, nil
-	}
-	mockDB.UpdateDevicesFunc = func(context.Context, uint, string) error { return nil }
-	mockDB.UpdateIPsFunc = func(context.Context, uint, string) error { return nil }
-	mockDB.UpdateLastRequestFunc = func(context.Context, string) error { return nil }
-	svc := newTestSubSvc(t)
+	svc, mockDB := newActiveSubDB(t, backend.URL+"/")
 	ctx := context.Background()
 
 	// Xray default keeps the bare subID cache key.

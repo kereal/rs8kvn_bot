@@ -7,102 +7,64 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestConstants_HTTPTimeouts(t *testing.T) {
+// Поведенческое покрытие констант живёт в потребителях: ratelimiter
+// (internal/ratelimiter, internal/bot/handlers_test.go), splitMessage
+// (internal/bot/split_message_test.go, MaxTelegramMessageLen),
+// SubscriptionResetDay (internal/service/sync_test.go, internal/xui),
+// MaxResponseSize (internal/subserver, internal/vpn), MaxOpenConns
+// (internal/database). Оставшиеся значения нигде поведенчески не проверяются —
+// держим один тест с их смысловыми инвариантами вместо тавтологичных пинов.
+func TestConstants_UncoveredInvariants(t *testing.T) {
 	t.Parallel()
 
-	assert.Greater(t, DefaultHTTPTimeout, 0*time.Second, "DefaultHTTPTimeout should be positive")
-	assert.Greater(t, DefaultIdleConnTimeout, 0*time.Second, "DefaultIdleConnTimeout should be positive")
-	assert.Equal(t, 30*time.Second, DefaultIdleConnTimeout, "DefaultIdleConnTimeout")
-	assert.Equal(t, 10*time.Second, DefaultHTTPTimeout, "DefaultHTTPTimeout")
-	assert.Equal(t, 2, MaxIdleConns, "MaxIdleConns should be 2 for low memory")
-}
+	// HTTP transport
+	assert.Greater(t, DefaultHTTPTimeout, time.Duration(0), "DefaultHTTPTimeout must be positive")
+	assert.Greater(t, DefaultIdleConnTimeout, time.Duration(0), "DefaultIdleConnTimeout must be positive")
+	assert.Greater(t, MaxIdleConns, 0, "MaxIdleConns must be positive")
 
-func TestConstants_RateLimiter(t *testing.T) {
-	t.Parallel()
+	// Rate limiting
+	assert.Greater(t, RateLimiterMaxTokens, 0, "RateLimiterMaxTokens must be positive")
+	assert.Greater(t, RateLimiterRefillRate, 0, "RateLimiterRefillRate must be positive")
+	assert.Greater(t, MaxConcurrentHandlers, 0, "MaxConcurrentHandlers must be positive")
 
-	assert.Equal(t, 30, RateLimiterMaxTokens, "RateLimiterMaxTokens")
-	assert.Equal(t, 5, RateLimiterRefillRate, "RateLimiterRefillRate")
-	assert.Equal(t, 10, MaxConcurrentHandlers, "MaxConcurrentHandlers")
-}
+	// Database
+	assert.NotEmpty(t, DefaultDatabasePath, "DefaultDatabasePath must be set")
+	assert.Greater(t, ConnMaxLifetime, time.Duration(0))
+	assert.Greater(t, ConnMaxIdleTime, time.Duration(0))
+	assert.Greater(t, MaxIdleConnsDB, 0)
 
-func TestConstants_TrafficLimits(t *testing.T) {
-	t.Parallel()
+	// Heartbeat
+	assert.GreaterOrEqual(t, DefaultHeartbeatInterval, MinHeartbeatInterval,
+		"default heartbeat interval must satisfy its own minimum")
 
-	assert.Equal(t, 30, SubscriptionResetDay, "SubscriptionResetDay")
-}
-
-func TestConstants_Database(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "./data/rs8kvn.db", DefaultDatabasePath)
-	assert.Equal(t, 5*time.Minute, ConnMaxLifetime)
-	assert.Equal(t, 2*time.Minute, ConnMaxIdleTime)
-	assert.Equal(t, 4, MaxOpenConns, "WAL mode supports concurrent readers")
-	assert.Equal(t, 4, MaxIdleConnsDB)
-}
-
-func TestConstants_Heartbeat(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, 300, DefaultHeartbeatInterval, "5 minutes")
-	assert.GreaterOrEqual(t, DefaultHeartbeatInterval, MinHeartbeatInterval)
-}
-
-func TestConstants_HealthCheck(t *testing.T) {
-	t.Parallel()
-
+	// Health check port
 	assert.Greater(t, DefaultWebServerPort, 0)
 	assert.Less(t, DefaultWebServerPort, 65536)
-}
 
-func TestConstants_TelegramLimits(t *testing.T) {
-	t.Parallel()
+	// Telegram limits
+	assert.Greater(t, MaxCaptionLen, 0, "MaxCaptionLen must be positive")
 
-	assert.Equal(t, 4096, MaxTelegramMessageLen)
-	assert.Equal(t, 1024, MaxCaptionLen)
-}
+	// Shutdown
+	assert.Greater(t, ShutdownTimeout, time.Duration(0), "ShutdownTimeout must be positive")
 
-func TestConstants_Validation(t *testing.T) {
-	t.Parallel()
+	// Trial defaults must satisfy validate() bounds
+	assert.GreaterOrEqual(t, DefaultTrialDurationHours, 1)
+	assert.LessOrEqual(t, DefaultTrialDurationHours, 168)
+	assert.GreaterOrEqual(t, DefaultTrialRateLimit, 1)
+	assert.LessOrEqual(t, DefaultTrialRateLimit, 100)
+	assert.NotEmpty(t, DefaultSiteURL, "DefaultSiteURL must be set")
 
-	assert.Equal(t, 2<<20, MaxResponseSize)
-}
+	// Admin send rate limiting
+	assert.Greater(t, AdminSendRateLimit, 0)
+	assert.Greater(t, AdminSendRateWindow, time.Duration(0))
+	assert.Greater(t, AdminSendMinInterval, time.Duration(0))
 
-func TestConstants_Shutdown(t *testing.T) {
-	t.Parallel()
+	// Feature flags preserving historical behaviour
+	assert.True(t, DefaultDonateEnabled, "DefaultDonateEnabled should stay true")
+	assert.True(t, DefaultNotificationsEnabled, "DefaultNotificationsEnabled should stay true")
 
-	assert.Equal(t, 90*time.Second, ShutdownTimeout)
-}
-
-func TestConstants_Trial(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "https://vpn.site", DefaultSiteURL)
-	assert.Equal(t, 3, DefaultTrialDurationHours)
-	assert.Equal(t, 3, DefaultTrialRateLimit)
-}
-
-func TestConstants_AdminRateLimit(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, 10, AdminSendRateLimit)
-	assert.Equal(t, 1*time.Minute, AdminSendRateWindow)
-	assert.Equal(t, 6*time.Second, AdminSendMinInterval)
-}
-
-func TestConstants_Donate(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "", DonateCardNumber)
-	assert.Equal(t, "", DonateURL)
-	assert.Equal(t, "", ContactUsername)
-	assert.True(t, DefaultDonateEnabled, "DefaultDonateEnabled should be true to preserve historical behaviour")
-	assert.True(t, DefaultNotificationsEnabled, "DefaultNotificationsEnabled should be true to preserve production behaviour")
-}
-
-func TestConstants_Backup(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, 3, DefaultBackupHour)
-	assert.Equal(t, 30, DefaultBackupRetention)
+	// Backup
+	assert.GreaterOrEqual(t, DefaultBackupHour, 0, "backup hour must be a valid hour")
+	assert.LessOrEqual(t, DefaultBackupHour, 23)
+	assert.Greater(t, DefaultBackupRetention, 0, "backup retention must keep at least one backup")
 }

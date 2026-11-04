@@ -128,7 +128,67 @@ func TestGetWithPlanAndNodes_RevokedSubscription(t *testing.T) {
 
 // ==================== UpdateDevices Tests ====================
 
+func TestUpdateDevices_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	sub := createTestSubscription(t, svc, 9110, "devices-user", "client-devices")
+
+	devicesJSON := `[{"User-Agent":"curl/8.0"}]`
+	require.NoError(t, svc.UpdateDevices(ctx, sub.ID, devicesJSON))
+
+	got, err := svc.GetByID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, devicesJSON, got.Devices)
+
+	parsed, err := got.ParseDevices()
+	require.NoError(t, err)
+	require.Len(t, parsed, 1)
+	assert.Equal(t, "curl/8.0", parsed[0]["User-Agent"])
+}
+
+func TestUpdateDevices_UnknownSubscriptionID(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+
+	err := svc.UpdateDevices(context.Background(), 999999, `[{"User-Agent":"x"}]`)
+	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
+}
+
 // ==================== UpdateIPs Tests ====================
+
+func TestUpdateIPs_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	sub := createTestSubscription(t, svc, 9111, "ips-user", "client-ips")
+
+	ipsJSON := `[{"203.0.113.7":"2026-11-02T10:00:00Z"}]`
+	require.NoError(t, svc.UpdateIPs(ctx, sub.ID, ipsJSON))
+
+	got, err := svc.GetByID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, ipsJSON, got.Ips)
+
+	parsed, err := got.ParseIPs()
+	require.NoError(t, err)
+	require.Len(t, parsed, 1)
+	assert.Equal(t, "2026-11-02T10:00:00Z", parsed[0]["203.0.113.7"])
+}
+
+func TestUpdateIPs_UnknownSubscriptionID(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+
+	err := svc.UpdateIPs(context.Background(), 999999, `["203.0.113.7"]`)
+	assert.ErrorIs(t, err, ErrSubscriptionNotFound)
+}
 
 // ==================== ExpireSubscription Tests ====================
 

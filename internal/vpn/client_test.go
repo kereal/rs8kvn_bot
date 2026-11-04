@@ -84,7 +84,7 @@ func TestNewClient_3xUI_RequiresXUIClient(t *testing.T) {
 }
 
 func TestNewClient_3xUI_Success(t *testing.T) {
-	mockXUI := &mockXUIClient{}
+	mockXUI := &fakeXUIClient{}
 	client, err := NewClient(Config{
 		Type:       database.NodeType3xUI,
 		XUIClient:  mockXUI,
@@ -146,44 +146,6 @@ type errReadCloser struct {
 
 func (e errReadCloser) Read([]byte) (int, error) { return 0, e.err }
 func (e errReadCloser) Close() error             { return nil }
-
-type mockXUIClient struct{}
-
-func (m *mockXUIClient) Ping(ctx context.Context) error {
-	return nil
-}
-
-func (m *mockXUIClient) GetClientTraffic(ctx context.Context, email string) (*xui.ClientTraffic, error) {
-	return nil, nil
-}
-
-func (m *mockXUIClient) GetClientByEmail(ctx context.Context, email string) (*xui.ClientRecord, error) {
-	return nil, nil
-}
-
-func (m *mockXUIClient) AddClient(ctx context.Context, inboundIDs []int, email string, trafficBytes int64, expiryTime time.Time) (*xui.ClientConfig, error) {
-	return nil, nil
-}
-
-func (m *mockXUIClient) AddClientWithID(ctx context.Context, req xui.ClientRequest) (*xui.ClientConfig, error) {
-	return &xui.ClientConfig{ID: req.ClientID, SubID: req.SubID}, nil
-}
-
-func (m *mockXUIClient) UpdateClient(ctx context.Context, req xui.ClientRequest) error {
-	return nil
-}
-
-func (m *mockXUIClient) DeleteClient(ctx context.Context, email string) error {
-	return nil
-}
-
-func (m *mockXUIClient) ResetTraffic(_ context.Context, _ string) error {
-	return nil
-}
-
-func (m *mockXUIClient) Close() error {
-	return nil
-}
 
 func TestProxmanClient_CreateSubscription_SendsWebhook(t *testing.T) {
 	t.Parallel()

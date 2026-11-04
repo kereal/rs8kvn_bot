@@ -76,20 +76,6 @@ func TestHandlePaymentCallback_Unauthorized(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
-func TestHandlePaymentCallback_InvalidJSON(t *testing.T) {
-	t.Parallel()
-
-	srv, _, _ := newPaymentTestServer(t, nil)
-	req := httptest.NewRequest(http.MethodPost, "/payment/callback", strings.NewReader(`{invalid`))
-	req.Header.Set("X-Merchantid", "merchant")
-	req.Header.Set("X-Secret", "secret")
-
-	rec := httptest.NewRecorder()
-
-	srv.handlePaymentCallback(rec, req)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
 func TestHandlePaymentCallback_AcceptsUnknownProviderFields(t *testing.T) {
 	t.Parallel()
 

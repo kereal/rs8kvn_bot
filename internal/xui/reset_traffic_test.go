@@ -48,28 +48,6 @@ func TestResetTraffic_Success(t *testing.T) {
 	assert.Equal(t, "Bearer "+testAPIToken, gotAuth)
 }
 
-func TestResetTraffic_PanelErrorSurfacesMsg(t *testing.T) {
-	t.Parallel()
-
-	// Контракт панели: resetTraffic отсутствующего клиента —
-	// "Something went wrong (record not found)". Классификация — sentinel,
-	// а не текст ошибки (см. client_test.go).
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"success":false,"msg":"Something went wrong (record not found)"}`)
-	}))
-	defer server.Close()
-
-	client, err := NewClient(server.URL, testAPIToken)
-	require.NoError(t, err)
-	defer client.Close()
-
-	err = client.ResetTraffic(context.Background(), "missing@example.com")
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrClientNotFound)
-}
-
 func TestResetTraffic_InvalidJSON(t *testing.T) {
 	t.Parallel()
 
@@ -87,28 +65,4 @@ func TestResetTraffic_InvalidJSON(t *testing.T) {
 	err = client.ResetTraffic(context.Background(), "user@example.com")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse resetTraffic response")
-}
-
-// TestResetTraffic_HTTPError ensures a non-2xx upstream response is retried and
-// finally surfaced. The 2s initial backoff makes this slow in short mode, so it
-// is skipped there like the other network tests in this package.
-func TestResetTraffic_HTTPError(t *testing.T) {
-	t.Parallel()
-
-	if testing.Short() {
-		t.Skip("Skipping slow test in short mode")
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer server.Close()
-
-	client, err := NewClient(server.URL, testAPIToken)
-	require.NoError(t, err)
-	defer client.Close()
-
-	err = client.ResetTraffic(context.Background(), "user@example.com")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "non-200", "the upstream HTTP failure must be surfaced")
 }

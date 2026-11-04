@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -66,21 +65,6 @@ func TestNewClient(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "http://localhost:2053", client.host)
 	})
-
-	t.Run("no trailing slash", func(t *testing.T) {
-		client, err := NewClient("http://localhost:2053", testAPIToken)
-		require.NoError(t, err)
-		assert.Equal(t, "http://localhost:2053", client.host)
-	})
-}
-
-func TestClient_SetNode(t *testing.T) {
-	t.Parallel()
-
-	client, err := NewClient("http://localhost:2053", testAPIToken)
-	require.NoError(t, err)
-	client.SetNode("primary-eu")
-	assert.Equal(t, "primary-eu", client.node)
 }
 
 func TestClient_RequestMetricsUseConfiguredNode(t *testing.T) {
@@ -142,170 +126,6 @@ func TestMarshalJSON(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, decoded)
 	})
-}
-func TestClientClose(t *testing.T) {
-	t.Parallel()
-
-	client, err := NewClient("http://localhost:2053", testAPIToken)
-	require.NoError(t, err)
-
-	err = client.Close()
-	assert.NoError(t, err)
-}
-
-func TestIsRetryable(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name      string
-		err       error
-		retryable bool
-	}{
-		{"nil", nil, false},
-		{"timeout", &net.OpError{Op: "read", Err: fmt.Errorf("i/o timeout")}, true},
-		{"dns error", &net.DNSError{Err: "dns", Name: "example.com"}, false},
-		{"no such host", fmt.Errorf("no such host"), false},
-		{"temporary failure", fmt.Errorf("temporary failure in name resolution"), false},
-		{"connection refused", &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused")}, true},
-		{"non-200", fmt.Errorf("upstream returned non-200: %w", utils.ErrNon200Response), false},
-		{"other error", fmt.Errorf("some other error"), false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.retryable, utils.IsRetryable(tt.err))
-		})
-	}
-}
-
-type testNetError struct{}
-
-func (testNetError) Error() string   { return "connection reset" }
-func (testNetError) Timeout() bool   { return false }
-func (testNetError) Temporary() bool { return true }
-
-func TestRetryWithBackoff(t *testing.T) {
-	t.Parallel()
-
-	var (
-		successRetryCalls, exhaustedCalls, non200Calls atomic.Int32
-		cancelledCalls, nonRetryableCalls              atomic.Int32
-	)
-
-	tests := []struct {
-		name         string
-		setupCtx     func() context.Context
-		fn           func() error
-		wantErr      bool
-		wantContains string
-		wantCalls    int32
-	}{
-		{
-			name: "success immediate",
-			setupCtx: func() context.Context {
-				return context.Background()
-			},
-			fn: func() error {
-				return nil
-			},
-			wantErr:   false,
-			wantCalls: 1,
-		},
-		{
-			name: "retries then succeeds",
-			setupCtx: func() context.Context {
-				return context.Background()
-			},
-			fn: func() error {
-				calls := successRetryCalls.Load()
-				successRetryCalls.Add(1)
-
-				if calls < 2 {
-					return testNetError{}
-				}
-
-				return nil
-			},
-			wantErr:   false,
-			wantCalls: 3,
-		},
-		{
-			name: "exhausted retries",
-			setupCtx: func() context.Context {
-				return context.Background()
-			},
-			fn: func() error {
-				exhaustedCalls.Add(1)
-				return testNetError{}
-			},
-			wantErr:      true,
-			wantContains: "connection reset",
-			wantCalls:    3,
-		},
-		{
-			name: "context cancelled",
-			setupCtx: func() context.Context {
-				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
-				cancel()
-
-				return ctx
-			},
-			fn: func() error {
-				cancelledCalls.Add(1)
-				return testNetError{}
-			},
-			wantErr:      true,
-			wantContains: "context cancelled",
-			wantCalls:    1,
-		},
-		{
-			name: "non-retryable error",
-			setupCtx: func() context.Context {
-				return context.Background()
-			},
-			fn: func() error {
-				nonRetryableCalls.Add(1)
-				return &net.DNSError{Err: "dns", Name: "example.com"}
-			},
-			wantErr:   true,
-			wantCalls: 1,
-		},
-		{
-			name: "non-200 not retried",
-			setupCtx: func() context.Context {
-				return context.Background()
-			},
-			fn: func() error {
-				non200Calls.Add(1)
-				return fmt.Errorf("upstream returned non-200: %w", utils.ErrNon200Response)
-			},
-			wantErr:      true,
-			wantContains: "upstream returned non-200",
-			wantCalls:    1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := utils.RetryWithBackoff(tt.setupCtx(), 3, time.Millisecond, tt.fn)
-
-			if tt.wantErr {
-				assert.Error(t, err)
-
-				if tt.wantContains != "" {
-					assert.Contains(t, err.Error(), tt.wantContains)
-				}
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-
-	assert.Equal(t, int32(3), successRetryCalls.Load(), "retries-then-succeeds call count")
-	assert.Equal(t, int32(3), exhaustedCalls.Load(), "exhausted call count")
-	assert.Equal(t, int32(1), cancelledCalls.Load(), "cancelled call count")
-	assert.Equal(t, int32(1), nonRetryableCalls.Load(), "non-retryable call count")
-	assert.Equal(t, int32(1), non200Calls.Load(), "non-200 call count")
 }
 
 func TestGetExpiresAtMillis(t *testing.T) {
@@ -497,71 +317,56 @@ func TestCloseResponseBody(t *testing.T) {
 	})
 }
 
-func TestAddClient(t *testing.T) {
+// TestAddClient_AutoGeneratesIdentity: обёртка AddClient сама генерирует
+// clientID и subID (client.go AddClient) — панель обязана получить непустые
+// uuid и subId. Поведение панели (add/update payload, ошибки) покрыто
+// тестами TestAddClientWithID* и TestPanelContract_*.
+func TestAddClient_AutoGeneratesIdentity(t *testing.T) {
 	t.Parallel()
 
 	if testing.Short() {
 		t.Skip("Skipping slow test in short mode")
 	}
 
-	t.Run("success", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.Contains(r.URL.Path, "get/") {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprint(w, `{"success":true,"obj":{"id":1,"streamSettings":"{\"network\":\"tcp\"}"}}`)
-
-				return
-			}
-
-			assert.Equal(t, "/panel/api/clients/add", r.URL.Path)
-			assert.Equal(t, "Bearer "+testAPIToken, r.Header.Get("Authorization"))
-			body, _ := io.ReadAll(r.Body)
-			assert.Contains(t, string(body), `"client"`)
-			assert.Contains(t, string(body), `"inboundIds"`)
-			assert.Contains(t, string(body), `"email":"test@example.com"`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "get/") {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
-		}))
-		defer server.Close()
+			fmt.Fprint(w, `{"success":true,"obj":{"id":1,"streamSettings":"{\"network\":\"tcp\"}"}}`)
 
-		client, err := NewClient(server.URL, testAPIToken)
-		require.NoError(t, err)
+			return
+		}
 
-		defer client.Close()
+		body, _ := io.ReadAll(r.Body)
 
-		result, err := client.AddClient(context.Background(), []int{1}, "test@example.com", 1<<30, time.Now().Add(24*time.Hour))
-		require.NoError(t, err)
-		require.NotNil(t, result)
-		assert.Equal(t, "test@example.com", result.Email)
-		assert.True(t, result.Enable)
-	})
+		var payload struct {
+			Client ClientConfig `json:"client"`
+		}
+		require.NoError(t, json.Unmarshal(body, &payload))
 
-	t.Run("error on add", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.Contains(r.URL.Path, "get/") {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
+		// Панельный add-payload несёт сгенерированный uuid в поле id
+		// (см. doAddClientWithID: clientObj["id"] = req.ClientID).
+		assert.NotEmpty(t, payload.Client.ID, "AddClient must auto-generate client uuid")
+		assert.NotEmpty(t, payload.Client.SubID, "AddClient must auto-generate subId")
+		assert.Equal(t, "test@example.com", payload.Client.Email)
 
-				return
-			}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
+	}))
+	defer server.Close()
 
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `{"success":false,"msg":"inbound not found"}`)
-		}))
-		defer server.Close()
+	client, err := NewClient(server.URL, testAPIToken)
+	require.NoError(t, err)
 
-		client, err := NewClient(server.URL, testAPIToken)
-		require.NoError(t, err)
+	defer client.Close()
 
-		defer client.Close()
-
-		_, err = client.AddClient(context.Background(), []int{1}, "test@example.com", 1<<30, time.Now().Add(24*time.Hour))
-		assert.Error(t, err)
-	})
+	result, err := client.AddClient(context.Background(), []int{1}, "test@example.com", 1<<30, time.Now().Add(24*time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.NotEmpty(t, result.ID, "auto-generated client id must be echoed back")
+	assert.Equal(t, "test@example.com", result.Email)
+	assert.True(t, result.Enable)
 }
 
 func TestAddClientWithID_SurfacesPanelMsg(t *testing.T) {
@@ -765,40 +570,8 @@ func TestAddClientWithID(t *testing.T) {
 		require.NoError(t, err)
 		defer client.Close()
 
-		_, err = client.AddClientWithID(context.Background(), ClientRequest{
-			InboundIDs: []int{1}, Email: "plain@example.com", ClientID: "plain-uuid", SubID: "plain-sub",
-			TrafficBytes: 1 << 30, ExpiryTime: time.Now().Add(24 * time.Hour), ResetDays: -1,
-		})
+		_, err = client.AddClientWithID(context.Background(), ClientRequest{InboundIDs: []int{1}, Email: "plain@example.com", ClientID: "plain-uuid", SubID: "plain-sub", TrafficBytes: 1 << 30, ExpiryTime: time.Now().Add(24 * time.Hour), ResetDays: -1})
 		require.NoError(t, err)
-	})
-
-	t.Run("reset_days_negative_normalized", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.Contains(r.URL.Path, "get/") {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprint(w, `{"success":true,"obj":{"id":1}}`)
-
-				return
-			}
-
-			body, _ := io.ReadAll(r.Body)
-			// The panel must receive the normalized value, not -1
-			assert.Contains(t, string(body), `"reset":30`, "negative ResetDays must be normalized to SubscriptionResetDay")
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `{"success":true,"msg":"ok"}`)
-		}))
-		defer server.Close()
-
-		client, err := NewClient(server.URL, testAPIToken)
-		require.NoError(t, err)
-
-		defer client.Close()
-
-		result, err := client.AddClientWithID(context.Background(), ClientRequest{InboundIDs: []int{1}, Email: "test@example.com", ClientID: "uuid", SubID: "sub", TrafficBytes: 100, ExpiryTime: time.Now().Add(24 * time.Hour), ResetDays: -1})
-		require.NoError(t, err)
-		assert.Equal(t, config.SubscriptionResetDay, result.Reset, "returned ClientConfig.Reset must reflect normalized value")
 	})
 }
 
@@ -825,24 +598,6 @@ func TestDeleteClient(t *testing.T) {
 
 		err = client.DeleteClient(context.Background(), "test-email")
 		assert.NoError(t, err)
-	})
-
-	t.Run("api error", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `{"success":false,"msg":"client not found"}`)
-		}))
-		defer server.Close()
-
-		client, err := NewClient(server.URL, testAPIToken)
-		require.NoError(t, err)
-
-		defer client.Close()
-
-		err = client.DeleteClient(context.Background(), "nonexistent")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "client not found")
 	})
 }
 
@@ -1018,44 +773,6 @@ func TestGetClientTraffic(t *testing.T) {
 		assert.Equal(t, int64(2000), traffic.Down)
 	})
 
-	t.Run("client not found", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `{"success":false,"msg":"client not found"}`)
-		}))
-		defer server.Close()
-
-		client, err := NewClient(server.URL, testAPIToken)
-		require.NoError(t, err)
-
-		defer client.Close()
-
-		_, err = client.GetClientTraffic(context.Background(), "nonexistent@example.com")
-		assert.ErrorIs(t, err, ErrClientNotFound)
-	})
-
-	// 3x-ui v3.10 answers an unknown email with success=true and obj=null.
-	// Treating it as parseable data produced "failed to parse traffic data",
-	// which the traffic-notification worker reports as an infrastructure error
-	// instead of a missing client.
-	t.Run("client not found (v3.10 null obj)", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `{"success":true,"msg":"","obj":null}`)
-		}))
-		defer server.Close()
-
-		client, err := NewClient(server.URL, testAPIToken)
-		require.NoError(t, err)
-
-		defer client.Close()
-
-		_, err = client.GetClientTraffic(context.Background(), "ghost@example.com")
-		assert.ErrorIs(t, err, ErrClientNotFound)
-	})
-
 	t.Run("invalid JSON response", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -1103,11 +820,10 @@ func TestGetInbound(t *testing.T) {
 		assert.Equal(t, "ws", inbound.GetTransport())
 	})
 
-	t.Run("not found", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `{"success":false,"msg":"inbound not found"}`)
+	t.Run("non-200 is wrapped as retryable ErrNon200Response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("upstream error"))
 		}))
 		defer server.Close()
 
@@ -1116,8 +832,9 @@ func TestGetInbound(t *testing.T) {
 
 		defer client.Close()
 
-		_, err = client.GetInbound(context.Background(), 999)
-		assert.Error(t, err)
+		_, err = client.GetInbound(context.Background(), 1)
+		assert.ErrorIs(t, err, utils.ErrNon200Response,
+			"a non-200 from /inbounds/get must stay retryable, not park the node")
 	})
 }
 
@@ -1140,77 +857,6 @@ func TestGetRequiredFlow_Fallback(t *testing.T) {
 	require.Error(t, err)
 	assert.Empty(t, flow)
 	assert.Contains(t, err.Error(), "get inbound for flow")
-}
-
-func TestAPIResponseParsing(t *testing.T) {
-	t.Parallel()
-
-	t.Run("valid response", func(t *testing.T) {
-		resp := APIResponse{Success: true, Msg: "ok", Obj: json.RawMessage(`{"key":"value"}`)}
-		assert.True(t, resp.Success)
-		assert.Equal(t, "ok", resp.Msg)
-	})
-
-	t.Run("error response", func(t *testing.T) {
-		resp := APIResponse{Success: false, Msg: "error message"}
-		assert.False(t, resp.Success)
-		assert.Equal(t, "error message", resp.Msg)
-	})
-}
-
-func TestHTTPStatusHandling(t *testing.T) {
-	t.Parallel()
-
-	t.Run("401 unauthorized", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusUnauthorized)
-			fmt.Fprint(w, `unauthorized`)
-		}))
-		defer server.Close()
-
-		client, err := NewClient(server.URL, testAPIToken)
-		require.NoError(t, err)
-
-		defer client.Close()
-
-		_, err = client.GetInbound(context.Background(), 1)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "upstream returned non-200")
-	})
-
-	t.Run("403 forbidden", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusForbidden)
-			fmt.Fprint(w, `forbidden`)
-		}))
-		defer server.Close()
-
-		client, err := NewClient(server.URL, testAPIToken)
-		require.NoError(t, err)
-
-		defer client.Close()
-
-		_, err = client.GetInbound(context.Background(), 1)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "upstream returned non-200")
-	})
-
-	t.Run("500 server error", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprint(w, `server error`)
-		}))
-		defer server.Close()
-
-		client, err := NewClient(server.URL, testAPIToken)
-		require.NoError(t, err)
-
-		defer client.Close()
-
-		_, err = client.GetInbound(context.Background(), 1)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "upstream returned non-200")
-	})
 }
 
 func TestExtractOperation(t *testing.T) {

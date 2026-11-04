@@ -2,17 +2,14 @@ package e2e
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/service"
-	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	"github.com/kereal/rs8kvn_bot/internal/web"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -24,22 +21,6 @@ import (
 // platega.ParseTransactionID. The mock provider always returns it, so the test
 // can reference the same id in the webhook callback.
 const premiumPaymentID = "550e8400-e29b-41d4-a716-446655440099"
-
-// fixedPaymentProvider is a PaymentProvider stub returning a deterministic
-// transaction id and payment link.
-type fixedPaymentProvider struct{}
-
-func (fixedPaymentProvider) CreateTransaction(_ context.Context, _ platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
-	return &platega.CreateTransactionResponse{
-		TransactionID: premiumPaymentID,
-		URL:           "https://pay.example/checkout",
-		ExpiresIn:     "00:15:00",
-	}, nil
-}
-
-func (fixedPaymentProvider) GetTransactionStatus(_ context.Context, _ uuid.UUID) (*platega.TransactionStatusResponse, error) {
-	return nil, errors.New("status not configured")
-}
 
 // TestE2E_PremiumPurchase_FullFlow drives the whole purchase path against a real
 // SQLite database: open the tariff list, pick a product, get a payment link,
@@ -75,7 +56,7 @@ func TestE2E_PremiumPurchase_FullFlow(t *testing.T) {
 	assert.Nil(t, freeSub.ProductID, "free subscription has no product yet")
 
 	// Wire the payment provider and order service into the bot handler.
-	orderSvc := service.NewOrderService(env.db, env.subService, env.syncService, fixedPaymentProvider{}, env.botConfig.Username, env.cfg)
+	orderSvc := service.NewOrderService(env.db, env.subService, env.syncService, fixedPaymentProvider{transactionID: premiumPaymentID}, env.botConfig.Username, env.cfg)
 	orderSvc.SetAdminBot(env.botAPI)
 	env.handler.SetOrderService(orderSvc)
 
