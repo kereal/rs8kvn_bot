@@ -1274,7 +1274,7 @@ func TestHandleSubscription_LateMissAfterFlightServesFreshCache(t *testing.T) {
 		<-releaseFetch
 
 		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp#node")
+		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp&security=tls#node")
 	}))
 	defer upstream.Close()
 	defer unblockFetch()
@@ -1458,7 +1458,7 @@ func TestHandleSubscription_LeaderCancellationDoesNotCancelFetch(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(started)
 		<-proceed
-		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp#node")
+		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp&security=tls#node")
 	}))
 	defer upstream.Close()
 	db := testutil.NewSubscriptionRepositoryFake()

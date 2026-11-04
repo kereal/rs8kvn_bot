@@ -350,7 +350,7 @@ func TestHandleSubscription_DatabaseError_Returns500GenericBody(t *testing.T) {
 func TestHandleSubscription_CacheSubscriptionResult(t *testing.T) {
 	t.Parallel()
 
-	plainContent := "vless://cached@x.com:443"
+	plainContent := "vless://cached@x.com:443?security=tls"
 
 	callCount := 0
 
@@ -392,7 +392,7 @@ func TestHandleSubscription_CacheSubscriptionResult(t *testing.T) {
 func TestHandleSubscription_DevicesTracking(t *testing.T) {
 	t.Parallel()
 
-	plainContent := "vless://dev@x.com:443"
+	plainContent := "vless://dev@x.com:443?security=tls"
 
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(plainContent))
