@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
@@ -124,24 +125,28 @@ func TestRunSupervised_BackoffEscalation(t *testing.T) {
 	})
 
 	t.Run("backoff resets after stable run", func(t *testing.T) {
-		setBackoff(t, 10*time.Millisecond, 40*time.Millisecond, 30*time.Millisecond)
-		var delays []time.Duration
-		runs := 0
-		runSupervisedWithWait(context.Background(), "test-backoff-reset", func(context.Context) {
-			runs++
-			if runs == 3 {
-				time.Sleep(50 * time.Millisecond)
-			}
-			if runs == 4 {
-				return
-			}
-			panic("boom")
-		}, func(_ context.Context, delay time.Duration) bool {
-			delays = append(delays, delay)
-			return true
+		// Виртуальное время исключает задержки планировщика; запас относительно
+		// таймаута отправки паники не замедляет тест.
+		synctest.Test(t, func(t *testing.T) {
+			setBackoff(t, 10*time.Millisecond, 40*time.Millisecond, 30*time.Second)
+			var delays []time.Duration
+			runs := 0
+			runSupervisedWithWait(context.Background(), "test-backoff-reset", func(context.Context) {
+				runs++
+				if runs == 3 {
+					time.Sleep(time.Minute)
+				}
+				if runs == 4 {
+					return
+				}
+				panic("boom")
+			}, func(_ context.Context, delay time.Duration) bool {
+				delays = append(delays, delay)
+				return true
+			})
+			assert.Equal(t, 4, runs)
+			assert.Equal(t, []time.Duration{10 * time.Millisecond, 20 * time.Millisecond, 10 * time.Millisecond}, delays)
 		})
-		assert.Equal(t, 4, runs)
-		assert.Equal(t, []time.Duration{10 * time.Millisecond, 20 * time.Millisecond, 10 * time.Millisecond}, delays)
 	})
 }
 

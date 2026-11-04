@@ -1262,6 +1262,9 @@ func TestHandleSubscription_LateMissAfterFlightServesFreshCache(t *testing.T) {
 	releaseFetch := make(chan struct{})
 	enteredLoad2 := make(chan struct{})
 	releaseLoad2 := make(chan struct{})
+	var releaseFetchOnce, releaseLoad2Once sync.Once
+	unblockFetch := func() { releaseFetchOnce.Do(func() { close(releaseFetch) }) }
+	unblockLoad2 := func() { releaseLoad2Once.Do(func() { close(releaseLoad2) }) }
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if fetches.Add(1) == 1 {
@@ -1274,6 +1277,8 @@ func TestHandleSubscription_LateMissAfterFlightServesFreshCache(t *testing.T) {
 		fmt.Fprint(w, "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=tcp#node")
 	}))
 	defer upstream.Close()
+	defer unblockFetch()
+	defer unblockLoad2()
 
 	mockDB := testutil.NewSubscriptionRepositoryFake()
 	mockDB.GetWithPlanAndNodesFunc = func(context.Context, string) (*database.SubscriptionFull, error) {
@@ -1291,7 +1296,8 @@ func TestHandleSubscription_LateMissAfterFlightServesFreshCache(t *testing.T) {
 	}
 
 	svc := newTestSubSvc(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 
 	type outcome struct {
 		res *SubscriptionResult
@@ -1305,7 +1311,13 @@ func TestHandleSubscription_LateMissAfterFlightServesFreshCache(t *testing.T) {
 		leader <- outcome{res, err}
 	}()
 
-	<-fetchStarted
+	select {
+	case <-fetchStarted:
+	case result := <-leader:
+		t.Fatalf("leader returned before upstream fetch: %v", result.err)
+	case <-time.After(4 * time.Second):
+		t.Fatal("upstream fetch did not start")
+	}
 
 	straggler := make(chan outcome, 1)
 
@@ -1314,20 +1326,36 @@ func TestHandleSubscription_LateMissAfterFlightServesFreshCache(t *testing.T) {
 		straggler <- outcome{res, err}
 	}()
 
-	<-enteredLoad2
+	select {
+	case <-enteredLoad2:
+	case result := <-straggler:
+		t.Fatalf("straggler returned before loading subscription: %v", result.err)
+	case <-time.After(4 * time.Second):
+		t.Fatal("straggler did not enter subscription load")
+	}
 
 	// Лидер дотягивает апстрим и завершает флайт (кэш записан, флайт снят),
 	// и только потом отпускаем опоздавшего — его double-check обязан попасть
 	// в свежую запись.
-	close(releaseFetch)
+	unblockFetch()
 
-	first := <-leader
+	var first outcome
+	select {
+	case first = <-leader:
+	case <-time.After(4 * time.Second):
+		t.Fatal("leader did not finish")
+	}
 	require.NoError(t, first.err)
 	require.NotNil(t, first.res)
 
-	close(releaseLoad2)
+	unblockLoad2()
 
-	second := <-straggler
+	var second outcome
+	select {
+	case second = <-straggler:
+	case <-time.After(4 * time.Second):
+		t.Fatal("straggler did not finish")
+	}
 	require.NoError(t, second.err)
 	require.NotNil(t, second.res)
 
