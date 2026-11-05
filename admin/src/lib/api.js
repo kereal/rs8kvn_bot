@@ -3,6 +3,20 @@
 // and never touches the bot's public server.
 const TOKEN_KEY = 'rs8kvn.admin.token'
 
+// Copy-paste from chat clients and PDFs drags in NBSP, zero-width joiners and
+// smart quotes. fetch() rejects any header value outside ISO-8859-1, so junk is
+// stripped at the boundary instead of surfacing as an opaque TypeError.
+const INVISIBLE = /[\u00A0\u200B-\u200D\u2060\uFEFF]/g
+const PRINTABLE_ASCII = /^[\x21-\x7E]+$/
+
+export function normalizeToken(value) {
+  return String(value ?? '').replace(INVISIBLE, '').trim()
+}
+
+export function isUsableToken(value) {
+  return PRINTABLE_ASCII.test(value)
+}
+
 export function getToken() {
   return sessionStorage.getItem(TOKEN_KEY) || ''
 }
@@ -22,15 +36,26 @@ export class ApiError extends Error {
 
 async function request(method, path, body) {
   const headers = { Accept: 'application/json' }
-  const token = getToken()
+  const token = normalizeToken(getToken())
+  // A stale non-ASCII token from an earlier paste would make fetch() throw a
+  // TypeError before any request leaves the tab. Treat it as "not signed in".
+  if (token && !isUsableToken(token)) {
+    setToken('')
+    throw new ApiError(401, 'unauthorized', 'token contains non-ASCII characters')
+  }
   if (token) headers.Authorization = `Bearer ${token}`
   if (body !== undefined) headers['Content-Type'] = 'application/json'
 
-  const res = await fetch(path, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body)
-  })
+  let res
+  try {
+    res = await fetch(path, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body)
+    })
+  } catch (err) {
+    throw new ApiError(0, 'network', err?.message || 'network error')
+  }
 
   const text = await res.text()
   let data = null

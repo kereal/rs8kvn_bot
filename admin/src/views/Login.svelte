@@ -1,5 +1,5 @@
 <script>
-  import { api, setToken } from '../lib/api.js'
+  import { api, isUsableToken, normalizeToken, setToken } from '../lib/api.js'
   import { humanError } from '../lib/format.js'
 
   let { onauthed } = $props()
@@ -10,14 +10,19 @@
 
   async function submit(event) {
     event.preventDefault()
-    if (!token.trim()) {
+    const value = normalizeToken(token)
+    if (!value) {
       error = 'Введите токен'
+      return
+    }
+    if (!isUsableToken(value)) {
+      error = 'Токен должен состоять из латиницы, цифр и знаков без пробелов — проверьте раскладку и лишние символы при вставке'
       return
     }
 
     busy = true
     error = ''
-    setToken(token.trim())
+    setToken(value)
     try {
       await api.checkSession()
       onauthed()
