@@ -9,12 +9,14 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/getsentry/sentry-go"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/kereal/rs8kvn_bot/admin"
 	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -273,6 +275,25 @@ func nodeHealthComponent(source nodeHealthSource) web.ComponentHealth {
 	default:
 		return web.ComponentHealth{Status: web.StatusDegraded, Message: fmt.Sprintf("%d/%d nodes unavailable", down, total)}
 	}
+}
+
+// startAdminServer поднимает локальную админку, если задан ADMIN_TOKEN.
+// Пустой токен выключает панель целиком: слушателя нет, атаковать нечего.
+func startAdminServer(cfg *config.Config, dbService *database.Service) (*admin.Server, error) {
+	if strings.TrimSpace(cfg.AdminToken) == "" {
+		logger.Info("Admin panel disabled (ADMIN_TOKEN is empty)")
+
+		return nil, nil
+	}
+
+	server := admin.NewServer(cfg.AdminListen, cfg.AdminToken, dbService)
+
+	err := server.Start(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	return server, nil
 }
 
 // startWebServer создаёт и запускает HTTP-сервер (подписки, инвайт/trial-страницы).
@@ -595,6 +616,25 @@ func main() {
 			logger.Error("Failed to stop web server", zap.Error(err))
 		}
 	}()
+
+	// 6b. Start the local admin panel. It is a separate loopback listener with
+	// its own bearer token; the public web server never mounts /admin.
+	adminServer, err := startAdminServer(cfg, dbService)
+	if err != nil {
+		logger.Fatal("Failed to start admin panel", zap.Error(err))
+	}
+
+	if adminServer != nil {
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			stopErr := adminServer.Stop(shutdownCtx)
+			if stopErr != nil {
+				logger.Error("Failed to stop admin panel", zap.Error(stopErr))
+			}
+		}()
+	}
 
 	// 7. Initialize Telegram bot (initBot retries internally and calls Fatal on total failure).
 	logger.Info("Initializing Telegram bot...")

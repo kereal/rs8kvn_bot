@@ -194,6 +194,54 @@ func TestLoad_InvalidHeartbeatInterval(t *testing.T) {
 	assert.Contains(t, err.Error(), "HEARTBEAT_INTERVAL", "Error should mention HEARTBEAT_INTERVAL")
 }
 
+func TestLoad_AdminDefaultsDisabled(t *testing.T) {
+	setLoadEnv(t, map[string]string{"ADMIN_TOKEN": ""})
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.AdminToken, "empty ADMIN_TOKEN must disable the panel")
+	assert.Equal(t, DefaultAdminListen, cfg.AdminListen)
+}
+
+func TestLoad_AdminTokenRequiresValidListen(t *testing.T) {
+	cases := map[string]string{
+		"no port":        "127.0.0.1",
+		"no host":        ":8881",
+		"bad port":       "127.0.0.1:port",
+		"port too large": "127.0.0.1:70000",
+	}
+
+	for name, listen := range cases {
+		t.Run(name, func(t *testing.T) {
+			setLoadEnv(t, map[string]string{"ADMIN_TOKEN": "secret", "ADMIN_LISTEN": listen})
+
+			_, err := Load()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "ADMIN_LISTEN")
+		})
+	}
+}
+
+func TestLoad_AdminListenMustDifferFromWebPort(t *testing.T) {
+	setLoadEnv(t, map[string]string{
+		"ADMIN_TOKEN":     "secret",
+		"ADMIN_LISTEN":    "127.0.0.1:8880",
+		"WEB_SERVER_PORT": "8880",
+	})
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must differ from WEB_SERVER_PORT")
+}
+
+func TestConfig_StringMasksAdminToken(t *testing.T) {
+	cfg := &Config{AdminToken: "super-secret-token", AdminListen: "127.0.0.1:8881"}
+
+	assert.NotContains(t, cfg.String(), "super-secret-token")
+	assert.Contains(t, cfg.String(), "AdminToken=***")
+	assert.Contains(t, cfg.String(), "AdminListen=127.0.0.1:8881")
+}
+
 func TestValidateURL(t *testing.T) {
 	t.Parallel()
 

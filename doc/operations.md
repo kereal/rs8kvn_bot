@@ -7,7 +7,7 @@
 1. [Quick Reference](#1-quick-reference)
 2. [Upgrade](#2-upgrade)
 3. [Backup & Restore](#3-backup--restore)
-4. [Monitoring](#4-monitoring)
+4. [Monitoring](#4-monitoring) (включая [админку](#431-admin-panel))
 5. [Troubleshooting](#5-troubleshooting)
 6. [Scaling](#6-scaling)
 7. [Security Hardening](#7-security-hardening)
@@ -328,6 +328,35 @@ If `SUBSERVER_ACCESS_LOG` is set, the bot appends every `/sub/{id}` request to t
 The main application log records an error message when this access log cannot be opened. To disable it, set `SUBSERVER_ACCESS_LOG` to an empty value and restart the bot.
 
 **Троттлинг «Subscription not found».** Клиент, у которого остался конфиг удалённой подписки, продолжает опрашивать `/sub/{id}` — после массовых `/del` это штатное состояние, а не сбой. Каждый такой запрос считается в `subserver_not_found_total`, а в лог попадает только первая пара `sub_id + client_ip` за час (WARN), остальные — уровнем DEBUG (при `LOG_LEVEL=info` их нет вовсе). Реализация: `utils.IntervalGate` (`internal/utils/gate.go`), карта чистится при достижении 4096 записей. Раньше такие запросы писали WARN и ERROR на каждый вызов: одна мёртвая подписка давала ~719 строк в сутки.
+
+### 4.3.1 Admin panel
+
+Локальная админка (`package admin`) — отдельный слушатель, отдельный токен.
+Публичный веб-сервер (`WEB_SERVER_PORT`, по умолчанию 8880) маршрут `/admin`
+не обслуживает вообще.
+
+```
+ADMIN_LISTEN=127.0.0.1:8881   # host:port, по умолчанию loopback
+ADMIN_TOKEN=                  # пусто = панель выключена целиком
+```
+
+- Пустой `ADMIN_TOKEN` — панель не стартует: слушателя нет, атаковать нечего.
+- Токен передаётся заголовком `Authorization: Bearer <ADMIN_TOKEN>`; SPA хранит
+  его в `sessionStorage` вкладки и не пишет в cookie.
+- `ADMIN_LISTEN` обязан отличаться по порту от `WEB_SERVER_PORT`; при старте на
+  не-loopback адресе бот пишет WARN — панель не рассчитана на публичный доступ.
+- Удалённый доступ — только через SSH-туннель:
+  `ssh -L 8881:127.0.0.1:8881 <host>`, затем `http://127.0.0.1:8881/admin/`.
+
+Что можно менять: планы (`free`/`trial` защищены, план с продуктами или
+подписками удалить нельзя). Подписки, заказы, статусы синка, рассылки и журнал
+аудита — только чтение. Полный список и конвенции: `admin/AGENTS.md`.
+
+Сборка фронтенда (`admin/dist` коммитится, встраивается через `go:embed`):
+
+```bash
+cd admin && npm install && npm run build   # dist/ -> go build
+```
 
 ### 4.4 Logs
 

@@ -3,7 +3,9 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -37,6 +39,14 @@ type Config struct {
 	// AuditLogRetentionDays — сколько дней хранится журнал аудита. По умолчанию
 	// полгода (180); дневное обслуживание удаляет более старые записи.
 	AuditLogRetentionDays int
+
+	// AdminListen — адрес локальной админки (host:port). По умолчанию
+	// 127.0.0.1:8881: панель не должна попадать в публичный интерфейс.
+	AdminListen string
+
+	// AdminToken — bearer-токен админки. Пустое значение полностью отключает
+	// панель: сервер не биндится, эндпоинтов нет.
+	AdminToken string
 
 	// MetricsToken — shared secret для /metrics. Пустое значение оставляет
 	// эндпоинт открытым (обратная совместимость и scrape с localhost), но
@@ -96,6 +106,8 @@ type configFlags struct {
 	paymentEnabled         *flag.BoolValue
 	notificationsEnabled   *flag.BoolValue
 	metricsToken           *flag.StringValue
+	adminListen            *flag.StringValue
+	adminToken             *flag.StringValue
 	auditRetentionDays     *flag.IntValue
 	paymentProvider        *flag.StringValue
 	plategaMerchantID      *flag.StringValue
@@ -119,6 +131,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		globalSubURL: flag.NewString(""), subServerAccessLogPath: flag.NewString(""),
 		paymentEnabled: flag.NewBool(false), paymentProvider: flag.NewString("platega"), plategaMerchantID: flag.NewString(""), plategaSecret: flag.NewString(""),
 		notificationsEnabled: flag.NewBool(DefaultNotificationsEnabled), metricsToken: flag.NewString(""),
+		adminListen: flag.NewString(DefaultAdminListen), adminToken: flag.NewString(""),
 		auditRetentionDays: flag.NewInt(DefaultAuditLogRetentionDays),
 	}
 	r.Register("TELEGRAM_BOT_TOKEN", f.telegramBotToken)
@@ -145,6 +158,8 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("PLATEGA_MERCHANT_ID", f.plategaMerchantID)
 	r.Register("PLATEGA_SECRET", f.plategaSecret)
 	r.Register("METRICS_TOKEN", f.metricsToken)
+	r.Register("ADMIN_LISTEN", f.adminListen)
+	r.Register("ADMIN_TOKEN", f.adminToken)
 	r.Register("AUDIT_LOG_RETENTION_DAYS", f.auditRetentionDays)
 
 	return r, f
@@ -166,6 +181,7 @@ func Load() (*Config, error) {
 		DatabasePath: f.databasePath.Get(), LogFilePath: f.logFilePath.Get(), LogLevel: f.logLevel.Get(),
 		HeartbeatURL: f.heartbeatURL.Get(), HeartbeatInterval: f.heartbeatInterval.Get(), SentryDSN: f.sentryDSN.Get(),
 		WebServerPort: f.webServerPort.Get(), MetricsToken: f.metricsToken.Get(),
+		AdminListen: f.adminListen.Get(), AdminToken: f.adminToken.Get(),
 		AuditLogRetentionDays: f.auditRetentionDays.Get(), SiteURL: f.siteURL.Get(),
 		TrialDurationHours: f.trialDurationHours.Get(), TrialRateLimit: f.trialRateLimit.Get(),
 		ContactUsername: f.contactUsername.Get(), DonateCardNumber: f.donateCardNumber.Get(), DonateURL: f.donateURL.Get(),
@@ -278,6 +294,28 @@ func (c *Config) validate() error {
 		return fmt.Errorf("TRIAL_RATE_LIMIT must be between 1 and 100")
 	}
 
+	// Admin panel validation. The token is optional (empty disables the panel),
+	// but a configured token must come with a bindable host:port address.
+	if c.AdminToken != "" {
+		host, port, splitErr := net.SplitHostPort(c.AdminListen)
+		if splitErr != nil {
+			return fmt.Errorf("ADMIN_LISTEN must be host:port: %w", splitErr)
+		}
+
+		if host == "" {
+			return fmt.Errorf("ADMIN_LISTEN must include a host (use 127.0.0.1 for the default)")
+		}
+
+		portNum, convErr := strconv.Atoi(port)
+		if convErr != nil || portNum < 1 || portNum > 65535 {
+			return fmt.Errorf("ADMIN_LISTEN port must be between 1 and 65535")
+		}
+
+		if portNum == c.WebServerPort {
+			return fmt.Errorf("ADMIN_LISTEN must differ from WEB_SERVER_PORT")
+		}
+	}
+
 	// Audit retention validation. Ноль означает «взять значение по умолчанию»
 	// (полгода) — так пустая настройка не удаляет всю историю. Отрицательные
 	// значения запрещены, верхняя граница — 10 лет.
@@ -322,6 +360,8 @@ func (c *Config) String() string {
 		"HeartbeatURL=%s, "+
 		"HeartbeatInterval=%d, "+
 		"GlobalSubURL=%s, "+
+		"AdminListen=%s, "+
+		"AdminToken=%s, "+
 		"SentryDSN=***, "+
 		"}",
 		c.TelegramAdminID,
@@ -331,6 +371,8 @@ func (c *Config) String() string {
 		maskURL(c.HeartbeatURL),
 		c.HeartbeatInterval,
 		maskURL(c.GlobalSubURL),
+		c.AdminListen,
+		maskedPresence(c.AdminToken),
 	)
 }
 
@@ -342,6 +384,15 @@ func (c *Config) SubURL(subID string) string {
 	}
 
 	return u
+}
+
+// maskedPresence reports whether a secret is configured without printing it.
+func maskedPresence(secret string) string {
+	if strings.TrimSpace(secret) == "" {
+		return "(disabled)"
+	}
+
+	return "***"
 }
 
 // maskURL returns a masked version of a URL for logging purposes.

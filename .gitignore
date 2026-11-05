@@ -56,3 +56,7 @@ mcp.json
 
 # Local planning artifacts
 .planning/
+
+# Admin panel: npm dependencies are not committed; the Vite build output is
+# committed on purpose so `go build` stays the only required build step.
+admin/node_modules/

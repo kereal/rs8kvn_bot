@@ -127,6 +127,10 @@ const (
 const (
 	// DefaultWebServerPort is the default port for the web server
 	DefaultWebServerPort = 8880
+	// DefaultAdminListen is the loopback address of the admin panel. The panel
+	// is a local tool: binding it to a public interface requires an explicit
+	// ADMIN_LISTEN override.
+	DefaultAdminListen = "127.0.0.1:8881"
 )
 
 // DefaultAuditLogRetentionDays — срок хранения audit_log по умолчанию: полгода.

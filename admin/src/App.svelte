@@ -1,0 +1,82 @@
+<script>
+  import { onMount } from 'svelte'
+  import { api, getToken, setToken } from './lib/api.js'
+  import Login from './views/Login.svelte'
+  import Plans from './views/Plans.svelte'
+
+  // One entry per screen. Adding a screen means adding a route here and a view
+  // file — no router dependency.
+  const routes = {
+    plans: { label: 'Планы', component: Plans }
+  }
+
+  let authed = $state(false)
+  let checking = $state(true)
+  let view = $state(routeFromHash())
+  let ActiveView = $derived((routes[view] ?? routes.plans).component)
+
+  function routeFromHash() {
+    const name = location.hash.replace(/^#\/?/, '')
+    return routes[name] ? name : 'plans'
+  }
+
+  function go(name) {
+    location.hash = `#/${name}`
+  }
+
+  $effect(() => {
+    const onHash = () => (view = routeFromHash())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  })
+
+  onMount(async () => {
+    if (!getToken()) {
+      checking = false
+      return
+    }
+    try {
+      await api.checkSession()
+      authed = true
+    } catch {
+      setToken('')
+    } finally {
+      checking = false
+    }
+  })
+
+  function logout() {
+    setToken('')
+    authed = false
+  }
+</script>
+
+{#if checking}
+  <div class="empty">Проверяем токен…</div>
+{:else if !authed}
+  <Login onauthed={() => (authed = true)} />
+{:else}
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        rs8kvn
+        <small>админка</small>
+      </div>
+      {#each Object.entries(routes) as [name, route] (name)}
+        <button
+          class="nav-item"
+          aria-current={view === name ? 'page' : undefined}
+          onclick={() => go(name)}
+        >
+          {route.label}
+        </button>
+      {/each}
+      <div class="sidebar-footer">
+        <button class="btn btn-ghost" onclick={logout}>Выйти</button>
+      </div>
+    </aside>
+    <main class="main">
+      <ActiveView />
+    </main>
+  </div>
+{/if}
