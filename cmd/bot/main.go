@@ -5,6 +5,7 @@ import (
 	"context"
 	cryptorand "crypto/rand"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 	"os/signal"
@@ -526,6 +527,31 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 	return &wg
 }
 
+// printVersionIfRequested prints the build stamp and reports whether the caller
+// must stop instead of starting the bot.
+//
+// doc/operations.md documents `./rs8kvn_bot --version`. Until this existed the
+// flag was ignored: the command started a second bot polling the same Telegram
+// token, which is the worst possible outcome for "just print the version".
+func printVersionIfRequested(args []string, out io.Writer) bool {
+	requested := false
+	for _, arg := range args {
+		if arg == "--version" || arg == "-version" {
+			requested = true
+
+			break
+		}
+	}
+
+	if !requested {
+		return false
+	}
+
+	_, _ = fmt.Fprintf(out, "%s commit=%s built=%s\n", getVersion(), commit, buildTime)
+
+	return true
+}
+
 // main — точка входа: инициализирует конфигурацию и сервисы, запускает фоновые
 // воркеры и веб-сервер, обрабатывает обновления Telegram с ограниченным
 // параллелизмом и выполняет корректное завершение при получении сигнала.
@@ -533,6 +559,10 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 // по принципу best-effort, чтобы сервис стартовал даже при недоступности части
 // зависимостей.
 func main() {
+	if printVersionIfRequested(os.Args[1:], os.Stdout) {
+		return
+	}
+
 	// 1. Load configuration
 	cfg, err := config.Load()
 	if err != nil {

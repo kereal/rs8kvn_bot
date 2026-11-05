@@ -285,3 +285,43 @@ func TestHandleUpdate_NilMessageAndNilCallback(t *testing.T) {
 // _InvalidPort удалены: дубли покрытия internal/config (config_test.go:
 // TestConfig_Validate_*, TestValidateURL) — та же конфигурация и те же
 // ветки validate(), только через os.Setenv.
+
+// printVersionIfRequested существует потому, что doc/operations.md обещает
+// `./rs8kvn_bot --version`: без обработки флага команда молча поднимала второго
+// бота на том же Telegram-токене.
+func TestPrintVersionIfRequested(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		args     []string
+		handled  bool
+		contains []string
+	}{
+		{name: "no args starts the bot", args: nil, handled: false},
+		{name: "unrelated flag starts the bot", args: []string{"--verbose"}, handled: false},
+		{name: "long version flag prints and stops", args: []string{"--version"}, handled: true, contains: []string{"rs8kvn_bot@", "commit=", "built="}},
+		{name: "short version flag prints and stops", args: []string{"-version"}, handled: true, contains: []string{"commit=", "built="}},
+		{name: "version among other args still handled", args: []string{"serve", "--version"}, handled: true, contains: []string{"commit="}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var out strings.Builder
+			handled := printVersionIfRequested(tt.args, &out)
+			assert.Equal(t, tt.handled, handled)
+
+			if !tt.handled {
+				assert.Empty(t, out.String())
+
+				return
+			}
+
+			for _, fragment := range tt.contains {
+				assert.Contains(t, out.String(), fragment)
+			}
+		})
+	}
+}
