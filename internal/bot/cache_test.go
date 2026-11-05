@@ -144,8 +144,12 @@ func TestSubscriptionCache_StartCleanup(t *testing.T) {
 
 	cache := NewSubscriptionCache(10, 5*time.Millisecond)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
+	// The context must not bound the cleanup tighter than the assertions:
+	// a 50 ms deadline sometimes expired before the scheduler gave the
+	// cleanup goroutine any time (race builds, all packages in parallel), and
+	// the cache kept its entries for the rest of the test.
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 
 	// Entries are added before the cleanup loop starts: с 2-миллисекундным
 	// тикером фоновая чистка могла вытеснить записи между Set и проверкой
@@ -161,10 +165,10 @@ func TestSubscriptionCache_StartCleanup(t *testing.T) {
 	// Wait for entries to expire
 	assert.Eventually(t, func() bool {
 		return cache.Get(1) == nil
-	}, 100*time.Millisecond, 1*time.Millisecond, "entries should expire")
+	}, 2*time.Second, time.Millisecond, "entries should expire")
 
 	// Wait for the background cleanup itself, not the lazy eviction by Get.
-	assert.Eventually(t, func() bool { return cache.Size() == 0 }, 100*time.Millisecond, 1*time.Millisecond)
+	assert.Eventually(t, func() bool { return cache.Size() == 0 }, 2*time.Second, time.Millisecond)
 	assert.Equal(t, 0, cache.Size(), "Size() after cleanup (all entries expired)")
 }
 
