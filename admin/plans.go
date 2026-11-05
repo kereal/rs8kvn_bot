@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -144,6 +145,28 @@ func (s *Server) writeStoreError(w http.ResponseWriter, op string, err error) {
 		writeError(w, http.StatusConflict, "protected", err.Error())
 	case errors.Is(err, database.ErrPlanInUse):
 		writeError(w, http.StatusConflict, "in_use", err.Error())
+	case errors.Is(err, database.ErrInviteNotFound): // screen: invites
+		writeError(w, http.StatusNotFound, "not_found", "invite not found")
+	case errors.Is(err, database.ErrInviteInvalid): // screen: invites
+		writeError(w, http.StatusBadRequest, "validation", err.Error())
+	case errors.Is(err, database.ErrInviteNameTaken): // screen: invites
+		message := "invite code already exists"
+		if details := inviteErrorDetails(err); details != nil && details["field"] == "referrer_tg_id" {
+			message = "user already has an invite code"
+		}
+
+		writeError(w, http.StatusConflict, "name_taken", message, inviteErrorDetails(err))
+	case errors.Is(err, database.ErrInviteInUse): // screen: invites
+		// The count is in the message too: ApiError (src/lib/api.js) carries no
+		// details, and the SPA shows this text verbatim.
+		var inUse *database.InviteInUseError
+		if errors.As(err, &inUse) {
+			writeError(w, http.StatusConflict, "in_use",
+				fmt.Sprintf("invite is used by %d subscriptions", inUse.Details["subscriptions"]),
+				inviteErrorDetails(err))
+		} else {
+			writeError(w, http.StatusConflict, "in_use", err.Error(), inviteErrorDetails(err))
+		}
 	default:
 		logger.Error("admin: "+op+" failed", zap.Error(err))
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
@@ -198,6 +221,11 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	}
 }
 
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]string{"code": code, "message": message})
+func writeError(w http.ResponseWriter, status int, code, message string, details ...map[string]any) {
+	payload := map[string]any{"code": code, "message": message}
+	if len(details) > 0 && details[0] != nil {
+		payload["details"] = details[0]
+	}
+
+	writeJSON(w, status, payload)
 }

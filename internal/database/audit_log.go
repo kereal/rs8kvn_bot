@@ -20,6 +20,7 @@ const (
 	EntityPlan         EntityType = "plan"
 	EntityNode         EntityType = "node"
 	EntityProduct      EntityType = "product"
+	EntityInvite       EntityType = "invite"
 	EntitySystem       EntityType = "system"
 )
 
@@ -76,6 +77,11 @@ const (
 
 	AuditEventSyncRunDegraded        = "sync_run_degraded"
 	AuditEventOrphanedClientsRevoked = "orphaned_clients_revoked"
+
+	// Инвайты (панель администратора).
+
+	AuditEventInviteCreated = "invite_created"
+	AuditEventInviteDeleted = "invite_deleted"
 )
 
 // AuditLog — одна запись журнала аудита (append-only: только INSERT и SELECT).
@@ -743,4 +749,51 @@ func (s *Service) DeleteAuditLogBefore(ctx context.Context, before time.Time, ba
 	}
 
 	return result.RowsAffected, nil
+}
+
+// --- Инвайты (панель администратора) ----------------------------------------
+
+// inviteAuditSnapshot — снапшот строки invites для old_state/new_state.
+// Счётчики referred/subscriptions в снапшот не входят: это производные данные,
+// а не состояние строки.
+func inviteAuditSnapshot(invite *Invite) map[string]any {
+	if invite == nil {
+		return nil
+	}
+
+	return map[string]any{
+		"code":           invite.Code,
+		"referrer_tg_id": invite.ReferrerTGID,
+		"created_at":     invite.CreatedAt,
+	}
+}
+
+// AuditInviteCreated фиксирует создание инвайта из панели. origin
+// ("generated" | "manual") показывает, сгенерирован код сервером или введён
+// администратором.
+func AuditInviteCreated(invite *Invite, origin InviteOrigin) *AuditLog {
+	return NewAuditLog(
+		EntityInvite,
+		invite.Code,
+		AuditEventInviteCreated,
+		ActorAdmin,
+		"0",
+		nil,
+		inviteAuditSnapshot(invite),
+		map[string]any{"origin": string(origin)},
+	)
+}
+
+// AuditInviteDeleted фиксирует удаление неиспользованного инвайта из панели.
+func AuditInviteDeleted(invite *Invite) *AuditLog {
+	return NewAuditLog(
+		EntityInvite,
+		invite.Code,
+		AuditEventInviteDeleted,
+		ActorAdmin,
+		"0",
+		inviteAuditSnapshot(invite),
+		nil,
+		nil,
+	)
 }

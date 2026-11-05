@@ -12,6 +12,9 @@ import (
 // Callers should use errors.Is to distinguish "not found" from infrastructure/DB errors.
 var (
 	ErrInviteNotFound             = errors.New("invite not found")
+	ErrInviteInvalid              = errors.New("invalid invite")
+	ErrInviteNameTaken            = errors.New("invite already exists")
+	ErrInviteInUse                = errors.New("invite is used by subscriptions")
 	ErrSubscriptionNotFound       = errors.New("subscription not found")
 	ErrPlanNotFound               = errors.New("plan not found")
 	ErrPlanInvalid                = errors.New("invalid plan")
@@ -233,6 +236,27 @@ type Invite struct {
 
 	Subscriptions []Subscription `gorm:"foreignKey:InviteCode"`
 }
+
+// InviteNameTakenError — занятый код или уникальный referrer_tg_id (миграция 004).
+// Details["field"] равно "code" или "referrer_tg_id": панель показывает,
+// какое именно поле конфликтует. errors.Is(err, ErrInviteNameTaken) работает.
+type InviteNameTakenError struct {
+	Details map[string]string
+}
+
+func (e *InviteNameTakenError) Error() string { return ErrInviteNameTaken.Error() }
+
+func (e *InviteNameTakenError) Is(target error) bool { return target == ErrInviteNameTaken }
+
+// InviteInUseError — есть подписки, привязанные к коду (subscriptions.invite_code).
+// Details["subscriptions"] — их число: панель показывает его в тексте отказа.
+type InviteInUseError struct {
+	Details map[string]int64
+}
+
+func (e *InviteInUseError) Error() string { return ErrInviteInUse.Error() }
+
+func (e *InviteInUseError) Is(target error) bool { return target == ErrInviteInUse }
 
 // BroadcastStatus represents the lifecycle state of a broadcast.
 //
