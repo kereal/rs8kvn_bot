@@ -236,6 +236,8 @@ func TestAPI_SubscriptionsRequireToken(t *testing.T) {
 
 	for _, token := range []string{"", "wrong"} {
 		for _, p := range probes {
+			resetAuthLimiter(srv)
+
 			rec := do(t, srv, p.method, p.path, token, "")
 			assert.Equal(t, http.StatusUnauthorized, rec.Code,
 				"token=%q method=%s path=%s", token, p.method, p.path)

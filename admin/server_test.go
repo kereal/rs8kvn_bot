@@ -46,6 +46,14 @@ func newTestServer(t *testing.T) (*Server, *database.Service) {
 	return NewServer("127.0.0.1:0", testToken, db), db
 }
 
+// resetAuthLimiter restores the full failure budget. Tests that probe every
+// route with an invalid token send more requests than the limiter allows per
+// minute (ADR-0002 P3), so they clear it between probes: the guard being tested
+// is the route's, not the budget's.
+func resetAuthLimiter(srv *Server) {
+	srv.authLimiter = newFailedAuthLimiter(failedAuthBurst, failedAuthRefill, failedAuthPruneAt)
+}
+
 func do(t *testing.T, srv *Server, method, path, token, body string) *httptest.ResponseRecorder {
 	t.Helper()
 

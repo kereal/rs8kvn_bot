@@ -23,7 +23,7 @@
 |---|---|
 | P1 | Один общий `ADMIN_TOKEN`, сравнение через `crypto/subtle`, заголовок `Authorization: Bearer`. Ролей и логинов нет; второй админ — отдельная таблица `admin_tokens` (миграция), не роли в коде |
 | P2 | Токен в `sessionStorage` вкладки. Cookie не используются → CSRF невозможен; CORS-заголовков нет, панель живёт на том же origin |
-| P3 | Rate limit: 10 неудачных авторизаций в минуту на IP, in-memory; успешный вход счётчик сбрасывает |
+| P3 | Rate limit: 10 неудачных авторизаций в минуту на IP, in-memory (`admin/authlimit.go`, бакет `internal/ratelimiter.TokenBucket`); успешный вход счётчик сбрасывает, поэтому верный токен обслуживается даже при исчерпанном бюджете. Исчерпание → `429 rate_limited` + `Retry-After: 60`. `X-Forwarded-For` не читается сознательно: панель без доверенного прокси, спуф заголовка не должен давать свежий бюджет |
 | P4 | Тело запроса ≤ 64 KiB (`http.MaxBytesReader`), `Content-Type: application/json`, неизвестные поля → `400` (`DisallowUnknownFields`) |
 | P5 | Слушатель по умолчанию loopback. На не-loopback адресе — `WARN` при старте. TLS панель не умеет: снаружи только SSH-туннель или реверс-прокси |
 | P6 | `Cache-Control: no-store` на `/admin/api/*`; ассеты `dist` хешированные и неизменяемые |
@@ -54,7 +54,7 @@
 |---|---|
 | P7 | Список всегда `{"items":[…],"total":N}`. Пагинация `?limit=` (по умолчанию 50, максимум 200) и `?offset=` — обязательна для растущих таблиц: `subscriptions`, `orders`, `audit_log`, получатели рассылок. Для `plans`, `products`, `nodes`, `plan_nodes`, `invites` отдаётся полный список (клиентская фильтрация) |
 | P8 | `?q=` — поиск, `?sort=<field>&order=asc\|desc` — сортировка; белый список полей объявлен в хендлере, неизвестное значение → `400 bad_request` |
-| P9 | Ошибка: `{"code":"…","message":"…","details":{…}}`. Коды: `bad_request`, `validation` (`400` + `details{field: причина}`), `unauthorized` (`401`), `not_found` (`404`), `name_taken` / `protected` / `in_use` / `stale` (`409`), `internal` (`500`) |
+| P9 | Ошибка: `{"code":"…","message":"…","details":{…}}`. Коды: `bad_request`, `validation` (`400` + `details{field: причина}`), `unauthorized` (`401`), `not_found` (`404`), `name_taken` / `protected` / `in_use` / `stale` (`409`), `rate_limited` (`429`, см. P3), `internal` (`500`) |
 | P10 | `PUT` — полная замена редактируемых полей. Отсутствующий необязательный ключ = значение по умолчанию, кроме секретов: пустая строка означает «не менять» |
 | P11 | Мутация возвращает изменённый объект (`200` + JSON), а не `{"ok":true}` — UI обновляет строку без второго запроса |
 | P12 | Ответ `204` не используется нигде: Chromium пишет `net::ERR_ABORTED` на `204` после `PUT`/`DELETE`, и это выглядит как падение |

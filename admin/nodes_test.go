@@ -155,6 +155,8 @@ func TestNodesAPI_RequiresToken(t *testing.T) {
 	}
 
 	for _, tt := range cases {
+		resetAuthLimiter(srv)
+
 		rec := do(t, srv, tt.method, tt.path, "", "")
 		assert.Equal(t, http.StatusUnauthorized, rec.Code, "%s %s", tt.method, tt.path)
 

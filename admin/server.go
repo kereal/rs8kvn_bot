@@ -73,6 +73,10 @@ type Server struct {
 	build     BuildInfo
 	startedAt time.Time
 
+	// authLimiter throttles token guessing (ADR-0002 P3). Per server, so tests
+	// and the dev harness each start with a full budget.
+	authLimiter *failedAuthLimiter
+
 	dist fs.FS
 
 	mu           sync.Mutex
@@ -104,7 +108,12 @@ func NewServer(addr, token string, db *database.Service) *Server {
 		subs:       db, // screen: subscriptions (reads; mutations via SetSubscriptionServices)
 		overview:   db, // screen: overview
 		startedAt:  time.Now(),
-		dist:       dist,
+		authLimiter: newFailedAuthLimiter(
+			failedAuthBurst,
+			failedAuthRefill,
+			failedAuthPruneAt,
+		),
+		dist: dist,
 	}
 }
 
@@ -283,11 +292,24 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 		header := r.Header.Get("Authorization")
 		token, ok := strings.CutPrefix(header, "Bearer ")
 		if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
+			ip := clientIP(r)
+			if s.authLimiter.exceeded(ip) {
+				// ADR-0002 P3: the budget is spent; answer without comparing.
+				w.Header().Set("Retry-After", "60")
+				writeError(w, http.StatusTooManyRequests, "rate_limited", "too many failed logins, retry in a minute")
+
+				return
+			}
+
+			s.authLimiter.failure(ip)
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid admin token")
 
 			return
 		}
 
+		// A correct token clears the failures: the operator pasted the token
+		// with a stray character, not an attacker guessing.
+		s.authLimiter.success(clientIP(r))
 		next(w, r)
 	}
 }
