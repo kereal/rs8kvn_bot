@@ -65,6 +65,8 @@ func (s *Service) CreatePlan(ctx context.Context, plan *Plan) error {
 		return classifyPlanWriteError("create plan", err)
 	}
 
+	_ = s.insertAuditLogBestEffort(ctx, AuditPlanCreated(plan))
+
 	return nil
 }
 
@@ -78,12 +80,14 @@ func (s *Service) UpdatePlan(ctx context.Context, plan *Plan) error {
 
 	name := strings.TrimSpace(plan.Name)
 
+	var before map[string]any
+
 	err := validatePlanFields(name, plan)
 	if err != nil {
 		return err
 	}
 
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current Plan
 
 		err := tx.Where("id = ?", plan.ID).First(&current).Error
@@ -103,6 +107,8 @@ func (s *Service) UpdatePlan(ctx context.Context, plan *Plan) error {
 			return fmt.Errorf("cannot deactivate plan %q: %w", current.Name, ErrPlanProtected)
 		}
 
+		before = planAuditState(current)
+
 		result := tx.Model(&Plan{}).Where("id = ?", plan.ID).Updates(map[string]any{
 			"name": plan.Name, "devices_limit": plan.DevicesLimit,
 			"traffic_limit": plan.TrafficLimit, "is_active": plan.IsActive,
@@ -117,13 +123,22 @@ func (s *Service) UpdatePlan(ctx context.Context, plan *Plan) error {
 
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	_ = s.insertAuditLogBestEffort(ctx, AuditPlanUpdated(plan.ID, before, planAuditState(*plan)))
+
+	return nil
 }
 
 // DeletePlan removes a plan that nothing depends on. Plans referenced by
 // products cannot be deleted directly: products.plan_id cascades, so a silent
 // delete would erase catalogue entries (and with them order history).
 func (s *Service) DeletePlan(ctx context.Context, id uint) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var deleted Plan
+
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var plan Plan
 
 		err := tx.Where("id = ?", id).First(&plan).Error
@@ -162,8 +177,17 @@ func (s *Service) DeletePlan(ctx context.Context, id uint) error {
 			return fmt.Errorf("delete plan %w", result.Error)
 		}
 
+		deleted = plan
+
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	_ = s.insertAuditLogBestEffort(ctx, AuditPlanDeleted(&deleted))
+
+	return nil
 }
 
 // isProtectedPlanName reports whether the plan name is referenced by name from

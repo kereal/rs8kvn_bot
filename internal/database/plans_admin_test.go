@@ -2,6 +2,8 @@ package database
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -163,4 +165,102 @@ func TestDeletePlan_GuardsReferences(t *testing.T) {
 	require.ErrorIs(t, err, ErrPlanNotFound)
 
 	require.ErrorIs(t, svc.DeletePlan(ctx, 99999), ErrPlanNotFound)
+}
+
+// TestPlanAuditEvents covers ADR-0002 P20 for the plan catalogue: every
+// successful mutation writes an admin-attributed event (actor_id "0" = panel),
+// and a rejected mutation writes nothing — "audited" must not mean "attempted".
+// History outlives the row: the deleted event stays readable after the plan is
+// physically gone (audit_log has no FK, migration 039).
+func TestPlanAuditEvents(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	plan := &Plan{Name: "audited-plan", IsActive: true, DevicesLimit: 2, TrafficLimit: 1 << 30}
+	require.NoError(t, svc.CreatePlan(ctx, plan))
+
+	created, err := svc.GetAuditLogByEvent(ctx, AuditEventPlanCreated, 10)
+	require.NoError(t, err)
+	require.Len(t, created, 1)
+
+	event := created[0]
+	assert.Equal(t, EntityPlan, event.EntityType)
+	require.NotNil(t, event.EntityID)
+	assert.Equal(t, fmt.Sprintf("%d", plan.ID), *event.EntityID)
+	assert.Equal(t, ActorAdmin, event.ActorType)
+	require.NotNil(t, event.ActorID)
+	assert.Equal(t, "0", *event.ActorID)
+	assert.Nil(t, event.OldState)
+
+	var newState map[string]any
+	require.NotNil(t, event.NewState)
+	require.NoError(t, json.Unmarshal([]byte(*event.NewState), &newState))
+	assert.Equal(t, "audited-plan", newState["name"])
+	assert.InDelta(t, 2, newState["devices_limit"], 0)
+	assert.Equal(t, true, newState["is_active"])
+
+	plan.Name = "audited-plan-v2"
+	plan.DevicesLimit = 5
+	require.NoError(t, svc.UpdatePlan(ctx, plan))
+
+	updated, err := svc.GetAuditLogByEvent(ctx, AuditEventPlanUpdated, 10)
+	require.NoError(t, err)
+	require.Len(t, updated, 1)
+
+	var oldState map[string]any
+	require.NotNil(t, updated[0].OldState)
+	require.NoError(t, json.Unmarshal([]byte(*updated[0].OldState), &oldState))
+	assert.Equal(t, "audited-plan", oldState["name"])
+	assert.InDelta(t, 2, oldState["devices_limit"], 0)
+	assert.NotContains(t, oldState, "traffic_limit", "unchanged fields stay out of the diff")
+	assert.NotContains(t, oldState, "is_active", "unchanged fields stay out of the diff")
+
+	// Rejected mutation: the protected trial plan cannot be renamed, and the
+	// failure must not leave a plan_updated event behind.
+	trial, err := svc.GetPlanByName(ctx, TrialPlanName)
+	require.NoError(t, err)
+
+	renamed := *trial
+	renamed.Name = "renamed-trial"
+	require.ErrorIs(t, svc.UpdatePlan(ctx, &renamed), ErrPlanProtected)
+
+	guardedDelete := &Plan{Name: "guarded-delete", IsActive: true, DevicesLimit: 1}
+	require.NoError(t, svc.CreatePlan(ctx, guardedDelete))
+	require.NoError(t, svc.db.Create(&Product{
+		PlanID: guardedDelete.ID, Name: "p", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true,
+	}).Error)
+	require.ErrorIs(t, svc.DeletePlan(ctx, guardedDelete.ID), ErrPlanInUse)
+
+	updated, err = svc.GetAuditLogByEvent(ctx, AuditEventPlanUpdated, 10)
+	require.NoError(t, err)
+	assert.Len(t, updated, 1, "failed update must not write an event")
+
+	deletedEvents, err := svc.GetAuditLogByEvent(ctx, AuditEventPlanDeleted, 10)
+	require.NoError(t, err)
+	assert.Empty(t, deletedEvents, "failed delete must not write an event")
+
+	// Successful delete: snapshot → nil, and the event survives the row.
+	doomed := &Plan{Name: "doomed", IsActive: true, DevicesLimit: 1, TrafficLimit: 2 << 30}
+	require.NoError(t, svc.CreatePlan(ctx, doomed))
+	require.NoError(t, svc.DeletePlan(ctx, doomed.ID))
+
+	deletedEvents, err = svc.GetAuditLogByEvent(ctx, AuditEventPlanDeleted, 10)
+	require.NoError(t, err)
+	require.Len(t, deletedEvents, 1)
+	assert.Nil(t, deletedEvents[0].NewState)
+
+	oldState = map[string]any{}
+	require.NotNil(t, deletedEvents[0].OldState)
+	require.NoError(t, json.Unmarshal([]byte(*deletedEvents[0].OldState), &oldState))
+	assert.Equal(t, "doomed", oldState["name"])
+	assert.InDelta(t, 2<<30, oldState["traffic_limit"], 0)
+
+	_, err = svc.GetPlanByID(ctx, doomed.ID)
+	require.ErrorIs(t, err, ErrPlanNotFound)
+
+	stored, err := svc.GetAuditLogByEntity(ctx, EntityPlan, fmt.Sprintf("%d", doomed.ID), 10)
+	require.NoError(t, err)
+	assert.Len(t, stored, 2, "created + deleted history outlives the row")
 }

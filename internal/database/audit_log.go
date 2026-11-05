@@ -93,6 +93,12 @@ const (
 	AuditEventNodeDeleted      = "node_deleted"
 	AuditEventPlanNodesChanged = "plan_nodes_changed"
 
+	// Планы (админ-панель): CRUD каталога планов (ADR-0002 P20).
+
+	AuditEventPlanCreated = "plan_created"
+	AuditEventPlanUpdated = "plan_updated"
+	AuditEventPlanDeleted = "plan_deleted"
+
 	// Технические агрегаты (сводки за прогон воркеров, не per-item шум).
 
 	AuditEventSyncRunDegraded        = "sync_run_degraded"
@@ -966,6 +972,49 @@ func (s *Service) DeleteAuditLogBefore(ctx context.Context, before time.Time, ba
 	}
 
 	return result.RowsAffected, nil
+}
+
+// --- Планы (админ-панель) ---------------------------------------------------
+
+// planAuditState возвращает снапшот значимых полей плана для old_state/new_state.
+// Счётчики products/subscriptions в снапшот не входят: это производные данные,
+// а не состояние строки.
+func planAuditState(p Plan) map[string]any {
+	return map[string]any{
+		"name":          p.Name,
+		"devices_limit": p.DevicesLimit,
+		"traffic_limit": p.TrafficLimit,
+		"is_active":     p.IsActive,
+	}
+}
+
+// AuditPlanCreated фиксирует создание плана из админ-панели.
+func AuditPlanCreated(plan *Plan) *AuditLog {
+	return NewAuditLog(EntityPlan, fmt.Sprintf("%d", plan.ID), AuditEventPlanCreated,
+		ActorAdmin, "0", nil, planAuditState(*plan), nil)
+}
+
+// AuditPlanUpdated фиксирует изменение плана: в журнал попадают только
+// изменившиеся поля (diffState), как у продуктов каталога.
+func AuditPlanUpdated(id uint, before, after map[string]any) *AuditLog {
+	oldJSON, newJSON := diffState(before, after)
+
+	return &AuditLog{
+		EntityType: EntityPlan,
+		EntityID:   marshalAuditJSONString(fmt.Sprintf("%d", id)),
+		Event:      AuditEventPlanUpdated,
+		ActorType:  ActorAdmin,
+		ActorID:    marshalAuditJSONString("0"),
+		OldState:   oldJSON,
+		NewState:   newJSON,
+	}
+}
+
+// AuditPlanDeleted фиксирует удаление плана: снимок → nil. FK нет (миграция
+// 039), поэтому история переживает физическое удаление строки.
+func AuditPlanDeleted(plan *Plan) *AuditLog {
+	return NewAuditLog(EntityPlan, fmt.Sprintf("%d", plan.ID), AuditEventPlanDeleted,
+		ActorAdmin, "0", planAuditState(*plan), nil, nil)
 }
 
 // --- Продукты (админ-панель) -----------------------------------------------
