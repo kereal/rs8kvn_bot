@@ -78,6 +78,28 @@ Nothing is replaced by this: server-side contract changes are pinned by
 `admin/contract_test.go`, which asserts the exact JSON key set of every response
 the views read. Type checks are for the JS side, contract tests for the Go side.
 
+### Response types (`src/lib/types.js`)
+
+`src/lib/types.js` holds JSDoc typedefs for every row the views read — key sets
+copied from `admin/contract_test.go`, value types from the `json` tags of the DTOs
+in `admin/*.go` (`time.Time` → `string`, `*time.Time` → `string|null`,
+`json.RawMessage` → `any`). The module has no runtime code (`export {}`).
+
+Annotate the container, not the request:
+
+```js
+/** @type {import('../lib/types.js').Plan[]} */
+let items = $state([])
+```
+
+Then a typo in `item.total_count` fails `npm run check` instead of rendering
+`undefined`. Two rules keep this honest:
+
+- the annotation describes what the handler actually sends — read the DTO or the
+  contract test, never `api.get`'s inferred `any`;
+- when a view deliberately unwraps a wrapper (`audience = data.count ?? 0`), the
+  state is the unwrapped type (`number|null`), not the wrapper typedef.
+
 ## Local run without the bot
 
 `make admin-serve` (or `go run ./tools/adminserve -seed`) runs the panel alone
