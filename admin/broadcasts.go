@@ -479,6 +479,7 @@ func toBroadcastDetail(b *database.Broadcast) broadcastDetail {
 		MessageText:   b.MessageText,
 		FiltersText:   filter.String(),
 		RetryCount:    b.RetryCount,
+		SnapshotTaken: database.BroadcastSnapshotTaken(b),
 		ErrorsPreview: preview,
 	}
 }

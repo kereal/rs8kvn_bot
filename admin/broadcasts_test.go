@@ -432,6 +432,24 @@ func TestAPI_BroadcastsDetail_ErrorsPreview(t *testing.T) {
 	assert.Equal(t, float64(800000), first["telegram_id"])
 }
 
+// Деталь и список читают флаг «снимок аудитории» из одного источника:
+// раньше деталь всегда отдавала false, потому что флаг просто не заполнялся.
+func TestAPI_BroadcastsDetail_SnapshotTaken(t *testing.T) {
+	t.Parallel()
+
+	srv, db := newTestServer(t)
+	b := seedBroadcast(t, db, "Снятый снимок", string(database.BroadcastStatusCompleted))
+	state := `{"snapshot":true,"recipients":[{"telegram_id":900001,"status":"sent","attempts":1}]}`
+	require.NoError(t, db.GetDB().Model(b).Update("recipients_state", state).Error)
+
+	rec := do(t, srv, http.MethodGet, fmt.Sprintf("/admin/api/broadcasts/%d", b.ID), testToken, "")
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var detail map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &detail))
+	assert.Equal(t, true, detail["snapshot_taken"])
+}
+
 func TestAPI_BroadcastsAudience(t *testing.T) {
 	t.Parallel()
 

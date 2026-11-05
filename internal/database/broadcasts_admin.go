@@ -74,10 +74,9 @@ func (s *Service) ListBroadcastOverviews(ctx context.Context, status string, lim
 
 	overviews := make([]BroadcastOverview, 0, len(rows))
 	for i := range rows {
-		overview := BroadcastOverview{Broadcast: rows[i]}
-		state, stateErr := parseBroadcastRecipientState(&rows[i])
-		if stateErr == nil {
-			overview.SnapshotTaken = state.Snapshot
+		overview := BroadcastOverview{
+			Broadcast:     rows[i],
+			SnapshotTaken: BroadcastSnapshotTaken(&rows[i]),
 		}
 
 		report, reportErr := rows[i].ParseDeliveryReport()
@@ -88,6 +87,18 @@ func (s *Service) ListBroadcastOverviews(ctx context.Context, status string, lim
 	}
 
 	return overviews, total, nil
+}
+
+// BroadcastSnapshotTaken сообщает, зафиксирован ли список получателей.
+// Список и деталь в панели читают флаг отсюда, иначе они расходятся: деталь
+// показывала «снимок не снят» даже у завершённой рассылки.
+func BroadcastSnapshotTaken(b *Broadcast) bool {
+	state, err := parseBroadcastRecipientState(b)
+	if err != nil {
+		return false
+	}
+
+	return state.Snapshot
 }
 
 // CountBroadcastAudience считает аудиторию фильтра. Запрос переиспользует
