@@ -19,6 +19,11 @@ services:
 
         environment:
             - TZ=Europe/Moscow
+            # Панель слушает loopback контейнера по умолчанию, а DNAT
+            # опубликованного порта до loopback не доходит (проверено: TCP
+            # соединяется через userland-proxy, но байты не доставляются).
+            # Раскомментируйте вместе с портом 8881 выше.
+            # - ADMIN_LISTEN=0.0.0.0:8881
             # Go runtime memory optimization
             # GOMEMLIMIT: 64MB soft limit (67108864 bytes)
             # GOGC: More aggressive GC (50 instead of default 100)
@@ -28,6 +33,12 @@ services:
         # Expose health check port for monitoring (optional)
         ports:
             - "127.0.0.1:8880:8880"
+            # Локальная админ-панель (нужен непустой ADMIN_TOKEN в .env).
+            # Двух шагов мало по одному: опубликовать порт AND перевести панель
+            # на 0.0.0.0 внутри контейнера - см. ADMIN_LISTEN ниже.
+            # Публикация только на loopback хоста: снаружи доступ через
+            # SSH-туннель, как описано в doc/operations.md.
+            # - "127.0.0.1:8881:8881"
 
         # Security hardening
         security_opt:
