@@ -279,7 +279,7 @@ func nodeHealthComponent(source nodeHealthSource) web.ComponentHealth {
 
 // startAdminServer поднимает локальную админку, если задан ADMIN_TOKEN.
 // Пустой токен выключает панель целиком: слушателя нет, атаковать нечего.
-func startAdminServer(cfg *config.Config, dbService *database.Service) (*admin.Server, error) {
+func startAdminServer(cfg *config.Config, dbService *database.Service, subService *service.SubscriptionService, syncSvc *service.SyncService) (*admin.Server, error) {
 	if strings.TrimSpace(cfg.AdminToken) == "" {
 		logger.Info("Admin panel disabled (ADMIN_TOKEN is empty)")
 
@@ -287,6 +287,9 @@ func startAdminServer(cfg *config.Config, dbService *database.Service) (*admin.S
 	}
 
 	server := admin.NewServer(cfg.AdminListen, cfg.AdminToken, dbService)
+	// Экран «Подписки»: чтение — из БД, мутации (продление/отзыв/удаление и
+	// сброс трафика) — только через сервисный слой.
+	server.SetSubscriptionServices(dbService, subService, syncSvc)
 
 	err := server.Start(context.Background())
 	if err != nil {
@@ -619,7 +622,7 @@ func main() {
 
 	// 6b. Start the local admin panel. It is a separate loopback listener with
 	// its own bearer token; the public web server never mounts /admin.
-	adminServer, err := startAdminServer(cfg, dbService)
+	adminServer, err := startAdminServer(cfg, dbService, svc.subService, svc.syncService)
 	if err != nil {
 		logger.Fatal("Failed to start admin panel", zap.Error(err))
 	}
