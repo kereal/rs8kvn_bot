@@ -48,12 +48,13 @@ type PlanStore interface {
 // every screen declares the few methods it needs (PlanStore, and one interface
 // per upcoming screen) instead of widening a single god interface.
 type Server struct {
-	addr   string
-	token  string
-	plans  PlanStore
-	orders OrderStore // screen: orders
-	audit  AuditStore // screen: audit
-	dist   fs.FS
+	addr     string
+	token    string
+	plans    PlanStore
+	products ProductStore // screen: products
+	orders   OrderStore   // screen: orders
+	audit    AuditStore   // screen: audit
+	dist     fs.FS
 
 	mu           sync.Mutex
 	server       *http.Server
@@ -72,12 +73,13 @@ func NewServer(addr, token string, db *database.Service) *Server {
 	}
 
 	return &Server{
-		addr:   addr,
-		token:  token,
-		plans:  db, // screen: plans (existing)
-		orders: db, // screen: orders
-		audit:  db, // screen: audit
-		dist:   dist,
+		addr:     addr,
+		token:    token,
+		plans:    db, // screen: plans (existing)
+		products: db, // screen: products
+		orders:   db, // screen: orders
+		audit:    db, // screen: audit
+		dist:     dist,
 	}
 }
 
@@ -91,6 +93,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/plans", s.withAuth(s.handleCreatePlan))
 	mux.HandleFunc("PUT /admin/api/plans/{id}", s.withAuth(s.handleUpdatePlan))
 	mux.HandleFunc("DELETE /admin/api/plans/{id}", s.withAuth(s.handleDeletePlan))
+	// --- products ---
+	mux.HandleFunc("GET /admin/api/products", s.withAuth(s.handleListProducts))
+	mux.HandleFunc("POST /admin/api/products", s.withAuth(s.handleCreateProduct))
+	mux.HandleFunc("PUT /admin/api/products/{id}", s.withAuth(s.handleUpdateProduct))
+	mux.HandleFunc("DELETE /admin/api/products/{id}", s.withAuth(s.handleDeleteProduct))
+
 	// --- orders ---
 	mux.HandleFunc("GET /admin/api/orders", s.withAuth(s.handleListOrders))
 	mux.HandleFunc("GET /admin/api/orders/{id}", s.withAuth(s.handleGetOrder))

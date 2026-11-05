@@ -3,11 +3,19 @@
   import { api, getToken, setToken } from './lib/api.js'
   import Login from './views/Login.svelte'
   import Plans from './views/Plans.svelte'
+  import Products from './views/Products.svelte'
+  import Orders from './views/Orders.svelte'
+  import OrdersDetail from './views/OrdersDetail.svelte'
+  import AuditLog from './views/AuditLog.svelte'
 
   // One entry per screen. Adding a screen means adding a route here and a view
-  // file — no router dependency.
+  // file — no router dependency. `detail` is optional: it renders instead of
+  // `component` when the hash carries an id ("#/orders/42").
   const routes = {
-    plans: { label: 'Планы', component: Plans }
+    plans: { label: 'Планы', component: Plans },
+    products: { label: 'Продукты', component: Products },
+    orders: { label: 'Заказы', component: Orders, detail: OrdersDetail },
+    audit: { label: 'Журнал', component: AuditLog }
   }
 
   let authed = $state(false)
@@ -16,7 +24,12 @@
   // the `id` prop; list views ignore it.
   let route = $state(routeFromHash())
   let view = $derived(route.name)
-  let ActiveView = $derived((routes[view] ?? routes.plans).component)
+  let ActiveView = $derived(resolveView(route))
+
+  function resolveView(current) {
+    const entry = routes[current.name] ?? routes.plans
+    return current.id && entry.detail ? entry.detail : entry.component
+  }
 
   function routeFromHash() {
     const [rawName = '', rawID = ''] = location.hash.replace(/^#\/?/, '').split('/')
@@ -66,13 +79,13 @@
         rs8kvn
         <small>админка</small>
       </div>
-      {#each Object.entries(routes) as [name, route] (name)}
+      {#each Object.entries(routes) as [name, entry] (name)}
         <button
           class="nav-item"
           aria-current={view === name ? 'page' : undefined}
           onclick={() => go(name)}
         >
-          {route.label}
+          {entry.label}
         </button>
       {/each}
       <div class="sidebar-footer">
