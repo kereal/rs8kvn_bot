@@ -146,6 +146,8 @@ func (s *Server) writeStoreError(w http.ResponseWriter, op string, err error) {
 		writeError(w, http.StatusConflict, "protected", err.Error())
 	case errors.Is(err, database.ErrPlanInUse):
 		writeError(w, http.StatusConflict, "in_use", err.Error())
+	case errors.Is(err, database.ErrOrderNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "order not found")
 	default:
 		logger.Error("admin: "+op+" failed", zap.Error(err))
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
