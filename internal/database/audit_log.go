@@ -55,6 +55,8 @@ const (
 
 	AuditEventReminderSent    = "reminder_sent"
 	AuditEventTrafficNotified = "traffic_notified"
+	// AuditEventTrafficReset фиксирует ручной сброс счётчика трафика из админ-панели.
+	AuditEventTrafficReset = "traffic_reset"
 
 	// Оплата и заказы.
 
@@ -477,6 +479,24 @@ func AuditTrafficNotified(sub *Subscription, kind string) *AuditLog {
 		Event:      AuditEventTrafficNotified,
 		ActorType:  ActorWorker,
 		ActorID:    marshalAuditJSONString("subscription_traffic_worker"),
+		Details:    marshalAuditDetails(details),
+	}
+}
+
+// AuditTrafficReset фиксирует сброс трафика подписки из админ-панели.
+// Пишется даже при частичном успехе: details несут, сколько узлов ответило и
+// сколько упало, чтобы по журналу было видно фактический исход.
+func AuditTrafficReset(sub *Subscription, nodesOK, nodesFailed int) *AuditLog {
+	details := auditSubDetails(sub)
+	details["nodes_ok"] = nodesOK
+	details["nodes_failed"] = nodesFailed
+
+	return &AuditLog{
+		EntityType: EntitySubscription,
+		EntityID:   marshalAuditJSONString(formatSubID(sub)),
+		Event:      AuditEventTrafficReset,
+		ActorType:  ActorAdmin,
+		ActorID:    marshalAuditJSONString("0"),
 		Details:    marshalAuditDetails(details),
 	}
 }

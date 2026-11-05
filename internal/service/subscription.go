@@ -460,6 +460,56 @@ func (s *SubscriptionService) deprovisionSub(ctx context.Context, subscriptionID
 	return nil
 }
 
+// ErrAlreadyRevoked reports that the subscription is already revoked, so a
+// second revoke has nothing to do. Callers map it to a 409 instead of silently
+// reporting success.
+var ErrAlreadyRevoked = errors.New("subscription already revoked")
+
+// revokeAndDeprovision flips the subscription to revoked and removes its VPN
+// clients. Both phases live here so the panel revoke action and the hard delete
+// share exactly one implementation: without deprovisioning, an already imported
+// profile keeps working while /sub answers 404.
+func (s *SubscriptionService) revokeAndDeprovision(ctx context.Context, sub *database.Subscription) error {
+	// Phase 1: mark revoked before any external effect.
+	err := s.markRevokedSub(ctx, sub)
+	if err != nil {
+		return err
+	}
+
+	// Phase 2: deprovision VPN access (best-effort; background sync reconciles on failure).
+	return s.deprovisionSub(ctx, sub.ID)
+}
+
+// RevokeSubscription revokes a subscription without deleting the row: the
+// subserver answers 404 immediately and the VPN clients are queued for removal.
+// Repeated calls report ErrAlreadyRevoked; there is no idempotent success path
+// because the panel needs to distinguish "just revoked" from "already was".
+func (s *SubscriptionService) RevokeSubscription(ctx context.Context, id uint) (*database.Subscription, error) {
+	sub, err := s.db.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("revoke subscription: %w", err)
+	}
+
+	if sub.Status == string(database.SubscriptionStatusRevoked) {
+		return nil, ErrAlreadyRevoked
+	}
+
+	err = s.revokeAndDeprovision(ctx, sub)
+	if err != nil {
+		return nil, err
+	}
+
+	s.logAudit(ctx, database.AuditSubscriptionRevoked(sub, "admin panel revoke"))
+
+	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
+		s.InvalidateBySubID(ctx, sub.SubscriptionID)
+	}
+
+	s.RefreshActiveSubscriptionsMetric(ctx)
+
+	return sub, nil
+}
+
 // revokeAndDeprovisionThenDelete runs the two-phase subscription teardown used by
 // DeleteByID: mark revoked, queue and attempt VPN removal, then physically delete
 // the DB row and invalidate its cache. Remaining node bindings prevent deletion
@@ -467,14 +517,7 @@ func (s *SubscriptionService) deprovisionSub(ctx context.Context, subscriptionID
 // Database and queueing errors also reach the caller; successful earlier steps
 // are not rolled back. Returns the deleted subscription, or nil on error.
 func (s *SubscriptionService) revokeAndDeprovisionThenDelete(ctx context.Context, sub *database.Subscription) (*database.Subscription, error) {
-	// Phase 1: mark revoked before any external effect.
-	err := s.markRevokedSub(ctx, sub)
-	if err != nil {
-		return nil, err
-	}
-
-	// Phase 2: deprovision VPN access (best-effort; background sync reconciles on failure).
-	err = s.deprovisionSub(ctx, sub.ID)
+	err := s.revokeAndDeprovision(ctx, sub)
 	if err != nil {
 		return nil, err
 	}
