@@ -10,6 +10,7 @@
     { value: 'fetch', label: 'fetch' }
   ]
 
+  /** @type {import('../lib/types.js').Node[]} */
   let items = $state([])
   let loading = $state(true)
   let error = $state('')
@@ -28,7 +29,9 @@
 
   // Привязки к планам: модалка «Планы ноды».
   let bindingsOpen = $state(false)
+  /** @type {import('../lib/types.js').Node|null} */
   let bindingsNode = $state(null)
+  /** @type {import('../lib/types.js').Plan[]} */
   let plans = $state([])
   let bindingChecks = $state({})
   let bindingInitial = $state({})

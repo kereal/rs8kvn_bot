@@ -4,6 +4,7 @@
   import { bytesToGib, formatDate, formatGib, gibToBytes, humanError } from '../lib/format.js'
   import Modal from '../lib/Modal.svelte'
 
+  /** @type {import('../lib/types.js').Plan[]} */
   let items = $state([])
   let loading = $state(true)
   let error = $state('')

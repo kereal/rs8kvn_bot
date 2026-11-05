@@ -20,6 +20,7 @@
     trial_deleted: 'Пробная подписка удалена',
     reminder_sent: 'Отправлено напоминание',
     traffic_notified: 'Отправлено трафик-уведомление',
+    traffic_reset: 'Сброшен трафик подписки',
     order_created: 'Заказ создан',
     payment_confirmed: 'Оплата подтверждена',
     order_expired: 'Заказ истёк',
@@ -30,8 +31,21 @@
     broadcast_completed: 'Рассылка завершена',
     broadcast_failed: 'Рассылка провалилась',
     broadcast_canceled: 'Рассылка отменена',
+    broadcast_created: 'Рассылка создана',
+    broadcast_updated: 'Рассылка изменена',
+    broadcast_retried: 'Повтор рассылки',
+    broadcast_deleted: 'Рассылка удалена',
+    node_created: 'Узел добавлен',
+    node_updated: 'Узел изменён',
+    node_deleted: 'Узел удалён',
+    plan_nodes_changed: 'Состав узлов тарифа изменён',
     sync_run_degraded: 'Синк прошёл с отказами',
-    orphaned_clients_revoked: 'Осиротевшие клиенты отозваны'
+    orphaned_clients_revoked: 'Осиротевшие клиенты отозваны',
+    product_created: 'Продукт создан',
+    product_updated: 'Продукт изменён',
+    product_deleted: 'Продукт удалён',
+    invite_created: 'Инвайт создан',
+    invite_deleted: 'Инвайт удалён'
   }
 
   const ENTITY_LABELS = {
@@ -52,13 +66,17 @@
     system: 'система'
   }
 
+  /** @type {import('../lib/types.js').AuditEntry[]} */
   let items = $state([])
   let total = $state(0)
   let loading = $state(true)
   let error = $state('')
 
+  /** @type {string[]} */
   let events = $state([])
+  /** @type {string[]} */
   let entityTypes = $state([])
+  /** @type {string[]} */
   let actorTypes = $state([])
 
   let filterEvent = $state('')

@@ -15,6 +15,7 @@
 
   let { id } = $props()
 
+  /** @type {import('../lib/types.js').BroadcastDetail|null} */
   let row = $state(null)
   let loading = $state(true)
   let error = $state('')

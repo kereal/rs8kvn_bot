@@ -3,6 +3,7 @@
   import { api } from '../lib/api.js'
   import { formatDate } from '../lib/format.js'
 
+  /** @type {import('../lib/types.js').Overview|null} */
   let data = $state(null)
   let loading = $state(true)
   let error = $state('')

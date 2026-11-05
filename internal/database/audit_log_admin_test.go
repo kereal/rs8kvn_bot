@@ -2,6 +2,11 @@ package database
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -348,20 +353,56 @@ func TestGetRecentAuditLog_DelegatesToPage(t *testing.T) {
 	}
 }
 
+// declaredAuditEventConstants parses audit_log.go and returns the value of every
+// AuditEvent* constant. The panel's event filter is built from AuditEventNames(),
+// and Go has no reflection over constants, so parsing the file is the only way
+// to prove the registry and the declarations agree.
+func declaredAuditEventConstants(t *testing.T) []string {
+	t.Helper()
+
+	file, err := parser.ParseFile(token.NewFileSet(), "audit_log.go", nil, 0)
+	require.NoError(t, err)
+
+	var values []string
+
+	ast.Inspect(file, func(node ast.Node) bool {
+		spec, ok := node.(*ast.ValueSpec)
+		if !ok {
+			return true
+		}
+
+		for i, name := range spec.Names {
+			if !strings.HasPrefix(name.Name, "AuditEvent") || i >= len(spec.Values) {
+				continue
+			}
+
+			lit, ok := spec.Values[i].(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				continue
+			}
+
+			value, unquoteErr := strconv.Unquote(lit.Value)
+			require.NoError(t, unquoteErr)
+			values = append(values, value)
+		}
+
+		return true
+	})
+
+	require.NotEmpty(t, values, "audit_log.go must declare AuditEvent* constants")
+
+	return values
+}
+
 func TestAuditRegistriesMatchConstants(t *testing.T) {
 	t.Parallel()
 
 	events := AuditEventNames()
-	assert.Equal(t, []string{
-		"subscription_created", "trial_created", "trial_bound", "subscription_reanimated",
-		"subscription_renewed", "plan_changed", "subscription_expired", "downgraded_to_free",
-		"subscription_revoked", "subscription_deleted", "trial_deleted",
-		"reminder_sent", "traffic_notified",
-		"order_created", "payment_confirmed", "order_expired", "order_canceled",
-		"chargeback_received", "payment_creation_uncertain",
-		"broadcast_started", "broadcast_completed", "broadcast_failed", "broadcast_canceled",
-		"sync_run_degraded", "orphaned_clients_revoked",
-	}, events)
+	// The registry is hand-written, so it is checked against the constants that
+	// audit_log.go actually declares: an AuditEvent* constant missing from the
+	// registry silently never reaches the panel's event filter
+	// (doc/specs/admin/07-audit-log.md, criterion 5).
+	assert.ElementsMatch(t, declaredAuditEventConstants(t), events, "registry must list every declared AuditEvent* constant")
 
 	assert.Equal(t, []string{
 		"subscription", "order", "broadcast", "plan", "node", "product", "system",

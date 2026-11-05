@@ -8,6 +8,7 @@
   // t.me/{bot}?start=share_{code}. Дублируем серверную валидацию на клиенте.
   const CODE_RE = /^[a-z0-9]{6,16}$/
 
+  /** @type {import('../lib/types.js').Invite[]} */
   let items = $state([])
   let loading = $state(true)
   let error = $state('')

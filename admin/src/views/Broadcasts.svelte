@@ -16,6 +16,7 @@
   const TEXT_LIMIT = 4096
   const PREVIEW_DEBOUNCE = 400
 
+  /** @type {import('../lib/types.js').Broadcast[]} */
   let items = $state([])
   let total = $state(0)
   let loading = $state(true)
@@ -33,6 +34,7 @@
   let form = $state(emptyForm())
 
   // Предпросмотр аудитории: обновляется с debounce 400 мс, 0 блокирует «Сохранить».
+  /** @type {number|null} */
   let audience = $state(null)
   let audienceError = $state('')
   let previewTimer

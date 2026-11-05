@@ -12,6 +12,7 @@
     revoked: { label: 'Отозвана', cls: 'badge-cancel' }
   }
 
+  /** @type {import('../lib/types.js').Subscription[]} */
   let items = $state([])
   let total = $state(0)
   let loading = $state(true)
@@ -27,6 +28,7 @@
   let limit = $state(50)
   let offset = $state(0)
 
+  /** @type {import('../lib/types.js').Plan[]} */
   let plans = $state([])
 
   let debounceTimer

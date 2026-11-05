@@ -20,6 +20,7 @@
     amount_cents: 'СУММА'
   }
 
+  /** @type {import('../lib/types.js').Order[]} */
   let items = $state([])
   let total = $state(0)
   let loading = $state(true)
