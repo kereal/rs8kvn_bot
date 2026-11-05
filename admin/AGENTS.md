@@ -28,26 +28,70 @@ If a screen needs a new primitive (select, toast, date picker), write it in
 
 ```
 admin/
-  server.go        HTTP server, auth, SPA serving (embed `dist/`)
-  plans.go         JSON handlers for plans
-  server_test.go   API + SPA tests
-  src/App.svelte   shell: token gate, sidebar, hash routing
-  src/views/       one file per screen
-  src/lib/         api client, formatting, shared components
-  dist/            Vite output — COMMITTED, embedded into the binary
+  server.go          HTTP server, auth, SPA serving (embed `dist/`)
+  plans.go           JSON handlers for plans
+  contract_test.go   JSON key sets every view reads (see Type checking)
+  server_test.go     API + SPA tests
+  jsconfig.json      checkJs config for svelte-check
+  src/App.svelte     shell: token gate, sidebar, hash routing
+  src/views/         one file per screen
+  src/lib/           api client, formatting, shared components
+  dist/              Vite output — COMMITTED, embedded into the binary
+tools/adminserve/    panel-only dev server (not shipped)
+lefthook.yml         pre-commit: gofmt + fresh dist + Conventional Commits
 ```
 
 `dist/` is committed on purpose: `go build` stays the only required build step
-in Docker and CI. Rebuild it whenever `src/` changes.
+in Docker and CI. Rebuild it whenever `src/` changes — the CI job
+`Admin Bundle Is Fresh` runs `npm ci && npm run build` and fails if the committed
+bundle differs from `src/`.
 
-## Build
+## Build and checks
 
 ```bash
+cd admin && npm ci                 # dev dependencies (fresh clone / lockfile change)
+cd admin && npm run check          # svelte-check: JS type check over src/
 cd admin && npm run build          # writes admin/dist
 go build ./...                     # embeds dist
+
+make check                         # gofmt + go vet + npm run check + go test ./...
+make admin-serve                   # panel alone on a throwaway DB copy, demo rows
 ```
 
-`npm install` is needed only when `package.json` changes (or on a fresh clone).
+## Type checking (`jsconfig.json` + `svelte-check`)
+
+`checkJs` is on, so `npm run check` type-checks the JS inside components and
+`src/lib`. It catches, verified by hand:
+
+- assigning a value of the wrong type (`Type 'number' is not assignable to type 'string'`);
+- calling a method that does not exist on the value (`Property 'trim' does not exist on type 'number'`);
+- `Date` arithmetic that TypeScript rejects (`new Date(a) - new Date(b)`); the fix is `.getTime()`.
+
+It does **not** catch the trap that already shipped once: `bind:value` on
+`<input type="number">` hands the handler a `number` at runtime while the state
+stays typed `string`, so `String(...)`/`Number(...)` conversion at the boundary is
+mandatory and invisible to the checker. Keep form state in the type the input
+actually produces, and convert explicitly where the value crosses into a request
+payload.
+
+Nothing is replaced by this: server-side contract changes are pinned by
+`admin/contract_test.go`, which asserts the exact JSON key set of every response
+the views read. Type checks are for the JS side, contract tests for the Go side.
+
+## Local run without the bot
+
+`make admin-serve` (or `go run ./tools/adminserve -seed`) runs the panel alone
+against a copy of `data/rs8kvn.db` (`-empty -seed` starts from a fresh database
+with demo rows). Node clients are empty, so every external call is a no-op: the
+harness never touches real panels. It prints `ADMIN_READY <url> token=<token>`.
+`npm run dev` gives Vite with HMR and proxies `/admin/api`.
+
+## Git hooks
+
+`lefthook.yml` is installed with `lefthook install` (hooks live in the global
+hooks path). Pre-commit runs `gofmt` on staged Go files and rebuilds plus stages
+`admin/dist` whenever `admin/src` is staged; commit-msg enforces Conventional
+Commits. Bypass with `LEFTHOOK=0 git commit`. Tests, lint and race stay in CI.
 
 ## API contract
 
@@ -56,6 +100,8 @@ Base path `/admin/api`, JSON, bearer token (`Authorization: Bearer <ADMIN_TOKEN>
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/admin/api/session` | — | `{"ok":true}` (token check) |
+| GET | `/admin/api/overview` | — | агрегаты экрана «Состояние» |
+| POST | `/admin/api/subscriptions/{id}/sync` | — | `200` + `{"subscription":{...},"warning":"..."}` |
 | GET | `/admin/api/plans` | — | `{"items":[…],"total":N}` |
 | POST | `/admin/api/plans` | plan | `201` + created plan |
 | PUT | `/admin/api/plans/{id}` | plan | `200` + updated plan |

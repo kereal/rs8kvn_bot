@@ -30,6 +30,9 @@ coverage.html
 tmp/
 temp/
 
+# Local build output of dev tools (go build ./tools/adminserve lands here)
+/adminserve
+
 # Go
 go.work
 go.work.sum

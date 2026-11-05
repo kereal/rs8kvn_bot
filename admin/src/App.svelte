@@ -9,7 +9,8 @@
   import AuditLog from './views/AuditLog.svelte'
   import Invites from './views/Invites.svelte'
   import Nodes from './views/Nodes.svelte'
-import Subscriptions from './views/Subscriptions.svelte'
+  import Overview from './views/Overview.svelte'
+  import Subscriptions from './views/Subscriptions.svelte'
   import SubscriptionDetail from './views/SubscriptionDetail.svelte'
   import Broadcasts from './views/Broadcasts.svelte'
   import BroadcastDetail from './views/BroadcastDetail.svelte'
@@ -18,6 +19,7 @@ import Subscriptions from './views/Subscriptions.svelte'
   // file — no router dependency. `detail` is optional: it renders instead of
   // `component` when the hash carries an id ("#/orders/42").
   const routes = {
+    overview: { label: 'Состояние', component: Overview },
     plans: { label: 'Планы', component: Plans },
     nodes: { label: 'Ноды', component: Nodes },
     products: { label: 'Продукты', component: Products },
@@ -37,13 +39,13 @@ import Subscriptions from './views/Subscriptions.svelte'
   let ActiveView = $derived(resolveView(route))
 
   function resolveView(current) {
-    const entry = routes[current.name] ?? routes.plans
+    const entry = routes[current.name] ?? routes.overview
     return current.id && entry.detail ? entry.detail : entry.component
   }
 
   function routeFromHash() {
     const [rawName = '', rawID = ''] = location.hash.replace(/^#\/?/, '').split('/')
-    const name = routes[rawName] ? rawName : 'plans'
+    const name = routes[rawName] ? rawName : 'overview'
     return { name, id: rawID || null }
   }
 

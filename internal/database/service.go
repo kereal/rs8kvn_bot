@@ -21,6 +21,14 @@ import (
 // Service provides database operations with proper dependency injection.
 type Service struct {
 	db *gorm.DB
+	// path — файл SQLite до перевода в DSN (для размера и пути в админке).
+	path string
+}
+
+// FilePath returns the SQLite file the service was opened on, as the caller
+// passed it. It is empty for handles created outside NewService.
+func (s *Service) FilePath() string {
+	return s.path
 }
 
 // GetDB returns the underlying *gorm.DB instance.
@@ -47,6 +55,7 @@ func NewService(dbPath string) (*Service, error) {
 	// random "database is locked" webhook failures during concurrent payment
 	// and expiry transitions. The busy timeout is part of the DSN so it applies
 	// to every pooled connection, not only the one used for this setup query.
+	originalPath := dbPath
 	dbPath = sqliteBusyTimeoutDSN(dbPath)
 
 	db, err := gorm.Open(gormsqlite.Open(dbPath), &gorm.Config{
@@ -116,7 +125,7 @@ func NewService(dbPath string) (*Service, error) {
 		logger.Info("Inserted default trial/free plans")
 	}
 
-	return &Service{db: db}, nil
+	return &Service{db: db, path: originalPath}, nil
 }
 
 func sqliteBusyTimeoutDSN(path string) string {

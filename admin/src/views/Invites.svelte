@@ -54,7 +54,7 @@
 
     return [...filtered].sort((a, b) => {
       if (sortKey === 'created_at') {
-        const cmp = new Date(a.created_at) - new Date(b.created_at)
+        const cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         return sortAsc ? cmp : -cmp
       }
       const cmp = String(a.code).localeCompare(String(b.code), 'ru')

@@ -120,7 +120,11 @@
 
   // Истекает: пусто или истекшая подписка — прочерк; близкий срок — красным.
   function expiringSoon(row) {
-    return row.status !== 'expired' && row.expires_at && new Date(row.expires_at) - Date.now() < 24 * 3600 * 1000
+    return (
+      row.status !== 'expired' &&
+      row.expires_at &&
+      new Date(row.expires_at).getTime() - Date.now() < 24 * 3600 * 1000
+    )
   }
 
   // Узлы: «2/2», а при зависших удалениях — «2/2 · −1» с подсказкой.

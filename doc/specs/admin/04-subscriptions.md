@@ -84,7 +84,16 @@ CREATE TABLE subscriptions (
 | POST | `/admin/api/subscriptions/{id}/plan` | `{"plan_id":int,"days":int}` | `200` + подписка |
 | POST | `/admin/api/subscriptions/{id}/revoke` | — | `200` + подписка |
 | POST | `/admin/api/subscriptions/{id}/reset-traffic` | — | `200` + `{"reset_nodes":N}` |
+| POST | `/admin/api/subscriptions/{id}/sync` | — | `200` + `{"subscription":{...},"warning":"..."}` |
 | DELETE | `/admin/api/subscriptions/{id}` | — | `200` + `{"id":N,"deleted":true}` |
+
+`/sync` принудительно прогоняет реконсайлер по одной подписке: толкает в
+панели всё, что стоит в очереди (`pending_add`/`pending_update`/
+`pending_remove`). Ответ — свежая деталь в том же DTO, что отдаёт `GET`.
+`warning` появляется, когда после прогона привязки остались не-`active`
+(`SyncSubscription` глотает пер-узловые ошибки по контракту best-effort) или
+когда сверка упала целиком. События в журнал не пишется: это тот же
+реконсайлер, что и у фонового воркера, домен он не меняет.
 
 `limit` по умолчанию 50, максимум 200. `sort` — только `id`, `created_at`,
 `expires_at`, `last_request`; по умолчанию `id desc`.
@@ -293,13 +302,15 @@ sub_url с кнопкой «Скопировать»), таблица узлов
 - [ ] Удаление и отзыв требуют ввода хвоста `subscription_id`.
 - [ ] Сброс трафика сообщает число узлов и показывает частичный сбой.
 - [ ] Обе операции с состоянием оставляют аудит с `actor_type=admin`.
+- [ ] `/sync` отвечает свежей деталью и ставит `warning`, если после прогона
+      привязки остались не-`active`; без сервиса — `503`.
 
 ## 10. Файлы
 
 Создаёт:
 
 - `internal/database/subscriptions_admin.go` + `_test.go`
-- `admin/subscriptions.go` + `_test.go`
+- `admin/subscriptions.go`, `admin/subscriptions_sync.go` + `_test.go`
 - `admin/src/views/Subscriptions.svelte`, `admin/src/views/SubscriptionDetail.svelte`
 
 Изменяет (не только одной строкой):

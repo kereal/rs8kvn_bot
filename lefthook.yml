@@ -1,0 +1,31 @@
+# lefthook — быстрые локальные проверки перед коммитом.
+# Установка: lefthook install (один раз на клон). Обойти: LEFTHOOK=0 git commit.
+#
+# Здесь только то, что дешевле починить до коммита, чем в CI: форматирование
+# Go, свежесть вшитого бандла панели и формат сообщения коммита. Тесты, линтер
+# и race остаются в CI — их место не в pre-commit.
+pre-commit:
+  parallel: true
+  commands:
+    gofmt:
+      glob: "*.go"
+      run: gofmt -l {staged_files} && test -z "$(gofmt -l {staged_files})"
+    # admin/dist закоммичен и вшивается в бинарник, поэтому исходники без
+    # пересобранного dist — это старая панель в проде при зелёных Go-тестах.
+    admin-bundle-fresh:
+      glob: "admin/src/**"
+      # Пересобираем и кладём бандл в индекс: dist — часть коммита, а не
+      # артефакт сборки, и забытая пересборка везёт в прод старую панель.
+      run: |
+        (cd admin && npm run build -s) || exit 1
+        git add admin/dist || exit 1
+        echo "admin/dist пересобран и добавлен в индекс"
+
+commit-msg:
+  commands:
+    conventional:
+      run: |
+        head -1 "{1}" | grep -Eq '^(feat|fix|docs|test|chore|refactor|perf|build|ci|revert)(\([a-z0-9._/-]+\))?!?: .{3,}' || {
+          echo "сообщение должно быть Conventional Commits: feat: ..., fix(admin): ... (см. AGENTS.md)"
+          exit 1
+        }

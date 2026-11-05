@@ -12,11 +12,22 @@
     revoked: { label: 'Отозвана', cls: 'badge-cancel' }
   }
 
+  // Статусы привязок к узлам: active — единственный устоявшийся (очередь
+  // пуста), остальные pending_* означают, что сверка ещё не дошла до панели.
+  const NODE_STATUS = {
+    active: { label: 'Активна', cls: 'badge-ok' },
+    pending_add: { label: 'Добавляется', cls: 'badge-warn' },
+    pending_update: { label: 'Обновляется', cls: 'badge-warn' },
+    pending_remove: { label: 'Снимается', cls: 'badge-warn' }
+  }
+
   let { id } = $props()
   let row = $state(null)
   let loading = $state(true)
   let error = $state('')
   let notice = $state('')
+  // Плашка сообщения бывает двух цветов: успех и «прошло не везде».
+  let noticeClass = $state('notice-ok')
   let opError = $state('')
 
   // Панель действий.
@@ -35,6 +46,7 @@
   let confirmBusy = $state(false)
 
   let resetBusy = $state(false)
+  let syncBusy = $state(false)
 
   // jsonCount считает элементы сохранённого JSON-массива (devices/ips).
   function jsonCount(raw) {
@@ -79,6 +91,33 @@
 
   function activeNodes() {
     return row.nodes_active ?? 0
+  }
+
+  function nodeStatusMeta(node) {
+    return NODE_STATUS[node.status] || { label: node.status, cls: 'badge-muted' }
+  }
+
+  // В очереди всё, что ещё не устоялось: панель не подтвердила привязку.
+  function queuedNodes() {
+    return (row.nodes || []).filter((node) => node.status !== 'active').length
+  }
+
+  // Принудительная сверка: тот же реконсайлер, что гоняет фоновый воркер,
+  // только по одному запросу оператора. 200 с warning означает, что часть
+  // панелей не ответила и привязки остались в очереди.
+  async function resync() {
+    syncBusy = true
+    opError = ''
+    try {
+      const payload = await api.post(`/admin/api/subscriptions/${id}/sync`, {})
+      row = payload.subscription
+      notice = payload.warning || 'Сверка выполнена'
+      noticeClass = payload.warning ? 'notice-warn' : 'notice-ok'
+    } catch (err) {
+      opError = humanError(err)
+    } finally {
+      syncBusy = false
+    }
   }
 
   function openPlanModal() {
@@ -131,6 +170,7 @@
       notice = payload.warning
         ? `Счётчик сброшен на ${payload.reset_nodes} узлах. ${payload.warning}`
         : `Счётчик трафика сброшен на ${payload.reset_nodes} узлах`
+      noticeClass = payload.warning ? 'notice-warn' : 'notice-ok'
       await load()
     } catch (err) {
       // in_use здесь означает не «на запись ссылаются», а «ни один узел не
@@ -227,7 +267,7 @@
   </div>
 
   {#if notice}
-    <div class="notice notice-ok">{notice}</div>
+    <div class="notice {noticeClass}">{notice}</div>
   {/if}
   {#if opError}
     <div class="notice notice-error">{opError}</div>
@@ -291,7 +331,12 @@
   </div>
 
   <section class="panel">
-    <h2>Узлы</h2>
+    <h2>
+      Узлы
+      {#if queuedNodes() > 0}
+        <span class="badge badge-warn">в очереди: {queuedNodes()}</span>
+      {/if}
+    </h2>
     {#if row.nodes.length === 0}
       <div class="empty">Привязок к узлам нет</div>
     {:else}
@@ -307,7 +352,7 @@
           {#each row.nodes as node (node.node_id)}
             <tr>
               <td class="mono">#{node.node_id} {node.node_name}</td>
-              <td class="mono">{node.status}</td>
+              <td><span class="badge {nodeStatusMeta(node).cls}">{nodeStatusMeta(node).label}</span></td>
               <td class="mono muted">{node.last_error || '—'}</td>
             </tr>
           {/each}
@@ -321,6 +366,7 @@
     <div class="action-row">
       <button class="btn" onclick={openPlanModal}>Продлить / сменить план</button>
       <button class="btn" onclick={askResetTraffic} disabled={resetBusy || activeNodes() === 0}>Сбросить трафик</button>
+      <button class="btn" onclick={resync} disabled={syncBusy}>Пересинхронизировать</button>
       <button class="btn btn-danger" onclick={() => openConfirm('revoke')} disabled={row.status === 'revoked'}>Отозвать</button>
       <button class="btn btn-danger" onclick={() => openConfirm('delete')}>Удалить</button>
     </div>

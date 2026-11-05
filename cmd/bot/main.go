@@ -287,6 +287,8 @@ func startAdminServer(cfg *config.Config, dbService *database.Service, subServic
 	}
 
 	server := admin.NewServer(cfg.AdminListen, cfg.AdminToken, dbService)
+	// Экран «Состояние» показывает ту же версию, что вшита в бинарник.
+	server.SetBuildInfo(admin.BuildInfo{Version: version, Commit: commit, BuildTime: buildTime})
 	// Экран «Подписки»: чтение — из БД, мутации (продление/отзыв/удаление и
 	// сброс трафика) — только через сервисный слой.
 	server.SetSubscriptionServices(dbService, subService, syncSvc)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -41,19 +42,25 @@ type SubscriptionActions interface {
 	DeleteByID(ctx context.Context, id uint) (*database.Subscription, error)
 }
 
-// SubscriptionTrafficActions is the narrow service contract for the traffic
-// counter reset. The concrete *service.SyncService satisfies it.
-type SubscriptionTrafficActions interface {
+// SubscriptionSyncActions is the narrow service contract for the two
+// node-facing operations: the traffic counter reset and a forced re-sync of one
+// subscription. Both live on *service.SyncService, so the panel takes one
+// dependency instead of two views of the same object.
+type SubscriptionSyncActions interface {
 	ResetSubscriptionTraffic(ctx context.Context, subscriptionID uint) (int, error)
+	// SyncSubscription re-runs the reconciler for one subscription: pending_add,
+	// pending_update and pending_remove bindings are pushed to the nodes. It is
+	// idempotent and safe to call for any status.
+	SyncSubscription(ctx context.Context, subscriptionID uint) error
 }
 
 // SetSubscriptionServices wires the service layer used by the mutating
 // subscription endpoints. Without it the screen stays read-only and mutations
 // answer 503.
-func (s *Server) SetSubscriptionServices(read SubscriptionReadStore, actions SubscriptionActions, traffic SubscriptionTrafficActions) {
+func (s *Server) SetSubscriptionServices(read SubscriptionReadStore, actions SubscriptionActions, sync SubscriptionSyncActions) {
 	s.subs = read
 	s.subActions = actions
-	s.subTraffic = traffic
+	s.subSync = sync
 }
 
 // Screen constants: pagination boundaries and default expiry window (hours).
@@ -162,16 +169,28 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	overview, nodes, err := s.subs.GetSubscriptionDetail(r.Context(), id)
+	detail, err := s.buildSubscriptionDetail(r.Context(), id)
 	if err != nil {
 		s.writeSubStoreError(w, "get subscription", err)
 		return
 	}
 
-	row, err := s.subs.GetByID(r.Context(), id)
+	writeJSON(w, http.StatusOK, detail)
+}
+
+// buildSubscriptionDetail assembles the detail DTO from three reads: the
+// overview row, the raw subscription, and the product that sets duration. The
+// sync endpoint reuses it, so a forced re-sync answers in exactly the shape GET
+// returns and the view can swap the row without a second request.
+func (s *Server) buildSubscriptionDetail(ctx context.Context, id uint) (*subscriptionDetail, error) {
+	overview, nodes, err := s.subs.GetSubscriptionDetail(ctx, id)
 	if err != nil {
-		s.writeSubStoreError(w, "load subscription row", err)
-		return
+		return nil, fmt.Errorf("load subscription detail: %w", err)
+	}
+
+	row, err := s.subs.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("load subscription row: %w", err)
 	}
 
 	detail := subscriptionDetail{
@@ -199,16 +218,15 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if row.ProductID != nil {
-		product, err := s.subs.GetProductByID(r.Context(), *row.ProductID)
+		product, prodErr := s.subs.GetProductByID(ctx, *row.ProductID)
 		switch {
-		case err == nil:
+		case prodErr == nil:
 			detail.DurationDays = &product.DurationDays
-		case errors.Is(err, database.ErrProductNotFound):
+		case errors.Is(prodErr, database.ErrProductNotFound):
 			// Product deleted while the subscription lives on: keep the id,
 			// duration unknown.
 		default:
-			s.writeStoreError(w, "load product", err)
-			return
+			return nil, fmt.Errorf("load product: %w", prodErr)
 		}
 	}
 
@@ -221,7 +239,7 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, detail)
+	return &detail, nil
 }
 
 // handleSetSubscriptionPlan renews the subscription or switches its plan
@@ -299,7 +317,7 @@ func (s *Server) handleRevokeSubscription(w http.ResponseWriter, r *http.Request
 // node. Reset is best-effort per node: a partial failure is a 200 with a
 // warning, zero reachable nodes is 409 in_use, and the audit row always lands.
 func (s *Server) handleResetSubscriptionTraffic(w http.ResponseWriter, r *http.Request) {
-	if s.requireSubTraffic(w) {
+	if s.requireSubSync(w) {
 		return
 	}
 
@@ -323,7 +341,7 @@ func (s *Server) handleResetSubscriptionTraffic(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	reset, err := s.subTraffic.ResetSubscriptionTraffic(service.WithAuditAdmin(r.Context(), 0), id)
+	reset, err := s.subSync.ResetSubscriptionTraffic(service.WithAuditAdmin(r.Context(), 0), id)
 	if reset == 0 {
 		// Ни один узел не ответил — счётчик не изменился нигде.
 		writeError(w, http.StatusConflict, "in_use", "no active nodes answered the reset",
@@ -457,10 +475,10 @@ func (s *Server) requireSubActions(w http.ResponseWriter) bool {
 	return false
 }
 
-func (s *Server) requireSubTraffic(w http.ResponseWriter) bool {
-	if s.subTraffic == nil {
+func (s *Server) requireSubSync(w http.ResponseWriter) bool {
+	if s.subSync == nil {
 		writeError(w, http.StatusServiceUnavailable, "internal",
-			"traffic reset service is not wired into the panel")
+			"sync service is not wired into the panel")
 		return true
 	}
 	return false

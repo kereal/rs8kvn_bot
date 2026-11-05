@@ -75,6 +75,40 @@ jobs:
                   path: coverage.out
                   retention-days: 7
 
+    admin-bundle:
+        name: Admin Bundle Is Fresh
+        runs-on: ubuntu-latest
+        # admin/dist is committed because the SPA is embedded into the binary.
+        # Nothing else rebuilds it, so a forgotten `npm run build` would ship a
+        # stale panel while every Go test still passes.
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v7
+              with:
+                persist-credentials: false
+
+            - name: Set up Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version-file: admin/.nvmrc
+                  cache: npm
+                  cache-dependency-path: admin/package-lock.json
+
+            - name: Install dependencies
+              run: npm ci
+              working-directory: admin
+
+            - name: Type-check sources
+              run: npm run check
+              working-directory: admin
+
+            - name: Build bundle
+              run: npm run build
+              working-directory: admin
+
+            - name: Bundle matches sources
+              run: git diff --exit-code -- admin/dist
+
     build-and-push:
         name: Build and Push Docker Image
         runs-on: ubuntu-latest

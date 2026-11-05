@@ -326,6 +326,12 @@ tbody tr:hover td {
   color: var(--ok);
 }
 
+.notice-warn {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
 dialog {
   border: 1px solid var(--border);
   border-radius: 12px;

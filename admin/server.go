@@ -65,7 +65,13 @@ type Server struct {
 	// service layer wired by SetSubscriptionServices.
 	subs       SubscriptionReadStore
 	subActions SubscriptionActions
-	subTraffic SubscriptionTrafficActions
+	subSync    SubscriptionSyncActions
+
+	// screen: overview — aggregates over the domain tables (see database
+	// GetOverviewSnapshot) plus the build stamp and uptime.
+	overview  OverviewStore
+	build     BuildInfo
+	startedAt time.Time
 
 	dist fs.FS
 
@@ -96,8 +102,23 @@ func NewServer(addr, token string, db *database.Service) *Server {
 		audit:      db, // screen: audit
 		broadcasts: db, // screen: broadcasts
 		subs:       db, // screen: subscriptions (reads; mutations via SetSubscriptionServices)
+		overview:   db, // screen: overview
+		startedAt:  time.Now(),
 		dist:       dist,
 	}
+}
+
+// BuildInfo is the build stamp the state screen shows. cmd/bot passes the same
+// values it injects with -ldflags, so the panel never disagrees with the binary.
+type BuildInfo struct {
+	Version   string
+	Commit    string
+	BuildTime string
+}
+
+// SetBuildInfo stamps the running build for the state screen.
+func (s *Server) SetBuildInfo(b BuildInfo) {
+	s.build = b
 }
 
 // SetBroadcastDeactivator wires the subscription service used by the
@@ -113,6 +134,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /admin/api/session", s.withAuth(s.handleSession))
+	mux.HandleFunc("GET /admin/api/overview", s.withAuth(s.handleOverview))
 	mux.HandleFunc("GET /admin/api/plans", s.withAuth(s.handleListPlans))
 	mux.HandleFunc("POST /admin/api/plans", s.withAuth(s.handleCreatePlan))
 	mux.HandleFunc("PUT /admin/api/plans/{id}", s.withAuth(s.handleUpdatePlan))
@@ -164,6 +186,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/subscriptions/{id}/plan", s.withAuth(s.handleSetSubscriptionPlan))
 	mux.HandleFunc("POST /admin/api/subscriptions/{id}/revoke", s.withAuth(s.handleRevokeSubscription))
 	mux.HandleFunc("POST /admin/api/subscriptions/{id}/reset-traffic", s.withAuth(s.handleResetSubscriptionTraffic))
+	mux.HandleFunc("POST /admin/api/subscriptions/{id}/sync", s.withAuth(s.handleSyncSubscription))
 	mux.HandleFunc("DELETE /admin/api/subscriptions/{id}", s.withAuth(s.handleDeleteSubscription))
 
 	mux.HandleFunc("/admin/", s.handleSPA)
