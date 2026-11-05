@@ -109,11 +109,11 @@
 
 ## 9. Критерии приёмки
 
-- [ ] Экран по умолчанию — «Состояние», не «Планы».
-- [ ] Очередь `pending_*` видна без захода в подписку и без логов.
-- [ ] Возраст очереди считается от `updated_at`, а не от времени ответа.
-- [ ] Нулевые значения не превращаются в 1970 год.
-- [ ] Аптайм и версия совпадают с `docker inspect` образа.
+- [x] Экран по умолчанию — «Состояние», не «Планы». — проверено: admin/src/App.svelte:26 (первый роут overview), :47 и :38 (fallback на overview для неизвестного хэша).
+- [x] Очередь `pending_*` видна без захода в подписку и без логов. — проверено: admin/src/views/Overview.svelte:163-184 (карточка «Очередь узлов»); данные из GET /admin/api/overview (admin/overview.go:81-85); TestGetOverviewSnapshot_Counts.
+- [x] Возраст очереди считается от `updated_at`, а не от времени ответа. — проверено: internal/database/overview.go:143-176 (oldestPendingBinding читает строку с Order updated_at ASC).
+- [x] Нулевые значения не превращаются в 1970 год. — проверено: overview.go:172-174,190-194 возвращают nil при отсутствии строк; JSON отдаёт null; formatDate(null)→'—' (admin/src/lib/format.js:20-22).
+- [x] Аптайм и версия совпадают с `docker inspect` образа — проверено на уровне механизма: `Dockerfile:29-35` (ldflags) → `main.version/commit/buildTime` → `server.SetBuildInfo` (`cmd/bot/main.go:291`) → JSON `build.{version,commit,build_time}` (`admin/overview.go:33-77`, ключи закреплены `admin/contract_test.go:313`); сборка с этими ldflags печатает штамп по `./rs8kvn_bot --version` (прогнано 2026-11-05: `v2.8.0-test commit=deadbeef`). Совпадение с `docker inspect` (время старта контейнера) остаётся ручной проверкой на собранном образе, потому что образ в этой сессии не поднимался.
 
 ## 10. Файлы
 

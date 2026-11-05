@@ -272,14 +272,14 @@ plan_name, duration_days), ссылка «Подписка #{subscription_id}» 
 
 ## 9. Критерии приёмки
 
-- [ ] В `admin/` и `internal/database/orders_admin.go` нет ни одного INSERT/UPDATE/DELETE по `orders` и ни одного метода, кроме двух read-методов (проверяется грепом в ревью).
-- [ ] `total` и `items` строятся из одного `buildOrderAdminQuery` — фильтр статуса одновременно меняет и список, и счётчик (тест-кейс «единый WHERE»).
-- [ ] `limit=1000` отдаёт максимум 200 строк и `total` реальный, а не clamp-нутый.
-- [ ] Поиск по цифрам находит и по `telegram_id`, и по `provider_payment_id`.
-- [ ] Список из 10 000 заказов — два SQL (count + select), без N+1.
-- [ ] Детальная страница содержит ссылку на подписку; при переходе открывается ТЗ 04.
-- [ ] `writeStoreError` маппит `ErrOrderNotFound` в `404`, а не `500`.
-- [ ] `go test -race ./admin/ ./internal/database/` зелёный, `golangci-lint` без замечаний.
+- [x] В `admin/` и `internal/database/orders_admin.go` нет ни одного INSERT/UPDATE/DELETE по `orders` и ни одного метода, кроме двух read-методов (проверяется грепом в ревью). Поверхность: `ListOrderOverviews` (`orders_admin.go:99`), `GetOrderOverview` (`:131`), интерфейс `OrderStore` (`admin/orders.go:14`).
+- [x] `total` и `items` строятся из одного `buildOrderAdminQuery` — фильтр статуса одновременно меняет и список, и счётчик (тест-кейс «единый WHERE»). `orders_admin.go:44-76`, count `:105`, select `:115`; `TestListOrderOverviews_StatusFilter_UniformWhere`.
+- [x] `limit=1000` отдаёт максимум 200 строк и `total` реальный, а не clamp-нутый. `admin/orders.go:121`, `TestAPI_OrdersList_ClampsLimit`.
+- [x] Поиск по цифрам находит и по `telegram_id`, и по `provider_payment_id`. `orders_admin.go:60-63`, `TestListOrderOverviews_QueryByTelegramID`, `_QueryByProviderPaymentID`.
+- [x] Список из 10 000 заказов — два SQL (count + select), без N+1. Ровно два терминальных вызова (`Count` + `Scan`), JOIN денормализует строку; нагрузочного прогона на 10 000 нет, вывод из структуры запроса.
+- [x] Детальная страница содержит ссылку на подписку; при переходе открывается ТЗ 04. `OrdersDetail.svelte:114` → `#/subscriptions/{id}`, роут `App.svelte:29`.
+- [x] `writeStoreError` маппит `ErrOrderNotFound` в `404`, а не `500`. `admin/plans.go:150`, `TestAPI_OrdersDetail_NotFound`.
+- [x] `go test -race ./admin/ ./internal/database/` зелёный, `golangci-lint` без замечаний. — проверено: прогнано 2026-11-05: go test -race ./admin/ ./internal/database/ ./internal/bot/ ./cmd/bot/ — ok (74.5s); golangci-lint run ./... — 0 issues.
 
 ## 10. Файлы
 

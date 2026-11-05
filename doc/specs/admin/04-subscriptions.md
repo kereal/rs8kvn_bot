@@ -295,14 +295,14 @@ sub_url с кнопкой «Скопировать»), таблица узлов
 
 ## 9. Критерии приёмки
 
-- [ ] Панель не содержит ни одного `UPDATE subscriptions` / `UPDATE subscription_nodes` (проверяется грепом в ревью).
-- [ ] Отзыв депровижинит VPN: после revoke субсервер отдаёт 404, а узлы получают `pending_remove`, затем `SyncPendingNodes` доводит до конца.
-- [ ] `RevokeSubscription` и `DeleteByID` не дублируют код: обе вызывают общий приватный метод.
-- [ ] Список из 5000 подписок отдаётся одним SQL на items и одним на total (без N+1).
-- [ ] Удаление и отзыв требуют ввода хвоста `subscription_id`.
-- [ ] Сброс трафика сообщает число узлов и показывает частичный сбой.
-- [ ] Обе операции с состоянием оставляют аудит с `actor_type=admin`.
-- [ ] `/sync` отвечает свежей деталью и ставит `warning`, если после прогона
+- [x] Панель не содержит ни одного `UPDATE subscriptions` / `UPDATE subscription_nodes` (проверяется грепом в ревью). — проверено: grep UPDATE subscriptions/subscription_nodes по admin/ = 0; панель ограничена read-стором (admin/subscriptions.go:8-12, ADR-0002 §6).
+- [x] Отзыв депровижинит VPN: после revoke субсервер отдаёт 404, а узлы получают `pending_remove`, затем `SyncPendingNodes` доводит до конца. — проверено: revokeAndDeprovision = markRevokedSub + deprovisionSub (internal/service/subscription.go:478-489), queueForDeprovision пишет pending_remove (:413-417); TestRevokeSubscription_MarksRevokedAndDeprovisions, TestSyncService_SyncPendingNodes_RevokedSubscriptionNotReprovisioned.
+- [x] `RevokeSubscription` и `DeleteByID` не дублируют код: обе вызывают общий приватный метод. — проверено: RevokeSubscription → revokeAndDeprovision (subscription.go:503), DeleteByID → revokeAndDeprovisionThenDelete → тот же метод (:526,:571-578).
+- [x] Список из 5000 подписок отдаётся одним SQL на items и одним на total (без N+1). — проверено: ListSubscriptionOverviews — 1 SQL Count + 1 SQL select по buildSubscriptionAdminQuery (internal/database/subscriptions_admin.go:130-140).
+- [x] Удаление и отзыв требуют ввода хвоста `subscription_id`. — проверено: UI: SubscriptionDetail.svelte:196-198,425-426 (сравнение ввода с slice(-4)); для сброса трафика — :158-163,435 (критерий про UI-ввод, серверной проверки не требуется).
+- [x] Сброс трафика сообщает число узлов и показывает частичный сбой. — проверено: payload reset_nodes (admin/subscriptions.go:365), partial → 200+warning, zero → 409 in_use (:316-347); UI SubscriptionDetail.svelte:165-178; TestAPI_SubscriptionsResetTraffic_PartialFailure, TestResetSubscriptionTraffic_ReportsPartialFailure.
+- [x] Обе операции с состоянием оставляют аудит с `actor_type=admin`. — проверено: revoke: AuditSubscriptionRevokedByAdmin (audit_log.go:459-470, вызов subscription.go:508); delete: AuditSubscriptionDeleted (:479-485, вызов :557); TestAPI_SubscriptionsRevoke, TestAPI_SubscriptionsDelete.
+- [x] `/sync` отвечает свежей деталью и ставит `warning`, если после прогона — проверено: handleSyncSubscription — admin/subscriptions_sync.go:33-72 (pendingBindings :75-86, warning :64-68); TestAPI_SyncSubscription (warning/no-warning), TestAPI_SyncSubscription_NotWired.
       привязки остались не-`active`; без сервиса — `503`.
 
 ## 10. Файлы

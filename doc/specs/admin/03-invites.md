@@ -190,14 +190,14 @@ mux.HandleFunc("DELETE /admin/api/invites/{code}", s.withAuth(s.handleDeleteInvi
 
 ## 9. Критерии приёмки
 
-- [ ] Сгенерированный код совпадает по формату с ботовым (8 символов `[0-9a-z]`) — код из панели работает в `t.me/{bot}?start=share_{code}` без правок бота.
-- [ ] Код не проходит валидацию `[a-z0-9]{6,16}` → `400 validation`, а не запись в БД (тест).
-- [ ] Дубль кода и второй код тому же referrer дают `409 name_taken` с разными `details.field` (тесты).
-- [ ] Удаление использованного инвайта блокируется `409 in_use` с числом подписок (тест).
-- [ ] Список считает `referred_count` и `subscriptions_count` одним SQL без N+1.
-- [ ] Ни один маршрут не отдаёт что-либо кроме DTO (модель БД в JSON не утекает).
-- [ ] Мутации пишут аудит `actor_type=admin`, `actor_id=0` с `origin` для created.
-- [ ] `go test -race ./admin/` зелёный, `golangci-lint` без замечаний.
+- [x] Сгенерированный код совпадает по формату с ботовым (8 символов `[0-9a-z]`) — код из панели работает в `t.me/{bot}?start=share_{code}` без правок бота. — проверено: internal/utils/uuid.go:58-91 (8 симв. [0-9a-z]), admin/invites.go:67-71; admin/invites_test.go:103.
+- [x] Код не проходит валидацию `[a-z0-9]{6,16}` → `400 validation`, а не запись в БД (тест). — проверено: invites_admin.go:80-82 → ErrInviteInvalid → admin/plans.go:154-155 (400 validation); TestCreateInviteAdmin_RejectsBadCode.
+- [x] Дубль кода и второй код тому же referrer дают `409 name_taken` с разными `details.field` (тесты). — проверено: invites_admin.go:90-107; TestAPI_InviteCreateGuardsMapToConflict, TestCreateInviteAdmin_DuplicateCode, ..._SecondCodeForSameReferrer.
+- [x] Удаление использованного инвайта блокируется `409 in_use` с числом подписок (тест). — проверено: invites_admin.go:141-152 (InviteInUseError{subscriptions}); admin/invites_test.go:170-178, TestDeleteInvite_UsedInviteIsBlocked.
+- [x] Список считает `referred_count` и `subscriptions_count` одним SQL без N+1. — проверено: invites_admin.go:39-69 (один SQL, два LEFT JOIN); TestListInviteOverviews_CountsBothMetrics.
+- [x] Ни один маршрут не отдаёт что-либо кроме DTO (модель БД в JSON не утекает). — проверено: inviteItem (admin/invites.go:46-61,94-98,115-119); admin/contract_test.go:185-191.
+- [x] Мутации пишут аудит `actor_type=admin`, `actor_id=0` с `origin` для created. — проверено: audit_log.go:1046-1066 (ActorAdmin,"0",origin для created); invites_admin.go:115,156; TestCreateInviteAdmin_ManualCodeWritesAudit.
+- [x] `go test -race ./admin/` зелёный, `golangci-lint` без замечаний. — проверено: прогнано 2026-11-05: go test -race ./admin/ ./internal/database/ ./internal/bot/ ./cmd/bot/ — ok (74.5s); golangci-lint run ./... — 0 issues.
 
 ## 10. Файлы
 

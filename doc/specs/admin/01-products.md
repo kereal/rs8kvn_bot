@@ -189,13 +189,13 @@ disabled при правке), название, срок, цена в рубл�
 
 ## 9. Критерии приёмки
 
-- [ ] Список показывает `subscriptions_count` и `orders_count` без N+1 (один SQL).
-- [ ] Дубль пары `(plan_id, duration_days)` даёт `409`, а не `500`.
-- [ ] Удаление продукта с подписками и с заказами блокируется с числами.
-- [ ] Смена плана у продукта отклоняется с `409 protected`.
-- [ ] Все мутации оставляют запись в `audit_log` с `actor_type=admin`, `actor_id=0`.
-- [ ] Консоль браузера чистая после create/update/delete.
-- [ ] `go test -race ./admin/` зелёный, `golangci-lint` без замечаний.
+- [x] Список показывает `subscriptions_count` и `orders_count` без N+1 (один SQL). — проверено: products_admin.go:75-89 (один SQL, подзапросы COUNT + JOIN plans); TestListProductOverviews_CountsInSingleRow.
+- [x] Дубль пары `(plan_id, duration_days)` даёт `409`, а не `500`. — проверено: products_admin.go:290-292 (UNIQUE → ErrProductNameTaken), admin/products.go:272-277 (409 name_taken); TestAPI_ProductsCreateDuplicatePairReturns409.
+- [x] Удаление продукта с подписками и с заказами блокируется с числами. — проверено: products_admin.go:181-232 (транзакция, счётчики → ProductInUseError), admin/products.go:283-301 (409 in_use); TestDeleteProduct_RejectsWithSubscription/WithOrder, TestAPI_ProductsDeleteWithDependenciesReturns409.
+- [x] Смена плана у продукта отклоняется с `409 protected`. — проверено: products_admin.go:138-140 (ErrProductProtected), admin/products.go:278-283 (409 protected, plan_id_immutable); TestAPI_ProductsPlanChangeIsProtected.
+- [x] Все мутации оставляют запись в `audit_log` с `actor_type=admin`, `actor_id=0`. — проверено: products_admin.go:119,174,234 → audit_log.go:987-1023 (ActorAdmin, ActorID "0"); TestCreateProduct_CreatesRowAndAudit, TestUpdateProductAdmin_ChangesPriceAndAuditsOldPrice, TestDeleteProduct_DeletesWithoutReferencesAndAudits.
+- [x] Консоль браузера чистая после create/update/delete. — проверено вживую на собранной панели (tools/adminserve -seed, headless Chromium, 2026-11-05): create 123 ₽ → update 777 ₽ → delete, все ответы 200, tab.console() и tab.errors() пусты после каждой операции.
+- [x] `go test -race ./admin/` зелёный, `golangci-lint` без замечаний. — проверено: прогнано 2026-11-05: go test -race ./admin/ ./internal/database/ ./internal/bot/ ./cmd/bot/ — ok (74.5s); golangci-lint run ./... — 0 issues.
 
 ## 10. Файлы
 

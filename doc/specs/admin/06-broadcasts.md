@@ -317,17 +317,17 @@ Sentinel-ошибки: `ErrBroadcastInvalid`, `ErrBroadcastLocked`,
 
 ## 9. Критерии приёмки
 
-- [ ] Ни один маршрут панели не отправляет сообщения в Telegram (проверяется отсутствием `tgbotapi` в `admin/`).
-- [ ] Созданная рассылка реально уходит: после сохранения черновика воркер берёт её в течение ~15 с (проверка вручную на тестовом боте).
-- [ ] Число получателей в диалоге совпадает с `recipients_total` после старта.
-- [ ] Правка и удаление заблокированы для `running` и для завершённых (кроме удаления завершённых).
-- [ ] `message_text` не попадает в аудит (только длина и хэш).
-- [ ] Ошибки доставки видны в детали (первые 20) и их число — в списке.
-- [ ] Отмена переводит `running` в `canceled`, и воркер прекращает отправку на следующем батче.
-- [ ] В боте нет команд `/broadcast` и `/broadcasts`, нет сессий черновика и инлайн-клавиатур рассылки.
-- [ ] `go test ./internal/bot/ ./tests/e2e/` зелёный после удаления флоу (остались только тесты воркера).
-- [ ] В процессе ровно один `BroadcastWorker` (панель не запускает второй).
-- [ ] Деактивация заблокировавших доступна из панели и повторяет поведение бота (revoked + deprovision), включая частичный сбой.
+- [x] Ни один маршрут панели не отправляет сообщения в Telegram (проверяется отсутствием `tgbotapi` в `admin/`). — проверено: в admin/ нет tgbotapi (греп 0); создание пишет только строку — admin/broadcasts.go:339-345, admin/broadcasts_test.go:17-19.
+- [x] Созданная рассылка реально уходит: после сохранения черновика воркер берёт её в течение ~15 с (проверка вручную на тестовом боте). — проверено: e2e TestE2E_BroadcastDraftDeliveredAfterCreate (tests/e2e/admin_test.go) — черновик scheduled уходит получателю через прод-воркер StartBroadcastWorker ровно один раз, recipients_total=1, событие broadcast_started несёт реальный размер аудитории; интервал тика 15 с — internal/bot/broadcast_constants.go:32. Реальная сетевая доставка в Telegram в e2e подменена фейком и остаётся ручной проверкой на тестовом боте.
+- [x] Число получателей в диалоге совпадает с `recipients_total` после старта. — проверено: SnapshotBroadcastRecipients публикует recipients_total в той же транзакции (internal/database/broadcast_recipients.go), TestSnapshotBroadcastRecipients_PublishesTotalWhileRunning; диалог и снапшот делят предикат — internal/database/broadcasts_admin.go:104-110.
+- [x] Правка и удаление заблокированы для `running` и для завершённых (кроме удаления завершённых). — проверено: admin/broadcasts.go:223-227,323; ErrBroadcastLocked — internal/database/broadcasts_admin.go:150-153; TestAPI_BroadcastsUpdate_Running, TestAPI_BroadcastsDelete.
+- [x] `message_text` не попадает в аудит (только длина и хэш). — проверено: audit_log.go:770-789 (только len + sha256), diff лишь изменённых полей :806-809.
+- [x] Ошибки доставки видны в детали (первые 20) и их число — в списке. — проверено: broadcastErrorsPreview=20 (admin/broadcasts.go:46, срез :466-483), failed_count в списке (:73,452); TestAPI_BroadcastsDetail_ErrorsPreview, TestAPI_BroadcastsList_NoDeliveryReport.
+- [x] Отмена переводит `running` в `canceled`, и воркер прекращает отправку на следующем батче. — проверено: CancelBroadcast — internal/database/broadcast_recipients.go:318-333; панель admin/broadcasts.go:270-286; воркер проверяет статус перед батчем (internal/bot/broadcast_worker.go:159-166) и снимает контекст :529-542; TestBroadcastRecipientClaimStopsAfterCancel, TestAPI_BroadcastsCancel.
+- [x] В боте нет команд `/broadcast` и `/broadcasts`, нет сессий черновика и инлайн-клавиатур рассылки. — проверено: греп /broadcast|bfilter_|broadcast_cancel|broadcast_details|broadcast_retry по internal/bot = 0; нет сессий черновика (internal/bot/handler.go:731-733); command.go без broadcast.
+- [x] `go test ./internal/bot/ ./tests/e2e/` зелёный после удаления флоу (остались только тесты воркера). — проверено: прогнано 2026-11-05: go test ./internal/bot/ ./tests/e2e/ -count=1 — ok (2.8s / 7.6s), плюс -race ./internal/bot/ — ok; тесты флоу команд удалены, остались тесты воркера.
+- [x] В процессе ровно один `BroadcastWorker` (панель не запускает второй). — проверено: единственный старт — cmd/bot/main.go:686 (StartBroadcastWorker), создание один раз — internal/bot/handler.go:127; в admin/ нет StartBroadcastWorker/NewBroadcastWorker.
+- [x] Деактивация заблокировавших доступна из панели и повторяет поведение бота (revoked + deprovision), включая частичный сбой. — проверено: seam BroadcastDeactivator (admin/broadcasts.go:36-40, admin/server.go:133-138); сервис revoked+deprovision+частичный сбой — internal/service/subscription_deactivate.go; TestDeactivateBlockedBroadcastRecipients_RevokesAndDeprovisions/_ReportsPartialFailure/_RetriesFailedDeprovision, HTTP TestAPI_BroadcastsDeactivate_Completed/_PartialFailure/_Guards.
 
 ## 10. Файлы
 

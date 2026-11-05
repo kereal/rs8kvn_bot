@@ -257,15 +257,15 @@ mux.HandleFunc("PUT /admin/api/plans/{id}/nodes", s.withAuth(s.handlePutPlanNode
 
 ## 9. Критерии приёмки
 
-- [ ] `api_token` отсутствует в любом JSON-ответе и в текстах ошибок; есть `has_api_token`; пустая строка в `PUT` не затирает токен (тест).
-- [ ] `type` вне `{3x-ui, proxman, fetch}` и смена `type` отклоняются, а не пишутся в БД (тесты).
-- [ ] Удаление ноды с привязками блокируется `409 in_use` с числами планов и подписок (тесты на оба счётчика).
-- [ ] Список нод содержит `plans_count`/`subscriptions_count` без N+1 (один SQL).
-- [ ] `PUT /plans/{id}/nodes` идемпотентен и атомарен (транзакция; тест на повтор).
-- [ ] Отвязка используемой ноды разрешена и оставляет `subscription_nodes` нетронутыми (панель не пишет в состояния).
-- [ ] Health вызывает `xui.Client.Ping`, не открывает второй HTTP-клиент с другой логикой; для proxman/fetch отвечает `400 validation`.
-- [ ] Все мутации пишут аудит `actor_type=admin`, `actor_id=0`; токен ни в одном снимке.
-- [ ] `go test -race ./admin/` зелёный, `golangci-lint` без замечаний.
+- [x] `api_token` отсутствует в любом JSON-ответе и в текстах ошибок; есть `has_api_token`; пустая строка в `PUT` не затирает токен (тест). — проверено: admin/nodes.go:32-57 (DTO без токена), admin/nodes_test.go:49,69-70,190-199, TestUpdateNodeAdmin_KeepsTokenOnEmpty.
+- [x] `type` вне `{3x-ui, proxman, fetch}` и смена `type` отклоняются, а не пишутся в БД (тесты). — проверено: internal/database/nodes_admin.go:409-424,:197-198; TestUpdateNodeAdmin_RejectsTypeChange, admin/nodes_test.go:103-107,179-182.
+- [x] Удаление ноды с привязками блокируется `409 in_use` с числами планов и подписок (тесты на оба счётчика). — проверено: nodes_admin.go:244-258; admin/nodes_test.go:240-243, TestDeleteNode_Guards (plans+subscriptions).
+- [x] Список нод содержит `plans_count`/`subscriptions_count` без N+1 (один SQL). — проверено: nodes_admin.go:29-33 (один SELECT, коррелированные подзапросы); TestListNodeOverviews_CountsWithoutNPlusOne.
+- [x] `PUT /plans/{id}/nodes` идемпотентен и атомарен (транзакция; тест на повтор). — проверено: nodes_admin.go:295 (Transaction), :126-130 (только дифф); TestReplacePlanNodes (повтор — no-op, без аудита).
+- [x] Отвязка используемой ноды разрешена и оставляет `subscription_nodes` нетронутыми (панель не пишет в состояния). — проверено: TestReplacePlanNodes_UnlinkNodeWithSubscriptions; nodes_admin.go:120-131 (subscription_nodes не трогается).
+- [x] Health вызывает `xui.Client.Ping`, не открывает второй HTTP-клиент с другой логикой; для proxman/fetch отвечает `400 validation`. — проверено: admin/nodes.go:234-250; admin/nodes_test.go:368-373,383-396 (для proxman — тот же код-путь, отдельного теста нет).
+- [x] Все мутации пишут аудит `actor_type=admin`, `actor_id=0`; токен ни в одном снимке. — проверено: audit_log.go:924-949 (ActorAdmin,"0"), :904-921 (снимок с has_api_token); nodes_admin.go:171,223,276.
+- [x] `go test -race ./admin/` зелёный, `golangci-lint` без замечаний. — проверено: прогнано 2026-11-05: go test -race ./admin/ ./internal/database/ ./internal/bot/ ./cmd/bot/ — ok (74.5s); golangci-lint run ./... — 0 issues.
 
 ## 10. Файлы
 
