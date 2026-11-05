@@ -37,7 +37,7 @@ const (
 // label values. Known commands are returned as-is; anything else becomes "unknown".
 func normalizeCommand(cmd string) string {
 	switch cmd {
-	case "start", "help", "invite", "mysub", "del", "setplan", "broadcast", "broadcasts", "send", "refstats", "v", "lastreg":
+	case "start", "help", "invite", "mysub", "del", "setplan", "send", "refstats", "v", "lastreg":
 		return cmd
 	default:
 		return "unknown"
@@ -79,10 +79,7 @@ type Handler struct {
 	adminRateLimiters map[int64]*ratelimiter.TokenBucket
 	adminRateLimitMu  sync.RWMutex
 
-	// Broadcast draft -> preview -> confirm session state (admin only)
-	broadcastSessions map[int64]*broadcastSession
-	broadcastMu       sync.RWMutex
-	broadcastWorker   *BroadcastWorker
+	broadcastWorker *BroadcastWorker
 
 	// Decomposed handlers
 	cmdHandler *CommandHandler
@@ -127,7 +124,6 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.BotStor
 	}
 	// Initialize admin rate limiters map
 	h.adminRateLimiters = make(map[int64]*ratelimiter.TokenBucket)
-	h.broadcastSessions = make(map[int64]*broadcastSession)
 	h.broadcastWorker = NewBroadcastWorker(h)
 
 	// Initialize decomposed handlers
@@ -706,10 +702,6 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 
 	if update.Message != nil {
 		if update.Message.IsCommand() {
-			if h.isAdmin(chatID) && h.broadcastSessionActive(chatID) && update.Message.Command() != "broadcast" {
-				h.clearBroadcastSession(chatID)
-			}
-
 			switch update.Message.Command() {
 			case "start":
 				err = h.HandleStart(ctx, update)
@@ -723,10 +715,6 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 				err = h.HandleDel(ctx, update)
 			case "setplan":
 				err = h.HandleSetPlan(ctx, update)
-			case "broadcast":
-				err = h.HandleBroadcast(ctx, update)
-			case "broadcasts":
-				err = h.HandleBroadcastHistory(ctx, update)
 			case "send":
 				err = h.HandleSend(ctx, update)
 			case "refstats":
@@ -740,13 +728,9 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 					"Неизвестная команда. Используйте /start или /help")
 			}
 		} else {
-			// Non-command message: if admin is composing a broadcast draft,
-			// treat it as the broadcast message; otherwise send help hint.
-			if h.isAdmin(chatID) && h.broadcastSessionActive(chatID) {
-				err = h.HandleBroadcastDraft(ctx, update)
-			} else {
-				err = h.HandleHelp(ctx, update)
-			}
+			// Non-command message: no draft sessions — broadcasts are managed
+			// in the admin panel (doc/specs/admin/06-broadcasts.md).
+			err = h.HandleHelp(ctx, update)
 		}
 	} else if update.CallbackQuery != nil {
 		err = h.HandleCallback(ctx, update)

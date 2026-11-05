@@ -9,6 +9,8 @@
   import AuditLog from './views/AuditLog.svelte'
   import Invites from './views/Invites.svelte'
   import Nodes from './views/Nodes.svelte'
+  import Broadcasts from './views/Broadcasts.svelte'
+  import BroadcastDetail from './views/BroadcastDetail.svelte'
 
   // One entry per screen. Adding a screen means adding a route here and a view
   // file — no router dependency. `detail` is optional: it renders instead of
@@ -18,6 +20,7 @@
     nodes: { label: 'Ноды', component: Nodes },
     products: { label: 'Продукты', component: Products },
     invites: { label: 'Инвайты', component: Invites },
+    broadcasts: { label: 'Рассылки', component: Broadcasts, detail: BroadcastDetail },
     orders: { label: 'Заказы', component: Orders, detail: OrdersDetail },
     audit: { label: 'Журнал', component: AuditLog }
   }

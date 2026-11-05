@@ -48,15 +48,17 @@ type PlanStore interface {
 // every screen declares the few methods it needs (PlanStore, and one interface
 // per upcoming screen) instead of widening a single god interface.
 type Server struct {
-	addr     string
-	token    string
-	plans    PlanStore
-	nodes    NodeStore    // screen: nodes
-	products ProductStore // screen: products
-	invites  InviteStore  // screen: invites
-	orders   OrderStore   // screen: orders
-	audit    AuditStore   // screen: audit
-	dist     fs.FS
+	addr        string
+	token       string
+	plans       PlanStore
+	nodes       NodeStore            // screen: nodes
+	products    ProductStore         // screen: products
+	invites     InviteStore          // screen: invites
+	orders      OrderStore           // screen: orders
+	broadcasts  BroadcastStore       // screen: broadcasts
+	deactivator BroadcastDeactivator // broadcasts: revoke blocked users (service seam)
+	audit       AuditStore           // screen: audit
+	dist        fs.FS
 
 	mu           sync.Mutex
 	server       *http.Server
@@ -75,16 +77,24 @@ func NewServer(addr, token string, db *database.Service) *Server {
 	}
 
 	return &Server{
-		addr:     addr,
-		token:    token,
-		plans:    db, // screen: plans (existing)
-		nodes:    db, // screen: nodes
-		products: db, // screen: products
-		invites:  db, // screen: invites
-		orders:   db, // screen: orders
-		audit:    db, // screen: audit
-		dist:     dist,
+		addr:       addr,
+		token:      token,
+		plans:      db, // screen: plans (existing)
+		nodes:      db, // screen: nodes
+		products:   db, // screen: products
+		invites:    db, // screen: invites
+		orders:     db, // screen: orders
+		broadcasts: db, // screen: broadcasts
+		audit:      db, // screen: audit
+		dist:       dist,
 	}
+}
+
+// SetBroadcastDeactivator wires the subscription service used by the
+// deactivate-blocked action. The panel never sends Telegram messages itself:
+// only the revocation service call goes through here (spec 06 §3).
+func (s *Server) SetBroadcastDeactivator(d BroadcastDeactivator) {
+	s.deactivator = d
 }
 
 // Handler returns the fully wired handler. It is exported so tests can drive
@@ -116,6 +126,17 @@ func (s *Server) Handler() http.Handler {
 	// --- orders ---
 	mux.HandleFunc("GET /admin/api/orders", s.withAuth(s.handleListOrders))
 	mux.HandleFunc("GET /admin/api/orders/{id}", s.withAuth(s.handleGetOrder))
+
+	// --- broadcasts ---
+	mux.HandleFunc("GET /admin/api/broadcasts", s.withAuth(s.handleListBroadcasts))
+	mux.HandleFunc("POST /admin/api/broadcasts", s.withAuth(s.handleCreateBroadcast))
+	mux.HandleFunc("GET /admin/api/broadcasts/audience", s.withAuth(s.handleBroadcastAudience))
+	mux.HandleFunc("GET /admin/api/broadcasts/{id}", s.withAuth(s.handleGetBroadcast))
+	mux.HandleFunc("PUT /admin/api/broadcasts/{id}", s.withAuth(s.handleUpdateBroadcast))
+	mux.HandleFunc("DELETE /admin/api/broadcasts/{id}", s.withAuth(s.handleDeleteBroadcast))
+	mux.HandleFunc("POST /admin/api/broadcasts/{id}/cancel", s.withAuth(s.handleCancelBroadcast))
+	mux.HandleFunc("POST /admin/api/broadcasts/{id}/retry", s.withAuth(s.handleRetryBroadcast))
+	mux.HandleFunc("POST /admin/api/broadcasts/{id}/deactivate-blocked", s.withAuth(s.handleDeactivateBlocked))
 
 	// --- invites ---
 	mux.HandleFunc("GET /admin/api/invites", s.withAuth(s.handleListInvites))

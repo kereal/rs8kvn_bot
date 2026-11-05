@@ -48,47 +48,6 @@ func TestGenerateInviteCode(t *testing.T) {
 // These functions are tested via integration tests with a real bot instance.
 // See integration_test.go for integration tests.
 
-func TestHandleBroadcast_MessageTooLong(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{
-		TelegramAdminID: 123456,
-	}
-	mockDB := testutil.NewBotStoreFake()
-	mockBot := testutil.NewBotAPI()
-	handler := NewHandler(mockBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	admin := &tgbotapi.User{ID: 123456, UserName: "admin"}
-	ctx := context.Background()
-
-	// (a) A message just over one Telegram message is now accepted: the draft
-	// is auto-split, so the handler must NOT reject it.
-	justOver := make([]byte, config.MaxTelegramMessageLen+1)
-	for i := range justOver {
-		justOver[i] = 'a'
-	}
-
-	handler.HandleBroadcast(ctx, createCommandUpdate(123456, admin, "/broadcast"))
-	handler.HandleBroadcastDraft(ctx, createTextUpdate(admin, "Тестовая рассылка"))
-	handler.HandleBroadcastDraft(ctx, createTextUpdate(admin, string(justOver)))
-	assert.True(t, handler.broadcastSessionActive(123456),
-		"Handler should accept a message slightly over one Telegram message (moves to preview)")
-	assert.NotContains(t, mockBot.LastSentTextSafe(), "слишком длинное",
-		"Handler should not reject a message under the broadcast cap")
-
-	// (b) A message over the hard broadcast cap is rejected.
-	handler.HandleBroadcast(ctx, createCommandUpdate(123456, admin, "/broadcast"))
-	handler.HandleBroadcastDraft(ctx, createTextUpdate(admin, "Тестовая рассылка"))
-
-	tooLong := make([]byte, config.MaxTelegramMessageLen*20+1)
-	for i := range tooLong {
-		tooLong[i] = 'a'
-	}
-
-	handler.HandleBroadcastDraft(ctx, createTextUpdate(admin, string(tooLong)))
-	assert.True(t, mockBot.SendCalledSafe())
-	assert.Contains(t, mockBot.LastSentTextSafe(), "слишком длинное")
-}
-
 func TestHandleSend_RateLimit(t *testing.T) {
 	t.Parallel()
 
@@ -426,9 +385,9 @@ func TestHandleUpdate_AdminCommandsBlockedForNonAdmin(t *testing.T) {
 			"non-admin must not receive referral stats")
 	})
 
-	// /send, /broadcast, /del and /setplan: silently ignored for non-admins
+	// /send, /del and /setplan: silently ignored for non-admins
 	// (no user-visible action).
-	for _, cmd := range []string{"/send", "/broadcast", "/del", "/setplan"} {
+	for _, cmd := range []string{"/send", "/del", "/setplan"} {
 		t.Run(cmd+" silently ignored", func(t *testing.T) {
 			t.Parallel()
 

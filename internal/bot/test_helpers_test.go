@@ -27,17 +27,6 @@ func newTestAdminHandler(cfg *config.Config, mockDB *testutil.BotStoreFake, mock
 	return h
 }
 
-// createTextUpdate creates a tgbotapi.Update with a plain (non-command) text message.
-func createTextUpdate(fromUser *tgbotapi.User, text string) tgbotapi.Update {
-	return tgbotapi.Update{
-		Message: &tgbotapi.Message{
-			Chat: &tgbotapi.Chat{ID: fromUser.ID},
-			From: fromUser,
-			Text: text,
-		},
-	}
-}
-
 // text string, fromUser *tgbotapi.User and return tgbotapi.Update.
 func createCommandUpdate(messageID int64, fromUser *tgbotapi.User, text string) tgbotapi.Update {
 	cmdLen := 0

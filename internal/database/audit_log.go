@@ -2,9 +2,12 @@ package database
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
+	"unicode/utf8"
 )
 
 // EntityType адресует сущность, к которой относится событие аудита.
@@ -74,6 +77,14 @@ const (
 	AuditEventBroadcastCompleted = "broadcast_completed"
 	AuditEventBroadcastFailed    = "broadcast_failed"
 	AuditEventBroadcastCanceled  = "broadcast_canceled"
+
+	// Рассылки (админ-панель): управление переехало из бота
+	// (doc/specs/admin/06-broadcasts.md §6).
+
+	AuditEventBroadcastCreated = "broadcast_created"
+	AuditEventBroadcastUpdated = "broadcast_updated"
+	AuditEventBroadcastRetried = "broadcast_retried"
+	AuditEventBroadcastDeleted = "broadcast_deleted"
 
 	// Ноды и привязки планов (админ-панель).
 
@@ -724,6 +735,95 @@ func AuditBroadcastCanceled(b *Broadcast, adminTelegramID int64) *AuditLog {
 		NewState:   marshalAuditJSON(map[string]any{"status": string(BroadcastStatusCanceled)}),
 		Details:    marshalAuditDetails(map[string]any{"name": b.Name}),
 	}
+}
+
+// broadcastAuditMessage суммаризирует текст рассылки для аудита: это
+// пользовательский контент, он уже лежит в таблице broadcasts, поэтому в
+// журнал попадают только длина в символах и SHA-256.
+func broadcastAuditMessage(text string) map[string]any {
+	sum := sha256.Sum256([]byte(text))
+
+	return map[string]any{
+		"len":    utf8.RuneCountInString(text),
+		"sha256": hex.EncodeToString(sum[:]),
+	}
+}
+
+// broadcastAuditSnapshot — снапшот редактируемых полей черновика рассылки.
+// message_text входит только в суммаризованном виде (см. broadcastAuditMessage).
+func broadcastAuditSnapshot(b *Broadcast) map[string]any {
+	if b == nil {
+		return nil
+	}
+
+	s := map[string]any{
+		"name":         b.Name,
+		"filters":      b.Filters,
+		"message_text": broadcastAuditMessage(b.MessageText),
+	}
+	if b.PlannedAt != nil {
+		s["planned_at"] = b.PlannedAt.UTC().Format(time.RFC3339)
+	}
+
+	return s
+}
+
+// AuditBroadcastCreated фиксирует создание рассылки из панели.
+func AuditBroadcastCreated(b *Broadcast) *AuditLog {
+	return NewAuditLog(
+		EntityBroadcast,
+		fmt.Sprintf("%d", b.ID),
+		AuditEventBroadcastCreated,
+		ActorAdmin,
+		"0",
+		nil,
+		broadcastAuditSnapshot(b),
+		nil,
+	)
+}
+
+// AuditBroadcastUpdated фиксирует правку черновика: old/new содержат только
+// изменившиеся поля (name, filters, planned_at; message_text — длина и хэш).
+func AuditBroadcastUpdated(id uint, before, after *Broadcast) *AuditLog {
+	oldJSON, newJSON := diffState(broadcastAuditSnapshot(before), broadcastAuditSnapshot(after))
+
+	return &AuditLog{
+		EntityType: EntityBroadcast,
+		EntityID:   marshalAuditJSONString(fmt.Sprintf("%d", id)),
+		Event:      AuditEventBroadcastUpdated,
+		ActorType:  ActorAdmin,
+		ActorID:    marshalAuditJSONString("0"),
+		OldState:   oldJSON,
+		NewState:   newJSON,
+	}
+}
+
+// AuditBroadcastRetried фиксирует повтор провалившейся рассылки из панели.
+func AuditBroadcastRetried(id uint, retryCount int) *AuditLog {
+	return &AuditLog{
+		EntityType: EntityBroadcast,
+		EntityID:   marshalAuditJSONString(fmt.Sprintf("%d", id)),
+		Event:      AuditEventBroadcastRetried,
+		ActorType:  ActorAdmin,
+		ActorID:    marshalAuditJSONString("0"),
+		NewState:   marshalAuditJSON(map[string]any{"status": string(BroadcastStatusScheduled)}),
+		Details:    marshalAuditDetails(map[string]any{"retry_count": retryCount}),
+	}
+}
+
+// AuditBroadcastDeleted фиксирует удаление рассылки из панели. Снапшот
+// нужен: строка удалена, а журнал переживает удаление сущности.
+func AuditBroadcastDeleted(b *Broadcast) *AuditLog {
+	return NewAuditLog(
+		EntityBroadcast,
+		fmt.Sprintf("%d", b.ID),
+		AuditEventBroadcastDeleted,
+		ActorAdmin,
+		"0",
+		broadcastAuditSnapshot(b),
+		nil,
+		nil,
+	)
 }
 
 // --- Технические агрегаты ---------------------------------------------------
