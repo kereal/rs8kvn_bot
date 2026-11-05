@@ -38,7 +38,7 @@ type planPayload struct {
 }
 
 func (s *Server) handleListPlans(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.store.ListPlanOverviews(r.Context())
+	rows, err := s.plans.ListPlanOverviews(r.Context())
 	if err != nil {
 		s.writeStoreError(w, "list plans", err)
 		return
@@ -75,7 +75,7 @@ func (s *Server) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 		IsActive:     payload.IsActive,
 	}
 
-	err := s.store.CreatePlan(r.Context(), plan)
+	err := s.plans.CreatePlan(r.Context(), plan)
 	if err != nil {
 		s.writeStoreError(w, "create plan", err)
 		return
@@ -103,7 +103,7 @@ func (s *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 		IsActive:     payload.IsActive,
 	}
 
-	err := s.store.UpdatePlan(r.Context(), plan)
+	err := s.plans.UpdatePlan(r.Context(), plan)
 	if err != nil {
 		s.writeStoreError(w, "update plan", err)
 		return
@@ -121,7 +121,7 @@ func (s *Server) handleDeletePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := s.store.DeletePlan(r.Context(), id)
+	err := s.plans.DeletePlan(r.Context(), id)
 	if err != nil {
 		s.writeStoreError(w, "delete plan", err)
 		return

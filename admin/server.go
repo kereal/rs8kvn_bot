@@ -43,10 +43,14 @@ type PlanStore interface {
 }
 
 // Server is the admin HTTP server. Create it with NewServer and run Start/Stop.
+//
+// The server holds the concrete *database.Service and narrows it per screen:
+// every screen declares the few methods it needs (PlanStore, and one interface
+// per upcoming screen) instead of widening a single god interface.
 type Server struct {
 	addr  string
 	token string
-	store PlanStore
+	plans PlanStore
 	dist  fs.FS
 
 	mu           sync.Mutex
@@ -56,7 +60,7 @@ type Server struct {
 
 // NewServer builds an admin server bound to addr. The token is required: an
 // empty token makes Start fail instead of exposing an unauthenticated panel.
-func NewServer(addr, token string, store PlanStore) *Server {
+func NewServer(addr, token string, db *database.Service) *Server {
 	dist, err := fs.Sub(distFiles, "dist")
 	if err != nil {
 		// The embed directive guarantees this directory exists; a failure here
@@ -65,7 +69,7 @@ func NewServer(addr, token string, store PlanStore) *Server {
 		dist = nil
 	}
 
-	return &Server{addr: addr, token: token, store: store, dist: dist}
+	return &Server{addr: addr, token: token, plans: db, dist: dist}
 }
 
 // Handler returns the fully wired handler. It is exported so tests can drive
