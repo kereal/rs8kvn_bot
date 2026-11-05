@@ -76,6 +76,12 @@ const (
 
 	AuditEventSyncRunDegraded        = "sync_run_degraded"
 	AuditEventOrphanedClientsRevoked = "orphaned_clients_revoked"
+
+	// Каталог продуктов (админ-панель).
+
+	AuditEventProductCreated = "product_created"
+	AuditEventProductUpdated = "product_updated"
+	AuditEventProductDeleted = "product_deleted"
 )
 
 // AuditLog — одна запись журнала аудита (append-only: только INSERT и SELECT).
@@ -743,4 +749,59 @@ func (s *Service) DeleteAuditLogBefore(ctx context.Context, before time.Time, ba
 	}
 
 	return result.RowsAffected, nil
+}
+
+// --- Продукты (админ-панель) -----------------------------------------------
+
+// productAuditState возвращает снапшот значимых полей продукта для
+// old_state/new_state событий каталога.
+func productAuditState(p Product) map[string]any {
+	return map[string]any{
+		"plan_id":       p.PlanID,
+		"name":          p.Name,
+		"duration_days": p.DurationDays,
+		"price_cents":   p.PriceCents,
+		"currency":      p.Currency,
+		"is_active":     p.IsActive,
+	}
+}
+
+// AuditProductCreated фиксирует создание продукта каталога.
+func AuditProductCreated(p *Product) *AuditLog {
+	return &AuditLog{
+		EntityType: EntityProduct,
+		EntityID:   marshalAuditJSONString(fmt.Sprintf("%d", p.ID)),
+		Event:      AuditEventProductCreated,
+		ActorType:  ActorAdmin,
+		ActorID:    marshalAuditJSONString("0"),
+		NewState:   marshalAuditJSON(productAuditState(*p)),
+	}
+}
+
+// AuditProductUpdated фиксирует изменение продукта каталога.
+func AuditProductUpdated(id uint, before, after map[string]any) *AuditLog {
+	oldJSON, newJSON := diffState(before, after)
+
+	return &AuditLog{
+		EntityType: EntityProduct,
+		EntityID:   marshalAuditJSONString(fmt.Sprintf("%d", id)),
+		Event:      AuditEventProductUpdated,
+		ActorType:  ActorAdmin,
+		ActorID:    marshalAuditJSONString("0"),
+		OldState:   oldJSON,
+		NewState:   newJSON,
+	}
+}
+
+// AuditProductDeleted фиксирует удаление продукта каталога; история остаётся
+// в журнале после физического удаления строки.
+func AuditProductDeleted(p *Product) *AuditLog {
+	return &AuditLog{
+		EntityType: EntityProduct,
+		EntityID:   marshalAuditJSONString(fmt.Sprintf("%d", p.ID)),
+		Event:      AuditEventProductDeleted,
+		ActorType:  ActorAdmin,
+		ActorID:    marshalAuditJSONString("0"),
+		OldState:   marshalAuditJSON(productAuditState(*p)),
+	}
 }

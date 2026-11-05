@@ -48,10 +48,11 @@ type PlanStore interface {
 // every screen declares the few methods it needs (PlanStore, and one interface
 // per upcoming screen) instead of widening a single god interface.
 type Server struct {
-	addr  string
-	token string
-	plans PlanStore
-	dist  fs.FS
+	addr     string
+	token    string
+	plans    PlanStore
+	dist     fs.FS
+	products ProductStore // screen: products
 
 	mu           sync.Mutex
 	server       *http.Server
@@ -69,7 +70,7 @@ func NewServer(addr, token string, db *database.Service) *Server {
 		dist = nil
 	}
 
-	return &Server{addr: addr, token: token, plans: db, dist: dist}
+	return &Server{addr: addr, token: token, plans: db, dist: dist, products: db} // screen: products
 }
 
 // Handler returns the fully wired handler. It is exported so tests can drive
@@ -82,6 +83,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/plans", s.withAuth(s.handleCreatePlan))
 	mux.HandleFunc("PUT /admin/api/plans/{id}", s.withAuth(s.handleUpdatePlan))
 	mux.HandleFunc("DELETE /admin/api/plans/{id}", s.withAuth(s.handleDeletePlan))
+	// --- products ---
+	mux.HandleFunc("GET /admin/api/products", s.withAuth(s.handleListProducts))
+	mux.HandleFunc("POST /admin/api/products", s.withAuth(s.handleCreateProduct))
+	mux.HandleFunc("PUT /admin/api/products/{id}", s.withAuth(s.handleUpdateProduct))
+	mux.HandleFunc("DELETE /admin/api/products/{id}", s.withAuth(s.handleDeleteProduct))
 	mux.HandleFunc("/admin/", s.handleSPA)
 
 	return securityHeaders(mux)
