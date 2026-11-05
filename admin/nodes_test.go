@@ -201,7 +201,7 @@ func TestNodesAPI_Update(t *testing.T) {
 	assert.Equal(t, "secret-token", stored.APIToken)
 
 	// Новый токен заменяется, но в ответ не попадает.
-	retoken := `{"name":"renamed","type":"3x-ui","host":"http://203.0.113.20:2053","subscription_url":"https://sub.example.com/s/","inbound_ids":[2],"api_token":"fresh-secret","is_active":false}`
+	retoken := `{"name":"renamed","type":"3x-ui","host":"http://203.0.113.20:2053","subscription_url":"https://sub.example.com/s/","inbound_ids":[2],"api_token":"fresh-secret","is_active":false}` // #nosec G101 -- test fixture, not a credential
 	rec = do(t, srv, http.MethodPut, fmt.Sprintf("/admin/api/nodes/%d", id), testToken, retoken)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.NotContains(t, rec.Body.String(), "fresh-secret")
@@ -379,7 +379,7 @@ func TestNodesAPI_Health(t *testing.T) {
 	assert.Contains(t, validation.Details, "type")
 
 	// 3x-ui без токена — 400 validation details.api_token.
-	tokenlessBody := `{"name":"no-token","type":"3x-ui","host":"http://203.0.113.30:2053","subscription_url":"https://sub.example.com/s/","inbound_ids":[],"api_token":"","is_active":true}`
+	tokenlessBody := `{"name":"no-token","type":"3x-ui","host":"http://203.0.113.30:2053","subscription_url":"https://sub.example.com/s/","inbound_ids":[],"api_token":"","is_active":true}` // #nosec G101 -- test fixture, not a credential
 	tokenlessID, _ := createNodeViaAPI(t, srv, tokenlessBody)
 
 	rec = do(t, srv, http.MethodPost, fmt.Sprintf("/admin/api/nodes/%d/health", tokenlessID), testToken, "")

@@ -28,6 +28,7 @@ var inviteCodeRe = regexp.MustCompile(`^[a-z0-9]{6,16}$`)
 // удаления: SubscriptionsCount > 0 означает, что код уже использован.
 type InviteOverview struct {
 	Invite
+
 	ReferredCount      int64
 	SubscriptionsCount int64
 }
@@ -106,11 +107,12 @@ func (s *Service) CreateInviteAdmin(ctx context.Context, invite *Invite, origin 
 		return fmt.Errorf("check invite referrer: %w", err)
 	}
 
-	if err := s.db.WithContext(ctx).Create(invite).Error; err != nil {
+	err = s.db.WithContext(ctx).Create(invite).Error
+	if err != nil {
 		return classifyInviteWriteError("create invite", err)
 	}
 
-	s.insertAuditLogBestEffort(ctx, AuditInviteCreated(invite, origin))
+	_ = s.insertAuditLogBestEffort(ctx, AuditInviteCreated(invite, origin))
 
 	return nil
 }
@@ -146,11 +148,12 @@ func (s *Service) DeleteInvite(ctx context.Context, code string) (Invite, error)
 		return Invite{}, &InviteInUseError{Details: map[string]int64{"subscriptions": used}}
 	}
 
-	if err := s.db.WithContext(ctx).Where("code = ?", code).Delete(&Invite{}).Error; err != nil {
+	err = s.db.WithContext(ctx).Where("code = ?", code).Delete(&Invite{}).Error
+	if err != nil {
 		return Invite{}, fmt.Errorf("delete invite: %w", err)
 	}
 
-	s.insertAuditLogBestEffort(ctx, AuditInviteDeleted(&invite))
+	_ = s.insertAuditLogBestEffort(ctx, AuditInviteDeleted(&invite))
 
 	return invite, nil
 }

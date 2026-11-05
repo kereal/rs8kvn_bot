@@ -27,6 +27,7 @@ type OrderAdminFilter struct {
 // OrderOverview — заказ с denormalized полями для панели.
 type OrderOverview struct {
 	Order
+
 	TelegramID   int64  // из subscriptions (JOIN)
 	PlanName     string // из products -> plans (JOIN)
 	ProductName  string // из products (JOIN)

@@ -81,7 +81,8 @@ func filterProducts(r *http.Request, items []productItem) []productItem {
 	planID := uint(0)
 
 	if raw := r.URL.Query().Get("plan_id"); raw != "" {
-		if parsed, err := strconv.ParseUint(raw, 10, 32); err == nil {
+		parsed, err := strconv.ParseUint(raw, 10, 32)
+		if err == nil {
 			planID = uint(parsed)
 		}
 	}

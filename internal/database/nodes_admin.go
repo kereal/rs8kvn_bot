@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"sort"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -423,7 +423,8 @@ func validateNodeFields(node *Node) error {
 		}
 	}
 
-	if _, err := ParseInboundIDs(node.InboundIDs); err != nil {
+	_, err := ParseInboundIDs(node.InboundIDs)
+	if err != nil {
 		return &NodeFieldError{Field: "inbound_ids", Reason: err.Error()}
 	}
 
@@ -456,7 +457,7 @@ func sortedUniqueIDs(ids []uint) []uint {
 		}
 	}
 
-	sort.Slice(unique, func(i, j int) bool { return unique[i] < unique[j] })
+	slices.Sort(unique)
 
 	return unique
 }

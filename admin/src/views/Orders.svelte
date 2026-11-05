@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { formatDate, formatMoney, humanError } from '../lib/format.js'
 
@@ -59,6 +60,8 @@
       loading = false
     }
   }
+
+  onMount(load)
 
   function resetAndLoad() {
     offset = 0

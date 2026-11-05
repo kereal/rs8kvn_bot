@@ -85,7 +85,8 @@ func (s *Server) handleCreateInvite(w http.ResponseWriter, r *http.Request) {
 		origin = database.InviteOriginGenerated
 	}
 
-	if err := s.invites.CreateInviteAdmin(r.Context(), invite, origin); err != nil {
+	err := s.invites.CreateInviteAdmin(r.Context(), invite, origin)
+	if err != nil {
 		s.writeStoreError(w, "create invite", err)
 		return
 	}

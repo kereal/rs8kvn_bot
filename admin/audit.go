@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +41,7 @@ type auditItem struct {
 // auditDetail adds the before/after snapshots for the expanded row.
 type auditDetail struct {
 	auditItem
+
 	OldState json.RawMessage `json:"old_state"`
 	NewState json.RawMessage `json:"new_state"`
 }
@@ -274,11 +276,5 @@ func parseAuditDate(w http.ResponseWriter, raw string, endOfDay bool) (*time.Tim
 }
 
 func contains(values []string, needle string) bool {
-	for _, value := range values {
-		if value == needle {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(values, needle)
 }

@@ -101,15 +101,18 @@ func (s *Service) CreateProduct(ctx context.Context, p *Product) error {
 		return fmt.Errorf("create product: %w", ErrProductInvalid)
 	}
 
-	if err := validateProductFields(p); err != nil {
+	err := validateProductFields(p)
+	if err != nil {
 		return err
 	}
 
-	if _, err := s.GetPlanByID(ctx, p.PlanID); err != nil {
+	_, err = s.GetPlanByID(ctx, p.PlanID)
+	if err != nil {
 		return invalidProduct("plan_id", "plan not found")
 	}
 
-	if err := s.db.WithContext(ctx).Create(p).Error; err != nil {
+	err = s.db.WithContext(ctx).Create(p).Error
+	if err != nil {
 		return classifyProductWriteError("create product", err)
 	}
 
@@ -136,7 +139,8 @@ func (s *Service) UpdateProductAdmin(ctx context.Context, p *Product) error {
 		return fmt.Errorf("plan_id %d differs from current %d: %w", p.PlanID, current.PlanID, ErrProductProtected)
 	}
 
-	if err := validateProductFields(p); err != nil {
+	err = validateProductFields(p)
+	if err != nil {
 		return err
 	}
 
@@ -157,7 +161,8 @@ func (s *Service) UpdateProductAdmin(ctx context.Context, p *Product) error {
 
 	before := productAuditState(*current)
 
-	if err := s.UpdateProductGuarded(ctx, p); err != nil {
+	err = s.UpdateProductGuarded(ctx, p)
+	if err != nil {
 		return err
 	}
 

@@ -109,10 +109,7 @@ func (s *Service) ListAuditLogPage(ctx context.Context, f AuditLogFilter) ([]Aud
 		limit = auditLogMaxLimit
 	}
 
-	offset := f.Offset
-	if offset < 0 {
-		offset = 0
-	}
+	offset := max(f.Offset, 0)
 
 	var total int64
 

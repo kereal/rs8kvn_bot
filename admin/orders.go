@@ -67,6 +67,7 @@ type orderItem struct {
 // needs it for manual reconciliation, so it is detail-only.
 type orderDetail struct {
 	orderItem
+
 	ProductID        uint       `json:"product_id"`
 	ExpiresAt        *time.Time `json:"expires_at"`
 	PaymentURL       string     `json:"payment_url"`
