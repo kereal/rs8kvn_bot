@@ -108,12 +108,8 @@ func (s *Service) GetRecentAuditLog(ctx context.Context, limit int) ([]AuditLog,
 		limit = 100
 	}
 
-	var events []AuditLog
-
-	err := s.db.WithContext(ctx).
-		Order("created_at DESC, id DESC").
-		Limit(limit).
-		Find(&events).Error
+	// Delegated so the package keeps a single audit query builder.
+	events, _, err := s.ListAuditLogPage(ctx, AuditLogFilter{Limit: limit, Desc: true})
 	if err != nil {
 		return nil, fmt.Errorf("get recent audit log: %w", err)
 	}
