@@ -121,14 +121,15 @@ func updateBroadcastRecipientState(ctx context.Context, s *Service, broadcastID 
 	}(ctx)
 
 	var status, recipientsState string
-	err = conn.QueryRowContext(ctx, "SELECT status, recipients_state FROM broadcasts WHERE id = ?", broadcastID).Scan(&status, &recipientsState)
+	var recipientsTotal int64
+	err = conn.QueryRowContext(ctx, "SELECT status, recipients_state, recipients_total FROM broadcasts WHERE id = ?", broadcastID).Scan(&status, &recipientsState, &recipientsTotal)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrBroadcastNotFound
 		}
 		return fmt.Errorf("load broadcast state: %w", err)
 	}
-	broadcast := &Broadcast{ID: broadcastID, Status: status, RecipientsState: recipientsState}
+	broadcast := &Broadcast{ID: broadcastID, Status: status, RecipientsState: recipientsState, RecipientsTotal: recipientsTotal}
 	state, err := parseBroadcastRecipientState(broadcast)
 	if err != nil {
 		return err
@@ -141,7 +142,13 @@ func updateBroadcastRecipientState(ctx context.Context, s *Service, broadcastID 
 	if err != nil {
 		return err
 	}
-	result, err := conn.ExecContext(ctx, "UPDATE broadcasts SET recipients_state = ? WHERE id = ?", broadcast.RecipientsState, broadcastID)
+	// recipients_total round-trips through this helper so the snapshot mutation
+	// can publish the audience size while the campaign is still running: the
+	// panel reads the column, and before that it stayed 0 until the campaign
+	// finished (the worker kept the total in memory only). Callers that do not
+	// touch the field write back the value they just read, so none of them can
+	// zero a published total.
+	result, err := conn.ExecContext(ctx, "UPDATE broadcasts SET recipients_state = ?, recipients_total = ? WHERE id = ?", broadcast.RecipientsState, broadcast.RecipientsTotal, broadcastID)
 	if err != nil {
 		return fmt.Errorf("save broadcast recipient state: %w", err)
 	}
@@ -169,9 +176,13 @@ func (s *Service) SnapshotBroadcastRecipients(ctx context.Context, broadcastID u
 		return 0, fmt.Errorf("select broadcast audience: %w", query.Error)
 	}
 	returnValue := int64(0)
-	err := updateBroadcastRecipientState(ctx, s, broadcastID, func(_ *Broadcast, state *broadcastRecipientState) error {
+	err := updateBroadcastRecipientState(ctx, s, broadcastID, func(broadcast *Broadcast, state *broadcastRecipientState) error {
 		if state.Snapshot {
 			returnValue = int64(len(state.Recipients))
+			// Keep the column authoritative even on a resume: the frozen
+			// snapshot is the only valid audience size.
+			broadcast.RecipientsTotal = returnValue
+
 			return nil
 		}
 		state.Snapshot = true
@@ -184,6 +195,8 @@ func (s *Service) SnapshotBroadcastRecipients(ctx context.Context, broadcastID u
 			})
 		}
 		returnValue = int64(len(state.Recipients))
+		broadcast.RecipientsTotal = returnValue
+
 		return nil
 	})
 	if err != nil {

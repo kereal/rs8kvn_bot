@@ -789,3 +789,70 @@ func TestE2E_BroadcastCrashMidChunksResumesAfterRestart(t *testing.T) {
 	assert.Equal(t, int64(1), cur.SentCount)
 	assert.Equal(t, int64(0), cur.FailedCount)
 }
+
+// TestE2E_BroadcastDraftDeliveredAfterCreate закрывает автоматическую часть
+// критерия приёмки doc/specs/admin/06-broadcasts.md #2: черновик, сохранённый
+// панелью в статусе scheduled, подхватывается прод-воркером
+// (StartBroadcastWorker) и уходит получателю без ручных действий. Реальная
+// доставка в Telegram остаётся ручной проверкой на тестовом боте.
+//
+// Заодно фиксирует два свойства, которые панель читает из строки рассылки:
+// recipients_total публикуется снапшотом до завершения кампании, а событие
+// broadcast_started в аудите несёт реальный размер аудитории, а не 0.
+func TestE2E_BroadcastDraftDeliveredAfterCreate(t *testing.T) {
+	t.Parallel()
+
+	env := setupE2EEnv(t)
+	defer func() {
+		err := env.db.Close()
+		if err != nil {
+			t.Logf("Warning: failed to close database: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+	userChatID := int64(500101)
+	_, err := env.subService.Create(ctx, userChatID, "broadcastuser", "")
+	require.NoError(t, err)
+
+	b := &database.Broadcast{
+		Name:        "draft from panel",
+		MessageText: "Привет из панели",
+		Filters:     "{}",
+		Status:      string(database.BroadcastStatusScheduled),
+	}
+	require.NoError(t, env.db.CreateBroadcast(ctx, b))
+
+	runCtx, cancel := context.WithCancel(ctx)
+	env.handler.StartBroadcastWorker(runCtx)
+	t.Cleanup(func() {
+		cancel()
+		env.handler.WaitForBackgroundGoroutines()
+	})
+
+	require.Eventually(t, func() bool {
+		cur, err := env.db.GetBroadcast(ctx, b.ID)
+		return err == nil && cur.Status == string(database.BroadcastStatusCompleted)
+	}, 5*time.Second, 10*time.Millisecond)
+
+	var delivered []string
+	for _, msg := range env.botAPI.GetAllSentMessages() {
+		if msg.ChatID == userChatID {
+			delivered = append(delivered, msg.Text)
+		}
+	}
+	require.Len(t, delivered, 1, "draft must reach the recipient exactly once")
+	assert.Equal(t, "Привет из панели", delivered[0])
+
+	cur, err := env.db.GetBroadcast(ctx, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), cur.RecipientsTotal)
+	assert.Equal(t, int64(1), cur.SentCount)
+	assert.Zero(t, cur.FailedCount)
+
+	started, err := env.db.GetAuditLogByEvent(ctx, database.AuditEventBroadcastStarted, 10)
+	require.NoError(t, err)
+	require.Len(t, started, 1)
+	assert.Contains(t, started[0].Details, `"recipients_total":1`,
+		"broadcast_started must carry the audience size resolved by the snapshot")
+}

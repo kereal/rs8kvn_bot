@@ -120,6 +120,8 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 	}
 	campaign = fresh
 
+	claimedNow := false
+
 	if campaign.Status == string(database.BroadcastStatusScheduled) {
 		claimed, err := w.h.db.ClaimBroadcast(campaignCtx, campaign.ID, time.Now().UTC())
 		if err != nil {
@@ -129,12 +131,25 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 			return nil
 		}
 		logger.Info("Broadcast campaign started", zap.Uint("broadcast_id", campaign.ID))
-		w.auditLog(ctx, database.AuditBroadcastStarted(campaign))
+		claimedNow = true
+	}
+
+	// The "started" event is written after the snapshot: the audience size is
+	// only known then, and emitting it at claim time recorded recipients_total=0
+	// for every campaign. A snapshot failure still writes the event (total 0)
+	// before returning, because the campaign is already running and the trail
+	// must show the start; the retry pass will not rewrite it.
+	emitStarted := func() {
+		if claimedNow {
+			w.auditLog(ctx, database.AuditBroadcastStarted(campaign))
+		}
 	}
 
 	// Snapshot is idempotent and also covers a crash between claim and snapshot.
 	filter, err := database.ParseBroadcastFilter(campaign.Filters)
 	if err != nil {
+		emitStarted()
+
 		parseErr := fmt.Errorf("parse broadcast filter: %w", err)
 		markErr := w.markCampaignFailed(campaignCtx, campaign.ID, parseErr)
 		if markErr != nil {
@@ -144,9 +159,12 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 	}
 	total, err := w.h.db.SnapshotBroadcastRecipients(campaignCtx, campaign.ID, filter)
 	if err != nil {
+		emitStarted()
+
 		return fmt.Errorf("snapshot broadcast recipients: %w", err)
 	}
 	campaign.RecipientsTotal = total
+	emitStarted()
 
 	err = w.h.db.RecoverStaleBroadcastRecipients(campaignCtx, campaign.ID, time.Now().UTC().Add(-2*time.Minute))
 	if err != nil {

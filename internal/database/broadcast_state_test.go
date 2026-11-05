@@ -419,3 +419,53 @@ func TestBroadcastRecipientConcurrentFinalizationsAllPersist(t *testing.T) {
 	require.Len(t, report.Delivered, recipientsCount)
 	assert.Equal(t, string(BroadcastStatusRunning), storedRecipients.Status, "a DB-only test never runs finishCampaign: the worker transition is asserted through the recipient statistics instead")
 }
+
+// Критерий приёмки 06-3: число получателей видно в `recipients_total` сразу
+// после старта, а не только после завершения рассылки. До этой проверки воркер
+// держал total в памяти (broadcast_worker.go: `campaign.RecipientsTotal = total`)
+// и панель показывала 0 всю кампанию.
+func TestSnapshotBroadcastRecipients_PublishesTotalWhileRunning(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newTestService(t)
+	b := createBroadcastForStateTest(t, svc)
+
+	freePlanID := testFreePlanID(t, svc)
+
+	for _, telegramID := range []int64{720001, 720002} {
+		require.NoError(t, svc.db.Create(&Subscription{
+			TelegramID: telegramID, Username: "user", ClientID: fmt.Sprintf("total-client-%d", telegramID),
+			SubscriptionID: fmt.Sprintf("total-sub-%d", telegramID),
+			Status:         string(SubscriptionStatusActive), PlanID: freePlanID,
+		}).Error)
+	}
+
+	claimed, err := svc.ClaimBroadcast(ctx, b.ID, time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	total, err := svc.SnapshotBroadcastRecipients(ctx, b.ID, BroadcastFilter{})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+
+	running, err := svc.GetBroadcast(ctx, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, string(BroadcastStatusRunning), running.Status)
+	assert.Equal(t, int64(2), running.RecipientsTotal, "total must be readable while the campaign runs")
+
+	// Последующие мутации (аренды, завершение получателей, повторный снимок)
+	// не должны обнулять опубликованное число.
+	recipients, err := svc.ClaimBroadcastRecipients(ctx, b.ID, time.Now().UTC(), 10)
+	require.NoError(t, err)
+	require.Len(t, recipients, 2)
+	require.NoError(t, svc.FinishBroadcastRecipient(ctx, b.ID, recipients[0].ID, recipients[0].Attempts, BroadcastRecipientSent, "", time.Now().UTC()))
+	require.NoError(t, svc.RecoverStaleBroadcastRecipients(ctx, b.ID, time.Now().UTC()))
+
+	repeated, err := svc.SnapshotBroadcastRecipients(ctx, b.ID, BroadcastFilter{})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), repeated, "resume must return the frozen snapshot size")
+
+	after, err := svc.GetBroadcast(ctx, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), after.RecipientsTotal)
+}
