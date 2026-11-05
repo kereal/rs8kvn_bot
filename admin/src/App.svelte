@@ -7,6 +7,7 @@
   import Orders from './views/Orders.svelte'
   import OrdersDetail from './views/OrdersDetail.svelte'
   import AuditLog from './views/AuditLog.svelte'
+  import Invites from './views/Invites.svelte'
 
   // One entry per screen. Adding a screen means adding a route here and a view
   // file — no router dependency. `detail` is optional: it renders instead of
@@ -14,6 +15,7 @@
   const routes = {
     plans: { label: 'Планы', component: Plans },
     products: { label: 'Продукты', component: Products },
+    invites: { label: 'Инвайты', component: Invites },
     orders: { label: 'Заказы', component: Orders, detail: OrdersDetail },
     audit: { label: 'Журнал', component: AuditLog }
   }
