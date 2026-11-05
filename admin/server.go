@@ -51,7 +51,9 @@ type Server struct {
 	addr  string
 	token string
 	plans PlanStore
-	dist  fs.FS
+	// screen: orders
+	orders OrderStore
+	dist   fs.FS
 
 	mu           sync.Mutex
 	server       *http.Server
@@ -69,7 +71,13 @@ func NewServer(addr, token string, db *database.Service) *Server {
 		dist = nil
 	}
 
-	return &Server{addr: addr, token: token, plans: db, dist: dist}
+	return &Server{
+		addr:   addr,
+		token:  token,
+		plans:  db, // screen: plans (existing)
+		orders: db, // screen: orders
+		dist:   dist,
+	}
 }
 
 // Handler returns the fully wired handler. It is exported so tests can drive
@@ -82,6 +90,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/plans", s.withAuth(s.handleCreatePlan))
 	mux.HandleFunc("PUT /admin/api/plans/{id}", s.withAuth(s.handleUpdatePlan))
 	mux.HandleFunc("DELETE /admin/api/plans/{id}", s.withAuth(s.handleDeletePlan))
+	// --- orders ---
+	mux.HandleFunc("GET /admin/api/orders", s.withAuth(s.handleListOrders))
+	mux.HandleFunc("GET /admin/api/orders/{id}", s.withAuth(s.handleGetOrder))
 	mux.HandleFunc("/admin/", s.handleSPA)
 
 	return securityHeaders(mux)
