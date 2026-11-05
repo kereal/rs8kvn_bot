@@ -56,7 +56,14 @@ type Server struct {
 	invites  InviteStore  // screen: invites
 	orders   OrderStore   // screen: orders
 	audit    AuditStore   // screen: audit
-	dist     fs.FS
+
+	// screen: subscriptions — reads come from the store, mutations from the
+	// service layer wired by SetSubscriptionServices.
+	subs       SubscriptionReadStore
+	subActions SubscriptionActions
+	subTraffic SubscriptionTrafficActions
+
+	dist fs.FS
 
 	mu           sync.Mutex
 	server       *http.Server
@@ -83,6 +90,7 @@ func NewServer(addr, token string, db *database.Service) *Server {
 		invites:  db, // screen: invites
 		orders:   db, // screen: orders
 		audit:    db, // screen: audit
+		subs:     db, // screen: subscriptions (reads; mutations via SetSubscriptionServices)
 		dist:     dist,
 	}
 }
@@ -126,6 +134,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/audit", s.withAuth(s.handleListAuditLog))
 	mux.HandleFunc("GET /admin/api/audit/events", s.withAuth(s.handleAuditEvents))
 	mux.HandleFunc("GET /admin/api/audit/{id}", s.withAuth(s.handleAuditDetail))
+
+	// --- subscriptions ---
+	mux.HandleFunc("GET /admin/api/subscriptions", s.withAuth(s.handleListSubscriptions))
+	mux.HandleFunc("GET /admin/api/subscriptions/{id}", s.withAuth(s.handleGetSubscription))
+	mux.HandleFunc("POST /admin/api/subscriptions/{id}/plan", s.withAuth(s.handleSetSubscriptionPlan))
+	mux.HandleFunc("POST /admin/api/subscriptions/{id}/revoke", s.withAuth(s.handleRevokeSubscription))
+	mux.HandleFunc("POST /admin/api/subscriptions/{id}/reset-traffic", s.withAuth(s.handleResetSubscriptionTraffic))
+	mux.HandleFunc("DELETE /admin/api/subscriptions/{id}", s.withAuth(s.handleDeleteSubscription))
+
 	mux.HandleFunc("/admin/", s.handleSPA)
 
 	return securityHeaders(mux)
