@@ -144,6 +144,14 @@ func (s *Server) writeStoreError(w http.ResponseWriter, op string, err error) {
 		writeError(w, http.StatusConflict, "protected", err.Error())
 	case errors.Is(err, database.ErrPlanInUse):
 		writeError(w, http.StatusConflict, "in_use", err.Error())
+	case errors.Is(err, database.ErrNodeNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "node not found")
+	case errors.Is(err, database.ErrNodeInvalid):
+		writeNodeInvalidError(w, err)
+	case errors.Is(err, database.ErrNodeTypeProtected):
+		writeError(w, http.StatusConflict, "protected", err.Error())
+	case errors.Is(err, database.ErrNodeInUse):
+		writeNodeInUseError(w, err)
 	default:
 		logger.Error("admin: "+op+" failed", zap.Error(err))
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")

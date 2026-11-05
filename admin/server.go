@@ -51,6 +51,7 @@ type Server struct {
 	addr  string
 	token string
 	plans PlanStore
+	nodes NodeStore // screen: nodes
 	dist  fs.FS
 
 	mu           sync.Mutex
@@ -69,7 +70,7 @@ func NewServer(addr, token string, db *database.Service) *Server {
 		dist = nil
 	}
 
-	return &Server{addr: addr, token: token, plans: db, dist: dist}
+	return &Server{addr: addr, token: token, plans: db, nodes: db, dist: dist} // screen: nodes
 }
 
 // Handler returns the fully wired handler. It is exported so tests can drive
@@ -82,6 +83,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/plans", s.withAuth(s.handleCreatePlan))
 	mux.HandleFunc("PUT /admin/api/plans/{id}", s.withAuth(s.handleUpdatePlan))
 	mux.HandleFunc("DELETE /admin/api/plans/{id}", s.withAuth(s.handleDeletePlan))
+
+	// --- nodes ---
+	mux.HandleFunc("GET /admin/api/nodes", s.withAuth(s.handleListNodes))
+	mux.HandleFunc("POST /admin/api/nodes", s.withAuth(s.handleCreateNode))
+	mux.HandleFunc("PUT /admin/api/nodes/{id}", s.withAuth(s.handleUpdateNode))
+	mux.HandleFunc("DELETE /admin/api/nodes/{id}", s.withAuth(s.handleDeleteNode))
+	mux.HandleFunc("POST /admin/api/nodes/{id}/health", s.withAuth(s.handleNodeHealth))
+	mux.HandleFunc("GET /admin/api/plans/{id}/nodes", s.withAuth(s.handleGetPlanNodes))
+	mux.HandleFunc("PUT /admin/api/plans/{id}/nodes", s.withAuth(s.handlePutPlanNodes))
+
 	mux.HandleFunc("/admin/", s.handleSPA)
 
 	return securityHeaders(mux)
