@@ -27,10 +27,13 @@ export function setToken(token) {
 }
 
 export class ApiError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, details) {
     super(message)
     this.status = status
     this.code = code
+    // Server-side context for guarded operations (for example how many
+    // subscriptions block a delete). Null when the error carries none.
+    this.details = details ?? null
   }
 }
 
@@ -71,7 +74,7 @@ async function request(method, path, body) {
     const code = data?.code || 'error'
     const message = data?.message || `HTTP ${res.status}`
     if (res.status === 401) setToken('')
-    throw new ApiError(res.status, code, message)
+    throw new ApiError(res.status, code, message, data?.details)
   }
 
   return data
