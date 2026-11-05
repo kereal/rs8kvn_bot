@@ -431,6 +431,12 @@ func (s *Server) writeSubActionError(w http.ResponseWriter, op string, err error
 	case errors.Is(err, service.ErrAlreadyRevoked):
 		writeError(w, http.StatusConflict, "stale", "subscription is already revoked",
 			map[string]any{"status": string(database.SubscriptionStatusRevoked)})
+	case errors.Is(err, service.ErrDeprovisionIncomplete):
+		// Строка не удалена, но подписка уже отозвана: доступ закрыт, а снятие
+		// профилей с узлов доводит фоновый воркер.
+		writeError(w, http.StatusConflict, "in_use",
+			"VPN bindings are still queued for removal; the subscription stays revoked",
+			map[string]any{"reason": "deprovision_incomplete"})
 	case errors.Is(err, database.ErrPlanNotFound):
 		writeError(w, http.StatusBadRequest, "validation", "plan does not exist",
 			map[string]any{"plan_id": nil})

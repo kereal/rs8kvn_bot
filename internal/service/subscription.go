@@ -465,6 +465,12 @@ func (s *SubscriptionService) deprovisionSub(ctx context.Context, subscriptionID
 // reporting success.
 var ErrAlreadyRevoked = errors.New("subscription already revoked")
 
+// ErrDeprovisionIncomplete means the subscription was revoked, but VPN bindings
+// are still queued for removal: deleting the row now would destroy the retry
+// queue and leak working profiles on the panels. Callers should report "not
+// yet" and let SyncPendingNodes finish the removal.
+var ErrDeprovisionIncomplete = errors.New("deprovision incomplete")
+
 // revokeAndDeprovision flips the subscription to revoked and removes its VPN
 // clients. Both phases live here so the panel revoke action and the hard delete
 // share exactly one implementation: without deprovisioning, an already imported
@@ -530,7 +536,7 @@ func (s *SubscriptionService) revokeAndDeprovisionThenDelete(ctx context.Context
 		return nil, fmt.Errorf("deprovision: verify node bindings: %w", nodesErr)
 	}
 	if len(nodes) > 0 {
-		return nil, fmt.Errorf("deprovision incomplete: %d node bindings remain", len(nodes))
+		return nil, fmt.Errorf("%w: %d node bindings remain", ErrDeprovisionIncomplete, len(nodes))
 	}
 
 	// Phase 3: remove the now-empty binding set before the parent row. This keeps
