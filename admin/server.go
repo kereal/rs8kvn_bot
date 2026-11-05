@@ -51,6 +51,7 @@ type Server struct {
 	addr     string
 	token    string
 	plans    PlanStore
+	nodes    NodeStore    // screen: nodes
 	products ProductStore // screen: products
 	invites  InviteStore  // screen: invites
 	orders   OrderStore   // screen: orders
@@ -77,6 +78,7 @@ func NewServer(addr, token string, db *database.Service) *Server {
 		addr:     addr,
 		token:    token,
 		plans:    db, // screen: plans (existing)
+		nodes:    db, // screen: nodes
 		products: db, // screen: products
 		invites:  db, // screen: invites
 		orders:   db, // screen: orders
@@ -95,6 +97,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/plans", s.withAuth(s.handleCreatePlan))
 	mux.HandleFunc("PUT /admin/api/plans/{id}", s.withAuth(s.handleUpdatePlan))
 	mux.HandleFunc("DELETE /admin/api/plans/{id}", s.withAuth(s.handleDeletePlan))
+
+	// --- nodes ---
+	mux.HandleFunc("GET /admin/api/nodes", s.withAuth(s.handleListNodes))
+	mux.HandleFunc("POST /admin/api/nodes", s.withAuth(s.handleCreateNode))
+	mux.HandleFunc("PUT /admin/api/nodes/{id}", s.withAuth(s.handleUpdateNode))
+	mux.HandleFunc("DELETE /admin/api/nodes/{id}", s.withAuth(s.handleDeleteNode))
+	mux.HandleFunc("POST /admin/api/nodes/{id}/health", s.withAuth(s.handleNodeHealth))
+	mux.HandleFunc("GET /admin/api/plans/{id}/nodes", s.withAuth(s.handleGetPlanNodes))
+	mux.HandleFunc("PUT /admin/api/plans/{id}/nodes", s.withAuth(s.handlePutPlanNodes))
 
 	// --- products ---
 	mux.HandleFunc("GET /admin/api/products", s.withAuth(s.handleListProducts))

@@ -75,6 +75,13 @@ const (
 	AuditEventBroadcastFailed    = "broadcast_failed"
 	AuditEventBroadcastCanceled  = "broadcast_canceled"
 
+	// Ноды и привязки планов (админ-панель).
+
+	AuditEventNodeCreated      = "node_created"
+	AuditEventNodeUpdated      = "node_updated"
+	AuditEventNodeDeleted      = "node_deleted"
+	AuditEventPlanNodesChanged = "plan_nodes_changed"
+
 	// Технические агрегаты (сводки за прогон воркеров, не per-item шум).
 
 	AuditEventSyncRunDegraded        = "sync_run_degraded"
@@ -756,6 +763,69 @@ func auditActorTelegram(sub *Subscription) *string {
 	}
 
 	return marshalAuditJSONString(fmt.Sprintf("%d", sub.TelegramID))
+}
+
+// --- События нод (админ-панель) --------------------------------------------
+//
+// Каждый конструктор админ-мутации ноды фиксирует entity/actor и состав
+// old/new/details. Actor — админ-панель: actor_type=admin, actor_id=0
+// (у панели нет идентичности пользователя).
+
+// formatNodeID возвращает entity_id ноды.
+func formatNodeID(node *Node) string {
+	if node == nil {
+		return ""
+	}
+
+	return fmt.Sprintf("%d", node.ID)
+}
+
+// nodeAuditSnapshot — снапшот значимых полей ноды для old_state/new_state.
+// api_token в снапшот не попадает никогда: журнал аудита не хранит секреты
+// (ADR-0002 §5), вместо него — признак наличия.
+func nodeAuditSnapshot(node *Node) map[string]any {
+	if node == nil {
+		return nil
+	}
+
+	return map[string]any{
+		"name":             node.Name,
+		"type":             node.Type,
+		"host":             node.Host,
+		"subscription_url": node.SubscriptionURL,
+		"inbound_ids":      node.InboundIDs,
+		"is_active":        node.IsActive,
+		"has_api_token":    node.APIToken != "",
+	}
+}
+
+// AuditNodeCreated фиксирует создание ноды из админ-панели.
+func AuditNodeCreated(node *Node) *AuditLog {
+	return NewAuditLog(EntityNode, formatNodeID(node), AuditEventNodeCreated,
+		ActorAdmin, "0", nil, nodeAuditSnapshot(node), nil)
+}
+
+// AuditNodeUpdated фиксирует изменение ноды: снимок до и снимок после.
+func AuditNodeUpdated(before, after *Node) *AuditLog {
+	return NewAuditLog(EntityNode, formatNodeID(after), AuditEventNodeUpdated,
+		ActorAdmin, "0", nodeAuditSnapshot(before), nodeAuditSnapshot(after), nil)
+}
+
+// AuditNodeDeleted фиксирует удаление ноды: снимок → nil.
+func AuditNodeDeleted(node *Node) *AuditLog {
+	return NewAuditLog(EntityNode, formatNodeID(node), AuditEventNodeDeleted,
+		ActorAdmin, "0", nodeAuditSnapshot(node), nil, nil)
+}
+
+// AuditPlanNodesChanged фиксирует замену набора нод плана: old/new — наборы
+// node_ids, details — только added/removed, чтобы дифф читался без сравнения
+// массивов.
+func AuditPlanNodesChanged(planID uint, oldIDs, newIDs, added, removed []uint) *AuditLog {
+	return NewAuditLog(EntityPlan, fmt.Sprintf("%d", planID), AuditEventPlanNodesChanged,
+		ActorAdmin, "0",
+		map[string]any{"node_ids": oldIDs},
+		map[string]any{"node_ids": newIDs},
+		map[string]any{"added": added, "removed": removed})
 }
 
 // DeleteAuditLogBefore удаляет не более batch записей старше before и
