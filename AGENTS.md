@@ -165,3 +165,28 @@ unless the server address is a private IP or domain») — снова падае
 plaintext принимают. Публичные CF-worker узлы (ws на IP Cloudflare без TLS)
 на новых ядрах не работают в принципе — это не баг конвертера.
 Регресс: `TestConvertJSONConfigsToXray_PlaintextQuarantine`.
+
+## Admin panel (admin/)
+
+Панель — тонкий клиент к тому же сервисному слою, что и бот: Go-хендлеры
+(`admin/*.go`) + Svelte 5 + Vite без runtime-зависимостей
+(`admin/src/**`, один бандл ~150 КБ JS, `dist/` закоммичен и встроен в бинарь).
+
+- **Контракт**: `doc/adr/0002-admin-panel-contract.md` и `doc/specs/admin/*.md`
+  (00-common + спека на экран). ТЗ на экран — источник истины по маршрутам,
+  DTO и guard'ам.
+- **Запреты**: SQL к таблицам домена из пакета `admin` (только через
+  `internal/database/*_admin.go`), `tgbotapi` в панели, второй воркер
+  рассылок. Панель не отправляет сообщения пользователям.
+- **Мутации — через сервисы**: отзыв/удаление/продление/сброс трафика идут в
+  `internal/service`, а не в репозитории. Аудит таких решений —
+  `actor_type=admin` (`AuditSubscriptionRevokedByAdmin`, id панели = 0).
+- **Сборка**: `cd admin && npm run build` (обязательно после правок вью —
+  коммитится `dist/`). Харнесс для ручного прогона: `tmp/adminserve`
+  (копирует `data/rs8kvn.db` в `/tmp/adminlive.db`, узлов нет — внешние
+  вызовы no-op).
+- **Ловушки**, уже стоившие отладки: `onMount(load)` обязателен во вью;
+  роут в `App.svelte` обёрнут в `{#key route.name/route.id}` (без ключа
+  detail→detail показывает предыдущую запись); `bind:value` на
+  `input[type=number]` даёт число, а не строку; секреты (api_token)
+  никогда не возвращаются в GET.

@@ -103,7 +103,12 @@ import Subscriptions from './views/Subscriptions.svelte'
       </div>
     </aside>
     <main class="main">
-      <ActiveView id={route.id} />
+      <!-- Key on the full route: without it a detail→detail hop ("#/orders/1"
+           to "#/orders/2") reuses the same component instance and keeps the
+           previous row on screen, since views load data in onMount. -->
+      {#key `${route.name}/${route.id ?? ''}`}
+        <ActiveView id={route.id} />
+      {/key}
     </main>
   </div>
 {/if}

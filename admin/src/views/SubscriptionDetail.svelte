@@ -98,7 +98,10 @@
     try {
       // Пусто = 0: сервис сохранит текущий срок (или выдаст 30 дней
       // подписке без срока).
-      const days = planDays.trim() === '' ? 0 : Number(planDays)
+      // bind:value на input[type=number] отдаёт число (или undefined при
+      // пустом поле), поэтому приводим типы до сравнения.
+      const rawDays = planDays === undefined || planDays === null ? '' : String(planDays).trim()
+      const days = rawDays === '' ? 0 : Number(rawDays)
       await api.post(`/admin/api/subscriptions/${id}/plan`, { plan_id: Number(planChoice), days })
       planOpen = false
       notice = 'План обновлён'
@@ -110,10 +113,17 @@
     }
   }
 
-  async function resetTraffic() {
-    const n = activeNodes()
-    if (!confirm(`Счётчик трафика обнулится на ${n} узлах. Продолжить?`)) return
+  // Сброс трафика — тоже операция «с последствиями»: спрашиваем через тот же
+  // диалог, что и отзыв, а не через window.confirm (его нельзя стилизовать и
+  // он блокирует автотесты).
+  function askResetTraffic() {
+    confirmMode = 'reset'
+    confirmTail = ''
+    confirmError = ''
+    confirmOpen = true
+  }
 
+  async function resetTraffic() {
     resetBusy = true
     opError = ''
     try {
@@ -123,7 +133,12 @@
         : `Счётчик трафика сброшен на ${payload.reset_nodes} узлах`
       await load()
     } catch (err) {
-      opError = humanError(err)
+      // in_use здесь означает не «на запись ссылаются», а «ни один узел не
+      // ответил» (details.nodes=0): общий текст только путал бы.
+      opError =
+        err?.code === 'in_use' && err?.details?.nodes === 0
+          ? 'Сброс не выполнен: ни один узел не ответил'
+          : humanError(err)
     } finally {
       resetBusy = false
     }
@@ -143,6 +158,12 @@
   }
 
   async function submitConfirm() {
+    if (confirmMode === 'reset') {
+      confirmOpen = false
+      await resetTraffic()
+      return
+    }
+
     if (!tailMatches()) {
       confirmError = `Введите последние 4 символа subscription_id (${row.subscription_id.slice(-4)})`
       return
@@ -294,7 +315,7 @@
     <h2>Действия</h2>
     <div class="action-row">
       <button class="btn" onclick={openPlanModal}>Продлить / сменить план</button>
-      <button class="btn" onclick={resetTraffic} disabled={resetBusy || activeNodes() === 0}>Сбросить трафик</button>
+      <button class="btn" onclick={askResetTraffic} disabled={resetBusy || activeNodes() === 0}>Сбросить трафик</button>
       <button class="btn btn-danger" onclick={() => openConfirm('revoke')} disabled={row.status === 'revoked'}>Отозвать</button>
       <button class="btn btn-danger" onclick={() => openConfirm('delete')}>Удалить</button>
     </div>
@@ -327,23 +348,37 @@
     {/snippet}
   </Modal>
 
-  <Modal bind:open={confirmOpen} title={confirmMode === 'revoke' ? 'Отозвать подписку' : 'Удалить подписку'}>
-    {#if confirmMode === 'revoke'}
+  <Modal
+    bind:open={confirmOpen}
+    title={confirmMode === 'revoke'
+      ? 'Отозвать подписку'
+      : confirmMode === 'reset'
+        ? 'Сбросить трафик'
+        : 'Удалить подписку'}
+  >
+    {#if confirmMode === 'reset'}
+      <p>
+        Счётчик трафика обнулится на {activeNodes()} узлах. Отменить это нельзя: израсходованное
+        не вернуть.
+      </p>
+    {:else if confirmMode === 'revoke'}
       <p>Доступ пользователя будет закрыт: субсервер начнёт отдавать 404, VPN-клиенты удалятся с узлов.</p>
     {:else}
       <p>Строка исчезнет безвозвратно — вместе с привязками узлов и историей в панели.</p>
     {/if}
-    <label class="field">
-      Последние 4 символа subscription_id ({row.subscription_id.slice(-4)})
-      <input class="mono" bind:value={confirmTail} placeholder={row.subscription_id.slice(-4)} />
-    </label>
+    {#if confirmMode !== 'reset'}
+      <label class="field">
+        Последние 4 символа subscription_id ({row.subscription_id.slice(-4)})
+        <input class="mono" bind:value={confirmTail} placeholder={row.subscription_id.slice(-4)} />
+      </label>
+    {/if}
     {#if confirmError}
       <div class="notice notice-error" style="margin:0">{confirmError}</div>
     {/if}
     {#snippet footer()}
       <button class="btn btn-ghost" onclick={() => (confirmOpen = false)} disabled={confirmBusy}>Отмена</button>
       <button class="btn btn-danger" onclick={submitConfirm} disabled={confirmBusy}>
-        {confirmMode === 'revoke' ? 'Отозвать' : 'Удалить'}
+        {confirmMode === 'revoke' ? 'Отозвать' : confirmMode === 'reset' ? 'Сбросить' : 'Удалить'}
       </button>
     {/snippet}
   </Modal>
