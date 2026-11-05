@@ -136,6 +136,8 @@ func (s *Server) writeStoreError(w http.ResponseWriter, op string, err error) {
 	switch {
 	case errors.Is(err, database.ErrPlanNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "plan not found")
+	case errors.Is(err, database.ErrAuditLogNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "audit entry not found")
 	case errors.Is(err, database.ErrPlanInvalid):
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 	case errors.Is(err, database.ErrPlanNameTaken):
