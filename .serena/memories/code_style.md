@@ -1,7 +1,10 @@
 # Code Style
 - Use `rtk` prefix for shell commands.
 - Ponytail: lazy, minimal, simplest solution.
-- Use codebase-memory-mcp for code discovery.
+- Use codebase-memory-mcp for code discovery: structural questions (callers,
+  implementers, file outlines, impact) — graph first; text questions (literals,
+  tags, SQL, configs) — grep/glob. Rules and pitfalls: AGENTS.md → «Codebase
+  Knowledge Graph».
 - Sequential initialization logic for bot and server to be decoupled in `cmd/bot/main.go`.
  and Conventions
 
