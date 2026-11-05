@@ -12,12 +12,16 @@
 
   let authed = $state(false)
   let checking = $state(true)
-  let view = $state(routeFromHash())
+  // Hash carries an optional id: "#/subscriptions/42". Detail views read it from
+  // the `id` prop; list views ignore it.
+  let route = $state(routeFromHash())
+  let view = $derived(route.name)
   let ActiveView = $derived((routes[view] ?? routes.plans).component)
 
   function routeFromHash() {
-    const name = location.hash.replace(/^#\/?/, '')
-    return routes[name] ? name : 'plans'
+    const [rawName = '', rawID = ''] = location.hash.replace(/^#\/?/, '').split('/')
+    const name = routes[rawName] ? rawName : 'plans'
+    return { name, id: rawID || null }
   }
 
   function go(name) {
@@ -25,7 +29,7 @@
   }
 
   $effect(() => {
-    const onHash = () => (view = routeFromHash())
+    const onHash = () => (route = routeFromHash())
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   })
@@ -76,7 +80,7 @@
       </div>
     </aside>
     <main class="main">
-      <ActiveView />
+      <ActiveView id={route.id} />
     </main>
   </div>
 {/if}

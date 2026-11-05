@@ -40,7 +40,7 @@
 | `subscriptions` | **чтение** + 3 операции | `SubscriptionService` | никогда прямая запись в таблицу |
 | `orders` | **чтение** | SQL-репозиторий | — |
 | `subscription_nodes` | **чтение** | SQL-репозиторий | — |
-| `broadcasts` | CRUD + запуск через очередь БД | `broadcast_admin.go` | `running` нельзя править или удалять — `409 in_use` |
+| `broadcasts` | **единственный владелец**: CRUD + расписание + отмена + повтор через очередь БД | `broadcast_admin.go` | `running` нельзя править или удалять — `409 in_use`; ботовские `/broadcast` и `/broadcasts` удалены |
 | `audit_log` | **чтение** | `audit_log_repo.go` | append-only, панель только фильтрует |
 
 Общее правило: **панель меняет конфигурацию, но не состояния.** Любое поле,
@@ -84,7 +84,7 @@
 | # | Решение |
 |---|---|
 | P17 | Прямая запись полей состояния запрещена (см. §2). Нарушение — повод отклонить код-ревью |
-| P18 | Рассылки: панель делает `INSERT` со `status="scheduled"` и `planned_at`, а подхватывает воркер (`GetRunnableBroadcasts`, тик 15 с, батч 100). Сообщения в Telegram панель не отправляет. Отмена — `CancelBroadcast`. Правка запланированной рассылки требует нового репозиторного метода `UpdateBroadcastDraft` (`UpdateBroadcast` пишет только счётчики и статус) |
+| P18 | Рассылки: управление полностью в панели — ботовские `/broadcast`/`/broadcasts`, сессии черновика и инлайн-фильтры удаляются. Панель делает `INSERT` со `status="scheduled"` и `planned_at`, а подхватывает единственный `BroadcastWorker` (`GetRunnableBroadcasts`, тик 15 с, батч 100). Воркер остаётся в процессе бота как транспорт (у него Telegram-клиент), но не принимает решений об аудитории и тексте. Второй экземпляр воркера в `admin/` не запускается. Отмена — `CancelBroadcast`. Правка запланированной требует `UpdateBroadcastDraft` (`UpdateBroadcast` пишет только счётчики и статус) |
 | P19 | Подписки — ровно три операции. «Продлить/сменить план» — существующий `AdminSetPlan`. «Отозвать без удаления» — новый экспортируемый `RevokeSubscription` (`markRevokedSub` + `deprovisionSub`). «Удалить» — `DeleteByID` (revoke + deprovision + удаление строки). Отдельного «сбросить трафик» нет: нужен `SyncService.ResetSubscriptionTraffic`, вызывающий `client.ResetTraffic` по всем активным нодам (best-effort, как в `ApplyPlanToSubscription`) |
 | P20 | Аудит: каждая панельная мутация пишет событие `actor_type=admin`, `actor_id=0` (**0 = панель**, Telegram ID всегда > 0) через `service.WithAuditAdmin(ctx, 0)`. Новые события — конструкторы в `internal/database/audit_log.go`: `AuditPlanCreated/Updated/Deleted`, `AuditProduct*`, `AuditNode*`, `AuditPlanNode*`, `AuditInvite*`, `AuditBroadcast*`. Best-effort, кроме платёжных транзакций |
 
@@ -154,7 +154,10 @@
 
 **Принятые ограничения:** один администратор; нет TLS; нет пагинации для
 малых таблиц; аудит панельных мутаций пишется best-effort (кроме транзакций
-оплаты, до которых панель не достаёт).
+оплаты, до которых панель не достаёт). Панель и бот — один процесс: если
+`ADMIN_TOKEN` пуст, панель не стартует, но `BroadcastWorker` продолжает
+исполнять уже запланированные строки (управлять ими в этом режиме нечем —
+это осознанный выбор, чтобы отключение панели не рвало отправку).
 
 **Проверка соблюдения контракта:** `go test ./admin/ ./internal/database/`,
 `golangci-lint run ./...`, ручной чек-лист экрана.

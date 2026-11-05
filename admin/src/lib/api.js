@@ -82,5 +82,13 @@ export const api = {
   listPlans: () => request('GET', '/admin/api/plans'),
   createPlan: (plan) => request('POST', '/admin/api/plans', plan),
   updatePlan: (id, plan) => request('PUT', `/admin/api/plans/${id}`, plan),
-  deletePlan: (id) => request('DELETE', `/admin/api/plans/${id}`)
+  deletePlan: (id) => request('DELETE', `/admin/api/plans/${id}`),
+
+  // Generic access for every other screen. New views call these instead of
+  // adding wrappers here: src/lib is shared, and each screen is developed on
+  // its own branch (see doc/specs/admin/00-common.md).
+  get: (path) => request('GET', path),
+  post: (path, body) => request('POST', path, body),
+  put: (path, body) => request('PUT', path, body),
+  del: (path) => request('DELETE', path)
 }
