@@ -10,7 +10,10 @@
 3. Отвечай всегда на русском
 4. После окончания работы, если это требуется, обновляй документацию и память
 5. Выбирай и применяй подходящие skills
-6. Используй подходящие mcp-инструменты
+6. Инструменты: структурные вопросы по коду (кто вызывает, что реализует, что
+   объявлено в файле) — сначала граф кода; текстовые (литералы, SQL, конфиги) —
+   grep/glob. Маршрутизация и подводные камни — в разделе
+   «Codebase Knowledge Graph» ниже.
 
 
 ## Git commits
@@ -41,27 +44,79 @@ rtk gh pr list
 
 ## Codebase Knowledge Graph (codebase-memory-mcp)
 
-This project uses codebase-memory-mcp to maintain a knowledge graph of the codebase.
-ALWAYS prefer MCP graph tools over grep/glob/file-search for code discovery.
-
 Project name in the graph: **`home-kereal-rs8kvn_bot`** (auto-generated from repo path).
+The index is `ready` and auto-refreshes (git watch, ~5 s); never call
+`index_repository` for this project.
 
-### Priority Order
-1. `search_graph` — find functions, classes, routes, variables by pattern
-2. `trace_path` — trace who calls a function or what it calls
-3. `get_code_snippet` — read specific function/class source code
-4. `query_graph` — run Cypher queries for complex patterns
-5. `get_architecture` — high-level project summary
+One routing rule, and it is about the *question*, not about preference:
 
-### When to fall back to grep/glob
-- Searching for string literals, error messages, config values
-- Searching non-code files (Dockerfiles, shell scripts, configs)
-- When MCP tools return insufficient results
+- **Structure** — who calls what, what implements what, what a change breaks, what
+  a file declares → the graph, first call, before any grep.
+- **Text** — literals, tags, SQL, configs, anything that is not a symbol → grep/glob.
+  The graph is not a text index; a graph miss here proves nothing.
+
+### Structural question → graph tool (mandatory first stop)
+
+Every call takes `project="home-kereal-rs8kvn_bot"` (omitted in the table for width).
+Suspicious results → `index_status()`: `indexed_at` plus `watch.last_scan_at` tell you
+whether the answer describes the working tree you are looking at.
+
+| Question | Call |
+|---|---|
+| Who calls / what does X call | `trace_path(function_name="X", direction="inbound"\|"outbound")` |
+| Impact of changing a signature, deleting a symbol, narrowing an interface | `trace_path(function_name="X", direction="inbound", depth=2, include_tests=true, risk_labels=true)` |
+| Who implements an interface / embeds a type | `query_graph(query="MATCH (t)-[:IMPLEMENTS]->(i) WHERE i.name='X' RETURN t.qn, t.file")` |
+| What a file declares, without reading the file | `get_file_outline(file_path="internal/service/subscription.go")` |
+| Find a symbol by approximate name | `search_graph(name_pattern=".*Handler.*")` or `query="revoke subscription"` |
+| Read one symbol | `get_code_snippet(qualified_name="home-kereal-rs8kvn_bot.internal.service.markRevokedSub")` |
+| Module map, layering, entry points | `get_architecture()` |
+| Multi-hop / aggregation over calls | `query_graph(...)` |
+
+Unqualified names resolve (`function_name="markRevokedSub"` works); `qn` is
+`<project>.<package path>.<name>`, and tool output groups rows by `qn_prefix` + `file`.
+
+### Text question → grep/glob (do not spend a graph call)
+
+- string literals, log messages, error text, `json:"..."` / struct tags, regexes;
+- SQL and everything under `internal/database/migrations/`;
+- Dockerfiles, compose, YAML, shell, `.env`, `admin/dist`, docs;
+- files whose parse is incomplete — `index_status(diagnostics="full")` currently flags
+  exactly 19: 17 migration `*.up.sql`/`*.down.sql`, `internal/subserver/templates/xray_client.json`
+  and `internal/database/orders_admin_test.go`. Constructs inside the flagged line
+  ranges may be absent, so grep them instead of trusting a graph miss — that JSON
+  template is the Xray profile template, a hot spot in this repo;
+- `not_indexed` paths (`.env`, `bot`, `rs8kvn_bot`, `coverage.out`, `mcp.json`,
+  `admin/dist`, `admin/node_modules`, `data`, `tmp`, `.planning`, `.serena/cache`, images) —
+  by design, not an error.
+
+### Verify before you act on a graph answer
+
+- `search_graph` rows are name matches, not proofs: `in`/`out` counts say nothing
+  about *which* edge. Read the cited symbol (`get_code_snippet`) before editing it.
+- `trace_path` **excludes tests by default**, and in this repo tests are callers
+  (`TestDeactivateBlockedBroadcastRecipients_*` → `markRevokedSub`). For impact
+  analysis always pass `include_tests=true`; otherwise you will "safely" break a
+  behaviour that is under test.
+- A caller list is only as good as the parse: `check_index_coverage(paths=[...])`
+  before treating "no callers" as "dead code".
+- `cross_repo` has never been run — `mode="cross_service"` returns nothing here.
+- Pages are real: check `has_more`/`next_cursor` instead of assuming a listing ended.
+
+### Cost discipline
+
+- Graph for discovery, `read` for proof — never call the graph to re-confirm what
+  `read` already showed.
+- One `trace_path(depth=2, include_tests=true)` beats five `search_graph` calls.
+- Count/repetition questions stay in shell (`grep -c`); the graph is for reachability.
 
 ### Examples
+
+- Who calls a revoke helper, tests included:
+  `trace_path(project="home-kereal-rs8kvn_bot", function_name="markRevokedSub", direction="inbound", include_tests=true)`
+- Declarations of a 500-line file without reading it:
+  `get_file_outline(project="home-kereal-rs8kvn_bot", file_path="internal/service/subscription.go")`
 - Find a handler: `search_graph(project="home-kereal-rs8kvn_bot", name_pattern=".*Handler.*")`
-- Who calls it: `trace_path(project="home-kereal-rs8kvn_bot", function_name="NewHandler", direction="inbound")`
-- Read source: `get_code_snippet(project="home-kereal-rs8kvn_bot", qualified_name="home-kereal-rs8kvn_bot.internal.bot.handler.NewHandler")`
+- Read one function: `get_code_snippet(project="home-kereal-rs8kvn_bot", qualified_name="home-kereal-rs8kvn_bot.internal.service.markRevokedSub")`
 - Check architecture: `get_architecture(project="home-kereal-rs8kvn_bot")`
 
 
