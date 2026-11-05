@@ -499,7 +499,7 @@ func (s *SubscriptionService) RevokeSubscription(ctx context.Context, id uint) (
 		return nil, err
 	}
 
-	s.logAudit(ctx, database.AuditSubscriptionRevoked(sub, "admin panel revoke"))
+	s.logAudit(ctx, database.AuditSubscriptionRevokedByAdmin(sub, "admin panel revoke", adminTelegramIDFromCtx(ctx)))
 
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
 		s.InvalidateBySubID(ctx, sub.SubscriptionID)

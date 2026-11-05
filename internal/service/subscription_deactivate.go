@@ -118,7 +118,7 @@ func (s *SubscriptionService) DeactivateBlockedBroadcastRecipients(ctx context.C
 
 			// Статус изменён — событие фиксируется сразу, до внешних вызовов:
 			// даже если депровижининг ниже упадёт, отзыв уже состоявшийся факт.
-			s.logAudit(ctx, database.AuditSubscriptionRevoked(sub, reason))
+			s.logAudit(ctx, database.AuditSubscriptionRevokedByAdmin(sub, reason, adminTelegramIDFromCtx(ctx)))
 		}
 
 		if sub.SubscriptionID != "" {

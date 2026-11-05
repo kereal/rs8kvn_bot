@@ -241,7 +241,8 @@ func (s *Server) handleSetSubscriptionPlan(w http.ResponseWriter, r *http.Reques
 	dec.DisallowUnknownFields()
 
 	var payload setPlanPayload
-	if err := dec.Decode(&payload); err != nil || payload.PlanID == nil {
+	err := dec.Decode(&payload)
+	if err != nil || payload.PlanID == nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "plan_id and days are required")
 		return
 	}
@@ -337,7 +338,8 @@ func (s *Server) handleResetSubscriptionTraffic(w http.ResponseWriter, r *http.R
 		failed = strings.Count(err.Error(), "\n") + 1
 	}
 
-	if auditErr := s.subs.InsertAuditLog(r.Context(), database.AuditTrafficReset(sub, reset, failed)); auditErr != nil {
+	auditErr := s.subs.InsertAuditLog(r.Context(), database.AuditTrafficReset(sub, reset, failed))
+	if auditErr != nil {
 		// Журнал не влияет на бизнес-операцию: сброс уже выполнен.
 		logger.Warn("admin: traffic_reset audit failed", zap.Error(auditErr))
 	}

@@ -86,7 +86,7 @@ func TestRevokeSubscription_MarksRevokedAndDeprovisions(t *testing.T) {
 		return nil
 	}
 
-	revoked, err := svc.RevokeSubscription(context.Background(), sub.ID)
+	revoked, err := svc.RevokeSubscription(WithAuditAdmin(context.Background(), 77), sub.ID)
 	require.NoError(t, err)
 	require.NotNil(t, revoked)
 
@@ -97,6 +97,12 @@ func TestRevokeSubscription_MarksRevokedAndDeprovisions(t *testing.T) {
 
 	events := store.AuditLogsByEvent(database.AuditEventSubscriptionRevoked)
 	require.Len(t, events, 1, "a revoke is a mutation and must be audited")
+
+	// Панельный отзыв — решение администратора, а не ответ воркера: журнал
+	// должен отвечать «кто», иначе робот- и человек-отзывы неразличимы.
+	assert.Equal(t, database.ActorAdmin, events[0].ActorType)
+	require.NotNil(t, events[0].ActorID)
+	assert.Equal(t, "77", *events[0].ActorID)
 }
 
 // TestRevokeSubscription_AlreadyRevoked rejects a second revoke instead of

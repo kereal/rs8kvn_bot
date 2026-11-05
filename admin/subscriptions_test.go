@@ -384,6 +384,9 @@ func TestAPI_SubscriptionsRevoke(t *testing.T) {
 	require.Len(t, audits, 1)
 	assert.Equal(t, database.AuditEventSubscriptionRevoked, audits[0].Event)
 	assert.Equal(t, "1", *audits[0].EntityID, "entity_id is the numeric DB id")
+	assert.Equal(t, database.ActorAdmin, audits[0].ActorType, "panel actions are admin, not worker")
+	require.NotNil(t, audits[0].ActorID)
+	assert.Equal(t, "0", *audits[0].ActorID, "the panel has no Telegram id of its own")
 }
 
 func TestAPI_SubscriptionsRevoke_AlreadyRevokedConflict(t *testing.T) {

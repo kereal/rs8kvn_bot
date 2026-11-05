@@ -40,13 +40,6 @@ const (
 	MsgAdminDelPartial   MessageKey = "admin.del_partial"
 	MsgAdminDelSuccess   MessageKey = "admin.del_success"
 
-	MsgAdminBroadcastUsage   MessageKey = "admin.broadcast_usage"
-	MsgAdminBroadcastLong    MessageKey = "admin.broadcast_long"
-	MsgAdminBroadcastNoUsers MessageKey = "admin.broadcast_no_users"
-	MsgAdminBroadcastStart   MessageKey = "admin.broadcast_start"
-	MsgAdminBroadcastPartial MessageKey = "admin.broadcast_partial"
-	MsgAdminBroadcastDone    MessageKey = "admin.broadcast_done"
-
 	MsgAdminSendUsage       MessageKey = "admin.send_usage"
 	MsgAdminSendNotFound    MessageKey = "admin.send_not_found"
 	MsgAdminSendFailed      MessageKey = "admin.send_failed"
@@ -104,13 +97,6 @@ var messages = map[MessageKey]string{
 	MsgAdminDelXUIFailed: "❌ Ошибка удаления клиента из панели 3x-ui",
 	MsgAdminDelPartial:   "⚠️ Клиент удален из панели, но ошибка удаления из базы",
 	MsgAdminDelSuccess:   "✅ Подписка успешно удалена!\n\n👤 Пользователь: %s\n🆔 Telegram ID: %d",
-
-	MsgAdminBroadcastUsage:   "❌ Использование: /broadcast <сообщение>\n\nПример: /broadcast Привет всем!",
-	MsgAdminBroadcastLong:    "❌ Сообщение слишком длинное (%d символов).\n\nМаксимум: %d символов.",
-	MsgAdminBroadcastNoUsers: "❌ Нет пользователей для рассылки",
-	MsgAdminBroadcastStart:   "📤 Начинаю рассылку для %d пользователей...",
-	MsgAdminBroadcastPartial: "⚠️ Рассылка прервана!\n\n📤 Отправлено: %d\n❌ Ошибок: %d\n👥 Осталось: %d",
-	MsgAdminBroadcastDone:    "✅ Рассылка завершена!\n\n📤 Отправлено: %d\n❌ Ошибок: %d\n👥 Всего пользователей: %d",
 
 	MsgAdminSendUsage:       "❌ Использование: /send <telegram_id|username> <сообщение>\n\nПримеры:\n/send 123456789 Привет!\n/send @username Привет!",
 	MsgAdminSendNotFound:    "❌ Пользователь @%s не найден в базе",

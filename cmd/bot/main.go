@@ -291,6 +291,10 @@ func startAdminServer(cfg *config.Config, dbService *database.Service, subServic
 	// сброс трафика) — только через сервисный слой.
 	server.SetSubscriptionServices(dbService, subService, syncSvc)
 
+	// Deactivate-blocked на экране рассылок вызывает сервис отзыва подписок:
+	// панель только принимает решение, депровижининг идёт через сервис бота.
+	server.SetBroadcastDeactivator(subService)
+
 	err := server.Start(context.Background())
 	if err != nil {
 		return nil, err

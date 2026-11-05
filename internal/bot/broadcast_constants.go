@@ -2,37 +2,11 @@ package bot
 
 import "time"
 
-// scheduleDayOptions — доступные дни для планирования рассылки, offset дней от сегодня.
-var scheduleDayOptions = []int{0, 1, 2, 3, 6}
-
-// broadcastScheduleTZ — таймзона планировщика рассылок. UI обещает московское
-// время, поэтому не зависим от time.Local сервера.
-var broadcastScheduleTZ = func() *time.Location {
-	loc, err := time.LoadLocation("Europe/Moscow")
-	if err != nil {
-		// Fallback без tzdata: MSK всегда UTC+3.
-		return time.FixedZone("MSK", 3*60*60)
-	}
-	return loc
-}()
-
-// ruWeekdays — короткие названия дней недели по time.Weekday() (0 = Вс).
-var ruWeekdays = [...]string{"Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"}
-
 const (
 	// --- Session / UI ---
 
-	// broadcastSessionTTL — максимальное время жизни черновика рассылки.
-	broadcastSessionTTL = 15 * time.Minute
-	// broadcastNameMaxLen — максимальная длина названия рассылки.
-	broadcastNameMaxLen = 100
-	// broadcastTextPreviewMaxRunes — максимальная длина текста в карточке рассылки.
-	broadcastTextPreviewMaxRunes = 500
 	// broadcastErrorTextMaxLen — максимальная длина текста ошибки в отчёте.
 	broadcastErrorTextMaxLen = 500
-	// broadcastErrorPreviewMaxRunes — максимальная длина текста одной ошибки
-	// в карточке деталей рассылки (полный текст остаётся в delivery_report).
-	broadcastErrorPreviewMaxRunes = 120
 
 	// --- Per-message delivery ---
 

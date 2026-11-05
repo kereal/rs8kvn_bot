@@ -470,10 +470,25 @@ func containsEntityChar(s string) bool {
 	return false
 }
 
-// broadcastSessionActive reports whether an admin has an in-progress broadcast.
-func (h *Handler) broadcastSessionActive(chatID int64) bool {
-	s := h.getBroadcastSession(chatID)
-	return s != nil && (s.stage == broadcastStageAwaitingName || s.stage == broadcastStageAwaitingDraft || s.stage == broadcastStageFiltering || s.stage == broadcastStageConfirming || s.stage == broadcastStageScheduling)
+// sendBroadcastReport sends the broadcast worker's completion notice to the
+// admin chat. Управление рассылками переехало в админ-панель
+// (doc/specs/admin/06-broadcasts.md): воркеру остаётся только короткое
+// уведомление о результате, полный отчёт живёт в панели и БД.
+func (h *Handler) sendBroadcastReport(ctx context.Context, chatID int64, text string, _ uint) {
+	h.SendMessage(ctx, chatID, text)
+}
+
+// truncateRunes обрезает строку до maxRunes символов (не байт) и ставит
+// многоточие. Используется воркером рассылок для last_error.
+func truncateRunes(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "…"
 }
 
 // HandleSend handles the /send command for admins to send a message to a specific user.

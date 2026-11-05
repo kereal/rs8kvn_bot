@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// SubscriptionAdminFilter — фильтры экрана «Подписки». Zero value = без
+// SubscriptionFilter — фильтры экрана «Подписки». Zero value = без
 // фильтра. Валидация строковых полей (статус, колонка сортировки) — в
 // хендлере (белые списки), здесь — только SQL.
 type SubscriptionFilter struct {
