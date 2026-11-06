@@ -118,6 +118,8 @@ Commits. Bypass with `LEFTHOOK=0 git commit`. Tests, lint and race stay in CI.
 ## API contract
 
 Base path `/admin/api`, JSON, bearer token (`Authorization: Bearer <ADMIN_TOKEN>`).
+The embedded SPA itself is served by `GET /admin/` (`handleSPA` in `server.go`),
+outside the JSON API below.
 
 | Method | Path | Body | Response |
 |---|---|---|---|

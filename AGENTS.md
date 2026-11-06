@@ -237,8 +237,8 @@ plaintext принимают. Публичные CF-worker узлы (ws на IP 
   `internal/service`, а не в репозитории. Аудит таких решений —
   `actor_type=admin` (`AuditSubscriptionRevokedByAdmin`, id панели = 0).
 - **Сборка**: `cd admin && npm run build` (обязательно после правок вью —
-  коммитится `dist/`). Харнесс для ручного прогона: `tmp/adminserve`
-  (копирует `data/rs8kvn.db` в `/tmp/adminlive.db`, узлов нет — внешние
+  коммитится `dist/`). Харнесс для ручного прогона: `go run ./tools/adminserve` (копирует
+  `data/rs8kvn.db` в `/tmp/rs8kvn-admin-dev.db`, узлов нет — внешние
   вызовы no-op).
 - **Ловушки**, уже стоившие отладки: `onMount(load)` обязателен во вью;
   роут в `App.svelte` обёрнут в `{#key route.name/route.id}` (без ключа

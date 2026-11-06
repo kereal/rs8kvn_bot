@@ -3,7 +3,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/kereal/rs8kvn_bot/docker.yml?branch=main)](https://github.com/kereal/rs8kvn_bot/actions)
 [![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](https://go.dev/)
-[![Coverage](https://img.shields.io/badge/coverage-66.2%25-green)](https://github.com/kereal/rs8kvn_bot/actions)
+[![Coverage](https://img.shields.io/badge/coverage-70.8%25-green)](https://github.com/kereal/rs8kvn_bot/actions)
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io%2Fkereal%2Frs8kvn_bot-blue?logo=docker)](https://github.com/kereal/rs8kvn_bot/actions)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 
@@ -24,13 +24,13 @@
 - 🗄️ Daily database backups with rotation, embedded SQLite migrations
 - 🐛 Sentry error tracking (+ performance traces)
 - 🐳 Docker support with health checks, non-root user, UPX compression
-- 🧪 Unit + E2E tests (66.2% aggregate coverage, race-safe, fuzzing)
+- 🧪 Unit + E2E tests (70.8% aggregate coverage, race-safe, fuzzing)
 - 🔒 Security hardening — X-Forwarded-For rightmost IP (S2), URL scheme allowlist http/https (S3), web↔bot dependency isolation (A1)
 
 ## Quick Start
 
 ```bash
-docker pull ghcr.io/kereal/rs8kvn_bot:2.4.0
+docker pull ghcr.io/kereal/rs8kvn_bot:2.7.1
 
 docker run -d \
   --name rs8kvn_bot \
@@ -38,10 +38,10 @@ docker run -d \
   -v $(pwd)/.env:/app/.env:ro \
   -v $(pwd)/data:/app/data \
   -p 127.0.0.1:8880:8880 \
-  ghcr.io/kereal/rs8kvn_bot:2.4.0
+  ghcr.io/kereal/rs8kvn_bot:2.7.1
 ```
 
-> The registry provides a `latest` tag as well as SemVer (`2.4.0`, `2.4`) and commit SHA tags. Pin a concrete SemVer or SHA tag when reproducible deployments are required.
+> The registry provides a `latest` tag as well as SemVer (`2.7.1`, `2.7`) and commit SHA tags. Pin a concrete SemVer or SHA tag when reproducible deployments are required.
 
 See **[Installation Guide](doc/installation.md)** for:
 - All 4 installation methods (Docker, Docker Compose, Build from Source, Air hot reload)
@@ -125,7 +125,7 @@ Referral-based trial flow: validates the invite code, applies IP rate limiting, 
 
 ### Subscription Server (`/sub/{subID}`)
 
-Serves merged subscriptions from all active nodes (3x-ui, proxman, fetch) with a 240s singleflight cache. Optional access logging is enabled via `SUBSERVER_ACCESS_LOG`.
+Serves merged subscriptions from all active nodes (3x-ui, proxman, fetch) with a 240s TTL cache and an in-process singleflight (`flightGroup`): concurrent cache misses for the same subID share one node fan-out instead of each hitting every node. Optional access logging is enabled via `SUBSERVER_ACCESS_LOG`.
 
 The response body is a JSON **array** of complete Xray-core client configs (`application/json; charset=utf-8`), one element per node, following the XTLS Subscription Standards body shape. Each element carries `remarks` (the node name clients display), local socks/http inbounds, one proxy outbound plus `direct`/`block`, DNS settings, and routing whose catch-all rule targets that element's own outbound. Validated with `xray -test -config`.
 
@@ -151,7 +151,7 @@ Expose it at `https://<domain>/payment/callback`: locally via `ngrok http 8880`,
 
 ## Releases
 
-Current release: **[v2.4.0](https://github.com/kereal/rs8kvn_bot/releases/tag/v2.4.0)**
+Current release: **[v2.7.1](https://github.com/kereal/rs8kvn_bot/releases/tag/v2.7.1)**
 
 Releases are fully automated:
 
@@ -180,7 +180,7 @@ golangci-lint run ./...
 gosec ./...
 ```
 
-Test suite: 66.2% aggregate coverage in the latest documented run (generated with `go test -coverprofile`), race-safe, fuzzing, table-driven tests, integration tests with mock HTTP server.
+Test suite: 70.8% aggregate coverage in the latest documented run (generated with `go test -coverprofile`), race-safe, fuzzing, table-driven tests, integration tests with mock HTTP server.
 
 ### Build
 

@@ -199,13 +199,13 @@ first outbound — a single-object response would show the user one node out of 
 | Telegram API | `go-telegram-bot-api/telegram-bot-api/v5` | v5.5.1 |
 | ORM | `gorm.io/gorm` + `gorm.io/driver/sqlite` | v1.31.2 |
 | DB engine | SQLite (mattn/go-sqlite3, CGO) | `./data/rs8kvn.db` |
-| Migrations | `golang-migrate/migrate/v4` | v4.19.1 |
+| Migrations | `golang-migrate/migrate/v4` | v4.20.1 |
 | QR Code | `piglig/go-qr` | v1.1.0 |
 | Logging | `go.uber.org/zap` + `lumberjack.v2` | v2.2.1 |
-| Error tracking | `getsentry/sentry-go` | v0.48.0 |
-| Metrics | `prometheus/client_golang` | v1.23.2 |
-| Concurrency | `golang.org/x/sync/singleflight` | — |
-| Testing | `stretchr/testify` | v1.11.1 |
+| Error tracking | `getsentry/sentry-go` | v0.50.0 |
+| Metrics | `prometheus/client_golang` | v1.25.0 |
+| Concurrency | stdlib `sync` — custom `flightGroup` (singleflight), keyed mutexes; `go.uber.org/goleak` v1.3.0 (tests) | — |
+| Testing | `stretchr/testify` | v1.12.1 |
 | CI/CD | GitHub Actions → golangci-lint, gosec, test, Docker → GHCR | — |
 
 ## Current State
@@ -312,7 +312,7 @@ The admin can go back to adjust filters or confirm to start the broadcast.
 | - Health endpoints — `/healthz` (503 when Down), `/readyz` (503 during init)
 | - Invite/trial landing — `/i/{code}` with IP rate limit (3/hour), cookie dedup (3h) |
 | - Per-user rate limiting — chatID token bucket (30 tokens, 5/sec refill, 10-min idle cleanup) |
-| - Subscription proxy — `GET /sub/{subID}` with multi-node aggregation, headers, 240s TTL cache, singleflight |
+| - Subscription proxy — `GET /sub/{subID}` with multi-node aggregation, headers, 240s TTL cache, in-process singleflight per subID (`flightGroup`) |
 | - Daily backups — WAL checkpoint, atomic copy, 30 rotated backups by default |
 | - Sentry error tracking (+ traces), Zap structured JSON logging with rotation
 | - Order/Product tracking — payment lifecycle (pending/paid/expired/canceled) with 30-min payment window
@@ -326,24 +326,33 @@ The admin can go back to adjust filters or confirm to start the broadcast.
 
 ### Test Coverage
 
+Measured 2026-11-06 with `go test ./... -count=1 -coverprofile` (21 packages, exit 0).
+`✅ ≥ 80%`, `🟡 60–80%`, `🔴 < 60%`.
+
 | Module | Coverage | Status |
 |--------|----------|--------|
-| `internal/flag` | **97.7%** | ✅ |
-| `internal/ratelimiter` | **97.4%** | ✅ |
-| `internal/heartbeat` | **96.2%** | ✅ |
-| `internal/service` | **95.2%** | ✅ |
-| `internal/config` | **91.8%** | ✅ |
-| `internal/xui` | **90.9%** | ✅ |
-| `internal/web` | **90.3%** | ✅ |
-| `internal/bot` | **92.6%** | ✅ |
-| `internal/utils` | **90.0%** | ✅ |
-| `internal/logger` | **88.9%** | ✅ |
-| `internal/backup` | **83.2%** | ✅ |
-| `internal/subserver` | **82.5%** | ✅ |
-| `internal/scheduler` | **81.2%** | ✅ |
-| `internal/database` | **77.8%** | 🟡 |
-| `cmd/bot` | **5.4%** | 🟡 (integration tests cover indirectly) |
-| **Overall** | **66.2%** | 🟡 |
+| `internal/ratelimiter` | **92.6%** | ✅ |
+| `internal/xui` | **91.2%** | ✅ |
+| `internal/config` | **89.8%** | ✅ |
+| `internal/web` | **89.3%** | ✅ |
+| `internal/utils` | **86.1%** | ✅ |
+| `internal/flag` | **84.5%** | ✅ |
+| `internal/vpn` | **83.5%** | ✅ |
+| `internal/heartbeat` | **83.3%** | ✅ |
+| `internal/subserver` | **80.4%** | ✅ |
+| `internal/service` | **80.1%** | ✅ |
+| `internal/backup` | **79.9%** | 🟡 |
+| `admin` (Go side of the panel) | **78.9%** | 🟡 |
+| `internal/scheduler` | **77.7%** | 🟡 |
+| `internal/metrics` | **77.1%** | 🟡 |
+| `internal/service/payment/platega` | **76.0%** | 🟡 |
+| `internal/database` | **74.2%** | 🟡 |
+| `internal/bot` | **69.4%** | 🟡 |
+| `internal/logger` | **60.5%** | 🟡 |
+| `cmd/bot` | **16.4%** | 🔴 (covered indirectly by e2e) |
+| **Overall** | **70.8%** | 🟡 |
+
+`internal/testutil` and `tools/adminserve` ship without their own tests (0%).
 
 All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 
