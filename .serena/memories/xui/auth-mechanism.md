@@ -8,7 +8,7 @@
 
 ## Singleflight
 - **НЕ для логина** (логина нет).
-- Используется в `internal/web/singleflight.go` для дедупликации одновременных DB queries (subserver cache misses).
+- Дедупликация одновременных промахов кэша субсервера — `flightGroup` в `internal/subserver/flight.go` (вызов в `subscription_handler.go`); к 3x-ui-клиенту отношения не имеет.
 
 ## Circuit Breaker — УДАЛЁН
 - Circuit breaker снесён как мёртвый код (коммит `406995b`, 2026-11); файлов breaker.go/breaker_test.go в репозитории нет.
@@ -46,7 +46,7 @@
 - `internal/config/constants.go` — `XUIRequestTimeout` и др. defaults
 - `internal/config/config.go` — `XUIAPIToken` field
 - `internal/interfaces/interfaces.go` — `XUIClient` interface (без `Login(ctx)`)
-- `internal/web/singleflight.go` — singleflight (НЕ в xui/)
+- `internal/subserver/flight.go` — `flightGroup` (singleflight, НЕ в xui/)
 
 ## Tests
 - `internal/xui/client_test.go` — doHTTPRequest, CRUD, RetryWithBackoff, isRetryable (non-200 не ретраится), flow detection, 401/403/500 errors.
