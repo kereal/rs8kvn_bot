@@ -101,6 +101,6 @@ GetSourcesByPlanNameFunc: func(ctx context.Context, planName string) ([]database
 
 ## Files изменены
 - internal/service/subscription.go (фиксы #5, #6)
-- internal/database/database.go (фикс #7)
+- internal/database/database.go (фикс #7; файла больше нет — BindTrialSubscription теперь в internal/database/trials.go)
 - internal/service/subscription_test.go (3 новых теста)
 - internal/database/database_test.go (1 новый тест)

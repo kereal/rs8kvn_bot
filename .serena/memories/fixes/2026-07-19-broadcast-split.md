@@ -34,7 +34,9 @@
   `Max+1`, отказ только при `Max*20+1`.
 
 ## Регрессия устранена (2026-07-19, follow-up)
-- `internal/bot/admin_test.go` был `package e2e` + `//go:build integration` в той
+- `internal/bot/admin_test.go` (файл позже удалён целиком при дедупликации тестов,
+  коммит `357bae9`; entity-тесты `splitMessage` теперь в `internal/bot/split_message_test.go`,
+  e2e-копии — в `tests/e2e/admin_test.go`) был `package e2e` + `//go:build integration` в той
   же директории, что `package bot` → integration-сборка `internal/bot` падала
   (`found packages bot (admin.go) and e2e (admin_test.go)`). И `setupE2EEnv`/
   `e2eTestEnv` живут в `tests/e2e/e2e_test.go`, поэтому e2e-тесты в файле и так

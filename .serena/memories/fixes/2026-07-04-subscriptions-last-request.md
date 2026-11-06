@@ -40,3 +40,7 @@
 - `doc/architecture.md` — колонка в схеме таблицы `subscriptions` + rationale индекса.
 - `doc/api.md` — шаг обновления `last_request` в flow `GET /sub/{subID}`.
 - `doc/handover.md` — devices tracking дополнен описанием `last_request`.
+
+> Обновлено 2026-11-06: вызов `UpdateLastRequest` больше не выполняется на каждом запросе —
+> он идёт через `touchLastRequest` с троттлингом 5 минут (`LastRequestWriteInterval`,
+> см. internal/subserver/touch.go:18), best-effort семантика сохранена.

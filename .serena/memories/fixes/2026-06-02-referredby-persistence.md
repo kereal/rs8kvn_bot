@@ -58,18 +58,18 @@
 
 ## Файлы изменены
 - internal/interfaces/interfaces.go
-- internal/database/database.go
+- internal/database/database.go (файла больше нет — пакет разложен на internal/database/*.go; CreateSubscription теперь в internal/database/subscriptions.go)
 - internal/testutil/testutil.go
 - internal/service/subscription.go
 - internal/service/subscription_test.go
 - internal/bot/subscription_handler.go
 - internal/bot/subscription_test.go
 - internal/bot/callbacks_test.go
-- internal/bot/database_test.go
+- internal/bot/database_test.go (файл удалён; TestCreateSubscription_WithPendingInvite теперь в internal/bot/subscription_test.go)
 - internal/bot/integration_test.go
 - internal/database/database_test.go
 - (sed bulk-update) tests/e2e/*_test.go
-- tests/leak/leak_test.go
+- tests/leak/leak_test.go (каталог tests/leak удалён, коммит 42434f7; goleak-проверки перенесены в пакетные тесты, напр. internal/bot/graceful_shutdown_test.go)
 
 ## Verification
 - `go vet ./...` — clean

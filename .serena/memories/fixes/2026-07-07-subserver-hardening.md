@@ -81,3 +81,8 @@
   сохранена (транзиентная ошибка теперь не фатальна, но запрос к БД остаётся).
 - **#8**: singleflight на cache stampede не добавлен (есть в `internal/web/singleflight.go`
   для логина, но путь cache-hit субсервера его не использует).
+
+> Обновлено 2026-11-06: пункт #8 закрыт — singleflight для промахов кэша субсервера
+> реализован как `flightGroup` в internal/subserver/flight.go и применяется к обработке
+> запроса (см. internal/subserver/subscription_handler.go:56, internal/subserver/service.go:35).
+> Упомянутый `internal/web/singleflight.go` удалён (коммит 530892b).
