@@ -82,12 +82,12 @@ Production-grade: миграции, мониторинг, rate-limiting, gracefu
 - Quote-wrapping для значений с пробелами
 - `statusRecorder` tracks per-request source success/total counts
 
-## Broadcast (рассылка `/broadcast`)
-- Админский флоу (сессия с TTL 15 мин): `/broadcast` → **название** → **текст** (MarkdownV2, спецсимволы авто-экранируются `utils.EscapeMarkdownV2`) → превью → **фильтры** (`bfilter_*`: plan paid/free, status active/all/revoked, дата регистрации 90/180/365, inactive 0/30/90 дн., ever_paid) → подтверждение (`broadcast_confirm` → счётчик получателей → `broadcast_final_confirm`).
+## Broadcast (рассылки)
+- **Создание и управление — через admin-панель** (Svelte SPA + `admin/broadcasts.go`, API `/admin/api/broadcasts*`: create/list/audience/get/update/delete/cancel/retry/deactivate-blocked). Бот-флоу `/broadcast` (wizard с фильтрами `bfilter_*` и колбэками `broadcast_cancel_`/`broadcast_retry_`) удалён из internal/bot.
 - **Durable BroadcastWorker** (`internal/bot/broadcast_worker.go`): тик 15 с, таймаут кампании 5 мин, батчи по 100 (concurrency 10), независим от update-loop, переживает рестарт процесса (кампании `scheduled|running` резюмируются через `retry_at`).
 - Аудитория снапшотится в JSON **`recipients_state`** той же строки `broadcasts` (миграция 036): snapshot + per-recipient `pending|sending|sent|blocked|unreachable|failed`, lease 2 мин, восстановление после краха (`RecoverStaleBroadcastRecipients`). Строка `broadcasts`: `filters` (JSON), статус (`scheduled|running|completed|failed|canceled`, CHECK-constraint), `planned_at`/`started_at`/`finished_at`, счётчики `recipients_total`/`sent_count`/`blocked_count`/`unreachable_count`/`failed_count`, `delivery_report` (JSON: `delivered`/`blocked`/`unreachable` — списки telegram_id, `errors` — `{telegram_id, error}`), `last_error`/`retry_at`/`retry_count`.
 - **Ретраи**: per-message 2 попытки (300/600 мс); `blocked` — только явная блокировка бота («bot was blocked by the user»), deactivated/недоступный/удалённый чат (вкл. «chat not found») → `unreachable`, не ретраются. Инфраструктурные/персистентные сбои кампании → `retry_at` с exponential backoff (5 с → 15 мин), статус остаётся `running`.
-- Управление: кнопки «📋 Детали рассылки» (`broadcast_details_<id>`), «⏹ Отменить» (`broadcast_cancel_<id>`), «🔁 Повторить ошибки» (`broadcast_retry_<id>`) в карточке; история — `/broadcasts` (10 последних).
+- Управление кампаниями — через admin-панель (карточка рассылки: отмена, повтор ошибок, deactivate-blocked); отчёт о доставке админ получает в Telegram от воркера (`sendAdminReport`).
 - Отчёт админу: счётчики `Отправлено/Заблокировали/Недоступны/Ошибок`; полные списки ID остаются в `delivery_report`. `UpdateBroadcast` обновляет только изменяемые поля, карточку не затирает.
 - **Логирование**: `Info` — создание/старт/завершение/отмена/retry кампании и черновика, плановый resume после таймаута (`DeadlineExceeded`/`errBroadcastIncomplete`); `Warn` — фоновые сбои (загрузка runnable, launch failed, markCampaignFailed, report load); `Error` — паника получателя, сбой scheduleRetry/создания, ошибки cancel/retry из callback.
 
@@ -100,13 +100,13 @@ Production-grade: миграции, мониторинг, rate-limiting, gracefu
 
 ## 3x-ui v3.7.0 auto-renew (2026-08-29)
 - Уточнён контракт панели по фактическому payload: `reset` — интервал продления, `resetDay=0` — rolling-режим, `resetMax=0` — без лимита, `trafficReset=monthly`, `trafficResetDay=1` — ежемесячный сброс 1-го числа.
-- **Проверено по исходникам панели (main, ~v3.7.0)**: `model.Client` — `trafficReset ∈ {never,hourly,daily,weekly,monthly}` (пустая строка принимается и нормализуется в `never`), `resetDay ∈ [0,31]` (0 = rolling), `resetMax ≥ 0` (0 = безлимит); `autoRenewClients` (`internal/web/service/inbound_traffic.go`) продлевает rolling-клиентов на `reset*86400000`, сбрасывает up/down; клиенты с `reset>0`/`reset_day>0` не удаляются purge'ом (`depletedClientsClause`).
+- **Проверено по исходникам панели (main, ~v3.7.0)**: `model.Client` — `trafficReset ∈ {never,hourly,daily,weekly,monthly}` (пустая строка принимается и нормализуется в `never`), `resetDay ∈ [0,31]` (0 = rolling), `resetMax ≥ 0` (0 = безлимит); `autoRenewClients` (исходник панели MHSanaei/3x-ui, `internal/web/service/inbound_traffic.go` — это путь upstream-репозитория, не наш) продлевает rolling-клиентов на `reset*86400000`, сбрасывает up/down; клиенты с `reset>0`/`reset_day>0` не удаляются purge'ом (`depletedClientsClause`).
 - `xui.ClientRequest`, `vpn.SubscriptionProvision` и адаптер 3x-ui передают эти поля при add/update; free-подписки получают профиль, trial — `reset=0` без автопродления.
 - Поля профиля отправляются **условно**: только когда задан `TrafficReset != ""`. Панель при update **не мержит** — отсутствующий `trafficReset` пишется как `never` (`normalizeClientTrafficReset`), поэтому каждый update лимитированного плана обязан слать полный профиль.
 - `/clients/traffic/{email}` не отдаёт `trafficReset/trafficResetDay`, поэтому `reenableAndNotify` читает профиль через новый `xui.Client.GetClientByEmail` (inbound settings) — best-effort: при ошибке Warn и продолжение без профиля.
 - Fallback восстановления срока — только в `xui.doUpdateClient` (guard `resetDays > 0`): истёкший free-клиент получает срок now + 30 дней; trial никогда не продлевается; sync-слой срок не двигает.
 - Существующих клиентов пересоздавать не нужно; их достаточно один раз сохранить с указанными параметрами панели.
-- Регрессионные тесты: JSON payload (add/update), условная отправка полей, неизменность неистёкшего срока, восстановление истёкшего, проброс профиля в traffic-воркере через `GetClientByEmail`, тесты самого `GetClientByEmail` (modern/legacy settings), sync не продлевает trial. `go test ./...` проходит (2124).
+- Регрессионные тесты: JSON payload (add/update), условная отправка полей, неизменность неистёкшего срока, восстановление истёкшего, проброс профиля в traffic-воркере через `GetClientByEmail`, тесты самого `GetClientByEmail` (modern/legacy settings), sync не продлевает trial. `go test ./...` зелёный (2026-11-06: 1367 Test-функций + 15 TestMain, 139 test-файлов, покрытие 70.8%).
 
 ## Последние изменения (2026-08-26, ветка feat/broadcast-campaigns)
 - **ResetTraffic при смене тарифа**: `vpn.Client.ResetTraffic` (3x-ui POST `/panel/api/clients/resetTraffic/{email}`; proxman/fetch — no-op). Вызывается в `processPendingUpdate` после update, **best-effort** (Warn при ошибке, не блокирует переход в `active`).
@@ -115,7 +115,7 @@ Production-grade: миграции, мониторинг, rate-limiting, gracefu
 - **ReconcileOrphanedClients**: активная non-trial подписка без node bindings — пересоздаётся `pending_add`-очередь (`ensureSubscriptionNodes`), а не ревокация.
 - **Subserver**: кэш-ревалидация **fail-closed** (Error + 5xx вместо stale после revoke/chargeback); лимит тела 2 MiB (`config.MaxResponseSize`); `analyticsMu` сериализует `UpdateDevices`/`UpdateIPs`; base64-агрегация поддерживает RawStdEncoding (без padding) и разбивает по строкам.
 - **Web**: check-and-record trial rate-limit под `trialRateMu`; `SecurityHeadersMiddleware` (nosniff/DENY/no-referrer/Permissions-Policy).
-- **Тесты**: `internal/bot/broadcast_admin_flow_test.go` (callback ID, cancel/retry, фильтры, форматтеры), `internal/xui/reset_traffic_test.go`, sync ResetTraffic best-effort, BindTrial rollback, CleanupExpiredTrials deprovision-failure, ReconcileOrphaned queue recovery.
+- **Тесты**: `internal/xui/reset_traffic_test.go`, sync ResetTraffic best-effort, BindTrial rollback, CleanupExpiredTrials deprovision-failure, ReconcileOrphaned queue recovery (бот-тесты broadcast-флоу удалены вместе с wizard'ом).
 - **Документация**: добавлен краткий README по флоу рассылок — `doc/broadcast.md` (флоу админа, воркер доставки, управление, указатели на код); ссылка добавлена в «Project Documentation» корневого README.md.
 
 ## Стек
@@ -141,21 +141,22 @@ Production-grade: миграции, мониторинг, rate-limiting, gracefu
 ## Структура
 ```text
 cmd/bot/                     — точка входа, graceful shutdown, lifecycle workers
-internal/bot/                — handlers, commands, callbacks, referral cache, keyboard/menu
+internal/bot/                — handlers, commands, callbacks, referral cache, keyboard/menu, broadcast_worker
 internal/database/           — GORM-модели, embedded migrations, транзакции
-internal/service/            — SubscriptionService + SyncService + reminders
+internal/service/            — SubscriptionService + SyncService + reminders (+ payment/platega)
 internal/vpn/                — VPN client abstraction (3x-ui, proxman, fetch)
 internal/xui/                — 3x-ui HTTP-клиент + классификация ошибок панели
-internal/interfaces/         — контракты (XUIClient, SubscriptionRepository, reminder repr.)
-internal/testutil/           — моки (db slice fakes, testutil helpers)
+internal/interfaces/         — контракты (XUIClient, 7 узких persistence-сеймов по ADR-0001, reminder repr.)
+internal/testutil/           — фейки/хелперы (ServiceStoreFake, SubscriptionRepositoryFake и др.)
 internal/utils/              — time, UUID, QR, Markdown EscapeMarkdownV2/EscapeMarkdown
 internal/config/             — загрузка, валидация
 internal/logger/             — zap setup
 internal/heartbeat/          — мониторинг
 internal/backup/             — ежедневные бэкапы БД с WAL checkpoint
-internal/scheduler/          — backup + trial cleanup + subscription sync + expiry reminders
+internal/scheduler/          — backup + trial cleanup + subscription sync + expiry reminders + traffic
 internal/ratelimiter/        — per-user token bucket
-internal/web/                — /healthz, /readyz, /i/{code}, /sub/{subID}, /metrics, /payment/callback, ... + singleflight
+internal/web/                — /healthz, /readyz, /i/{code}, /sub/{subID}, /metrics, /payment/callback, /static/logo.png
+admin/                       — admin-panel API (Svelte SPA в admin/dist), /admin/api/*: 29 уникальных путей (41 маршрут метод+путь) + /admin/ SPA
 internal/subserver/           — кэш + merge подписок; выдаёт полные профили (Xray JSON-массив, sing-box 1.12+, Clash/Mihomo YAML) по UA/?format=; optional access log
 internal/metrics/            — Prometheus/обёртка; напоминания имеют выделенные счётчики
 ```
@@ -174,9 +175,8 @@ internal/metrics/            — Prometheus/обёртка; напоминани
 - Архитектура: см. `architecture`
 - Стиль кода: см. `code_style`
 - Git workflow: см. `git-workflow`
-- Дорожная карта: см. `roadmap`
-- Тесты: см. `test-info`
-- Аудиты: см. `audit/*`
+- Тесты/покрытие: см. `test-coverage`
+- Метрики: см. `metrics`
 - Исторические фиксы: см. `fixes/*`
 - Рассылки (кратко): см. `doc/broadcast.md`
 - Traffic-уведомления: см. `fixes/2026-08-27-subscription-traffic-worker`

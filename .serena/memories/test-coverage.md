@@ -1,16 +1,17 @@
 # Test Coverage Analysis — rs8kvn_bot
 
-**Последняя проверка:** 2026-11-02
+**Последняя проверка:** 2026-11-06
 **Метод:** `go test -coverprofile=/tmp/coverage.out ./...` и `go tool cover -func=/tmp/coverage.out`
-**Общее покрытие:** 70.2% (2026-11-02, после чистки набора — см. секцию ниже)
+**Общее покрытие:** 70.8% statements (2026-11-06)
+**Структура набора (2026-11-06):** 139 test-файлов, 1367 `func Test*` (плюс 15 `TestMain`), 25 пакетов (`go list ./...`), 22 пакета с тестами (остальные — `internal/testutil`, `tools/adminserve`, `internal/subserver/benchmarks`).
 
 ## Чистка тестового набора (2026-11-02, dev, 8 коммитов d5d162c..754d052)
 
 Аудит 110 тест-файлов / 1455 тест-функций. Итог: −5520 строк нетто, 1455→1212 Test-функций,
 покрытие 70.2%, race/lint 0. Ключевые решения (НЕ откатывать без причины):
-- Удалены межпакетные клоны: internal/bot/database_test.go (копия internal/database), admin_test.go
-  (integration-тег; TTL-тест перенесён в broadcast_admin_flow_test без тега, split-message покрыт
-  split_message_test).
+- Удалены межпакетные клоны: клон internal/bot/database_test.go (копия internal/database;
+  канонический файл — internal/database/database_test.go), admin_test.go
+  (integration-тег; split-message покрыт split_message_test).
 - subserver: мёртвый прод ConvertJSONToShareLinks жил в _test.go (не компилировался в бинарь) — удалён
   вместе с 9 обёртками и base64StdEncode; DetectFormat-золотые слиты в таблицу; hits/misses-атомик в
   cache.go мёртвый (метрики CacheHits/MissesTotal отдельные).
@@ -25,57 +26,64 @@
 - Новые guard'ы: admin_del_test.go (/del — единственный продуктовый путь удаления), deactivate
   prompt/exec колбэки, broadcastSessionTTL, IntervalGate (utils/gate_test.go), RequestPayment
   повторный линк (защита от двойного списания), ClaimReminder/ReleaseReminder (нет двойного письма
-  после продления), fetch-node URL, AllowInsecure render, expire sec/ms.
+  после продления), fetch-node URL, AllowInsecure render (позже заменён на
+  NoAllowInsecure-гварды — см. AGENTS.md), expire sec/ms.
+  (Guard broadcastSessionTTL удалён вместе с бот-флоу рассылок — управление
+  рассылками теперь через admin-панель, воркер доставки остался в internal/bot.)
 - Флаки устранены: ConcurrentMissesShareOneFetch (release-барьер вместо sleep-окна),
   SavesRedirectPaymentDetails (без wall-clock допуска).
 
 **Последняя проверка (историческая):** 2026-08-21
 
-Пакетные значения ниже — исторический снимок от 2026-06-26, а не актуальный CI-отчёт. Для текущих значений всегда использовать команду выше.
+## По пакетам (замер 2026-11-06, `go test ./... -count=1 -coverprofile`)
 
-## По пакетам (оценка)
+| Пакет | Покрытие |
+|---|---|
+| internal/web | 89.3% |
+| internal/xui | 91.2% |
+| internal/ratelimiter | 92.6% |
+| internal/utils | 86.1% |
+| internal/config | 89.8% |
+| internal/flag | 84.5% |
+| internal/heartbeat | 83.3% |
+| internal/vpn | 83.5% |
+| internal/subserver | 80.4% |
+| internal/service | 80.1% |
+| internal/backup | 79.9% |
+| admin | 78.9% |
+| internal/scheduler | 77.7% |
+| internal/metrics | 77.1% |
+| internal/service/payment/platega | 76.0% |
+| internal/database | 74.2% |
+| internal/bot | 69.4% |
+| internal/logger | 60.5% |
+| cmd/bot | 16.4% |
+| internal/testutil | 0.0% (фейки, тестов нет) |
 
-| Пакет | Покрытие | Статус |
+tests/e2e — интеграционные тесты без unit-покрытия statements.
+
+## Файлы с наименьшим покрытием (замер 2026-11-06, файлы ≥ 50 statements)
+
+| Файл | Покрытие | Замечание |
 |---|---|---|
-| internal/flag | ~97% | 🟢 |
-| internal/heartbeat | ~92% | 🟢 |
-| internal/ratelimiter | ~90% | 🟢 |
-| internal/xui | ~85% | 🟢 |
-| internal/bot | ~82% | 🟢 |
-| internal/scheduler | ~80% | 🟢 |
-| internal/web | ~78% | 🟡 |
-| internal/config | ~78% | 🟡 |
-| internal/utils | ~70% | 🟡 |
-| internal/logger | ~68% | 🟡 |
-| internal/service | ~70% | 🟢 |
-| internal/database | ~55% | 🟡 |
-| internal/vpn | ~65% | 🟢 |
-| internal/metrics | ~35% | 🔴 |
-| internal/subserver | ~30% | 🔴 |
-| internal/testutil | 0% | ⚪ (ожидаемо) |
+| `cmd/bot/lifecycle.go` | 0.0% | lifecycle-обёртки, косвенно прикрыты e2e |
+| `internal/bot/broadcast_worker.go` | 0.3% | воркер доставки рассылок — крупнейший пробел (296 statements) |
+| `cmd/bot/main.go` | 13.8% | сборка графа и запуск воркеров; проверяется e2e/смоуком |
+| `internal/subserver/access_log.go` | 33.3% | опциональный access log |
+| `internal/database/models.go` | 55.2% | GORM-модели |
+| `internal/service/payment/platega/callback.go` | 58.6% | разбор колбэка провайдера |
+| `internal/logger/logger.go` | 60.5% | zap setup |
+| `internal/database/subscription_nodes.go` | 62.7% | state-machine биндингов, покрыта через sync-тесты |
+| `internal/database/trials.go` | 65.9% | bind/cleanup trial |
+| `internal/bot/callback.go` | 66.1% | роутер callback'ов |
 
-## Файлы с низким покрытием
-- internal/database/subscription_nodes.go — частично покрыт sync.go тестами
-- internal/service/sync.go — ~50% (нужны тесты на ReconcilePlanNodes, handleSyncError)
-- internal/vpn/client.go — ~65% (ThreeXUIClient, classify errors)
-- internal/utils/markdown.go — EscapeMarkdown
+`internal/testutil` и `tools/adminserve` собственных тестов не имеют (0%) — так и задумано.
 
-## Приоритеты улучшения
+## Приоритеты улучшения (2026-11-06)
 
-### P1 — Высокое
-1. service/sync.go — непокрытые пути: ReconcilePlanNodes edge cases, handleSyncError
-2. vpn/client.go — classify ошибок, retryUnavailableNode
-
-### P2 — Среднее
-3. database/subscription_nodes.go — UpsertSubscriptionNode, GetPendingSync edge cases
-4. database/trials.go — BindTrialSubscription race-condition flows
-
-### P3 — Низкое
-5. utils/markdown.go — EscapeMarkdown
-
-## Количество тестовых файлов
-
-Количество тестовых файлов меняется вместе с кодом; не использовать историческое число ниже как текущую метрику.
+1. `internal/bot/broadcast_worker.go` — ретраи, flood-обработка, resume кампаний после краха (реальный прод-путь, покрыт почти нулём).
+2. `cmd/bot/lifecycle.go` + `cmd/bot/main.go` — сборка графа и порядок запуска воркеров.
+3. `internal/service/payment/platega/callback.go` — идемпотентность и разбор ответа провайдера.
 
 ## Добавленные тесты (2026-06-26, ветка test/add-coverage-p1-p2)
 
@@ -83,7 +91,7 @@
 - `internal/database/orders_test.go` — 13 тестов: CRUD orders, status transitions, paid/activated updates
 - `internal/database/products_test.go` — 6 тестов: GetActiveByPlanID (active/inactive product/plan), GetProductByID
 - `internal/subserver/subscription_handler_test.go` — HandleSubscription (cache hit/miss/invalidated, Xray JSON response, multiple nodes, no URL, fetch error), UpdateDevices, UpdateIPs, helper functions (ParseUserInfoValue, ParseExpireFromUserInfo, BuildUserInfoHeader, FilterHeaders, SkipTransportHeader, ResponseHeaders, DetectFormat, isValidServer)
-- `internal/subserver/xray_subscription_test.go` — контракт ответа `/sub`: JSON/Clash/share-link/base64 источники → JSON-массив полных Xray-конфигов, один профиль на ноду (тест `TestBuildResponseOneProfilePerNode` проверяет, что 3 ноды дают 3 профиля с разными address), `remarks` = тег ноды, catch-all на СОБСТВЕННЫЙ тег профиля, inbounds socks+http, DNS + routing правила, отказ при отсутствии конвертируемых источников, `parseShareLink` (VLESS Reality/Trojan/Hysteria2 + malformed), `vmess://` со строковыми и числовыми `port`/`aid`, `TestTagProxyOutboundsReservesDirectAndBlock` + `TestBuildResponseRemarksCollidingWithReservedTags` (ноды с remark `direct`/`block` получают запасной тег, а freedom/blackhole и правила маршрутизации остаются нетронутыми; падали до фикса `reservedOutboundTags`), `TestParseVMessLinkPreservesCase` (EqualFold по схеме `VMESS://`, payload не lower-cased), `TestBuildResponseReservesDirectAndBlockTags`
+- `internal/subserver/xray_subscription_test.go` — контракт ответа `/sub`: JSON/Clash/share-link/base64 источники → JSON-массив полных Xray-конфигов, один профиль на ноду (тест `TestBuildResponseOneProfilePerNode` проверяет, что 3 ноды дают 3 профиля с разными address), `remarks` = тег ноды, catch-all на СОБСТВЕННЫЙ тег профиля, inbounds socks+http, DNS + routing правила, отказ при отсутствии конвертируемых источников, `parseShareLink` (VLESS Reality/Trojan/Hysteria2 + malformed), `vmess://` со строковыми и числовыми `port`/`aid`, `TestTagProxyOutboundsReservesDirectAndBlock` + `TestBuildResponseReservedTagsFallback` (ранее `TestBuildResponseRemarksCollidingWithReservedTags`; ноды с remark `direct`/`block` получают запасной тег, а freedom/blackhole и правила маршрутизации остаются нетронутыми; падали до фикса `reservedOutboundTags`), `TestParseVMessLinkPreservesCase` (EqualFold по схеме `VMESS://`, payload не lower-cased)
 
 ## Добавленные тесты (2026-08, Subscription Traffic Worker)
 - `internal/xui/client_enable_test.go` — `TestUpdateClient_EnableTrue`/`TestUpdateClient_EnableFalse` (обновление с `Enable` флагом, mock inbound-flow lookup через `get/`), `TestGetClientTraffic_DecodesEnable` (декодирование `Enable` из ответа панели).
@@ -108,8 +116,11 @@
 - `internal/metrics/db_test.go` — 4 теста: GORM callbacks для create/query/update/delete
 
 ## Добавленные тесты (2026-08-26, ветка feat/broadcast-campaigns)
-- `internal/bot/broadcast_admin_flow_test.go` — parseBroadcastCallbackID (0/overflow/нечисловой), callbacks broadcast_cancel_/broadcast_retry_ (+не-админ), handleBroadcastFilter (plan/status/date/inactive/ever_paid + toggle off), handleBroadcastBackToFilters, форматтеры truncateRunes/formatIDList/formatErrorList
-- `internal/bot/admin_broadcast_test.go` (+flood) — TestBroadcastFloodClassificationAndRetryDelay (распознавание 429, уважение/каппинг `retry_after`), TestBroadcast_FloodWaitsRetryAfterThenDelivers (429 не расходует обычные попытки → sent)
+<!-- Тест-файлы broadcast-флоу бота ниже удалены вместе с бот-wizard /broadcast (рассылки
+     переехали в admin-панель: admin/broadcasts.go + admin API /admin/api/broadcasts*,
+     в internal/bot остался только broadcast_worker.go). Историческая запись. -->
+- ~~`internal/bot/broadcast_admin_flow_test.go`~~ — УДАЛЁН: parseBroadcastCallbackID, callbacks broadcast_cancel_/broadcast_retry_, handleBroadcastFilter, handleBroadcastBackToFilters, форматтеры
+- ~~`internal/bot/admin_broadcast_test.go`~~ — УДАЛЁН (+flood-тесты 429/retry_after; flood-логика живёт в internal/bot/broadcast_worker.go: processRecipient/isFloodError)
 - `internal/xui/reset_traffic_test.go` — ResetTraffic: пустой email, успех (метод/путь/экранирование), Success:false с msg панели, невалидный JSON, не-2xx
 - `internal/service/sync_test.go` — processPendingUpdate вызывает ResetTraffic при смене тарифа; сбой ResetTraffic — best-effort (нода всё равно active)
 - `internal/service/subscription_test.go` — BindTrial rollback при DB-bind failure (rollback и conservative skip), CleanupExpiredTrials deprovision-failure оставляет строку, ReconcileOrphanedClients пересоздаёт node queue
