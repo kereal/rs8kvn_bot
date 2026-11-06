@@ -135,7 +135,7 @@
 - **`active_subscriptions`** — gauge: текущие активные подписки (любые)
 - **`premium_subscriptions`** — gauge: текущие активные paid подписки
 - **`free_subscriptions`** — gauge: текущие активные free подписки
-- **`trial_subscriptions`** — gauge: текущие trial подписки (telegramID=0)
+- **`trial_subscriptions`** — gauge: текущие trial подписки (`telegram_id < 0`, активированные и неактивированные)
 
 ### Subscriptions — Operations (`subscription_*`)
 
@@ -158,6 +158,13 @@ These are process-local counters; they reset on restart and are not durable busi
 - **`traffic_notifications_total{kind,result}`** — counter: attempted traffic notifications; no rows means no eligible transitions, not necessarily worker outage
 - **`reconcile_orphaned_duration_seconds`** — histogram: orphan reconciliation duration
 - **`bot_orphaned_clients_revoked_total`** — counter: subscriptions revoked during reconciliation
+
+### Subscription Bindings & Node Health (`subscription_nodes*`, `node_up`, `worker_restarts_*`)
+
+- **`subscription_nodes{status}`** — gauge: биндинги `subscription_nodes` по статусам синка (`active`, `pending_add`, `pending_update`, `pending_remove`); обновляется каждым проходом `SyncPendingNodes` (`refreshSyncGauges`)
+- **`subscription_nodes_parked`** — gauge: биндинги, запаркованные после исчерпания retry-ладдера (`maxSyncRetries = 10`) или отказа панели; `retry_at` уводится в 9999 год, выход — смена плана или восстановление ноды
+- **`node_up{node}`** — gauge: доступность панели ноды по последнему проходу синка (`refreshNodeHealth`, ping активных нод; 1 = панель отвечает)
+- **`worker_restarts_total{worker}`** — counter: перезапуски фонового воркера после паники (`runSupervised` в `cmd/bot/main.go`); любой рост — повод разобрать стек в логе
 
 ### Subscription Reminders (`subscription_reminder*`)
 
@@ -191,6 +198,11 @@ These are process-local counters; they reset on restart and are not durable busi
   - `operation`: `request`, `confirm`, `cancel`
   - `result`: `success`, `error`
 - **`payment_operation_duration_seconds{operation}`** — histogram: latency операций payment service
+
+### Payments — Reconcile (`payment_reconcile_*`)
+
+- **`payment_reconcile_total{result}`** — counter: исходы сверки зависших pending-заказов (hourly reconcile в sync worker). Охват — заказы со сроком ссылки в последние 30 дней (с 10-минутным запасом); более старые pending требуют ручной проверки у провайдера
+  - `result`: `confirmed_activated`, `confirmed_pending`, `expired`, `provider_error`, `confirm_error`, `expire_error`, `expire_race`, `skipped_no_provider_id`, `still_pending`
 
 ### Payments — Money (`payment_amount_cents_total`)
 

@@ -224,6 +224,11 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | `HEARTBEAT_INTERVAL` | Heartbeat interval (seconds) | `300` | ❌ | Min 10s |
 | `SENTRY_DSN` | Sentry DSN for error tracking | — | ❌ | https://sentry.io/...; must be valid http/https URL if set |
 | `WEB_SERVER_PORT` | HTTP (web) server port | `8880` | ❌ | 1–65535 |
+| `METRICS_TOKEN` | Bearer token for `/metrics` | *(empty)* | ❌ | Empty = endpoint open; при публичном порту токен обязателен — метрики раскрывают имена нод и объёмы |
+| **Admin Panel** |
+| `ADMIN_LISTEN` | Listen address of the admin panel | `127.0.0.1:8881` | ❌ | Обязателен host (не пустой) и порт 1–65535; порт должен отличаться от `WEB_SERVER_PORT`; не-loopback бинд логируется WARN (`admin/server.go`) |
+| `ADMIN_TOKEN` | Admin panel Bearer token | *(empty)* | ❌ | Пусто = панель не стартует; отдалённый доступ — только SSH-туннель |
+| `AUDIT_LOG_RETENTION_DAYS` | Audit log retention (days) | `180` | ❌ | 0 = default; допустимо 0–3650; обрезка пачками по 1000 после ежедневного бэкапа |
 | **Trial & Referral** |
 | `SITE_URL` | Base URL for landing pages | `https://vpn.site` | ❌ | Must be valid http/https URL; used in Telegram links |
 | `TRIAL_DURATION_HOURS` | Trial subscription duration | `3` | ❌ | 1–168 hours (7 days max) |
@@ -316,9 +321,11 @@ Admin-only commands:
 - `/lastreg` — last 10 subscribers
 - `/del <id>` — delete subscription by DB ID
 - `/setplan <subscription_id> <plan_id> [days]` — change subscription plan (reconciles VPN nodes; if `days` omitted, keeps a future expiry or applies a 30-day default)
-- `/broadcast <msg>` — message all users
-- `/send <id|@username> <msg>` — private message
+- `/send <id|@username> <msg>` — private message (rate limit: 1 per minute per admin)
 - `/refstats` — referral statistics
+- `/v` — version info
+
+Broadcast campaigns are managed in the admin panel (`/admin/`, see `doc/broadcast.md`), not via Telegram commands.
 
 ---
 

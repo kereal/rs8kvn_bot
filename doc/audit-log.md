@@ -32,7 +32,7 @@
 ```sql
 CREATE TABLE audit_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    entity_type TEXT NOT NULL,   -- subscription | order | broadcast | plan | node | product | system
+    entity_type TEXT NOT NULL,   -- subscription | order | broadcast | plan | node | product | invite | system
     entity_id   TEXT,            -- строковый ID сущности; NULL для системных событий
     event       TEXT NOT NULL,   -- 'payment_confirmed', 'plan_changed', ...
     actor_type  TEXT NOT NULL,   -- user | admin | worker | payment_provider | system
@@ -95,10 +95,11 @@ CREATE TABLE audit_log (
 
 ### Уведомления (entity_type = subscription)
 
-| Событие | Когда |
-|---|---|
-| `reminder_sent` | Отправлено напоминание об истечении (окно в details: `3d`/`1d`/`3h`) |
-| `traffic_notified` | Трафик-уведомление (kind: `ninety`/`exhausted`/`reset`) |
+| Событие | Кто | Когда |
+|---|---|---|
+| `reminder_sent` | worker | Отправлено напоминание об истечении (окно в details: `3d`/`1d`/`3h`) |
+| `traffic_notified` | worker | Трафик-уведомление (kind: `ninety`/`exhausted`/`reset`) |
+| `traffic_reset` | admin | Сброс счётчика трафика из админ-панели (`POST /admin/api/subscriptions/{id}/reset-traffic`); details несут `nodes_ok`/`nodes_failed` — пишется даже при частичном успехе |
 
 ### Оплата (entity_type = order)
 
@@ -113,9 +114,56 @@ CREATE TABLE audit_log (
 
 ### Рассылки (entity_type = broadcast)
 
-`broadcast_started` / `broadcast_completed` / `broadcast_failed` /
-`broadcast_canceled` (actor_id — telegram_id админа). Сводная статистика
-(sent/blocked/unreachable/failed) — в details завершающих событий.
+| Событие | Кто | Когда |
+|---|---|---|
+| `broadcast_created` | admin | Рассылка создана из панели (new_state — снапшот кампании) |
+| `broadcast_updated` | admin | Правка черновика (old/new — только изменившиеся поля: name, filters, planned_at; message_text — длина и хэш) |
+| `broadcast_started` | system | Воркер заклеймил кампанию (`scheduled → running`) |
+| `broadcast_completed` | system | Все получатели исчерпаны |
+| `broadcast_failed` | system | Инфраструктурный/персистентный сбой доставки |
+| `broadcast_canceled` | admin | `POST /admin/api/broadcasts/{id}/cancel` (actor_id — telegram_id инициировавшего, из панели `0`) |
+| `broadcast_retried` | admin | Повтор провалившейся рассылки (details: `retry_count`) |
+| `broadcast_deleted` | admin | Удаление рассылки (снапшот в old_state — строка удалена) |
+
+Сводная статистика (sent/blocked/unreachable/failed) — в details завершающих
+событий. Панельные события (`created`/`updated`/`retried`/`deleted`/`canceled`)
+пишутся с `actor_type=admin` (из панели `actor_id="0"`, ADR-0002 P20);
+`started`/`completed`/`failed` — с `actor_type=system` (доставка воркером).
+
+### Планы и привязки нод (entity_type = plan)
+
+| Событие | Когда |
+|---|---|
+| `plan_created` | План создан из панели (new_state — снапшот) |
+| `plan_updated` | План изменён (old/new — только изменившиеся поля) |
+| `plan_deleted` | План удалён (снапшот → nil; FK нет — история переживает удаление) |
+| `plan_nodes_changed` | Замена набора нод плана: old/new — наборы `node_ids`, details — `added`/`removed` |
+
+### Ноды (entity_type = node)
+
+| Событие | Когда |
+|---|---|
+| `node_created` | Нода создана из панели (new_state — снапшот, `api_token` заменён на `has_api_token`) |
+| `node_updated` | Нода изменена (снимок до и после) |
+| `node_deleted` | Нода удалена (снапшот → nil) |
+
+### Продукты (entity_type = product)
+
+| Событие | Когда |
+|---|---|
+| `product_created` | Продукт каталога создан (new_state — снапшот значимых полей) |
+| `product_updated` | Продукт изменён (old/new — только изменившиеся поля) |
+| `product_deleted` | Продукт удалён (снапшот в old_state) |
+
+### Инвайты (entity_type = invite)
+
+| Событие | Когда |
+|---|---|
+| `invite_created` | Инвайт создан из панели (details: `origin` = `generated` \| `manual`) |
+| `invite_deleted` | Неиспользованный инвайт удалён (снапшот в old_state) |
+
+Все события этого раздела — панельные мутации: `actor_type=admin`,
+`actor_id="0"` (ADR-0002 P20).
 
 ### Технические агрегаты (entity_type = system)
 

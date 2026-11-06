@@ -57,7 +57,10 @@ Instead, contact us privately:
 - **RetryWithBackoff** on VPN client handles transient failures
 - **Rate limiting** per Telegram user (30 tokens, 5/sec refill)
 - **IP rate limiting** on trial endpoint (3/hour per IP)
-- **Trusted proxy IP extraction (S2):** `getClientIP()` uses the **rightmost** IP from `X-Forwarded-For` (set by the trusted reverse proxy) instead of the leftmost value (which is client-controllable and spoofable). This prevents IP spoofing to bypass rate limits.
+- **Trusted proxy IP extraction (S2):** `getClientIP()` uses the **rightmost** IP from `X-Forwarded-For` (set by the trusted reverse proxy) instead of the leftmost value (which is client-controllable and spoofable). This prevents IP spoofing to bypass rate limits. Доверять XFF-заголовкам разрешено только loopback/приватным пирам (`isLocalAddress`, `internal/web/web.go`).
+- **HTTP rate limits в приложении:** только trial-эндпоинт `/i/{code}` (3 запроса/час на IP, DB-таблица `trial_requests`); `/sub/{subID}` и `/metrics` на уровне приложения не лимитируются (митигируется nginx-лимитами и кешем TTL 240 с).
+- **Security headers** (`SecurityHeadersMiddleware`, `internal/web/middleware.go`): все ответы публичного сервера получают `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`; HSTS намеренно не ставится (сервер может работать за plain-HTTP в локальных деплоях).
+- **Bearer-токены:** `/metrics` (`METRICS_TOKEN`, иначе 401) и админ-панель (`ADMIN_TOKEN`, пустой токен = панель не стартует) закрыты `BearerAuthMiddleware`/`metricsAuth` с `subtle.ConstantTimeCompare`.
 
 ### 4. Data Protection
 
@@ -70,9 +73,9 @@ Instead, contact us privately:
 
 ### 5. Error Handling
 
-- **Panic recovery** in all goroutines (`recoverAndReport`)
+- **Panic recovery** in all goroutines (`runSupervised` в `cmd/bot/main.go`, `logger.Recover` в HTTP-сервере)
 - **Graceful shutdown** — in-flight requests allowed to complete
-- **RetryWithBackoff** retries VPN panel calls on transient errors (exponential backoff + jitter, up to 3 retries)
+- **RetryWithBackoff** retries VPN panel calls on transient errors (exponential backoff + jitter, up to 3 total attempts = 2 retries)
 - **Fail-closed cache revalidation** for the Subscription server: cached access is not served when subscription status cannot be checked
 
 ### 6. Code Quality
@@ -80,8 +83,8 @@ Instead, contact us privately:
 - **Static analysis:** `golangci-lint` with strict config, `gosec` security scanner
 - **Race detection:** All tests run with `-race`
 - **Fuzzing:** Markdown sanitization fuzz tests
-- **Leak detection:** Goroutine leak tests in `tests/leak/`
-- **Test coverage:** 66.2% aggregate in the latest documented run; regenerate with `go test -coverprofile=coverage.out ./...`
+- **Leak detection:** `go.uber.org/goleak` в пакетных тестах (`internal/backup/backup_test.go`, `internal/ratelimiter/ratelimiter_test.go`, `internal/xui/client_test.go`); каталог `tests/leak/` удалён (коммит 42434f7)
+- **Test coverage:** ~70.8% aggregate (прогон `go test ./... -coverprofile` 2026-11-06); regenerate with `go test -coverprofile=coverage.out ./...`
 - **Prometheus metrics** (`internal/metrics/`): HTTP requests, bot updates, live XUI requests, DB queries, cache hits/misses, active subscriptions, reminder delivery, payment events, and orphaned subscriptions revoked during reconciliation
 
 ### 7. Architecture Security
@@ -125,7 +128,7 @@ Instead, contact us privately:
 - **Idempotent transitions:** `ConfirmOrderPaidCAS`/`CancelOrderCAS` are guarded CAS transitions (`pending → paid`, `pending/canceled`); duplicate callbacks are no-ops. A late `CONFIRMED` for an expired/canceled order never activates it.
 - **Chargebacks:** `CHARGEBACKED` on a paid order auto-downgrades the subscription to the free plan unless another paid order exists. On the successful paid-order path (`WasPaid=true`), the admin receives exactly one dedicated `notifyAdminChargeback` alert with the buyer link and access status (downgraded or preserved). `NotifyPaymentIssue` is reserved for infrastructure or integration failures and is not a normal duplicate chargeback notification.
 - **Secrets:** payment credentials are **not** included in `Config.String()` (masked by absence) and are never logged.
-- **Monitoring:** `payment_issues_total{event}` + `payment_amounts_cents_total{operation,currency}` for alerting on anomalies (unexpected chargebacks, callback mismatches, late confirmations).
+- **Monitoring:** `payment_issues_total{event}` + `payment_amount_cents_total{operation,currency}` for alerting on anomalies (unexpected chargebacks, callback mismatches, late confirmations).
 
 ---
 
@@ -293,9 +296,9 @@ docker run -d \
 | Package | Version | Known vulns? |
 |---------|---------|--------------|
 | `gorm.io/gorm` | v1.31.2 | None |
-| `github.com/mattn/go-sqlite3` | v1.14.48 | None (CVE-2023-32636 patched) |
+| `github.com/mattn/go-sqlite3` | v1.14.52 | None |
 | `go.uber.org/zap` | v1.28.0 | None |
-| `github.com/prometheus/client_golang` | v1.23.2 | None |
+| `github.com/prometheus/client_golang` | v1.25.0 | None |
 
 **Check regularly:**
 ```bash

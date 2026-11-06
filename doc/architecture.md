@@ -36,7 +36,7 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 - Retry with exponential backoff for external dependencies
 - Comprehensive caching (in-memory LRU, TTL)
 - Graceful shutdown with coordinated cleanup
-- 66.2% aggregate test coverage in the latest documented run (unit, e2e, fuzz, leak detection)
+- 70.8% aggregate test coverage in the latest documented run (unit, e2e, fuzz, leak detection)
 - Payment/order tracking for subscription purchases
 - Node-based subscription synchronization with 4-state sync machine (`subscription_nodes`)
 - 3-touch expiry reminders (3d/1d/3h) with atomic claim and bitmask (`subscriptions.reminders_sent`)
@@ -150,12 +150,24 @@ rs8kvn_bot — production-ready Telegram bot for distributing VLESS+Reality+Visi
 ## Package Structure
 
 ```
+admin/              # Admin panel (Svelte SPA + Go API, ADR-0002)
+├── server.go       # 29 путей /admin/api/* + /admin/ → SPA (Bearer ADMIN_TOKEN)
+├── plans.go, products.go, nodes.go, orders.go, subscriptions.go,
+│   broadcasts.go, invites.go, audit.go, overview.go   # хендлеры экранов
+├── authlimit.go    # Rate limit неудачных авторизаций (10/min на IP)
+├── src/            # Svelte-исходники UI
+└── dist/           # Собранный SPA (закоммичен)
+
+cmd/
+└── bot/            # main.go, lifecycle.go, supervisor.go — composition root
+
 internal/
 ├── bot/              # Telegram layer
 │   ├── handler.go           # Main router, update loop
 │   ├── command.go            # /start, /help, /invite
 │   ├── callback.go           # Inline keyboard callbacks
-│   ├── admin.go             # /del, /broadcast, /send, /refstats, broadcast cards
+│   ├── admin.go             # /del, /setplan, /send, /refstats
+│   ├── broadcast_worker.go  # Delivery worker for panel-scheduled broadcasts (см. broadcast.md)
 │   ├── subscription_handler.go # Create/view/QR subscription
 │   ├── menu.go              # Navigation: donate, help, back
 │   ├── cache.go             # LRU cache (1000 entries, 5min TTL)
@@ -177,12 +189,10 @@ internal/
 │   ├── subscription.go      # Use cases: Create, Delete, DeleteByID, Renew; unified two-phase teardown (revokeAndDeprovisionThenDelete)
 │   ├── subscription_reminders.go # Reminder window model and Telegram delivery
 │   ├── subscription_traffic.go # Presentation: TrafficInfo, GetWithTraffic
-│   ├── subscription_reset.go # «🔄 Сброс» card line: next traffic reset from the panel profile
-│   ├── node_clients.go       # NodeClients registry: per-node Provision + Reader slots, built in cmd/bot
-│   ├── sync.go              # Multi-node subscription sync (Reconcile, SyncPendingNodes)
+│   ├── sync.go              # Multi-node subscription sync (Reconcile, SyncPendingNodes, реестр NodeClients)
 │   ├── plan_reconcile.go     # Single subscription_nodes transition core + db/tx planNodeStore adapters
 │   ├── order.go             # Order lifecycle (Create, Activate, Expire)
-│   └── subscription_nodes.go # Subscription-node join table CRUD
+│   └── subscription_presentation.go # Presentation: TrafficInfo, «🔄 Сброс» card line (describeTrafficReset)
 ├── vpn/                # VPN client abstraction (multi-node, multi-type)
 │   ├── client.go            # Client interface, Config, NewClient factory, idempotent error classification (ErrSubscriptionAlreadyExists / ErrSubscriptionNotFound)
 │   ├── threex_ui.go         # 3x-ui specific client implementation (classifies Create/Update/Delete)
@@ -203,7 +213,11 @@ internal/
 │   ├── nodes.go             # Node CRUD
 │   ├── plans.go             # Plan CRUD
 │   ├── products.go          # Product CRUD
+│   ├── products_admin.go    # Product CRUD for admin panel (sentinel errors, DTO)
 │   ├── orders.go            # Order CRUD
+│   ├── broadcasts.go        # Broadcast campaigns, filters, recipient state
+│   ├── audit_log.go         # Audit event registry (constants + constructors)
+│   ├── audit_log_repo.go    # audit_log repository (append-only INSERT/SELECT)
 │   └── subscription_nodes.go # SubscriptionNode CRUD
 ├── config/           # Configuration
 │   ├── config.go            # Load + validate (URL scheme allowlist via S3)
@@ -222,7 +236,8 @@ internal/
 │   ├── trial_cleanup.go     # Expired trial cleanup at startup and every 3h
 │   ├── subscription_sync_worker.go  # SyncPendingNodes worker
 │   ├── subscription_expire_worker.go # Subscription expiry worker
-│   └── subscription_reminder_worker.go # Expiry reminders: 3d / 1d / 3h, idempotent bitmask
+│   ├── subscription_reminder_worker.go # Expiry reminders: 3d / 1d / 3h, idempotent bitmask
+│   └── subscription_traffic_worker.go # Traffic quota notifications: 90%/exhausted/reset, bitmask
 ├── backup/           # Backup engine
 │   └── backup.go            # WAL checkpoint + atomic copy + rotate
 ├── heartbeat/        # External monitoring
@@ -236,11 +251,9 @@ internal/
 │   ├── format.go            # Progress bar, date formatting
 │   └── markdown.go          # Markdown sanitization
 └── testutil/         # Test helpers
-    ├── testutil.go          # Config/XUI/Bot fakes + real-SQLite helper
-    ├── fake_service_store.go # ServiceStoreFake: SubscriptionStore+SyncStore+OrderStore (no domain mirroring)
-    ├── fake_bot_store.go     # BotStoreFake: *ServiceStoreFake + BotStore surface
-    ├── fake_web_repository.go # SubscriptionRepositoryFake: *ServiceStoreFake + WebRepository
-    └── fake_small.go         # ReferralCountSourceFake, ReferralInviteStoreFake, AuditLogWriterFake
+    └── testutil.go          # Config/XUI/Bot fakes + real-SQLite helper + per-consumer fakes
+                              # (ServiceStoreFake, BotStoreFake, SubscriptionRepositoryFake,
+                              # ReferralCountSourceFake, ReferralInviteStoreFake, AuditLogWriterFake)
 ```
 
 ---
@@ -403,6 +416,12 @@ ConnMaxIdleTime = 2m
 остаётся один.
 
 **Migrations:** Embedded SQL files, applied via `golang-migrate` at startup.
+Текущая схема: **41 миграция** (`internal/database/migrations/*.up.sql`,
+последняя — `041_restore_subscription_nodes_retry_index`). Таблиц в продовой
+БД — 12: `invites`, `trial_requests`, `schema_migrations`, `nodes`, `plans`,
+`plan_nodes`, `products`, `subscription_nodes`, `subscriptions`, `orders`,
+`broadcasts`, `audit_log`. Журнал `audit_log` — append-only аудит (миграция
+`039_create_audit_log`): модель, каталог событий и правила — `audit-log.md`.
 
 **Transactions used for:**
 - `CreateSubscription`: revoke old + create new (atomic)
@@ -608,6 +627,38 @@ SIGQUIT (kill -3) → graceful shutdown (also handled)
 │ retry_at                 *time                               │
 │ last_error               *text                               │
 │ updated_at                time     autoUpdate               │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                      broadcasts                             │
+├─────────────────────────────────────────────────────────────┤
+│ id (PK)              uint                                   │
+│ name                 string                                 │
+│ message_text         text                                   │
+│ filters              text     JSON-предикаты (см. ниже)     │
+│ status               string   scheduled/running/completed/  │
+│                               failed/canceled               │
+│ planned_at           *time                                  │
+│ started_at           *time                                  │
+│ recipients_total     int      размер снапшота аудитории     │
+│ created_at           time     autoCreate                    │
+│ updated_at           time     autoUpdate                    │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                       audit_log                             │
+├─────────────────────────────────────────────────────────────┤
+│ id (PK)              uint (AUTOINCREMENT)                   │
+│ entity_type          string                                 │
+│ entity_id            string (NULL для system-событий)       │
+│ event                string                                 │
+│ actor_type           string   user/admin/worker/            │
+│                               payment_provider/system       │
+│ actor_id             string   telegram_id админа/юзера,     │
+│                               имя воркера, "0" = панель     │
+│ old_state / new_state text   JSON: только изменившиеся поля │
+│ details              text     JSON, default '{}'            │
+│ created_at           datetime                               │
 └─────────────────────────────────────────────────────────────┘
 
 **Sync states:** active | pending_add | pending_remove | pending_update
@@ -856,6 +907,7 @@ subscription). Parity is pinned by `TestApplyPlan_Parity_BackgroundAndTxSameEndS
 | `SubscriptionExpireWorker` | Immediately at startup, then every 1h | Expires paid subscriptions past `expires_at` |
 | `SubscriptionTrafficWorker` | Immediately at startup, then every 1h | Sends quota warnings (90%/exhausted) on traffic-limited plans and re-enables clients after traffic reset |
 | `SubscriptionReminderWorker` | Immediately at startup, then every 30m | Sends idempotent 3d/1d/3h expiry reminders |
+| `BroadcastWorker` (internal/bot/broadcast_worker.go) | Every 15s | Claims scheduled/running broadcast campaigns, delivers to recipient snapshots in batches of 100; retry with exponential backoff 5s → 15min (см. `broadcast.md`) |
 | `OrphanReconciler` | After 30s, then every 8h | Recovers missing queues and revokes fully deprovisioned subscriptions |
 | `Heartbeat` | Configured interval, default 5m | Sends optional external monitoring heartbeat |
 
@@ -913,6 +965,19 @@ The bot exposes a `/metrics` endpoint (via `promhttp.Handler()`) on the HTTP ser
 
 ---
 
+## Админ-панель (`admin/`)
+
+Веб-панель администратора — Svelte SPA + Go API в одном процессе бота
+(`admin/server.go`): 29 путей `GET/POST/PUT/DELETE /admin/api/*` (session,
+overview, plans, plan-nodes, products, nodes + health, orders, broadcasts,
+invites, audit, subscriptions) и `GET /admin/` → SPA из `admin/dist`.
+Доступ — Bearer `ADMIN_TOKEN` (`crypto/subtle`), rate limit неудачных
+авторизаций 10/мин на IP (`admin/authlimit.go`). Правила доступа, формат API,
+границы мутаций и аудит панельных действий (`actor_id=0`) зафиксированы в
+`doc/adr/0002-admin-panel-contract.md`; экран рассылок — `broadcast.md`.
+
+---
+
 ## Broadcast Filters
 
 The broadcast system supports recipient filtering via JSON predicates stored in `broadcasts.filters`. Filters are applied server-side using SQL WHERE clauses, ensuring scalability.
@@ -958,35 +1023,11 @@ WHERE telegram_id > 0
 
 ### UX Flow
 
-```
-/broadcast
-→ Enter name
-→ Enter text (MarkdownV2)
-→ Filter keyboard appears:
-  [👥 All] [💰 Paid] [🆓 Free]
-  [📋 All] [✅ Active] [🚫 Revoked]
-  [📅 Reg. 3m] [📅 Reg. 6m] [📅 Reg. 1y] [📅 Reg. all]
-  [🚫 Never accessed] [⏰ >1m] [⏰ >3m] [👤 No filter]
-  [💳 Paid] [🆓 Never paid] [👤 No filter]
-  [✅ Send] [❌ Cancel]
-→ Admin selects filters (toggle on/off)
-→ Preview updates with filter description
-→ Press "✅ Send" → Recipient count preview:
-  📦 Broadcast: Promo
-  👥 Recipients: 1234
-  🔍 Filter: Paid · Active · Inactive >30d
-  ⚡ Send to 1234 users?
-  [✅ Send now] [⏰ Schedule]
-  [🔙 Back to filters] [❌ Cancel]
-→ Press "✅ Send now" → Broadcast starts immediately
-→ Press "⏰ Schedule" → Day picker (today / tomorrow / +3d / +1w)
-  → Hour picker (00:00–23:00, Moscow time)
-  → Preview: "Scheduled for 15.08.2026 18:00"
-  [✅ Confirm] [🔙 Change time] [❌ Cancel]
-→ Press "✅ Confirm" → campaign is stored with `planned_at` set and stays
-  `scheduled`; the worker claims it once `planned_at` is due (also after restart).
-  `planned_at` is preserved, not overwritten at start time.
-```
+UX-флоу ботовского wizard `/broadcast` удалён: рассылки живут в админ-панели —
+создание, фильтры аудитории, расписание и история на экране «Рассылки»
+(`admin/src/views/Broadcasts.svelte`). Жизненный цикл кампании, состояние
+получателей и параметры доставки — см. `broadcast.md`; передача ответственности
+бот → панель — `specs/admin/06-broadcasts.md`.
 
 ### Important Implementation Details
 
@@ -1008,12 +1049,10 @@ WHERE telegram_id > 0
 | **Cache** | Redis for shared cache across multiple bot instances | P3 (if horizontal scaling) |
 | **Rate limiting** | Distributed rate limiting via Redis (per-IP) | P2 (DDoS protection) |
 | **Proxy** | Support for multiple XUI panels (sharding) | Done — multi-node via vpn/ abstraction |
-| **Auth** | OAuth for admin panel (web UI) | P3 (convenience) |
+| **Auth** | Admin panel (web UI) | Done — Bearer `ADMIN_TOKEN`, ADR-0002 |
 | **Testing** | Property-based testing (quickcheck) | P2 (quality) |
-| **CI/CD** | Automated security scanning (Trivy, gosec in CI) | P1 (security) |
+| **CI/CD** | Automated security scanning | Partial — gosec in CI (`docker.yml`); Trivy not wired |
 | **Deployment** | Helm chart for Kubernetes | P2 (if using k8s) |
-| **Storage** | Real Cloudflare R2 backend for UploadStore | P2 (WIRED-not-PROVEN) |
-| **Transcription** | Live HTTP transcription endpoint | P2 (WIRED-not-PROVEN) |
 
 ---
 
@@ -1049,7 +1088,7 @@ Worker каждые 60 минут обрабатывает активные по
   удалены (`e723650`);
 - кандидат 7 — timeout применяется один раз в `HandleUpdate` на диспетчеризации
   (`withTimeout`), прологи в admin/command handlers снесены
-  (см. `internal/bot/dispatch_timeout_test.go`).
+  (см. `TestHandleUpdate_AppliesTimeoutAtDispatch` в `internal/bot/handlers_test.go`).
 
 ---
 

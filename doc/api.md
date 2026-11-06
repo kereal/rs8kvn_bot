@@ -12,10 +12,11 @@
 4. [Prometheus Metrics](#4-prometheus-metrics)
 5. [Payment Callback](#5-payment-callback)
 6. [Static Files](#6-static-files)
-7. [Error Codes](#7-error-codes)
-8. [Rate Limits](#8-rate-limits)
-9. [cURL Examples](#9-curl-examples)
-10. [Versioning](#10-versioning)
+7. [Admin Panel API](#7-admin-panel-api)
+8. [Error Codes](#8-error-codes)
+9. [Rate Limits](#9-rate-limits)
+10. [cURL Examples](#10-curl-examples)
+11. [Versioning](#11-versioning)
 
 ---
 
@@ -50,6 +51,13 @@ Liveness probe — returns overall service health, aggregating registered compon
 ```
 
 > `status` is `ok` only when every component is `ok`; it becomes `down` if any component is `down`.
+
+### `GET /readyz`
+
+Readiness probe — checks the same components and additionally returns `503` with plain-text
+`NOT READY` until the server has finished initialization (`s.ready`); once ready, returns
+`200 OK` with plain-text `OK` when all components are healthy. `GET`/`HEAD` only
+(otherwise `405` with `Allow: GET, HEAD`).
 
 ---
 
@@ -98,6 +106,8 @@ The same aggregated nodes are also served in sing-box and Clash/Mihomo formats, 
 
 Prometheus exposition endpoint. It exposes application, bot, cache, subserver, database, subscription, and payment metrics. Requests to `/metrics` itself and `/static/*` are deliberately excluded from `http_requests_total` and `http_request_duration_seconds`, so scrapes and asset 404s do not pollute application traffic metrics.
 
+If the `METRICS_TOKEN` config value is set, requests must carry `Authorization: Bearer <token>` (constant-time comparison); otherwise `401` with `WWW-Authenticate: Bearer realm="metrics"`. When the token is empty, the endpoint is unauthenticated.
+
 ---
 
 ## 5. Payment Callback
@@ -142,20 +152,41 @@ Returns the embedded 512×512 PNG logo. Also responds to `HEAD`.
 
 ---
 
-## 7. Error Codes
+## 7. Admin Panel API
 
-| Code | HTTP Status | Description |
-|------|------------|-------------|
-| `INVITE_NOT_FOUND` | 404 | Invite code invalid |
-| `RATE_LIMIT_EXCEEDED` | 429 | Too many trial requests from IP |
-| `SUBSCRIPTION_NOT_FOUND` | 404 | Subscription not found/inactive/expired |
-| `TRIAL_CREATION_FAILED` | 500 | VPN node failed to create trial |
-| `DATABASE_ERROR` | 500 | Database query failed |
-| `INTERNAL_ERROR` | 500 | Unexpected system failure |
+The admin panel is served from the same process: `GET /admin/` returns the built Svelte SPA
+(`admin/dist`), and the JSON API lives under `/admin/api/*` (`admin/server.go`) — 29 paths
+covering `session`, `overview`, `plans` (+ `plans/{id}/nodes`), `products`, `nodes`
+(+ `nodes/{id}/health`), `orders`, `broadcasts` (+ `audience`, `cancel`, `retry`,
+`deactivate-blocked`), `invites`, `audit` (+ `events`, `{id}`), and `subscriptions`
+(+ `plan`, `revoke`, `reset-traffic`, `sync`).
+
+All `/admin/api/*` requests require `Authorization: Bearer <ADMIN_TOKEN>`
+(`crypto/subtle` comparison); failed logins are rate-limited to 10/min per IP (`429 rate_limited`
++ `Retry-After: 60`). Response format, error codes, unit conventions and mutation boundaries are
+fixed by [doc/adr/0002-admin-panel-contract.md](adr/0002-admin-panel-contract.md).
 
 ---
 
-## 8. Rate Limits
+## 8. Error Codes
+
+JSON error codes are **not** used by the public bot endpoints. Actual error behavior:
+
+| Endpoint | Failure | Response |
+|----------|---------|----------|
+| `/healthz`, `/readyz` | component down / not ready | `503` — JSON health report / plain text `NOT READY` |
+| `/i/{code}` | unknown/invalid code | `404` + HTML error page («Приглашение не найдено») |
+| `/i/{code}` | IP rate limit exceeded | `429` + HTML error page |
+| `/i/{code}` | node/DB failure | `500` + HTML error page |
+| `/i/{code}`, `/sub/{subID}`, `/payment/callback` | wrong method | `405` with `Allow` header |
+| `/sub/{subID}` | subscription not found / inactive / expired, or no convertible configs | `404` |
+| `/sub/{subID}` | subserver not initialized | `503` |
+| `/metrics` | `METRICS_TOKEN` set and missing/wrong | `401` |
+| `/payment/callback` | see section 5 | `400`/`401`/`405`/`500`/`503` |
+
+---
+
+## 9. Rate Limits
 
 | Endpoint | Limit | Enforcement |
 |----------|-------|-------------|
@@ -166,7 +197,7 @@ Returns the embedded 512×512 PNG logo. Also responds to `HEAD`.
 
 ---
 
-## 9. cURL Examples
+## 10. cURL Examples
 
 **Health check:**
 ```bash
@@ -189,7 +220,7 @@ curl -i -X POST http://localhost:8880/payment/callback \
 
 ---
 
-## 10. Versioning
+## 11. Versioning
 
 API version is implicit in endpoint paths. Bot version in logs: `rs8kvn_bot@<version>`.
 

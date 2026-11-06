@@ -174,3 +174,14 @@
 - [ ] Четыре состояния UI; деструктив подтверждается с перечнем зависимостей
 - [ ] Таблица sentinel-кейсов + HTTP-тесты на 200/400/401/404/409
 - [ ] `npm run build`, `dist` закоммичен, `go build ./...` зелёный
+
+## Статус реализации (2026-11-06)
+
+Все пункты раздела «Последствия» реализованы: `SubscriptionService.RevokeSubscription`
+(`internal/service/subscription.go:493`), `SyncService.ResetSubscriptionTraffic`
+(`internal/service/sync.go:1399`, маршрут `POST /admin/api/subscriptions/{id}/reset-traffic`),
+`UpdateBroadcastDraft`/`DeleteBroadcast`/`CountBroadcastAudience`
+(`internal/database/broadcasts_admin.go`), конструкторы аудита для планов,
+продуктов, нод, привязок, инвайтов и рассылок — в `internal/database/audit_log.go`.
+Полный список маршрутов — `admin/server.go` (`Handler()`): 29 путей `/admin/api/*`
++ `GET /admin/` → SPA. Все 7 экранов из «Порядка реализации» заведены.

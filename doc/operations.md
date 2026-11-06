@@ -7,7 +7,7 @@
 1. [Quick Reference](#1-quick-reference)
 2. [Upgrade](#2-upgrade)
 3. [Backup & Restore](#3-backup--restore)
-4. [Monitoring](#4-monitoring) (включая [админку](#431-admin-panel))
+4. [Monitoring](#4-monitoring) (включая [админку](#431-admin-panel) и [фоновые воркеры](#47-фоновые-воркеры-и-notifications_enabled))
 5. [Troubleshooting](#5-troubleshooting)
 6. [Scaling](#6-scaling)
 7. [Security Hardening](#7-security-hardening)
@@ -357,7 +357,8 @@ ADMIN_TOKEN=                  # пусто = панель выключена ц�
   WARN про не-loopback адрес в этом режиме ожидаем: публикация ограничена
   loopback хоста, снаружи — тот же SSH-туннель.
 - Разработка без бота: `make admin-serve` поднимает только панель на копии
-  `data/rs8kvn.db` (`-empty -seed` — на чистой базе с демо-строками). Клиентов
+  `data/rs8kvn.db` (цель = `go run ./tools/adminserve -seed`; `-empty` — флаг
+  инструмента для старта с пустой базы вместо копии). Клиентов
   узлов в этом режиме нет, внешние вызовы ничего не делают: боевые панели
   харнесс не трогает. Гейты перед коммитом — `make check`; бандл `admin/dist`
   коммитится, его свежесть проверяют CI-джоба `Admin Bundle Is Fresh` и
@@ -525,11 +526,12 @@ sum(rate(payment_amount_cents_total{operation="confirmed"}[24h]))
 | `http_request_duration_seconds` | Histogram | method, path | Application HTTP latency; `/metrics` and `/static/*` excluded |
 | `premium_subscriptions` | Gauge | — | Текущее количество активных оплаченных Premium-подписок |
 | `bot_updates_total` | Counter | command, result | Bot updates processed (success/error/rate_limited) |
-| `bot_update_duration_seconds` | Histogram | — | Bot update processing time |
-| `cache_hits_total` / `cache_misses_total` | Counter | cache | Cache hit/miss (subscription, referral, subserver) |
-| `xui_requests_total` | Counter | operation, result | Live 3x-ui request count |
-| `xui_request_duration_seconds` | Histogram | operation | Live 3x-ui request duration |
+| `bot_update_duration_seconds` | Histogram | command | Bot update processing time |
+| `cache_hits_total` / `cache_misses_total` | Counter | cache | Cache hit/miss (subscription, subserver) |
+| `xui_requests_total` | Counter | operation, result, node | Live 3x-ui request count |
+| `xui_request_duration_seconds` | Histogram | operation, node | Live 3x-ui request duration |
 | `bot_orphaned_clients_revoked_total` | Counter | — | Orphaned subscriptions revoked during reconciliation |
+| `subserver_requests_total` | Counter | format | Subscription responses delivered by format (`xray`, `singbox`, `clash`; нулевые серии публикуются в `init()`) |
 | `subserver_source_fetch_total` | Counter | result, format | Upstream source fetch results (success/error by format) |
 | `subserver_source_fetch_duration_seconds` | Histogram | result | Upstream source fetch duration |
 | `subserver_cache_invalidations_total` | Counter | reason | Cache invalidations by reason |
@@ -538,7 +540,7 @@ sum(rate(payment_amount_cents_total{operation="confirmed"}[24h]))
 | `payment_operation_duration_seconds` | Histogram | operation | Payment service operation latency |
 | `payment_amount_cents_total` | Counter | operation, currency | Monetary amounts in cents by outcome (`confirmed`, `chargeback`) — watch for chargeback totals vs confirmed |
 | `payment_issues_total` | Counter | event | Payment incidents requiring investigation or operator attention (`callback_unauthorized`, `unknown_provider_id`, …) |
-| `payment_reconcile_total` | Counter | result | Stale pending order sweep outcomes (`confirmed_activated`, `expired`, `provider_error`, `still_pending`, …) |
+| `payment_reconcile_total` | Counter | result | Stale pending order sweep outcomes (`confirmed_activated`, `confirmed_pending`, `expired`, `provider_error`, `confirm_error`, `expire_error`, `expire_race`, `skipped_no_provider_id`, `still_pending`, …) |
 | `node_up` | Gauge | node | Node panel availability from the sync health probe (1 = up) |
 | `subscription_nodes` | Gauge | status | Subscription node bindings by sync status |
 | `subscription_nodes_parked` | Gauge | — | Bindings parked after exhausted retries or a panel refusal |
@@ -566,6 +568,27 @@ scrape_configs:
 - XUI latency: только среднее — `sum(rate(xui_request_duration_seconds_sum[5m])) / sum(rate(xui_request_duration_seconds_count[5m]))`; `histogram_quantile` на хранилище Better Stack не работает
 - Active subscriptions: `active_subscriptions`
 - Устаревший деплой: проверить наличие `app_info{revision="<expected-commit-sha>"}` для ожидаемого коммита
+
+### 4.7 Фоновые воркеры и NOTIFICATIONS_ENABLED
+
+Воркеры запускаются в `startBackgroundWorkers` (`cmd/bot/main.go`), каждый — под `runSupervised` (паника → перезапуск, счётчик `worker_restarts_total{worker}`):
+
+| Воркер | Период | Что делает |
+|---|---|---|
+| DB pool metrics collector | 10 с | `db_pool_*`, `db_file_bytes`, `db_wal_bytes` |
+| Orphan reconciler | 1-й проход через 30 с, далее каждые 8 ч | Отзыв осиротевших клиентов (`bot_orphaned_clients_revoked_total`) |
+| Backup scheduler | ежедневно в 03:00, retention 30 | Бэкап БД + суточная обрезка audit_log (`AUDIT_LOG_RETENTION_DAYS`) |
+| Heartbeat scheduler | `HEARTBEAT_INTERVAL` (по умолчанию 300 с) | POST `{}` в `HEARTBEAT_URL` |
+| Trial cleanup scheduler | каждые 3 ч | Чистка истёкших trial-подписок |
+| Subscription sync worker | каждые 5 мин (+ hourly reconcile платежей) | Обработка `subscription_nodes` в pending-статусах |
+| Subscription expire worker | каждый час | Отключение истёкших подписок |
+| Subscription reminder worker | каждые 30 мин | Напоминания об истечении (3д/1д/3ч) |
+| Subscription traffic worker | каждые 60 мин | Проверка квот трафика, уведомления и восстановление доступа |
+
+`NOTIFICATIONS_ENABLED` (по умолчанию `true`) управляет пользовательскими уведомлениями:
+- `false` — reminder-воркер не стартует вовсе; traffic-воркер работает в режиме `RunRecovery` (восстанавливает доступ после сброса квоты панелью, но не шлёт сообщений пользователям); в лог пишется Warn.
+- Полезно при локальном запуске против копии продовой БД, чтобы реальные пользователи не получали сообщения.
+
 
 
 ## 5. Troubleshooting
@@ -748,16 +771,13 @@ WHERE subscription_id = (SELECT id FROM subscriptions WHERE subscription_id = 'y
 # Docker stats
 docker stats rs8kvn_bot
 
-# Go heap (if binary, send SIGUSR1 to get heap profile)
-kill -USR1 <pid>
-# profile in /tmp
-
-# Count goroutines
-curl http://localhost:8880/debug/pprof/goroutine?debug=1  # if enabled
+# Count goroutines — pprof endpoint в коде НЕ включён (нет ни net/http/pprof,
+# ни обработчика SIGUSR1; сигналы: SIGINT/SIGTERM/SIGQUIT, cmd/bot/main.go).
+# Горутины/heap профили доступны только через go test/локальный запуск с pprof-обвязкой.
 ```
 
 **Mitigation:**
-- Increase `GOGC` (default 100, lower = more frequent GC)
+- Increase `GOGC` (default 100, lower = more frequent GC; в compose уже заданы `GOMEMLIMIT=67108864` и `GOGC=40`)
 - Reduce `CacheMaxSize` (recompile)
 - Restart bot (graceful shutdown respects in-flight handlers)
 
@@ -817,7 +837,7 @@ sqlite3 ./data/rs8kvn.db "PRAGMA journal_mode=WAL;"
 # MaxSize: 10 MB, MaxBackups: 2, MaxAge: 14 days
 ```
 
-**Logrotate alternative:** See section 4.3.
+**Logrotate alternative:** See section 4.4.
 
 ---
 

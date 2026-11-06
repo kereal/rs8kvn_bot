@@ -36,6 +36,8 @@
 3. В `internal/testutil/db_slice_fakes.go` добавлены пер-срезовые фейки (`*...Fake`, по одному на
    под-интерфейс) + конструкторы `NewSubscriptionRepository()`, `NewTrialRepository()` и т.д.
    для узких тестов. Плоский `DatabaseService` в `testutil.go` оставлен нетронутым.
+   (Файл `db_slice_fakes.go` в репозитории больше не существует — судьба фейков описана
+   в Дополнениях 2026-08-11 и 2026-10-31 ниже.)
 
 ## Отвергнутая альтернатива: сборка `DatabaseService` через embedding пер-срезовых фейков
 
@@ -91,6 +93,8 @@ OrderStore — service-тесты строят все три сервиса на
 (embeds `*ServiceStoreFake` + BotStore-поверхность — bot-тесты строят handler и сервисы над
 одним инстансом), `SubscriptionRepositoryFake` (embeds `*ServiceStoreFake`, реализует
 `WebRepository` — subserver/web/expire-worker), плюс мелкие `ReferralCountSourceFake`,
-`ReferralInviteStoreFake`, `AuditLogWriterFake`. Embedding здесь — композиция тестового графа,
+`ReferralInviteStoreFake`, `AuditLogWriterFake`). Все фейки живут в одном файле
+`internal/testutil/testutil.go` (промежуточные `fake_*.go`-файлы слиты обратно
+при консолидации). Embedding здесь — композиция тестового графа,
 а не запрещённая сборка god-фейка `DatabaseService` из срезов; composite-литералы совместимы,
 т.к. Func-поля объявлены на уровне каждого фейка (промоутед — присваиванием).

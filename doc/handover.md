@@ -1,7 +1,7 @@
 # Handover Summary — rs8kvn_bot
 
 **Repo:** https://github.com/kereal/rs8kvn_bot
-**Module:** `rs8kvn_bot` (Go 1.26+)
+**Module:** `github.com/kereal/rs8kvn_bot` (Go 1.26+)
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration, feature branches from dev or `plans_and_pricing`)
 
 ---
@@ -36,7 +36,7 @@
 │ • Commands    │    │ • /readyz     │    │   (03:00)     │
 │ • Callbacks   │    │ • /i/{code}   │    │ • Trial       │
 │ • Cache       │    │ • /sub/{subID}│    │   cleanup     │
-│ • RateLimit   │    │ • /metrics    │    │   (hourly)    │
+│ • RateLimit   │    │ • /metrics    │    │   (every 3h)  │
 └───────────────┘    └───────────────┘    └───────────────┘
         │                     │                     │
         └─────────────────────┼─────────────────────┘
@@ -76,7 +76,7 @@ Handler.HandleUpdate → HandleCallback ("create_subscription")
         ▼
 SubscriptionService.Create(ctx, telegramID)
         │
-        ├─ Generate UUID, SubID (14 random bytes → 28 hex)
+        ├─ Generate UUID, SubID (5 random bytes → 10 hex chars)
         ├─ Build subscription URL: GLOBAL_SUB_URL + SubID
         │
         ▼
@@ -223,8 +223,8 @@ first outbound — a single-object response would show the user one node out of 
 **Admin Features:**
 - `/del <id>` — delete subscription by ID
 - `/setplan <subscription_id> <plan_id> [days]` — change subscription plan through the service layer (subscription row + node reconciliation + best-effort VPN sync; free plan clears expiry, future expiry preserved when `days` omitted, else 30-day default)
-- `/broadcast` — asynchronous broadcast flow: name → draft → **filter selection** → **recipient count preview** → inline confirm. Confirmation queues a campaign; a durable worker snapshots the audience into `broadcasts.recipients_state`, sends in batches (100, concurrency 10), retries transient errors twice, recovers stale leases after restart, and stores final counters/report in `broadcasts`. The confirm step offers **send now** or **schedule** (day picker → hour picker, Moscow time). A scheduled campaign keeps `planned_at` (persisted, never overwritten) and stays `scheduled`; `GetRunnableBroadcasts` only returns it once `planned_at` is due, so it also survives restarts and can be canceled before launch.
-- `/broadcasts` — recent campaign history with details, cancellation of active campaigns, and retry of failed recipients. Anonymous trials are excluded; `expired` is not offered as a broadcast status, while `all` is explicit. Migration 036 creates `broadcasts` with recipient state, delivery classification, and retry metadata columns; no recipient table is created. `blocked` means Telegram explicitly reports that the user blocked the bot; deactivated or missing chats are `unreachable`. Details send one compact admin message, while complete ID lists remain in the persisted campaign report.
+- `/v` — version info (admin only)
+**Broadcast management (admin panel, not Telegram commands):** ботовских команд `/broadcast`/`/broadcasts` нет — рассылки управляются в админ-панели (`/admin/`, см. `doc/broadcast.md`). Асинхронный flow: name → draft → **filter selection** → **recipient count preview** → inline confirm. Confirmation queues a campaign; a durable worker snapshots the audience into `broadcasts.recipients_state`, sends in batches (100, concurrency 10), retries transient errors twice, recovers stale leases after restart, and stores final counters/report in `broadcasts`. The confirm step offers **send now** or **schedule** (day picker → hour picker, Moscow time). A scheduled campaign keeps `planned_at` (persisted, never overwritten) and stays `scheduled`; `GetRunnableBroadcasts` only returns it once `planned_at` is due, so it also survives restarts and can be canceled before launch. Recent campaign history with details, cancellation of active campaigns, and retry of failed recipients — тоже в панели. Anonymous trials are excluded; `expired` is not offered as a broadcast status, while `all` is explicit. Migration 036 creates `broadcasts` with recipient state, delivery classification, and retry metadata columns; no recipient table is created. `blocked` means Telegram explicitly reports that the user blocked the bot; deactivated or missing chats are `unreachable`. Details send one compact admin message, while complete ID lists remain in the persisted campaign report.
 
 #### Broadcast Filters
 
@@ -302,15 +302,15 @@ The admin can go back to adjust filters or confirm to start the broadcast.
 - Empty filter `{}` = all active users (same as no filter).
 - Broadcast details show counters plus complete Telegram ID lists for delivered, blocked, failed, and unprocessed recipients; blocked IDs are retained in `delivery_report.blocked`.
 - Filters are applied at the SQL level (not in-memory), so they scale to thousands of users.
-- `/send <id|username> <msg>` — private message (30s cooldown per admin)
+- `/send <id|username> <msg>` — private message (rate limit: 1 per minute per admin)
 - `/refstats` — referral statistics (top 10 from cache)
 - 📊 Stats — bot statistics
 
 | **Infrastructure** |
-| - 3x-ui integration — Bearer token auth (no session/login/CSRF), client CRUD, RetryWithBackoff (3 retries, jitter), flow detection
+| - 3x-ui integration — Bearer token auth (no session/login/CSRF), client CRUD, RetryWithBackoff (up to 3 attempts = 2 retries, jitter), flow detection
 | - Multi-node subscription synchronization — `subscription_nodes` table with 4-state sync machine (active/pending_add/pending_remove/pending_update), per-subscription locking, retry with exponential backoff |
 | - Health endpoints — `/healthz` (503 when Down), `/readyz` (503 during init)
-| - Invite/trial landing — `/i/{code}` with IP rate limit (3/hour), cookie dedup (3h) |
+| - Invite/trial landing — `/i/{code}` with IP rate limit (3/hour), cookie dedup (TRIAL_DURATION_HOURS, default 3h) |
 | - Per-user rate limiting — chatID token bucket (30 tokens, 5/sec refill, 10-min idle cleanup) |
 | - Subscription proxy — `GET /sub/{subID}` with multi-node aggregation, headers, 240s TTL cache, in-process singleflight per subID (`flightGroup`) |
 | - Daily backups — WAL checkpoint, atomic copy, 30 rotated backups by default |
@@ -364,8 +364,8 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **API Token auth:** Bearer token via `Authorization` header (no session/login/CSRF/cookiejar)
 - **Node configuration:** Managed entirely via the `nodes` DB table (host, API token, inbound IDs, type, subscription URL). Multi-node support via `nodes` table.
 - **VPN client abstraction:** `internal/vpn/` package provides `Client` interface with `NewClient` factory routing by `NodeType` (3x-ui, proxman, fetch). Each node gets its own VPN client instance. Fetch nodes use no-op client — subscription_url fetched directly by subserver.
-- **RetryWithBackoff:** 3 retries with exponential backoff + jitter. DNS errors fast-fail.
-- **Subscription defaults:** `reset: 30` (days from creation), `expiresAt: now + 30 days`
+- **RetryWithBackoff:** up to 3 total attempts (2 retries) with exponential backoff + jitter. DNS errors fast-fail.
+- **Subscription defaults:** новый клиент создаётся на каноническом free-плане с `ExpiresAt = NULL` (`service/subscription.go` Create); в профиль панели уходит `reset: 30` (`config.SubscriptionResetDay`, дней от создания)
 - **Auto-reset:** Only works when `expiresAt` > 0. Traffic resets every 30 days, expiry extends (3x-ui auto-renew logic)
 - **Client email:** `trial_{subID}` for trial, `{username}` for regular
 - **Flow detection:** When creating/updating clients, fetches inbound config via `GET /panel/api/inbounds/get/{id}` to determine transport type. Flow is set based on transport: `tcp` → `"xtls-rprx-vision"`, `xhttp/h2/ws/grpc` → `""` (empty). A failed inbound read fails the call (no guessed flow): a wrong value would silently mis-provision the client. v3.11 additionally strips flow itself for inbounds that cannot use it, and the update call is scoped to its own flow group via `?inboundIds=` (`doc/architecture.md`, «Контракт API панели 3x-ui» §4.5, §4.8).
@@ -375,7 +375,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Trial:** `/i/{code}` → IP rate limit (3/hour) → DB trial record (negative telegram_id) → user clicks link in Telegram → `BindTrialSubscription` sets telegram_id (из отрицательного в реальный), sets referred_by if from invite
 - **Regular:** `create_subscription` callback → VPN client provisioning (per-node) → `subscription_nodes` records created as `pending_add` → DB record → cache invalidate → admin notify
 - **Sync pipeline:** Background `SyncPendingNodes` worker processes `pending_add`/`pending_remove`/`pending_update` states with per-subscription locking and exponential backoff retry
-- **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for 3 hours (HttpOnly, Secure, SameSite=Strict)
+- **Trial cookie:** `rs8kvn_trial_{code}` prevents duplication for the trial duration (`TRIAL_DURATION_HOURS`, по умолчанию 3 ч; HttpOnly, Secure, SameSite=Strict)
 - **Atomic cleanup:** `DELETE ... RETURNING` for expired trials (prevent race with bind)
 - **Share referral:** `pendingInvites[chatID]` cached 60 min (in-memory, periodic cleanup prevents leak)
 - **TelegramID conventions:** Positive = bound users, Negative = unbound trial subscriptions
@@ -387,7 +387,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Late confirmed payment:** `CONFIRMED` for an `expired`/`canceled` order never activates it — money flagged for manual review (refund or manual activation), admin alerted (`late_confirmed_callback`). Race documented in `doc/platega-T3.md` §5.4.
 - **Chargeback:** `CHARGEBACKED` on a paid order auto-downgrades the subscription to the free plan unless another paid order exists (access preserved for manual review).
 - **Payment window:** link lifetime is determined by Platega `expiresIn` and stored as absolute UTC `payment_expires_at`; a still-valid saved link is reused. Only a new `RequestPayment` after that timestamp terminalizes the pending order as `expired`; a late `CONFIRMED` for an `expired`/`canceled` order never activates it and is sent for manual review.
-- **Metrics:** `payment_operations_total{operation,result}`, `payment_operation_duration_seconds`, `payment_amounts_cents_total{operation,currency}` (confirmed/chargeback), `payment_issues_total{event}`.
+- **Metrics:** `payment_operations_total{operation,result}`, `payment_operation_duration_seconds`, `payment_amount_cents_total{operation,currency}` (confirmed/chargeback), `payment_issues_total{event}`.
 
 ### Subscription Deletion
 - **Order:** Mark as revoked → best-effort deprovision VPN access → physical deletion of DB row
@@ -395,7 +395,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Referral cache:** `DecrementReferralCount` called after successful deletion.
 
 ### Subscription Proxy
-- **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID from DB (14 random bytes → 28 hex chars)
+- **Endpoint:** `GET /sub/{subID}` — subID = SubscriptionID from DB (5 random bytes → 10 hex chars)
 - **Config:** Subserver агрегирует ответы активных нод как-is; отдельный extra-servers файл не используется.
 - **Cache:** 240s TTL hardcoded (`config.SubServerCacheTTL`)
 - **Singleflight:** First request fetches, others wait and get same result (prevents thundering herd) — загрузка внешнего конфиг-файла не выполняется (фича удалена)
@@ -407,7 +407,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **Cache purpose:** Read-through for real-time display (`/refstats`) without hitting DB
 - **Save() is no-op:** DB already reflects correct count after changes (Created/Deleted/Bound)
 - **Sync():** Calls `Load()` hourly to refresh from DB
-- **Admin rate limit:** 30s cooldown between `/send` commands per admin (sync.Map)
+- **Admin rate limit:** `/send` — 1 сообщение в минуту на админа (token bucket: 1 token, refill 1/60 в секунду, `internal/bot/handler.go:612`)
 
 ### Database
 - **Engine:** SQLite (mattn/go-sqlite3, WAL mode)
@@ -437,8 +437,8 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
   - Applied to all command/callback handlers
   - `MaxConcurrentHandlers=10` semaphore prevents goroutine explosion
 - **Trial endpoint (IP-based):** 3 requests/hour per IP (DB-tracked, auto-cleanup)
-- **Admin `/send`:** 30-second cooldown per admin (in-memory sync.Map)
-- **Broadcast:** 50ms delay between messages (~20 msg/sec, respects Telegram limits)
+- **Admin `/send`:** 1 сообщение в минуту на админа (in-memory token bucket per admin, 1 token / 1/60 refill)
+- **Broadcast:** параллельные goroutine-отправки (concurrency 10, без per-message throttle); Telegram 429 обрабатывается по `retry_after` (до 5 ожиданий на сообщение), повторы доставки — linear backoff 300 мс × attempt
 
 ### Security
 - **Input validation:** Regex validation rejects path-separator/invalid characters in invite codes (`internal/web/web.go`) and subscription IDs.
@@ -450,7 +450,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **HTTP timeouts:** ReadHeaderTimeout 5s, ReadTimeout 10s, WriteTimeout 30s, IdleTimeout 60s
 - **Port binding:** Verified before goroutine launch — `net.Listen()` then `Serve()` in separate goroutine
 - **Non-root Docker:** UID 1000, `no-new-privileges:true`
-- **RetryWithBackoff:** 3 retries with exponential backoff + jitter; DNS errors fast-fail
+- **RetryWithBackoff:** up to 3 total attempts (2 retries) with exponential backoff + jitter; DNS errors fast-fail
 
 
 ### Health Checks

@@ -27,10 +27,11 @@
 | `bot_orphaned_clients_revoked_total` | counter | `service/subscription.go` |
 | `db_queries_total{operation,result}` | counter | `metrics/db.go` — GORM callbacks |
 | `db_query_duration_seconds{operation}` | histogram | `metrics/db.go` — GORM callbacks |
-| `subserver_source_fetch_total{result,format}` | counter | `subscription_handler_split.go:225,242` |
-| `subserver_source_fetch_duration_seconds{result}` | histogram | `subscription_handler_split.go:226,243` |
-| `subserver_cache_invalidations_total{reason}` | counter | `subscription_handler_split.go:38,62` |
-| `subserver_no_items_total` | counter | `subscription_handler_split.go:394` |
+| `subserver_source_fetch_total{result,format}` | counter | `subscription_handler_split.go:259,278` |
+| `subserver_source_fetch_duration_seconds{result}` | histogram | `subscription_handler_split.go:259,278` |
+| `subserver_cache_invalidations_total{reason}` | counter | `subscription_handler_split.go:43,65` |
+| `subserver_no_items_total` | counter | `subscription_handler_split.go:413` |
+| `subserver_requests_total{format}` | counter | `subserver/subscription_handler.go:33` (нулевые серии `xray`/`singbox`/`clash` публикуются в `init()` metrics.go) |
 
 ### Удалённые или ранее ошибочно классифицированные метрики
 
