@@ -10,7 +10,7 @@
 
 ## 2. Данные
 
-Схема — миграции [002](../../internal/database/migrations/002_add_invites_and_trials.up.sql), [003](../../internal/database/migrations/003_add_referral_columns.up.sql), [004](../../internal/database/migrations/004_add_unique_referrer_tg_id.up.sql), [005](../../internal/database/migrations/005_cleanup_duplicate_invites.up.sql):
+Схема — миграции [002](../../../internal/database/migrations/002_add_invites_and_trials.up.sql), [003](../../../internal/database/migrations/003_add_referral_columns.up.sql), [004](../../../internal/database/migrations/004_add_unique_referrer_tg_id.up.sql), [005](../../../internal/database/migrations/005_cleanup_duplicate_invites.up.sql):
 
 ```sql
 CREATE TABLE invites (

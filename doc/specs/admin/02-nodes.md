@@ -10,7 +10,7 @@
 
 ## 2. Данные
 
-Схема — миграции [006](../../internal/database/migrations/006_create_sources.up.sql), [014](../../internal/database/migrations/014_sources_to_nodes.up.sql), [020](../../internal/database/migrations/020_convert_inbound_id_to_array.up.sql):
+Схема — миграции [006](../../../internal/database/migrations/006_create_sources.up.sql), [014](../../../internal/database/migrations/014_sources_to_nodes.up.sql), [020](../../../internal/database/migrations/020_convert_inbound_id_to_array.up.sql):
 
 ```sql
 CREATE TABLE nodes (
@@ -35,7 +35,7 @@ CREATE TABLE plan_nodes (
 );
 ```
 
-`subscription_nodes` ([018](../../internal/database/migrations/018_create_subscription_nodes.up.sql), [026](../../internal/database/migrations/026_remove_subscription_nodes_cascade.up.sql)) — FK на `nodes(id)` **без** `ON DELETE`: удаление ноды с биндингами упадёт на FK, это перехватывает guard.
+`subscription_nodes` ([018](../../../internal/database/migrations/018_create_subscription_nodes.up.sql), [026](../../../internal/database/migrations/026_remove_subscription_nodes_cascade.up.sql)) — FK на `nodes(id)` **без** `ON DELETE`: удаление ноды с биндингами упадёт на FK, это перехватывает guard.
 
 Факты, на которые опирается реализация:
 
