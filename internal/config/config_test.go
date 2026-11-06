@@ -239,7 +239,40 @@ func TestConfig_StringMasksAdminToken(t *testing.T) {
 
 	assert.NotContains(t, cfg.String(), "super-secret-token")
 	assert.Contains(t, cfg.String(), "AdminToken=***")
-	assert.Contains(t, cfg.String(), "AdminListen=127.0.0.1:8881")
+	assert.Contains(t, cfg.String(), "AdminURL=http://127.0.0.1:8881/admin/")
+
+	// Пустой ADMIN_TOKEN выключает панель целиком: слушателя нет, поэтому в
+	// сводке не должно быть «рабочей» ссылки.
+	disabled := &Config{AdminListen: "127.0.0.1:8881"}
+	assert.Contains(t, disabled.String(), "AdminURL=(disabled)")
+}
+
+func TestConfig_AdminURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		adminToken string
+		listen     string
+		want       string
+	}{
+		{name: "loopback", adminToken: "secret", listen: "127.0.0.1:8881", want: "http://127.0.0.1:8881/admin/"},
+		{name: "wildcard host", adminToken: "secret", listen: "0.0.0.0:8881", want: "http://127.0.0.1:8881/admin/"},
+		{name: "wildcard ipv6", adminToken: "secret", listen: "[::]:8881", want: "http://127.0.0.1:8881/admin/"},
+		{name: "ipv6 loopback", adminToken: "secret", listen: "[::1]:8881", want: "http://[::1]:8881/admin/"},
+		{name: "panel disabled without token", listen: "127.0.0.1:8881", want: ""},
+		{name: "unparsable listen", adminToken: "secret", listen: "no-port", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &Config{AdminToken: tt.adminToken, AdminListen: tt.listen}
+
+			assert.Equal(t, tt.want, cfg.AdminURL())
+		})
+	}
 }
 
 func TestValidateURL(t *testing.T) {

@@ -303,6 +303,12 @@ func startAdminServer(cfg *config.Config, dbService *database.Service, subServic
 		return nil, err
 	}
 
+	// ADMIN_LISTEN — это адрес привязки; в лог отдаём ссылку, по которой
+	// панель открывается в браузере (wildcard-адрес там недостижим).
+	logger.Info("Admin panel started",
+		zap.String("url", cfg.AdminURL()),
+		zap.String("listen", cfg.AdminListen))
+
 	return server, nil
 }
 

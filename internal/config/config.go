@@ -351,6 +351,11 @@ func (c *Config) validateURL(name, value string) error {
 
 // String returns a safe string representation of the config (without sensitive data).
 func (c *Config) String() string {
+	adminURL := c.AdminURL()
+	if adminURL == "" {
+		adminURL = "(disabled)"
+	}
+
 	return fmt.Sprintf("Config{"+
 		"TelegramBotToken=***, "+
 		"TelegramAdminID=%d, "+
@@ -360,7 +365,7 @@ func (c *Config) String() string {
 		"HeartbeatURL=%s, "+
 		"HeartbeatInterval=%d, "+
 		"GlobalSubURL=%s, "+
-		"AdminListen=%s, "+
+		"AdminURL=%s, "+
 		"AdminToken=%s, "+
 		"SentryDSN=***, "+
 		"}",
@@ -371,9 +376,32 @@ func (c *Config) String() string {
 		maskURL(c.HeartbeatURL),
 		c.HeartbeatInterval,
 		maskURL(c.GlobalSubURL),
-		c.AdminListen,
+		adminURL,
 		maskedPresence(c.AdminToken),
 	)
+}
+
+// AdminURL returns the address of the admin panel as a clickable URL, or an
+// empty string when the panel is disabled (empty ADMIN_TOKEN means no listener
+// at all). A wildcard bind address (0.0.0.0, :: or a bare port) becomes
+// 127.0.0.1: the browser needs an address it can actually reach, while the
+// panel's own bind address stays visible in the startup log.
+func (c *Config) AdminURL() string {
+	if strings.TrimSpace(c.AdminToken) == "" {
+		return ""
+	}
+
+	host, port, err := net.SplitHostPort(c.AdminListen)
+	if err != nil {
+		return ""
+	}
+
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "127.0.0.1"
+	}
+
+	return "http://" + net.JoinHostPort(host, port) + "/admin/"
 }
 
 // SubURL builds a full subscription URL from a subscription ID.
