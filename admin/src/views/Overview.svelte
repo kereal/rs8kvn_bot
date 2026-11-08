@@ -218,6 +218,10 @@
     align-items: start;
   }
 
+  .card {
+    padding: 14px 16px;
+  }
+
   .card h2 {
     margin: 0 0 12px;
     font-size: 13px;

@@ -12,14 +12,6 @@
     canceled: { label: 'Отменён', cls: 'badge-cancel' }
   }
 
-  const SORTABLE = ['id', 'created_at', 'paid_at', 'amount_cents']
-  const COLUMN_LABELS = {
-    id: 'ID',
-    created_at: 'СОЗДАН',
-    paid_at: 'ОПЛАЧЕН',
-    amount_cents: 'СУММА'
-  }
-
   /** @type {import('../lib/types.js').Order[]} */
   let items = $state([])
   let total = $state(0)
@@ -99,6 +91,13 @@
       order = 'desc'
     }
     resetAndLoad()
+  }
+
+  // Стрелка сортировки живёт рядом с заголовком, а не в цикле по списку
+  // колонок: sortable-колонки разнесены по таблице (ID, СУММА, СОЗДАН, ОПЛАЧЕН).
+  function sortArrow(column) {
+    if (sort !== column) return ''
+    return order === 'desc' ? ' ↓' : ' ↑'
   }
 
   function pageFirst() {
@@ -190,17 +189,16 @@
     <table>
       <thead>
         <tr>
-          {#each SORTABLE as column (column)}
-            <th class="sortable" onclick={() => sortBy(column)}>
-              {COLUMN_LABELS[column]}{sort === column ? (order === 'desc' ? ' ↓' : ' ↑') : ''}
-            </th>
-          {/each}
+          <th class="sortable" onclick={() => sortBy('id')}>ID{sortArrow('id')}</th>
           <th>ПОЛЬЗОВАТЕЛЬ</th>
           <th>ПРОДУКТ</th>
           <th>ПЛАН</th>
           <th>СТАТУС</th>
+          <th class="sortable num" onclick={() => sortBy('amount_cents')}>СУММА{sortArrow('amount_cents')}</th>
           <th class="num">СПИСАНО</th>
           <th>ПРОВАЙДЕР</th>
+          <th class="sortable" onclick={() => sortBy('created_at')}>СОЗДАН{sortArrow('created_at')}</th>
+          <th class="sortable" onclick={() => sortBy('paid_at')}>ОПЛАЧЕН{sortArrow('paid_at')}</th>
         </tr>
       </thead>
       <tbody>
