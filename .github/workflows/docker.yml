@@ -41,7 +41,7 @@ jobs:
 
             - name: Upload coverage reports to Codecov
               if: env.CODECOV_TOKEN != ''  # пропускаем на PR от Dependabot: у них нет доступа к secrets
-              uses: codecov/codecov-action@v5
+              uses: codecov/codecov-action@v7
               env:
                   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
               with:
