@@ -395,14 +395,11 @@
       </tbody>
     </table>
 
-    <div class="pagination">
-      <span>Найдено: {total}</span>
-      <span class="pagination-info">
-        {offset + 1}–{offset + items.length} из {total}
-      </span>
+    <div class="pager">
+      <span class="muted">{offset + 1}–{offset + items.length} из {total}</span>
       <button
         class="btn btn-ghost"
-        disabled={offset === 0}
+        disabled={offset === 0 || loading}
         onclick={() => {
           offset = Math.max(0, offset - limit)
           load()
@@ -412,7 +409,7 @@
       </button>
       <button
         class="btn btn-ghost"
-        disabled={offset + items.length >= total}
+        disabled={offset + items.length >= total || loading}
         onclick={() => {
           offset = offset + limit
           load()
@@ -547,16 +544,5 @@
     margin: 10px 0 0;
     color: var(--muted, #777);
     font-size: 13px;
-  }
-
-  .pagination {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 0;
-  }
-
-  .pagination-info {
-    color: var(--muted, #777);
   }
 </style>

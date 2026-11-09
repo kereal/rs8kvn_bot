@@ -286,12 +286,4 @@
     text-decoration: underline;
   }
 
-  .pager {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    justify-content: flex-end;
-    padding: 10px 14px;
-    border-top: 1px solid var(--border);
-  }
 </style>
