@@ -6,6 +6,8 @@
 
   /** @type {import('../lib/types.js').Product[]} */
   let items = $state([])
+  /** @type {import('../lib/types.js').Plan[]} */
+  let plans = $state([])
   let loading = $state(true)
   let error = $state('')
   let notice = $state('')
@@ -35,8 +37,12 @@
     loading = true
     error = ''
     try {
-      const data = await api.get('/admin/api/products')
-      items = data.items || []
+      const [products, planList] = await Promise.all([
+        api.get('/admin/api/products'),
+        api.get('/admin/api/plans')
+      ])
+      items = products.items || []
+      plans = planList.items || []
     } catch (err) {
       error = humanError(err)
     } finally {
@@ -45,14 +51,6 @@
   }
 
   onMount(load)
-
-  let plans = $derived.by(() => {
-    const seen = new Map()
-    for (const item of items) {
-      if (!seen.has(item.plan_id)) seen.set(item.plan_id, item.plan_name)
-    }
-    return [...seen.entries()].map(([id, name]) => ({ id, name }))
-  })
 
   let rows = $derived.by(() => {
     const needle = query.trim().toLowerCase()
@@ -287,6 +285,7 @@
   <div class="field">
     <label for="product-plan">План</label>
     <select id="product-plan" bind:value={form.plan_id} disabled={form.id > 0}>
+      <option value={0}>— выберите план —</option>
       {#each plans as plan (plan.id)}
         <option value={plan.id}>{plan.name}</option>
       {/each}

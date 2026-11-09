@@ -332,7 +332,7 @@
     </section>
   </div>
 
-  <section class="panel">
+  <section class="panel nodes-panel">
     <h2>
       Узлы
       {#if queuedNodes() > 0}
@@ -363,7 +363,7 @@
     {/if}
   </section>
 
-  <section class="panel actions">
+  <section class="panel actions-panel">
     <h2>Действия</h2>
     <div class="action-row">
       <button class="btn" onclick={openPlanModal}>Продлить / сменить план</button>
@@ -489,6 +489,17 @@
 
   section.panel {
     margin-bottom: 14px;
+  }
+
+  /* Секции без карточки: заголовок и содержимое отбиты отступом от края.
+     Таблица узлов остаётся во всю ширину панели — как на других экранах,
+     поэтому отступ получает заголовок, а не секция. */
+  .nodes-panel > h2 {
+    padding: 14px 14px 0;
+  }
+
+  .actions-panel {
+    padding: 14px 16px;
   }
 
   .action-row {
