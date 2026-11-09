@@ -314,8 +314,8 @@ Sentinel-ошибки: `ErrBroadcastInvalid`, `ErrBroadcastLocked`,
 - «Отправка» — «сразу после подтверждения» или дата-время;
 - сообщение в виде пузыря: текст, разобранный так же, как его отрисует
   Telegram (жирный, курсив, зачёркнутый, код, блок кода, ссылки);
-- действия: «Назад к форме» (вернуть всё), «Изменить текст» (вернуть форму с
-  фокусом в тексте) и подтверждение — «Отправить 3120 получателям»
+- действия: «Назад к форме» (вернуть форму с фокусом в тексте сообщения) и
+  подтверждение — «Отправить 3120 получателям»
   (при `planned_at` — «Запланировать 3120 получателям»).
 
 Подтверждение с точным числом получателей обязательно: без него запрос
@@ -385,7 +385,7 @@ MarkdownV2: `*жирный*`, `_курсив_`, `~зачёркнутый~`, `` `
 - [x] `go test ./internal/bot/ ./tests/e2e/` зелёный после удаления флоу (остались только тесты воркера). — проверено: прогнано 2026-11-05: go test ./internal/bot/ ./tests/e2e/ -count=1 — ok (2.8s / 7.6s), плюс -race ./internal/bot/ — ok; тесты флоу команд удалены, остались тесты воркера.
 - [x] В процессе ровно один `BroadcastWorker` (панель не запускает второй). — проверено: единственный старт — cmd/bot/main.go:686 (StartBroadcastWorker), создание один раз — internal/bot/handler.go:127; в admin/ нет StartBroadcastWorker/NewBroadcastWorker.
 - [x] Деактивация заблокировавших доступна из панели и повторяет поведение бота (revoked + deprovision), включая частичный сбой. — проверено: seam BroadcastDeactivator (admin/broadcasts.go:36-40, admin/server.go:133-138); сервис revoked+deprovision+частичный сбой — internal/service/subscription_deactivate.go; TestDeactivateBlockedBroadcastRecipients_RevokesAndDeprovisions/_ReportsPartialFailure/_RetriesFailedDeprovision, HTTP TestAPI_BroadcastsDeactivate_Completed/_PartialFailure/_Guards.
-- [x] Перед отправкой показывается предпросмотр: точное число получателей, выбранные фильтры, расписание и текст так, как его увидит получатель. Кнопка формы «Просмотр» ничего не создаёт. — проверено: `POST /admin/api/broadcasts/preview` (admin/broadcasts.go) — dry-run без записи в `broadcasts`; разбор текста — `utils.ParseMarkdownV2` (тот же `EscapeMarkdownV2`, что у воркера); UI: `Broadcasts.svelte` — форма → превью → «Назад к форме» / «Изменить текст» / «Отправить N получателям»; тесты TestAPI_BroadcastsPreview/_Guards, TestParseMarkdownV2; живая проверка в браузере: превью показывает 64 получателя, жирный/курсив/зачёркнутый/ссылку и `# Заголовок` обычным текстом, подтверждение создаёт ровно одну рассылку.
+- [x] Перед отправкой показывается предпросмотр: точное число получателей, выбранные фильтры, расписание и текст так, как его увидит получатель. Кнопка формы «Просмотр» ничего не создаёт. — проверено: `POST /admin/api/broadcasts/preview` (admin/broadcasts.go) — dry-run без записи в `broadcasts`; разбор текста — `utils.ParseMarkdownV2` (тот же `EscapeMarkdownV2`, что у воркера); UI: `Broadcasts.svelte` — форма → превью → «Назад к форме» / «Отправить N получателям»; тесты TestAPI_BroadcastsPreview/_Guards, TestParseMarkdownV2; живая проверка в браузере: превью показывает 64 получателя, жирный/курсив/зачёркнутый/ссылку и `# Заголовок` обычным текстом, подтверждение создаёт ровно одну рассылку.
 
 ## 10. Файлы
 

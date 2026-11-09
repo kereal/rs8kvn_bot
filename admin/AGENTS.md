@@ -58,6 +58,26 @@ make check                         # gofmt + go vet + npm run check + go test ./
 make admin-serve                   # panel alone on a throwaway DB copy, demo rows
 ```
 
+## Theme (light + dark)
+
+The panel follows the OS: `prefers-color-scheme: dark` swaps the variables in
+`src/app.css`. Colors in components come only from those variables:
+
+| Variable | Light | Dark | Use |
+|---|---|---|---|
+| `--bg` | `#f6f7f9` | `#12141a` | page background, inputs, code blocks |
+| `--panel` | `#ffffff` | `#191c23` | cards, dialogs, buttons |
+| `--border` | `#e2e5ea` | `#2a2f3a` | borders |
+| `--text` | `#171a1f` | `#e7e9ee` | text |
+| `--muted` | `#6b7280` | `#9aa3b2` | secondary text |
+| `--accent` / `--danger` / `--ok` / `--warn` | … | … | accents, with `*-soft` backgrounds |
+
+There is **no** `--surface` or `--surface-alt`: a `var(--surface, #fff)` silently
+falls back to white and produces light text on a white block in dark mode (the
+audit log JSON had exactly this bug). Use `--bg` for inset blocks and
+`color-mix(in srgb, var(--border) 35%, transparent)` for a tinted row. Never
+hardcode a light background or a dark text color.
+
 ## Type checking (`jsconfig.json` + `svelte-check`)
 
 `checkJs` is on, so `npm run check` type-checks the JS inside components and
@@ -228,7 +248,8 @@ enter the token, exercise list → create → edit → delete. Dev mode with HMR
 4. Разметка: `*жирный*`, `_курсив_`, `~зачёркнутый~`, `` `код` ``,
    `[текст](ссылка)` — как в Telegram; `# Заголовок` и `__подчёркнутый__` —
    обычным текстом (Telegram в MarkdownV2 их не поддерживает).
-5. «Изменить текст» возвращает в форму с фокусом в тексте и сохраняет
-   введённое; «Назад к форме» — тоже, но без фокуса на тексте.
+5. «Назад к форме» возвращает в форму с фокусом в тексте сообщения и
+   сохраняет введённое. Второй кнопки возврата нет — в футере превью только
+   «Назад к форме» и подтверждение.
 6. Подтверждение («Отправить N получателям») создаёт ровно одну рассылку в
    статусе `scheduled`; при пустой аудитории кнопка заблокирована.

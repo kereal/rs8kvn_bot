@@ -430,10 +430,10 @@
   .badge-ro {
     align-self: center;
     padding: 2px 10px;
-    border: 1px solid var(--border, #ccc);
+    border: 1px solid var(--border);
     border-radius: 999px;
     font-size: 12px;
-    color: var(--muted, #777);
+    color: var(--muted);
     white-space: nowrap;
   }
 
@@ -454,7 +454,7 @@
   }
 
   .row.expanded {
-    background: var(--surface-alt, rgba(0, 0, 0, 0.03));
+    background: color-mix(in srgb, var(--border) 35%, transparent);
   }
 
   .nowrap {
@@ -471,23 +471,25 @@
     padding: 1px 8px;
     border-radius: 999px;
     font-size: 12px;
-    border: 1px solid var(--border, #ccc);
+    border: 1px solid var(--border);
     white-space: nowrap;
   }
 
+  /* Цвета бейджей — из темы: жёсткие тёмные оттенки в тёмной теме были
+     почти не видны на тёмном фоне. */
   .actor-admin {
-    border-color: #b58a2b;
-    color: #8a6a1f;
+    border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+    color: var(--warn);
   }
 
   .actor-payment_provider {
-    border-color: #3a7bd5;
-    color: #2c5fa8;
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+    color: var(--accent);
   }
 
   .actor-system,
   .actor-worker {
-    color: var(--muted, #777);
+    color: var(--muted);
   }
 
   .details-cell {
@@ -506,7 +508,7 @@
   }
 
   .expand-row > td {
-    background: var(--surface-alt, rgba(0, 0, 0, 0.03));
+    background: color-mix(in srgb, var(--border) 35%, transparent);
   }
 
   .expand-grid {
@@ -528,21 +530,24 @@
     overflow: auto;
     margin: 0;
     padding: 8px;
-    border: 1px solid var(--border, #ccc);
+    border: 1px solid var(--border);
     border-radius: 6px;
-    background: var(--surface, #fff);
+    /* Фон и цвет — из темы: в тёмной теме блок остаётся тёмным, текст
+       читаемым. Раньше здесь был жёсткий белый фон с цветом страницы. */
+    background: var(--bg);
+    color: var(--text);
     font-size: 12px;
   }
 
   .state-note {
-    color: var(--muted, #777);
+    color: var(--muted);
     font-style: italic;
     margin: 0;
   }
 
   .expand-meta {
     margin: 10px 0 0;
-    color: var(--muted, #777);
+    color: var(--muted);
     font-size: 13px;
   }
 </style>

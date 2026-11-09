@@ -252,14 +252,13 @@
     }
   }
 
-  // Возврат в форму из превью: focusText=true — сразу к тексту сообщения.
-  async function backToForm(focusText) {
+  // Возврат в форму из превью: курсор ставим в текст сообщения — после
+  // просмотра правят обычно именно его.
+  async function backToForm() {
     previewOpen = false
     formOpen = true
-    if (focusText) {
-      await tick()
-      document.getElementById('bc-text')?.focus()
-    }
+    await tick()
+    document.getElementById('bc-text')?.focus()
   }
 
   // Шаг 2 → отправка: запрос уходит только после подтверждения в превью.
@@ -611,8 +610,7 @@
 
   {#snippet footer()}
     <div class="preview-actions">
-      <button class="btn btn-ghost" onclick={() => backToForm(false)} disabled={saving}>Назад к форме</button>
-      <button class="btn btn-ghost" onclick={() => backToForm(true)} disabled={saving}>Изменить текст</button>
+      <button class="btn btn-ghost" onclick={() => backToForm()} disabled={saving}>Назад к форме</button>
       <button
         class="btn btn-primary send"
         onclick={doSave}
