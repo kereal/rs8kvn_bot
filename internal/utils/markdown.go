@@ -62,8 +62,21 @@ func EscapeMarkdownV2(text string) string {
 	}
 
 	out := b.String()
+
+	// Конструкция, захваченная позже (например, жирный текст с кодом
+	// внутри), содержит токен более ранней конструкции. Токены подставляются
+	// после экранирования внутреннего текста: иначе разделители вложенной
+	// конструкции тоже экранировались бы и ломали разметку.
+	resolved := make([]string, len(protected))
+
 	for i, p := range protected {
-		out = strings.ReplaceAll(out, mdv2Token(i), escapeProtected(p))
+		text := escapeProtected(p)
+		for j := range i {
+			text = strings.ReplaceAll(text, mdv2Token(j), resolved[j])
+		}
+
+		resolved[i] = text
+		out = strings.ReplaceAll(out, mdv2Token(i), text)
 	}
 
 	return out
@@ -137,4 +150,242 @@ func EscapeLegacyMarkdown(text string) string {
 	}
 
 	return b.String()
+}
+
+// MarkdownRun — фрагмент разобранного сообщения: текст с набором активных
+// стилей. Ссылка задаётся URL, блок кода — Type "pre".
+type MarkdownRun struct {
+	Type   string `json:"type"` // "text" | "pre"
+	Text   string `json:"text"`
+	URL    string `json:"url"`
+	Bold   bool   `json:"bold"`
+	Italic bool   `json:"italic"`
+	Strike bool   `json:"strike"`
+	Code   bool   `json:"code"`
+}
+
+// ParseMarkdownV2 разбирает текст так, как его увидит получатель: сначала
+// применяется EscapeMarkdownV2 — ровно тот вызов, который делает воркер
+// рассылки, — затем результат парсится как MarkdownV2.
+//
+// Так превью не может разойтись с доставкой: и экранирование, и набор
+// поддерживаемых конструкций (жирный, курсив, зачёркнутый, код, блок кода,
+// ссылка) берутся из одного места. Всё, что в MarkdownV2 не поддерживается
+// Telegram (заголовки, подчёркивание, спойлеры), воркер экранирует, поэтому
+// в разборе такие конструкции остаются обычным текстом.
+func ParseMarkdownV2(text string) []MarkdownRun {
+	return parseMarkdownRuns(EscapeMarkdownV2(text), false, false, false)
+}
+
+// parseMarkdownRuns разбирает уже экранированный MarkdownV2. Стили bold,
+// italic и strike наследуются вложенными конструкциями.
+func parseMarkdownRuns(s string, bold, italic, strike bool) []MarkdownRun {
+	var runs []MarkdownRun
+
+	var buf strings.Builder
+
+	flush := func() {
+		if buf.Len() == 0 {
+			return
+		}
+
+		runs = append(runs, MarkdownRun{
+			Type:   "text",
+			Text:   buf.String(),
+			Bold:   bold,
+			Italic: italic,
+			Strike: strike,
+		})
+		buf.Reset()
+	}
+
+	for i := 0; i < len(s); {
+		switch {
+		case s[i] == '\\' && i+1 < len(s):
+			// Экранированный зарезервированный символ — обычный текст.
+			buf.WriteByte(s[i+1])
+			i += 2
+		case strings.HasPrefix(s[i:], "```"):
+			end := strings.Index(s[i+3:], "```")
+			if end < 0 {
+				flush()
+
+				runs = append(runs, MarkdownRun{Type: "pre", Text: unescapeMarkdown(s[i+3:]), Code: true})
+
+				i = len(s)
+
+				continue
+			}
+
+			flush()
+
+			runs = append(runs, MarkdownRun{Type: "pre", Text: unescapeMarkdown(s[i+3 : i+3+end]), Code: true})
+
+			i += 3 + end + 3
+		case s[i] == '`':
+			end := strings.IndexByte(s[i+1:], '`')
+			if end < 0 {
+				buf.WriteByte('`')
+				i++
+
+				continue
+			}
+
+			flush()
+
+			runs = append(runs, MarkdownRun{
+				Type:   "text",
+				Text:   unescapeMarkdown(s[i+1 : i+1+end]),
+				Bold:   bold,
+				Italic: italic,
+				Strike: strike,
+				Code:   true,
+			})
+
+			i += 1 + end + 1
+		case s[i] == '*':
+			end := strings.IndexByte(s[i+1:], '*')
+			if end < 0 {
+				buf.WriteByte('*')
+				i++
+
+				continue
+			}
+
+			flush()
+
+			runs = append(runs, parseMarkdownRuns(s[i+1:i+1+end], true, italic, strike)...)
+
+			i += 1 + end + 1
+		case s[i] == '_':
+			end := strings.IndexByte(s[i+1:], '_')
+			if end < 0 {
+				buf.WriteByte('_')
+				i++
+
+				continue
+			}
+
+			flush()
+
+			runs = append(runs, parseMarkdownRuns(s[i+1:i+1+end], bold, true, strike)...)
+
+			i += 1 + end + 1
+		case s[i] == '~':
+			end := strings.IndexByte(s[i+1:], '~')
+			if end < 0 {
+				buf.WriteByte('~')
+				i++
+
+				continue
+			}
+
+			flush()
+
+			runs = append(runs, parseMarkdownRuns(s[i+1:i+1+end], bold, italic, true)...)
+
+			i += 1 + end + 1
+		case s[i] == '[':
+			textEnd, linkEnd, url, ok := parseMarkdownLink(s[i:])
+			if !ok {
+				buf.WriteByte('[')
+				i++
+
+				continue
+			}
+
+			flush()
+
+			inner := parseMarkdownRuns(s[i+1:i+textEnd], bold, italic, strike)
+			if len(inner) == 0 {
+				inner = []MarkdownRun{{Type: "text", Text: ""}}
+			}
+
+			for idx := range inner {
+				inner[idx].URL = url
+			}
+
+			runs = append(runs, inner...)
+
+			i += linkEnd
+		default:
+			buf.WriteByte(s[i])
+			i++
+		}
+	}
+
+	flush()
+
+	return runs
+}
+
+// parseMarkdownLink разбирает «[текст](url)» в начале строки. Возвращает
+// границу текста, границу всей конструкции, URL и признак успеха. URL с
+// неизвестной схемой отбрасывается: Telegram такие ссылки не делает
+// кликабельными, а текст остаётся текстом.
+func parseMarkdownLink(s string) (textEnd, linkEnd int, url string, ok bool) {
+	closeBracket := strings.IndexByte(s[1:], ']')
+	if closeBracket < 0 {
+		return 0, 0, "", false
+	}
+
+	textEnd = 1 + closeBracket
+	if !strings.HasPrefix(s[textEnd:], "](") {
+		return 0, 0, "", false
+	}
+
+	rest := s[textEnd+2:]
+	closeParen := strings.IndexByte(rest, ')')
+	if closeParen < 0 {
+		return 0, 0, "", false
+	}
+
+	linkEnd = textEnd + 2 + closeParen + 1
+
+	raw := rest[:closeParen]
+	if !safeMarkdownURL(raw) {
+		return textEnd, linkEnd, "", true
+	}
+
+	return textEnd, linkEnd, unescapeMarkdown(raw), true
+}
+
+// unescapeMarkdown превращает экранированные символы обратно в обычные:
+// Telegram показывает «\.» как «.», а не как обратный слэш.
+func unescapeMarkdown(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+
+	var b strings.Builder
+
+	b.Grow(len(s))
+
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			i++
+
+			b.WriteByte(s[i])
+
+			continue
+		}
+
+		b.WriteByte(s[i])
+	}
+
+	return b.String()
+}
+
+// safeMarkdownURL оставляет только схемы, которые Telegram превращает в
+// кликабельную ссылку.
+func safeMarkdownURL(raw string) bool {
+	url := strings.ToLower(strings.TrimSpace(raw))
+
+	for _, scheme := range []string{"http://", "https://", "tg://", "mailto:"} {
+		if strings.HasPrefix(url, scheme) {
+			return true
+		}
+	}
+
+	return false
 }

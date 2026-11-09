@@ -472,6 +472,80 @@ func TestAPI_BroadcastsAudience(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+func TestAPI_BroadcastsPreview(t *testing.T) {
+	t.Parallel()
+
+	srv, db := newTestServer(t)
+	seedBroadcastAudience(t, db, 820001, 3)
+
+	body := broadcastPayloadJSON("Чёрная пятница", "*Скидка* 50%! [сайт](https://example.com)", "{}", "")
+	rec := do(t, srv, http.MethodPost, "/admin/api/broadcasts/preview", testToken, body)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var preview struct {
+		AudienceCount int64   `json:"audience_count"`
+		FiltersText   string  `json:"filters_text"`
+		PlannedAt     *string `json:"planned_at"`
+		MessageRuns   []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+			URL  string `json:"url"`
+			Bold bool   `json:"bold"`
+			Code bool   `json:"code"`
+		} `json:"message_runs"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &preview))
+
+	assert.Equal(t, int64(3), preview.AudienceCount)
+	assert.Equal(t, "Все активные пользователи", preview.FiltersText)
+	assert.Nil(t, preview.PlannedAt)
+	require.Len(t, preview.MessageRuns, 3)
+	assert.Equal(t, "Скидка", preview.MessageRuns[0].Text)
+	assert.True(t, preview.MessageRuns[0].Bold)
+	assert.Equal(t, " 50%! ", preview.MessageRuns[1].Text)
+	assert.Equal(t, "сайт", preview.MessageRuns[2].Text)
+	assert.Equal(t, "https://example.com", preview.MessageRuns[2].URL)
+
+	// Предпросмотр ничего не создаёт: в таблице по-прежнему пусто.
+	var count int64
+	require.NoError(t, db.GetDB().Model(&database.Broadcast{}).Count(&count).Error)
+	assert.Equal(t, int64(0), count)
+}
+
+func TestAPI_BroadcastsPreview_Guards(t *testing.T) {
+	t.Parallel()
+
+	srv, db := newTestServer(t)
+	seedBroadcastAudience(t, db, 830001, 1)
+
+	// Пустая аудитория — не ошибка предпросмотра: число показывается, отправка
+	// блокируется в интерфейсе.
+	body := broadcastPayloadJSON("Пусто", "Текст", `{"plan_type":"paid"}`, "")
+	rec := do(t, srv, http.MethodPost, "/admin/api/broadcasts/preview", testToken, body)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var preview struct {
+		AudienceCount int64 `json:"audience_count"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &preview))
+	assert.Equal(t, int64(0), preview.AudienceCount)
+
+	// Невалидный черновик отклоняется тем же кодом, что и при создании.
+	rec = do(t, srv, http.MethodPost, "/admin/api/broadcasts/preview", testToken,
+		broadcastPayloadJSON("", "Текст", "{}", ""))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	// Неизвестное значение фильтра — 400, а не молчаливое игнорирование.
+	rec = do(t, srv, http.MethodPost, "/admin/api/broadcasts/preview", testToken,
+		broadcastPayloadJSON("Название", "Текст", `{"plan_type":"vip"}`, ""))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	// Без токена — 401.
+	rec = do(t, srv, http.MethodPost, "/admin/api/broadcasts/preview", "",
+		broadcastPayloadJSON("Название", "Текст", "{}", ""))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
 func TestAPI_Broadcasts_NotFound(t *testing.T) {
 	t.Parallel()
 

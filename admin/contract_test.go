@@ -252,6 +252,16 @@ func TestAPI_Contract_KeySets(t *testing.T) {
 				"entity_type", "event", "id",
 			},
 		},
+		// admin/src/views/Broadcasts.svelte — предпросмотр перед отправкой.
+		{
+			name:   "broadcasts preview",
+			method: http.MethodPost,
+			path:   "/admin/api/broadcasts/preview",
+			body:   `{"name":"Превью","message_text":"*текст*","filters":{},"planned_at":null}`,
+			expected: []string{
+				"audience_count", "filters_text", "message_runs", "planned_at",
+			},
+		},
 		// admin/src/views/AuditLog.svelte (раскрытие строки)
 		{
 			name:   "audit detail",
@@ -299,6 +309,28 @@ func TestAPI_Contract_KeySets(t *testing.T) {
 			assert.Equal(t, tc.expected, contractKeys(contractRow(t, rec.Body.Bytes())))
 		})
 	}
+
+	// admin/src/views/Broadcasts.svelte — ключи каждого фрагмента сообщения.
+	t.Run("broadcast preview runs", func(t *testing.T) {
+		t.Parallel()
+
+		rec := do(t, srv, http.MethodPost, "/admin/api/broadcasts/preview", testToken,
+			`{"name":"Превью","message_text":"*текст*","filters":{},"planned_at":null}`)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+		payload := contractRow(t, rec.Body.Bytes())
+
+		runs, ok := payload["message_runs"].([]any)
+		require.True(t, ok, "message_runs must be a JSON array")
+		require.NotEmpty(t, runs)
+
+		run, ok := runs[0].(map[string]any)
+		require.True(t, ok, "message run must be a JSON object")
+		assert.Equal(t,
+			[]string{"bold", "code", "italic", "strike", "text", "type", "url"},
+			contractKeys(run),
+		)
+	})
 
 	// admin/src/views/Overview.svelte — ключи каждого вложенного блока.
 	t.Run("overview blocks", func(t *testing.T) {

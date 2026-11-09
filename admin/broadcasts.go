@@ -13,6 +13,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/service"
+	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	"go.uber.org/zap"
 )
@@ -97,6 +98,17 @@ type broadcastPayload struct {
 	PlannedAt   *time.Time      `json:"planned_at"`
 }
 
+// broadcastPreview is the dry-run answer for the form's preview step: the
+// exact audience size, the filter in human-readable form, the schedule and
+// the message text parsed the way Telegram will render it. Nothing is
+// created and nothing is sent — the panel only puts rows into the queue.
+type broadcastPreview struct {
+	AudienceCount int64               `json:"audience_count"`
+	FiltersText   string              `json:"filters_text"`
+	PlannedAt     *time.Time          `json:"planned_at"`
+	MessageRuns   []utils.MarkdownRun `json:"message_runs"`
+}
+
 func (s *Server) handleListBroadcasts(w http.ResponseWriter, r *http.Request) {
 	limit, offset, ok := parseBroadcastPage(w, r)
 	if !ok {
@@ -157,6 +169,45 @@ func (s *Server) handleBroadcastAudience(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
+// handlePreviewBroadcast is the dry-run of the "Новая рассылка" form: it
+// counts the audience with the same query the real send uses and returns the
+// message text parsed the way Telegram will render it. Nothing is created and
+// nothing is sent — the admin confirms the preview in a second step.
+func (s *Server) handlePreviewBroadcast(w http.ResponseWriter, r *http.Request) {
+	payload, ok := decodeBroadcastPayload(w, r)
+	if !ok {
+		return
+	}
+
+	b, filter, ok := buildBroadcast(w, payload)
+	if !ok {
+		return
+	}
+
+	// The same guards as the create path: a preview of an invalid draft would
+	// only show numbers that cannot be sent.
+	err := database.ValidateBroadcastDraft(b)
+	if err != nil {
+		s.writeBroadcastStoreError(w, "validate broadcast", err)
+
+		return
+	}
+
+	count, err := s.broadcasts.CountBroadcastAudience(r.Context(), filter)
+	if err != nil {
+		s.writeBroadcastStoreError(w, "count broadcast audience", err)
+
+		return
+	}
+
+	writeJSON(w, http.StatusOK, broadcastPreview{
+		AudienceCount: count,
+		FiltersText:   filter.String(),
+		PlannedAt:     b.PlannedAt,
+		MessageRuns:   utils.ParseMarkdownV2(b.MessageText),
+	})
 }
 
 func (s *Server) handleCreateBroadcast(w http.ResponseWriter, r *http.Request) {

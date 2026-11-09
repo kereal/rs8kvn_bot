@@ -72,6 +72,108 @@ func TestEscapeMarkdownV2_PreservesEntities(t *testing.T) {
 	}
 }
 
+func TestEscapeMarkdownV2_NestedEntities(t *testing.T) {
+	// Код внутри жирного текста: внешняя конструкция захватывает внутреннюю,
+	// поэтому разделители вложенной не должны экранироваться.
+	got := EscapeMarkdownV2("*жирный `код`*")
+	assert.Equal(t, "*жирный `код`*", got)
+	assert.NotContains(t, got, "\x01")
+}
+
+func TestParseMarkdownV2(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []MarkdownRun
+	}{
+		{
+			name: "plain text keeps reserved chars as text",
+			in:   "Цена 100 руб. Акция!",
+			want: []MarkdownRun{{Type: "text", Text: "Цена 100 руб. Акция!"}},
+		},
+		{
+			name: "bold",
+			in:   "*жирный*",
+			want: []MarkdownRun{{Type: "text", Text: "жирный", Bold: true}},
+		},
+		{
+			name: "italic",
+			in:   "_курсив_",
+			want: []MarkdownRun{{Type: "text", Text: "курсив", Italic: true}},
+		},
+		{
+			name: "strike",
+			in:   "~зачёркнутый~",
+			want: []MarkdownRun{{Type: "text", Text: "зачёркнутый", Strike: true}},
+		},
+		{
+			name: "inline code",
+			in:   "`команда`",
+			want: []MarkdownRun{{Type: "text", Text: "команда", Code: true}},
+		},
+		{
+			name: "fenced code",
+			in:   "```go\nfmt.Println()\n```",
+			want: []MarkdownRun{{Type: "pre", Text: "go\nfmt.Println()\n", Code: true}},
+		},
+		{
+			name: "link",
+			in:   "[сайт](https://example.com)",
+			want: []MarkdownRun{{Type: "text", Text: "сайт", URL: "https://example.com"}},
+		},
+		{
+			name: "link with unsafe scheme is not clickable",
+			in:   "[клик](javascript:alert)",
+			want: []MarkdownRun{{Type: "text", Text: "клик"}},
+		},
+		{
+			name: "unclosed bold stays literal",
+			in:   "*не закрыто",
+			want: []MarkdownRun{{Type: "text", Text: "*не закрыто"}},
+		},
+		{
+			name: "headers are not supported by telegram markdownv2",
+			in:   "# Заголовок",
+			want: []MarkdownRun{{Type: "text", Text: "# Заголовок"}},
+		},
+		{
+			name: "mixed text and entities",
+			in:   "Цена *100* рублей",
+			want: []MarkdownRun{
+				{Type: "text", Text: "Цена "},
+				{Type: "text", Text: "100", Bold: true},
+				{Type: "text", Text: " рублей"},
+			},
+		},
+		{
+			name: "code inside bold keeps both styles",
+			in:   "*жирный `код`*",
+			want: []MarkdownRun{
+				{Type: "text", Text: "жирный ", Bold: true},
+				{Type: "text", Text: "код", Bold: true, Code: true},
+			},
+		},
+		{
+			name: "italic inside bold is literal: bold is escaped first",
+			in:   "*жирный _и курсив_*",
+			want: []MarkdownRun{{Type: "text", Text: "жирный _и курсив_", Bold: true}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ParseMarkdownV2(tc.in)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestParseMarkdownV2_EscapedTextBecomesLiteral(t *testing.T) {
+	// Точка и решётка экранируются воркером: получатель видит обычный текст.
+	got := ParseMarkdownV2("100 руб. #1")
+	assert.Equal(t, []MarkdownRun{{Type: "text", Text: "100 руб. #1"}}, got)
+}
+
 func TestEscapeLegacyMarkdown(t *testing.T) {
 	tests := []struct {
 		name string

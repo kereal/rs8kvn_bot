@@ -171,6 +171,30 @@
  */
 
 /**
+ * POST /admin/api/broadcasts/preview — фрагмент сообщения, разобранный так же,
+ * как его отрисует Telegram (internal/utils ParseMarkdownV2). type "pre" —
+ * блок кода, url непустой — кликабельная ссылка.
+ * @typedef {object} MarkdownRun
+ * @property {'text'|'pre'} type
+ * @property {string} text
+ * @property {string} url
+ * @property {boolean} bold
+ * @property {boolean} italic
+ * @property {boolean} strike
+ * @property {boolean} code
+ */
+
+/**
+ * POST /admin/api/broadcasts/preview — предпросмотр перед отправкой:
+ * точный размер аудитории, описание фильтра, расписание и текст сообщения.
+ * @typedef {object} BroadcastPreview
+ * @property {number} audience_count
+ * @property {string} filters_text
+ * @property {string|null} planned_at
+ * @property {MarkdownRun[]} message_runs
+ */
+
+/**
  * GET /admin/api/audit — строка журнала аудита (admin/audit.go auditItem).
  * @typedef {object} AuditEntry
  * @property {number} id

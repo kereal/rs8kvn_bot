@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { api } from '../lib/api.js'
   import { formatDate, humanError } from '../lib/format.js'
   import Modal from '../lib/Modal.svelte'
@@ -39,9 +39,13 @@
   let audienceError = $state('')
   let previewTimer
 
-  // Обязательный диалог подтверждения с точным числом получателей.
-  let confirmOpen = $state(false)
-  let confirmText = $state('')
+  // Предпросмотр перед отправкой: точное число получателей, фильтр,
+  // расписание и текст, разобранный как в Telegram. Ничего не отправляет —
+  // только показывает, что увидит получатель.
+  let previewOpen = $state(false)
+  let previewing = $state(false)
+  /** @type {import('../lib/types.js').BroadcastPreview|null} */
+  let preview = $state(null)
 
   function emptyForm() {
     return {
@@ -214,59 +218,86 @@
     return ''
   }
 
-  // Сохранение всегда идёт через подтверждение с точным числом получателей:
-  // без диалога запрос не отправляется (§7).
-  function askSave() {
-    const problem = validateForm()
-    if (problem) {
-      formError = problem
-      return
-    }
-    if (audience === null) {
-      formError = 'Дождитесь предпросмотра аудитории'
-      return
-    }
-    if (audience === 0) {
-      formError = 'Аудитория пуста: фильтр не выбрал ни одного получателя'
-      return
-    }
-
-    formError = ''
-    const when = plannedISO()
-    const whenLabel = when ? ` ${formatDate(when)}` : ''
-    confirmText = `Отправить ${audience} пользователям${whenLabel}?`
-    confirmOpen = true
-  }
-
-  async function doSave() {
-    confirmOpen = false
-    saving = true
-    formError = ''
-
-    const payload = {
+  // Тело запроса формы — одинаковое для предпросмотра и для сохранения.
+  function formPayload() {
+    return {
       name: form.name.trim(),
       message_text: form.text,
       filters: filterFromBody(),
       planned_at: plannedISO()
     }
+  }
+
+  // Шаг 1 → шаг 2: кнопка «Просмотр» ничего не сохраняет и не отправляет —
+  // сервер считает аудиторию и разбирает текст так же, как воркер.
+  async function openPreview() {
+    const problem = validateForm()
+    if (problem) {
+      formError = problem
+      return
+    }
+
+    formError = ''
+    previewing = true
+
+    try {
+      const data = await api.post('/admin/api/broadcasts/preview', formPayload())
+      preview = data
+      formOpen = false
+      previewOpen = true
+    } catch (err) {
+      formError = describeSaveError(err)
+    } finally {
+      previewing = false
+    }
+  }
+
+  // Возврат в форму из превью: focusText=true — сразу к тексту сообщения.
+  async function backToForm(focusText) {
+    previewOpen = false
+    formOpen = true
+    if (focusText) {
+      await tick()
+      document.getElementById('bc-text')?.focus()
+    }
+  }
+
+  // Шаг 2 → отправка: запрос уходит только после подтверждения в превью.
+  async function doSave() {
+    saving = true
+    formError = ''
 
     try {
       if (editingID) {
-        await api.put(`/admin/api/broadcasts/${editingID}`, payload)
+        await api.put(`/admin/api/broadcasts/${editingID}`, formPayload())
         notice = 'Черновик обновлён'
       } else {
-        await api.post('/admin/api/broadcasts', payload)
+        await api.post('/admin/api/broadcasts', formPayload())
         notice = plannedISO()
           ? 'Рассылка запланирована'
           : 'Рассылка создана — отправка начнётся при ближайшем тике воркера'
       }
+      previewOpen = false
       formOpen = false
       await load()
     } catch (err) {
+      // Ошибка валидации или гонки с другой правкой — возвращаем в форму,
+      // где видно, что именно не так.
       formError = describeSaveError(err)
+      previewOpen = false
+      formOpen = true
     } finally {
       saving = false
     }
+  }
+
+  // Текст кнопки подтверждения: точное число получателей в нём обязательно.
+  function confirmLabel() {
+    if (editingID) return 'Сохранить черновик'
+    const count = preview?.audience_count ?? 0
+    const word = count % 10 === 1 && count % 100 !== 11 ? 'получателю' : 'получателям'
+    if (preview?.planned_at) return `Запланировать ${count} ${word}`
+    return `Отправить ${count} ${word}`
   }
 
   function describeSaveError(err) {
@@ -473,7 +504,7 @@
       {:else}
         Получателей: <strong>{audience}</strong>
         {#if audience === 0}
-          <span class="audience-err">— фильтр не выбрал никого, сохранить нельзя</span>
+          <span class="audience-err">— фильтр не выбрал никого, отправить нельзя</span>
         {/if}
       {/if}
     </div>
@@ -486,13 +517,17 @@
         bind:value={form.text}
         placeholder="Текст рассылки (MarkdownV2)"></textarea>
       <span class="hint">{textRunes()} / {TEXT_LIMIT} — длинный текст уйдёт несколькими сообщениями</span>
+      <span class="hint">
+        Разметка Telegram: <b>*жирный*</b>, <i>_курсив_</i>, <s>~зачёркнутый~</s>,
+        <code>`код`</code>, <code>[текст](ссылка)</code>. Как это увидит получатель — покажет превью.
+      </span>
     </div>
 
     <fieldset class="filters">
       <legend>Расписание</legend>
       <label class="checkbox">
         <input type="radio" bind:group={form.schedule} value="now" />
-        Сразу после сохранения
+        Сразу после подтверждения
       </label>
       <label class="checkbox">
         <input type="radio" bind:group={form.schedule} value="at" />
@@ -510,22 +545,82 @@
   </div>
 
   {#snippet footer()}
-    <button class="btn" onclick={() => (formOpen = false)} disabled={saving}>Отмена</button>
-    <button
-      class="btn btn-primary"
-      onclick={askSave}
-      disabled={saving || audience === null || audience === 0}
-    >
-      {saving ? 'Сохраняем…' : 'Сохранить'}
+    <button class="btn" onclick={() => (formOpen = false)} disabled={saving || previewing}>Отмена</button>
+    <button class="btn btn-primary" onclick={openPreview} disabled={saving || previewing}>
+      {previewing ? 'Готовим превью…' : 'Просмотр'}
     </button>
   {/snippet}
 </Modal>
 
-<Modal bind:open={confirmOpen} title="Подтверждение отправки">
-  <p class="confirm-text">{confirmText}</p>
+<Modal bind:open={previewOpen} title={editingID ? 'Предпросмотр изменений' : 'Предпросмотр рассылки'}>
+  {#if preview}
+    <div class="preview">
+      <dl class="facts">
+        <div class="fact">
+          <dt>Получателей</dt>
+          <dd class="fact-count" class:zero={preview.audience_count === 0}>{preview.audience_count}</dd>
+        </div>
+        <div class="fact">
+          <dt>Аудитория</dt>
+          <dd>{preview.filters_text}</dd>
+        </div>
+        <div class="fact">
+          <dt>Отправка</dt>
+          <dd>{preview.planned_at ? formatDate(preview.planned_at) : 'сразу после подтверждения'}</dd>
+        </div>
+      </dl>
+
+      {#if preview.audience_count === 0}
+        <div class="notice notice-error" style="margin:0">
+          Фильтр не выбрал ни одного получателя — отправить рассылку нельзя.
+        </div>
+      {/if}
+
+      <div class="bubble">
+        {#each preview.message_runs as run}
+          {#if run.type === 'pre'}
+            <pre class="md-pre">{run.text}</pre>
+          {:else if run.url}
+            <a
+              class="md-link"
+              class:md-bold={run.bold}
+              class:md-italic={run.italic}
+              class:md-strike={run.strike}
+              href={run.url}
+              target="_blank"
+              rel="noopener noreferrer">{run.text}</a
+            >
+          {:else}
+            <span
+              class:md-bold={run.bold}
+              class:md-italic={run.italic}
+              class:md-strike={run.strike}
+              class:md-code={run.code}>{run.text}</span
+            >
+          {/if}
+        {/each}
+      </div>
+
+      <p class="hint">
+        Так сообщение увидит получатель. Telegram показывает <b>*жирный*</b>,
+        <i>_курсив_</i>, <s>~зачёркнутый~</s>, <code>`код`</code> и ссылки
+        <code>[текст](ссылка)</code>; остальное — обычный текст.
+      </p>
+    </div>
+  {/if}
+
   {#snippet footer()}
-    <button class="btn" onclick={() => (confirmOpen = false)}>Нет, вернуться</button>
-    <button class="btn btn-primary" onclick={doSave}>Да, отправить</button>
+    <div class="preview-actions">
+      <button class="btn btn-ghost" onclick={() => backToForm(false)} disabled={saving}>Назад к форме</button>
+      <button class="btn btn-ghost" onclick={() => backToForm(true)} disabled={saving}>Изменить текст</button>
+      <button
+        class="btn btn-primary send"
+        onclick={doSave}
+        disabled={saving || !preview || preview.audience_count === 0}
+      >
+        {saving ? 'Сохраняем…' : confirmLabel()}
+      </button>
+    </div>
   {/snippet}
 </Modal>
 
@@ -641,8 +736,102 @@
     color: var(--danger);
   }
 
-  .confirm-text {
+  .preview {
+    display: grid;
+    gap: 14px;
+  }
+
+  /* Три действия в подвале не помещаются в 480px: переносятся, основная
+     кнопка остаётся справа. */
+  .preview-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .preview-actions .send {
+    margin-left: auto;
+  }
+
+  .facts {
+    display: grid;
+    gap: 8px;
     margin: 0;
+  }
+
+  .fact {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: 10px;
+    align-items: baseline;
+  }
+
+  .fact dt {
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  .fact dd {
+    margin: 0;
+  }
+
+  .fact-count {
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .fact-count.zero {
+    color: var(--danger);
+  }
+
+  /* Пузырь сообщения: переносы строк сохраняются, разметка Telegram видна
+     так же, как в чате. */
+  .bubble {
+    max-width: 460px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .md-pre {
+    margin: 6px 0;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px;
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  .md-link {
+    color: var(--accent);
+  }
+
+  .md-bold {
+    font-weight: 600;
+  }
+
+  .md-italic {
+    font-style: italic;
+  }
+
+  .md-strike {
+    text-decoration: line-through;
+  }
+
+  .md-code {
+    padding: 0 3px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--border) 45%, transparent);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px;
   }
 
   .retry {

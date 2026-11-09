@@ -172,6 +172,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/broadcasts", s.withAuth(s.handleListBroadcasts))
 	mux.HandleFunc("POST /admin/api/broadcasts", s.withAuth(s.handleCreateBroadcast))
 	mux.HandleFunc("GET /admin/api/broadcasts/audience", s.withAuth(s.handleBroadcastAudience))
+	mux.HandleFunc("POST /admin/api/broadcasts/preview", s.withAuth(s.handlePreviewBroadcast))
 	mux.HandleFunc("GET /admin/api/broadcasts/{id}", s.withAuth(s.handleGetBroadcast))
 	mux.HandleFunc("PUT /admin/api/broadcasts/{id}", s.withAuth(s.handleUpdateBroadcast))
 	mux.HandleFunc("DELETE /admin/api/broadcasts/{id}", s.withAuth(s.handleDeleteBroadcast))
