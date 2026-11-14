@@ -21,7 +21,12 @@
   // читаем в onMount целевой вью (ключ 'admin_search').
   function navigateTo(screen, q) {
     sessionStorage.setItem('admin_search', JSON.stringify({ screen, q }))
+    // Переход на текущий экран не меняет хэш — без события вью не
+    // перемонтируется и пресет никто не прочитает. App.svelte по событию
+    // поднимает nonce в ключе {#key} и перемонтирует вью принудительно.
+    const sameHash = location.hash === `#/${screen}`
     location.hash = `#/${screen}`
+    if (sameHash) window.dispatchEvent(new CustomEvent('admin-search'))
   }
 
   function submit(event) {

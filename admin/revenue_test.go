@@ -61,6 +61,8 @@ func seedRevenueOrder(t *testing.T, db *database.Service) {
 // TestAPI_Revenue проверяет экран выручки: окно дней, авторизацию, клампы и
 // поведение при сбое хранилища.
 func TestAPI_Revenue(t *testing.T) {
+	t.Parallel()
+
 	t.Run("returns zero-filled window with seeded order", func(t *testing.T) {
 		t.Parallel()
 

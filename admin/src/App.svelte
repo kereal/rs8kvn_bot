@@ -39,6 +39,9 @@
   // Hash carries an optional id: "#/subscriptions/42". Detail views read it from
   // the `id` prop; list views ignore it.
   let route = $state(routeFromHash())
+  // Nonce для {#key}: глобальный поиск на текущем экране не меняет хэш,
+  // поэтому перемонтирует вью событием 'admin-search' (см. GlobalSearch).
+  let searchNonce = $state(0)
   let view = $derived(route.name)
   let ActiveView = $derived(resolveView(route))
 
@@ -59,8 +62,13 @@
 
   $effect(() => {
     const onHash = () => (route = routeFromHash())
+    const onSearch = () => (searchNonce += 1)
     window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
+    window.addEventListener('admin-search', onSearch)
+    return () => {
+      window.removeEventListener('hashchange', onHash)
+      window.removeEventListener('admin-search', onSearch)
+    }
   })
 
   onMount(async () => {
@@ -113,7 +121,7 @@
       <!-- Key on the full route: without it a detail→detail hop ("#/orders/1"
            to "#/orders/2") reuses the same component instance and keeps the
            previous row on screen, since views load data in onMount. -->
-      {#key `${route.name}/${route.id ?? ''}`}
+      {#key `${route.name}/${route.id ?? ''}/${searchNonce}`}
         <ActiveView id={route.id} />
       {/key}
     </main>

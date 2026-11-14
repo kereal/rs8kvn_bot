@@ -307,7 +307,8 @@ func (s *Server) handleNodeLive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 404 на неизвестную ноду — sentinel из store; живой опрос дальше.
-	if _, err := s.nodes.GetNodeByID(r.Context(), id); err != nil {
+	_, err := s.nodes.GetNodeByID(r.Context(), id)
+	if err != nil {
 		s.writeStoreError(w, "load node for live", err)
 
 		return

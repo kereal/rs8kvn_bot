@@ -188,6 +188,29 @@ h1 {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  /* Лёгкий подъём карточки: тень едва заметна в светлой теме и не мешает тёмной. */
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+}
+
+/* Плавные переходы на интерактивных элементах: без движения для тех,
+   кто просит reduced motion (системная настройка уважается ниже). */
+.btn,
+.nav-item,
+.pager button {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+tbody tr {
+  transition: background-color 0.12s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .nav-item,
+  .pager button,
+  tbody tr {
+    transition: none;
+  }
 }
 
 .toolbar {
