@@ -245,9 +245,6 @@ type BroadcastRepository interface {
 	UpdateBroadcastRecipientProgress(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, nextChunk int, now time.Time) error
 	ResetBroadcastFailedRecipients(ctx context.Context, id uint, now time.Time) error
 	GetBroadcastRecipientsStats(ctx context.Context, broadcastID uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error)
-	// GetAuditLogByEntity возвращает события аудита сущности broadcast; воркер
-	// использует её, чтобы идемпотентно дописать broadcast_started на resume.
-	GetAuditLogByEntity(ctx context.Context, entityType database.EntityType, entityID string, limit int) ([]database.AuditLog, error)
 }
 
 // DatabaseService is the composed persistence contract for the composition
@@ -368,6 +365,9 @@ type BotStore interface {
 	GetInviteByReferrer(ctx context.Context, referrerTGID int64) (*database.Invite, error)
 	GetAllReferralCounts(ctx context.Context) (map[int64]int64, error)
 	InsertAuditLog(ctx context.Context, e *database.AuditLog) error
+	// GetAuditLogByEntity читает события аудита; бот-воркер рассылок
+	// использует её, чтобы идемпотентно дописать broadcast_started на resume.
+	GetAuditLogByEntity(ctx context.Context, entityType database.EntityType, entityID string, limit int) ([]database.AuditLog, error)
 }
 
 // ReferralCountSource feeds bot.ReferralCache with referral counters.

@@ -25,17 +25,28 @@ import (
 // worker picks the campaign up again on the next pass.
 var errBroadcastIncomplete = errors.New("broadcast has unfinished recipients")
 
+// AuditEventReader is the audit-read seam of BroadcastWorker's resume path:
+// the worker checks whether a broadcast_started event already exists before
+// backfilling it. Declared here (consumer side, ADR-0001) instead of growing
+// the broadcast repository with an audit concern.
+type AuditEventReader interface {
+	GetAuditLogByEntity(ctx context.Context, entityType database.EntityType, entityID string, limit int) ([]database.AuditLog, error)
+}
+
+var _ AuditEventReader = (*database.Service)(nil)
+
 // BroadcastWorker processes durable broadcast campaigns independently from the
 // Telegram update loop. A process restart resumes scheduled/running campaigns.
 type BroadcastWorker struct {
-	h        *Handler
-	mu       sync.Mutex
-	activeMu sync.Mutex
-	active   map[uint]context.CancelFunc
+	h           *Handler
+	auditReader AuditEventReader
+	mu          sync.Mutex
+	activeMu    sync.Mutex
+	active      map[uint]context.CancelFunc
 }
 
 func NewBroadcastWorker(h *Handler) *BroadcastWorker {
-	return &BroadcastWorker{h: h, active: make(map[uint]context.CancelFunc)}
+	return &BroadcastWorker{h: h, auditReader: h.db, active: make(map[uint]context.CancelFunc)}
 }
 
 func (w *BroadcastWorker) Run(ctx context.Context) {
@@ -154,7 +165,7 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 		if campaign.Status != string(database.BroadcastStatusRunning) {
 			return
 		}
-		events, err := w.h.db.GetAuditLogByEntity(ctx, database.EntityBroadcast,
+		events, err := w.auditReader.GetAuditLogByEntity(ctx, database.EntityBroadcast,
 			fmt.Sprintf("%d", campaign.ID), 10)
 		if err != nil {
 			// A read failure must not fail the campaign; the start just stays lost.
