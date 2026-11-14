@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +23,13 @@ const (
 	auditLimitMax     = 200
 	dateLayout        = "2006-01-02"
 )
+
+// auditSortColumns — белый список сортировки журнала аудита (спека 07 §7):
+// только created_at и id.
+var auditSortColumns = map[string]bool{
+	"created_at": true,
+	"id":         true,
+}
 
 // auditItem is one list row. old_state/new_state are deliberately absent: the
 // list must stay small, and the snapshots are only shown after a row expands.
@@ -150,13 +156,23 @@ func auditJSON(raw string) json.RawMessage {
 // values are rejected instead of silently ignored: a typo in a filter must not
 // look like "no events matched".
 func parseAuditFilter(w http.ResponseWriter, r *http.Request) (database.AuditLogFilter, bool) {
-	query := r.URL.Query()
-
-	filter := database.AuditLogFilter{
-		Sort:  "created_at",
-		Desc:  true,
-		Limit: auditLimitDefault,
+	shared, ok := parseListParams(w, r, auditLimitDefault, auditLimitMax, auditSortColumns)
+	if !ok {
+		return database.AuditLogFilter{}, false
 	}
+
+	// Без sort-параметра журнал сортируется по времени (спека 07 §7).
+	filter := database.AuditLogFilter{
+		Sort:   "created_at",
+		Desc:   shared.Desc,
+		Limit:  shared.Limit,
+		Offset: shared.Offset,
+	}
+	if shared.Sort != "" {
+		filter.Sort = shared.Sort
+	}
+
+	query := r.URL.Query()
 
 	if raw := query.Get("entity_type"); raw != "" {
 		if !contains(database.EntityTypeNames(), raw) {
@@ -189,52 +205,6 @@ func parseAuditFilter(w http.ResponseWriter, r *http.Request) (database.AuditLog
 	}
 
 	filter.EntityID = query.Get("entity_id")
-
-	if raw := query.Get("sort"); raw != "" {
-		if raw != "created_at" && raw != "id" {
-			writeError(w, http.StatusBadRequest, "bad_request", "unknown sort")
-
-			return filter, false
-		}
-
-		filter.Sort = raw
-	}
-
-	if raw := query.Get("order"); raw != "" {
-		switch raw {
-		case "desc":
-			filter.Desc = true
-		case "asc":
-			filter.Desc = false
-		default:
-			writeError(w, http.StatusBadRequest, "bad_request", "order must be asc or desc")
-
-			return filter, false
-		}
-	}
-
-	if raw := query.Get("limit"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 0 {
-			writeError(w, http.StatusBadRequest, "bad_request", "invalid limit")
-
-			return filter, false
-		}
-
-		// Oversized pages are clamped, not rejected (P7).
-		filter.Limit = min(n, auditLimitMax)
-	}
-
-	if raw := query.Get("offset"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 0 {
-			writeError(w, http.StatusBadRequest, "bad_request", "invalid offset")
-
-			return filter, false
-		}
-
-		filter.Offset = n
-	}
 
 	from, ok := parseAuditDate(w, query.Get("from"), false)
 	if !ok {

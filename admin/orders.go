@@ -3,7 +3,6 @@ package admin
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -141,30 +140,15 @@ func toOrderItem(row database.OrderOverview) orderItem {
 // violations and malformed values are bad_request, never silent (P8); limit
 // above the cap is clamped, not rejected (P7).
 func parseOrderFilter(w http.ResponseWriter, r *http.Request) (database.OrderAdminFilter, bool) {
-	f := database.OrderAdminFilter{Limit: ordersDefaultLimit}
-
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		limit, err := strconv.Atoi(raw)
-		if err != nil || limit <= 0 {
-			writeError(w, http.StatusBadRequest, "bad_request", "limit must be a positive integer")
-			return f, false
-		}
-		if limit > ordersMaxLimit {
-			limit = ordersMaxLimit
-		}
-		f.Limit = limit
+	shared, ok := parseListParams(w, r, ordersDefaultLimit, ordersMaxLimit, orderSortColumns)
+	if !ok {
+		return database.OrderAdminFilter{}, false
 	}
+	f := database.OrderAdminFilter{Limit: shared.Limit, Offset: shared.Offset, Sort: shared.Sort, Desc: shared.Desc}
 
-	if raw := r.URL.Query().Get("offset"); raw != "" {
-		offset, err := strconv.Atoi(raw)
-		if err != nil || offset < 0 {
-			writeError(w, http.StatusBadRequest, "bad_request", "offset must be a non-negative integer")
-			return f, false
-		}
-		f.Offset = offset
-	}
+	query := r.URL.Query()
 
-	if raw := r.URL.Query().Get("status"); raw != "" {
+	if raw := query.Get("status"); raw != "" {
 		if !orderStatuses[raw] {
 			writeError(w, http.StatusBadRequest, "bad_request", "unknown status")
 			return f, false
@@ -172,7 +156,7 @@ func parseOrderFilter(w http.ResponseWriter, r *http.Request) (database.OrderAdm
 		f.Status = raw
 	}
 
-	f.Query = r.URL.Query().Get("q")
+	f.Query = query.Get("q")
 
 	from, ok := parseOrderDate(w, r, "from")
 	if !ok {
@@ -188,25 +172,6 @@ func parseOrderFilter(w http.ResponseWriter, r *http.Request) (database.OrderAdm
 		// to is inclusive: the whole UTC day.
 		end := to.AddDate(0, 0, 1).Add(-time.Nanosecond)
 		f.To = &end
-	}
-
-	if raw := r.URL.Query().Get("sort"); raw != "" {
-		if !orderSortColumns[raw] {
-			writeError(w, http.StatusBadRequest, "bad_request", "unknown sort column")
-			return f, false
-		}
-		f.Sort = raw
-	}
-
-	switch raw := r.URL.Query().Get("order"); raw {
-	case "":
-		f.Desc = true
-	case "desc":
-		f.Desc = true
-	case "asc":
-	default:
-		writeError(w, http.StatusBadRequest, "bad_request", "order must be asc or desc")
-		return f, false
 	}
 
 	return f, true
