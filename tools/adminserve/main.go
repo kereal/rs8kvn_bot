@@ -1,9 +1,16 @@
 // Command adminserve runs only the admin panel against a throwaway copy of a
 // database. It exists for agents and for manual inspection: the panel starts
-// without the Telegram bot, without node clients, and without touching any real
-// infrastructure (node calls become no-ops), so UI work can be reviewed live.
+// without the Telegram bot, without node clients, and without touching any
+// real infrastructure (node calls become no-ops), so UI work can be reviewed
+// live. Flags are documented in doc/operations.md («Разработка без бота»);
+// the short version:
 //
-//	go run ./tools/adminserve -seed
+//	go run ./tools/adminserve [-db src] [-out dst] [-addr host:port]
+//	                          [-token t] [-seed] [-empty] [-demo]
+//
+// -seed inserts a minimal demo dataset into an empty copy; -demo fills a rich
+// fake dataset (best with -empty); -empty starts from a scratch database
+// instead of copying -db.
 //
 // It is not part of the shipped binary and is never imported by it.
 package main
