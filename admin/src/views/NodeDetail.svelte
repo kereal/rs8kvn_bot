@@ -133,6 +133,55 @@
 {/if}
 
 <style>
+  /* Карточки: та же сетка, что на карточке подписки. Без локальных стилей
+     панели слипались в столбик, а dl рендерился браузерными отступами. */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 14px;
+    align-items: start;
+    margin-bottom: 14px;
+  }
+
+  .card {
+    padding: 14px 16px;
+  }
+
+  .card h2 {
+    margin: 0 0 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  dl {
+    margin: 0;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 16px;
+  }
+
+  dt {
+    color: var(--muted);
+  }
+
+  dd {
+    margin: 0;
+  }
+
+  .back {
+    display: inline-block;
+    margin-bottom: 12px;
+    color: var(--muted);
+    text-decoration: none;
+  }
+
+  .back:hover {
+    color: var(--accent);
+  }
+
   h2 {
     display: flex;
     align-items: center;

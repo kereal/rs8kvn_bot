@@ -91,9 +91,19 @@
   }
 
   .search-row {
+    /* .global-search несёт глобальный .toolbar (display:flex): форма —
+       flex-элемент и без flex:1 сжимается до ширины инпута. */
+    flex: 1;
     display: flex;
     gap: 10px;
     align-items: center;
+  }
+
+  /* Глобальный поиск растягивается на всю ширину контентной колонки:
+     глобальный .search ограничен 320px для списков — здесь перекрываем. */
+  .search-row .search {
+    flex: 1;
+    max-width: none;
   }
 
   .menu {

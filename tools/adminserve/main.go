@@ -36,6 +36,7 @@ func main() {
 		token   = flag.String("token", "admin", "bearer token for the panel")
 		seed    = flag.Bool("seed", false, "insert demo rows when the copy has no subscriptions")
 		empty   = flag.Bool("empty", false, "start from an empty database instead of copying one")
+		demo    = flag.Bool("demo", false, "fill a rich fake dataset for UI testing (best with -empty)")
 	)
 	flag.Parse()
 
@@ -46,7 +47,14 @@ func main() {
 		panic(err)
 	}
 
-	if !*empty {
+	if *empty {
+		// «Пустая база» обязана быть пустой: под лежалый /tmp-файл из прошлого
+		// прогона схему не пересоздать, а сид упрётся в занятые id.
+		removeErr := os.Remove(*dstPath)
+		if removeErr != nil && !os.IsNotExist(removeErr) {
+			logger.Warn("remove stale database failed", zap.String("path", *dstPath), zap.Error(removeErr))
+		}
+	} else {
 		err = copyFile(*srcPath, *dstPath)
 		if err != nil {
 			panic(err)
@@ -60,8 +68,12 @@ func main() {
 
 	defer func() { _ = store.Close() }()
 
-	if *seed {
+	if *seed || *demo {
 		seedDemo(store)
+	}
+
+	if *demo {
+		seedRichDemo(store)
 	}
 
 	// The panel's service seams are real services over an empty node registry:

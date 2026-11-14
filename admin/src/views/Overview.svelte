@@ -181,9 +181,6 @@
   <button class="btn" onclick={load} disabled={loading}>Обновить</button>
 </div>
 
-<!-- Глобальный поиск живёт только на «Состоянии» (решение владельца). -->
-<GlobalSearch />
-
 {#if error}
   <div class="notice notice-error">
     {error}
@@ -326,6 +323,10 @@
     </section>
   </div>
 {/if}
+
+<!-- Глобальный поиск живёт только на «Состоянии» (решение владельца):
+     во всю ширину и под всеми блоками. -->
+<GlobalSearch />
 
 <style>
   .grid {
