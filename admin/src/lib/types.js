@@ -32,6 +32,27 @@
 /** Конверт GET /admin/api/plans: total не отдаётся (admin/plans.go). @typedef {{items: Plan[]}} PlanListEnvelope */
 
 /**
+ * GET /admin/api/trials — последние триал-запросы (admin/trials.go).
+ * @typedef {{id: number, ip: string, created_at: string}} TrialRequestItem
+ */
+/**
+ * @typedef {{items: TrialRequestItem[], total: number}} TrialRequestsResponse
+ */
+/**
+ * @typedef {{requests_24h: number, unique_ips_24h: number, top_ips: Array<{ip: string, count: number}>}} TrialRequestsStats
+ */
+
+/**
+ * GET /admin/api/nodes/{id}/live — живой опрос панели ноды (admin/nodes.go).
+ * @typedef {{node_id: number, available: boolean, ping_latency_ms: number, ping_error?: string, clients: number, disabled: number, traffic_bytes: number, last_online: number}} NodeLiveResponse
+ */
+
+/**
+ * GET /admin/api/broadcasts/{id} — разобранный delivery_report (admin/broadcasts.go).
+ * @typedef {{telegram_id: number, error: string}} BroadcastSendError
+ */
+
+/**
  * GET /admin/api/revenue?days=N — агрегат выручки (admin/revenue.go).
  * days — ровно N UTC-дат от старых к новым, последний = сегодня, пустые дни нулями.
  * @typedef {object} RevenueResponse
@@ -294,6 +315,10 @@
  * @property {string} invite_code
  * @property {string} sub_url
  * @property {SubscriptionNode[]} nodes
+ * @property {number} delivered_count
+ * @property {number[]} blocked
+ * @property {number[]} unreachable
+ * @property {BroadcastSendError[]} errors
  */
 
 /**
@@ -335,6 +360,7 @@
  * @property {{total: number, by_status: {[status: string]: number}}} broadcasts
  * @property {{events_24h: number}} audit
  * @property {string|null} last_sub_request
+ * @property {{total: number, days: Array<{date: string, count: number}>}} expiring
  */
 
 /** POST /admin/api/nodes/{id}/health — ошибка сети это available:false, не протокол (admin/nodes.go nodeHealthResult). @typedef {{available: boolean, latency_ms: number, error?: string, checked_at: string}} NodeHealth */

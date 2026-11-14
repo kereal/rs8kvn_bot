@@ -25,6 +25,7 @@ type overviewResponse struct {
 	Bindings       overviewBindings `json:"bindings"`
 	Orders         overviewCounts   `json:"orders"`
 	Broadcasts     overviewCounts   `json:"broadcasts"`
+	Expiring       overviewExpiring `json:"expiring"`
 	Audit          overviewAudit    `json:"audit"`
 	LastSubRequest *time.Time       `json:"last_sub_request"`
 }
@@ -62,11 +63,28 @@ type overviewAudit struct {
 	Events24h int64 `json:"events_24h"`
 }
 
+// overviewExpiring — активные подписки, истекающие в ближайшие 30 дней:
+// total за окно и по бакету на день (нулевые дни включены).
+type overviewExpiring struct {
+	Total int64                 `json:"total"`
+	Days  []overviewExpiringDay `json:"days"`
+}
+
+type overviewExpiringDay struct {
+	Date  string `json:"date"`
+	Count int64  `json:"count"`
+}
+
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	snapshot, err := s.overview.GetOverviewSnapshot(r.Context())
 	if err != nil {
 		s.writeStoreError(w, "overview", err)
 		return
+	}
+
+	expiringDays := make([]overviewExpiringDay, len(snapshot.Expiring.Days))
+	for i, d := range snapshot.Expiring.Days {
+		expiringDays[i] = overviewExpiringDay{Date: d.Date, Count: d.Count}
 	}
 
 	writeJSON(w, http.StatusOK, overviewResponse{
@@ -98,6 +116,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 			Total:    sumCounts(snapshot.BroadcastsByStatus),
 			ByStatus: snapshot.BroadcastsByStatus,
 		},
+		Expiring:       overviewExpiring{Total: snapshot.Expiring.Total, Days: expiringDays},
 		Audit:          overviewAudit{Events24h: snapshot.AuditEventsLast24h},
 		LastSubRequest: snapshot.LastSubRequest,
 	})

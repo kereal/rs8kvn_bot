@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/stretchr/testify/assert"
@@ -32,9 +33,11 @@ func TestAPI_Overview(t *testing.T) {
 		node := &database.Node{Name: "ov-node", IsActive: true, Host: "http://n1", APIToken: "t1", InboundIDs: `[1]`}
 		require.NoError(t, db.GetDB().Create(node).Error)
 
+		// Активная подписка, истекающая сегодня-завтра: попадает в блок expiring.
+		expiresAt := time.Now().UTC().Add(2 * time.Hour)
 		sub := &database.Subscription{
 			TelegramID: 700101, ClientID: "ov-c1", SubscriptionID: "ov-sub-1",
-			Status: "active", PlanID: plan.ID,
+			Status: "active", PlanID: plan.ID, ExpiresAt: &expiresAt,
 		}
 		require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 		// pending_remove — единственная запись в очереди узлов этого снапшота.
@@ -63,8 +66,25 @@ func TestAPI_Overview(t *testing.T) {
 				PendingTotal    int64            `json:"pending_total"`
 				OldestPendingAt *string          `json:"oldest_pending_at"`
 			} `json:"bindings"`
+			Expiring struct {
+				Total int64 `json:"total"`
+				Days  []struct {
+					Date  string `json:"date"`
+					Count int64  `json:"count"`
+				} `json:"days"`
+			} `json:"expiring"`
 		}
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+
+		// Блок истечений присутствует в JSON всегда; окно 30 дней = 31 бакет,
+		// total совпадает с суммой дневных бакетов.
+		require.Len(t, payload.Expiring.Days, 31)
+		var daysSum int64
+		for _, d := range payload.Expiring.Days {
+			daysSum += d.Count
+		}
+		assert.Equal(t, payload.Expiring.Total, daysSum)
+		assert.GreaterOrEqual(t, payload.Expiring.Total, int64(1))
 
 		assert.Equal(t, int64(1), payload.Bindings.PendingTotal)
 		assert.NotNil(t, payload.Bindings.OldestPendingAt)

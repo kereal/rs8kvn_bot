@@ -66,7 +66,8 @@ type Server struct {
 	subs       SubscriptionReadStore
 	subActions SubscriptionActions
 	subSync    SubscriptionSyncActions
-	traffic    TrafficSource // detail card: live traffic read (SetTrafficSource)
+	traffic    TrafficSource  // detail card: live traffic read (SetTrafficSource)
+	nodeLive   NodeLiveSource // node detail: live panel read (SetNodeLiveSource)
 
 	// screen: overview — aggregates over the domain tables (see database
 	// GetOverviewSnapshot) plus the build stamp and uptime.
@@ -156,6 +157,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/api/nodes/{id}", s.withAuth(s.handleUpdateNode))
 	mux.HandleFunc("DELETE /admin/api/nodes/{id}", s.withAuth(s.handleDeleteNode))
 	mux.HandleFunc("POST /admin/api/nodes/{id}/health", s.withAuth(s.handleNodeHealth))
+	mux.HandleFunc("GET /admin/api/nodes/{id}/live", s.withAuth(s.handleNodeLive))
 	mux.HandleFunc("GET /admin/api/plans/{id}/nodes", s.withAuth(s.handleGetPlanNodes))
 	mux.HandleFunc("PUT /admin/api/plans/{id}/nodes", s.withAuth(s.handlePutPlanNodes))
 
@@ -191,6 +193,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/audit", s.withAuth(s.handleListAuditLog))
 	mux.HandleFunc("GET /admin/api/audit/events", s.withAuth(s.handleAuditEvents))
 	mux.HandleFunc("GET /admin/api/audit/{id}", s.withAuth(s.handleAuditDetail))
+
+	// --- trials ---
+	mux.HandleFunc("GET /admin/api/trials", s.withAuth(s.handleListTrials))
+	mux.HandleFunc("GET /admin/api/trials/stats", s.withAuth(s.handleTrialStats))
 
 	// --- subscriptions ---
 	mux.HandleFunc("GET /admin/api/subscriptions", s.withAuth(s.handleListSubscriptions))

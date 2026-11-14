@@ -54,7 +54,23 @@
     }
   }
 
-  onMount(load)
+  onMount(() => {
+    // Глобальный поиск кладёт предустановку сюда; ключ одноразовый.
+    const search = sessionStorage.getItem('admin_search')
+    if (search) {
+      sessionStorage.removeItem('admin_search')
+      try {
+        const preset = JSON.parse(search)
+        if (preset.screen === 'orders' && preset.q) {
+          qInput = preset.q
+          qApplied = preset.q
+        }
+      } catch {
+        // мусор в хранилище — игнорируем
+      }
+    }
+    load()
+  })
 
   function resetAndLoad() {
     offset = 0

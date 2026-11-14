@@ -85,6 +85,56 @@ func TestGetOverviewSnapshot_Counts(t *testing.T) {
 	assert.Positive(t, snapshot.DatabaseSizeBytes)
 }
 
+// TestGetOverviewSnapshot_ExpiringBuckets проверяет бакеты истечения: активные
+// подписки в окне 30 дней раскладываются по дням (нулевые дни включены),
+// подписка за окном не считается.
+func TestGetOverviewSnapshot_ExpiringBuckets(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	plan := &Plan{Name: "expiring-plan", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
+
+	// ExpiresAt ставим в середину оставшейся части суток (и того же смещения
+	// на день+6), чтобы бакет не зависел от близости теста к полуночи UTC.
+	now := time.Now().UTC()
+	today := now.Truncate(24 * time.Hour)
+	mid := today.AddDate(0, 0, 1).Sub(now) / 2
+	in0 := now.Add(mid)
+	in6 := today.AddDate(0, 0, 6).Add(mid)
+	in40 := today.AddDate(0, 0, 40).Add(mid)
+
+	create := func(tg int64, client, subID string, expires time.Time) {
+		t.Helper()
+		e := expires.UTC()
+		require.NoError(t, svc.CreateSubscription(ctx, &Subscription{
+			TelegramID: tg, ClientID: client, SubscriptionID: subID,
+			Status: string(SubscriptionStatusActive), ExpiresAt: &e, PlanID: plan.ID,
+		}, ""))
+	}
+	create(700201, "exp-c1", "exp-s1", in0)
+	create(700202, "exp-c2", "exp-s2", in6)
+	// Вне окна 30 дней и истёкшая — не считаются.
+	create(700203, "exp-c3", "exp-s3", in40)
+	expired := in0.Add(-48 * time.Hour)
+	require.NoError(t, svc.CreateSubscription(ctx, &Subscription{
+		TelegramID: 700204, ClientID: "exp-c4", SubscriptionID: "exp-s4",
+		Status: string(SubscriptionStatusActive), ExpiresAt: &expired, PlanID: plan.ID,
+	}, ""))
+
+	snapshot, err := svc.GetOverviewSnapshot(ctx)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(2), snapshot.Expiring.Total)
+	require.Len(t, snapshot.Expiring.Days, 31)
+	assert.Equal(t, today.Format("2006-01-02"), snapshot.Expiring.Days[0].Date)
+	assert.Equal(t, int64(1), snapshot.Expiring.Days[0].Count)
+	assert.Equal(t, int64(1), snapshot.Expiring.Days[6].Count)
+	assert.Equal(t, int64(0), snapshot.Expiring.Days[7].Count)
+}
+
 // TestGetOverviewSnapshot_EmptyQueue checks the zero case: no pending bindings
 // means no timestamp, not a zero-valued time that the panel would render as
 // "1970".

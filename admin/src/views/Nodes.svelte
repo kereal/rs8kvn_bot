@@ -339,7 +339,7 @@
           <tr>
             <td class="mono muted">{node.id}</td>
             <td>
-              {node.name}
+              <a class="row-link" href="#/nodes/{node.id}">{node.name}</a>
               {#if health[node.id]}
                 {#if health[node.id].available}
                   <span class="badge badge-ok" style="margin-left:8px">
@@ -505,6 +505,16 @@
 
   .toolbar select {
     min-width: 120px;
+  }
+
+  .row-link {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .row-link:hover {
+    color: var(--accent);
+    text-decoration: underline;
   }
 </style>
 

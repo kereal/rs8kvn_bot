@@ -236,11 +236,12 @@ func TestAPI_Contract_KeySets(t *testing.T) {
 			method: http.MethodGet,
 			path:   fmt.Sprintf("/admin/api/broadcasts/%d", id),
 			expected: []string{
-				"blocked_count", "created_at", "errors_preview", "failed_count",
-				"filters", "filters_text", "finished_at", "id", "last_error",
+				"blocked", "blocked_count", "created_at", "delivered_count",
+				"errors", "errors_preview", "failed_count", "filters",
+				"filters_text", "finished_at", "id", "last_error",
 				"message_text", "name", "planned_at", "recipients_total", "retry_at",
 				"retry_count", "sent_count", "snapshot_taken", "started_at", "status",
-				"unreachable_count",
+				"unreachable", "unreachable_count",
 			},
 		},
 		// admin/src/views/AuditLog.svelte
@@ -295,7 +296,8 @@ func TestAPI_Contract_KeySets(t *testing.T) {
 			path:   "/admin/api/overview",
 			expected: []string{
 				"audit", "bindings", "broadcasts", "build", "database",
-				"last_sub_request", "nodes", "orders", "subscriptions",
+				"expiring", "last_sub_request", "nodes", "orders",
+				"subscriptions",
 			},
 		},
 		{
@@ -350,6 +352,7 @@ func TestAPI_Contract_KeySets(t *testing.T) {
 
 		blocks := map[string][]string{
 			"build":         {"build_time", "commit", "uptime_seconds", "version"},
+			"expiring":      {"days", "total"},
 			"database":      {"path", "size_bytes"},
 			"subscriptions": {"by_status", "total"},
 			"nodes":         {"total"},

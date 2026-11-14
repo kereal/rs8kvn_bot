@@ -149,6 +149,30 @@
   function goTo(hash) {
     location.hash = hash
   }
+
+  // Ключ expiring пока не объявлен в typedef Overview (types.js — зона
+  // интегратора); читаем через локальную форму, пока тип не дополнен.
+  function expiringOf(d) {
+    const raw = /** @type {any} */ (d)?.expiring
+    return {
+      total: raw?.total ?? 0,
+      days: raw?.days || []
+    }
+  }
+
+  let expiringView = $derived(expiringOf(data))
+
+  // Высота столбика в процентах от максимума; нулевые дни — минимальная полоска.
+  function expBarPct(count) {
+    const max = Math.max(...expiringView.days.map((d) => d.count), 1)
+    return Math.max(2, Math.round((count / max) * 100))
+  }
+
+  // Рабочий список: предустанавливаем окно 30 дней в селекте «Подписок».
+  function openExpiring() {
+    sessionStorage.setItem('expiring_in', '720')
+    goTo('#/subscriptions')
+  }
 </script>
 
 <div class="page-head">
@@ -232,6 +256,22 @@
         {/each}
       </div>
       <button class="btn btn-ghost" onclick={() => goTo('#/subscriptions')}>Открыть подписки</button>
+    </section>
+
+    <section class="panel card">
+      <h2>Истекают</h2>
+      <div class="kv"><span>За 30 дней</span><span class="strong">{expiringView.total}</span></div>
+      <div class="exp-chart" role="img" aria-label="Истечения по дням">
+        {#each expiringView.days as d (d.date)}
+          <div
+            class="exp-bar"
+            class:zero={d.count === 0}
+            style={`height:${expBarPct(d.count)}%`}
+            title={`${d.date}: ${d.count}`}
+          ></div>
+        {/each}
+      </div>
+      <button class="btn btn-ghost" onclick={openExpiring}>Открыть подписки</button>
     </section>
 
     <section class="panel card queue">
@@ -340,6 +380,29 @@
   }
 
   .rev-bar.zero {
+    background: var(--border);
+    opacity: 1;
+  }
+
+  /* Мини-гистограмма истечений: локальная копия стиля выручки (rev-*),
+     чтобы карточки развивались независимо. */
+  .exp-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 56px;
+    margin-top: 12px;
+  }
+
+  .exp-bar {
+    flex: 1 1 0;
+    min-width: 3px;
+    background: var(--accent);
+    border-radius: 2px 2px 0 0;
+    opacity: 0.85;
+  }
+
+  .exp-bar.zero {
     background: var(--border);
     opacity: 1;
   }

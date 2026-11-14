@@ -89,6 +89,14 @@ type broadcastDetail struct {
 	RetryCount    int                           `json:"retry_count"`
 	SnapshotTaken bool                          `json:"snapshot_taken"`
 	ErrorsPreview []database.BroadcastSendError `json:"errors_preview"`
+
+	// Разобранный delivery_report (§4): списки получателей, которым не
+	// доставлено, и счётчик доставок. Ошибки ограничены
+	// broadcastErrorsPreview записями — отчёт может быть большим.
+	DeliveredCount int64                         `json:"delivered_count"`
+	Blocked        []int64                       `json:"blocked"`
+	Unreachable    []int64                       `json:"unreachable"`
+	Errors         []database.BroadcastSendError `json:"errors"`
 }
 
 type broadcastPayload struct {
@@ -524,14 +532,32 @@ func toBroadcastDetail(b *database.Broadcast) broadcastDetail {
 		}
 	}
 
+	blocked := []int64{}
+	unreachable := []int64{}
+	errors := []database.BroadcastSendError{}
+	deliveredCount := int64(0)
+	if reportErr == nil {
+		blocked = report.Blocked
+		unreachable = report.Unreachable
+		errors = report.Errors
+		if len(errors) > broadcastErrorsPreview {
+			errors = errors[:broadcastErrorsPreview]
+		}
+		deliveredCount = int64(len(report.Delivered))
+	}
+
 	return broadcastDetail{
-		broadcastItem: toBroadcastItem(*b),
-		Filters:       filters,
-		MessageText:   b.MessageText,
-		FiltersText:   filter.String(),
-		RetryCount:    b.RetryCount,
-		SnapshotTaken: database.BroadcastSnapshotTaken(b),
-		ErrorsPreview: preview,
+		broadcastItem:  toBroadcastItem(*b),
+		Filters:        filters,
+		MessageText:    b.MessageText,
+		FiltersText:    filter.String(),
+		RetryCount:     b.RetryCount,
+		SnapshotTaken:  database.BroadcastSnapshotTaken(b),
+		ErrorsPreview:  preview,
+		DeliveredCount: deliveredCount,
+		Blocked:        blocked,
+		Unreachable:    unreachable,
+		Errors:         errors,
 	}
 }
 

@@ -432,6 +432,75 @@ func TestAPI_BroadcastsDetail_ErrorsPreview(t *testing.T) {
 	assert.Equal(t, float64(800000), first["telegram_id"])
 }
 
+// Разобранный delivery_report на карточке: blocked/unreachable — списки id,
+// errors — с лимитом 20, delivered_count — из списка доставленных. Полный
+// delivery_report по-прежнему наружу не отдаётся (§4).
+func TestAPI_BroadcastsDetail_DeliveryReport(t *testing.T) {
+	t.Parallel()
+
+	srv, db := newTestServer(t)
+	b := seedBroadcast(t, db, "С отчётом", string(database.BroadcastStatusCompleted))
+
+	report := map[string]any{
+		"delivered":   []int64{700001, 700002},
+		"blocked":     []int64{710001, 710002, 710003},
+		"unreachable": []int64{720001},
+		"errors":      []map[string]any{},
+	}
+	for i := range 25 {
+		report["errors"] = append(report["errors"].([]map[string]any), map[string]any{
+			"telegram_id": 800000 + i,
+			"error":       fmt.Sprintf("ошибка %d", i),
+		})
+	}
+	raw, err := json.Marshal(report)
+	require.NoError(t, err)
+	require.NoError(t, db.GetDB().Model(b).Update("delivery_report", string(raw)).Error)
+
+	rec := do(t, srv, http.MethodGet, fmt.Sprintf("/admin/api/broadcasts/%d", b.ID), testToken, "")
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var detail map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &detail))
+	assert.NotContains(t, rec.Body.String(), "delivery_report")
+
+	assert.Equal(t, float64(2), detail["delivered_count"])
+	blocked, ok := detail["blocked"].([]any)
+	require.True(t, ok, "blocked must be an array")
+	assert.Equal(t, []any{float64(710001), float64(710002), float64(710003)}, blocked)
+	unreachable, ok := detail["unreachable"].([]any)
+	require.True(t, ok, "unreachable must be an array")
+	assert.Equal(t, []any{float64(720001)}, unreachable)
+
+	errs, ok := detail["errors"].([]any)
+	require.True(t, ok, "errors must be an array")
+	assert.Len(t, errs, 20, "errors are capped at 20 entries")
+	first, _ := errs[0].(map[string]any)
+	assert.Equal(t, float64(800000), first["telegram_id"])
+	assert.Equal(t, "ошибка 0", first["error"])
+}
+
+// Без отчёта (пустой "{}") разобранные списки — пустые массивы, а не null.
+func TestAPI_BroadcastsDetail_DeliveryReportEmpty(t *testing.T) {
+	t.Parallel()
+
+	srv, db := newTestServer(t)
+	b := seedBroadcast(t, db, "Без отчёта", string(database.BroadcastStatusCompleted))
+	require.NoError(t, db.GetDB().Model(b).Update("delivery_report", "{}").Error)
+
+	rec := do(t, srv, http.MethodGet, fmt.Sprintf("/admin/api/broadcasts/%d", b.ID), testToken, "")
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var detail map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &detail))
+	assert.Equal(t, float64(0), detail["delivered_count"])
+	for _, key := range []string{"blocked", "unreachable", "errors"} {
+		arr, ok := detail[key].([]any)
+		require.True(t, ok, "%s must be an array", key)
+		assert.Empty(t, arr)
+	}
+}
+
 // Деталь и список читают флаг «снимок аудитории» из одного источника:
 // раньше деталь всегда отдавала false, потому что флаг просто не заполнялся.
 func TestAPI_BroadcastsDetail_SnapshotTaken(t *testing.T) {

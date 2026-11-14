@@ -26,11 +26,31 @@ type OverviewSnapshot struct {
 	OldestPendingBinding *time.Time
 	// LastSubRequest is the newest /sub/:id hit. It tells whether the
 	// subscription server receives traffic at all.
-	LastSubRequest     *time.Time
+	LastSubRequest *time.Time
+	// Expiring counts active subscriptions whose expires_at falls in the next
+	// 30 days, bucketed per day for the state screen mini-chart.
+	Expiring           ExpiringBuckets
 	AuditEventsLast24h int64
 	DatabasePath       string
 	DatabaseSizeBytes  int64
 }
+
+// ExpiringDay — число активных подписок, истекающих в данный день. Дата —
+// строка UTC "YYYY-MM-DD": панель рисует гистограмму по ней без обработки.
+type ExpiringDay struct {
+	Date  string
+	Count int64
+}
+
+// ExpiringBuckets — сводка истечения для экрана «Состояние»: total за окно и
+// по дню на каждый день от сегодня до +30 включительно (нулевые дни есть).
+type ExpiringBuckets struct {
+	Total int64
+	Days  []ExpiringDay
+}
+
+// expiringWindowDays — глубина окна истечения на «Состоянии».
+const expiringWindowDays = 30
 
 // SubscriptionsTotal sums the closed status set: a subscription always has one.
 func (o *OverviewSnapshot) SubscriptionsTotal() int64 {
@@ -98,6 +118,11 @@ func (s *Service) GetOverviewSnapshot(ctx context.Context) (*OverviewSnapshot, e
 		return nil, err
 	}
 
+	expiring, err := s.expiringBuckets(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	var auditEvents int64
 	err = db.Model(&AuditLog{}).
 		Where("created_at >= ?", time.Now().UTC().Add(-24*time.Hour)).
@@ -114,6 +139,7 @@ func (s *Service) GetOverviewSnapshot(ctx context.Context) (*OverviewSnapshot, e
 		NodesTotal:            nodesTotal,
 		OldestPendingBinding:  oldestPending,
 		LastSubRequest:        lastSubRequest,
+		Expiring:              expiring,
 		AuditEventsLast24h:    auditEvents,
 		DatabasePath:          s.path,
 	}
@@ -126,6 +152,46 @@ func (s *Service) GetOverviewSnapshot(ctx context.Context) (*OverviewSnapshot, e
 	}
 
 	return snapshot, nil
+}
+
+// expiringBuckets считает активные подписки с expires_at в ближайшие 30 дней
+// и раскладывает их по дням UTC от сегодня до +30 включительно. Дни без
+// истечений заполняются нулями в Go — SQL не порождает пустые дни (образец —
+// GetRevenueStats). Верхняя граница — конец дня +30 (исключающая), чтобы
+// подписка, истекающая в последний день окна, попала в его бакет.
+func (s *Service) expiringBuckets(ctx context.Context) (ExpiringBuckets, error) {
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	from := today
+	to := today.AddDate(0, 0, expiringWindowDays+1)
+
+	var rows []struct {
+		Day   string
+		Count int64
+	}
+
+	err := s.db.WithContext(ctx).Raw(`
+		SELECT date(expires_at) AS day, COUNT(*) AS count
+		FROM subscriptions
+		WHERE status = ? AND expires_at >= ? AND expires_at < ?
+		GROUP BY date(expires_at)`,
+		string(SubscriptionStatusActive), from, to).Scan(&rows).Error
+	if err != nil {
+		return ExpiringBuckets{}, fmt.Errorf("count expiring subscriptions: %w", err)
+	}
+
+	byDay := make(map[string]int64, len(rows))
+	var total int64
+	for _, row := range rows {
+		byDay[row.Day] = row.Count
+		total += row.Count
+	}
+
+	days := make([]ExpiringDay, 0, expiringWindowDays+1)
+	for d := from; d.Before(to); d = d.AddDate(0, 0, 1) {
+		days = append(days, ExpiringDay{Date: d.Format("2006-01-02"), Count: byDay[d.Format("2006-01-02")]})
+	}
+
+	return ExpiringBuckets{Total: total, Days: days}, nil
 }
 
 // countByColumn groups rows by one column. The column name is a package

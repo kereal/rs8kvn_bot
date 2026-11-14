@@ -277,6 +277,8 @@ type SubscriptionStore interface {
 	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
 	GetAllSubscriptions(ctx context.Context) ([]database.Subscription, error)
 	GetBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
+	// GetActiveByNodeID feeds the node detail page live read (SetNodeLiveSource).
+	GetActiveByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
 	CountActiveSubscriptions(ctx context.Context) (int64, error)
 	CountPremiumSubscriptions(ctx context.Context) (int64, error)
 	CountFreeSubscriptions(ctx context.Context) (int64, error)

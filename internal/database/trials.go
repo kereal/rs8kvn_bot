@@ -284,6 +284,82 @@ func (s *Service) CreateTrialRequest(ctx context.Context, ip string) error {
 	return nil
 }
 
+// TrialRequestStats — антифрод-агрегат экрана «Триал-запросы» за последние 24 часа:
+// всего запросов, уникальных IP и топ-5 IP по числу запросов.
+type TrialRequestStats struct {
+	Requests24h  int64
+	UniqueIPs24h int64
+	TopIPs       []TrialRequestIPCount
+}
+
+// TrialRequestIPCount — одна строка топа IP: адрес и число запросов за сутки.
+type TrialRequestIPCount struct {
+	IP    string
+	Count int64
+}
+
+// ListTrialRequests возвращает страницу триал-запросов, новые сверху.
+func (s *Service) ListTrialRequests(ctx context.Context, limit, offset int) ([]TrialRequest, int64, error) {
+	var total int64
+
+	err := s.db.WithContext(ctx).Model(&TrialRequest{}).Count(&total).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count trial requests: %w", err)
+	}
+
+	var rows []TrialRequest
+
+	err = s.db.WithContext(ctx).
+		Order("created_at DESC, id DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&rows).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list trial requests: %w", err)
+	}
+
+	return rows, total, nil
+}
+
+// GetTrialRequestStats считает антифрод-агрегат за 24 часа: всего запросов,
+// уникальных IP и топ-5 IP (GROUP BY ip ORDER BY count DESC, ip ASC — вторая
+// часть фиксирует детерминированный порядок при равных счётчиках).
+func (s *Service) GetTrialRequestStats(ctx context.Context) (TrialRequestStats, error) {
+	cutoff := time.Now().Add(-24 * time.Hour)
+
+	var totals struct {
+		Requests int64 `gorm:"column:requests"`
+		IPs      int64 `gorm:"column:ips"`
+	}
+
+	err := s.db.WithContext(ctx).Model(&TrialRequest{}).
+		Select("COUNT(*) AS requests, COUNT(DISTINCT ip) AS ips").
+		Where("created_at > ?", cutoff).
+		Scan(&totals).Error
+	if err != nil {
+		return TrialRequestStats{}, fmt.Errorf("failed to aggregate trial requests: %w", err)
+	}
+
+	var top []TrialRequestIPCount
+
+	err = s.db.WithContext(ctx).Model(&TrialRequest{}).
+		Select("ip, COUNT(*) AS count").
+		Where("created_at > ?", cutoff).
+		Group("ip").
+		Order("count DESC, ip ASC").
+		Limit(5).
+		Scan(&top).Error
+	if err != nil {
+		return TrialRequestStats{}, fmt.Errorf("failed to aggregate top trial IPs: %w", err)
+	}
+
+	return TrialRequestStats{
+		Requests24h:  totals.Requests,
+		UniqueIPs24h: totals.IPs,
+		TopIPs:       top,
+	}, nil
+}
+
 // CleanupExpiredTrials deletes trial subscriptions that have expired without being activated.
 // Uses atomic DELETE ... RETURNING to prevent race conditions with concurrent trial activation.
 func (s *Service) CleanupExpiredTrials(ctx context.Context, hours int) ([]Subscription, error) {

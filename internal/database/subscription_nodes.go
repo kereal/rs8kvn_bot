@@ -20,6 +20,21 @@ func (s *Service) GetBySubscriptionID(ctx context.Context, subscriptionID uint) 
 	return rows, nil
 }
 
+// GetActiveByNodeID returns active subscription-node bindings for the given
+// node: клиенты, фактически живущие на ноде (снимок для живых данных панели).
+func (s *Service) GetActiveByNodeID(ctx context.Context, nodeID uint) ([]SubscriptionNode, error) {
+	var rows []SubscriptionNode
+
+	result := s.db.WithContext(ctx).
+		Where("node_id = ? AND status = ?", nodeID, SyncStatusActive).
+		Find(&rows)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get active subscription nodes: %w", result.Error)
+	}
+
+	return rows, nil
+}
+
 // GetPendingSync returns subscription nodes awaiting synchronization, limited by retry window.
 func (s *Service) GetPendingSync(ctx context.Context) ([]SubscriptionNode, error) {
 	var rows []SubscriptionNode

@@ -295,6 +295,7 @@ func startAdminServer(cfg *config.Config, dbService *database.Service, subServic
 	server.SetSubscriptionServices(dbService, subService, syncSvc)
 	// Живой трафик на карточке подписки: тот же SubscriptionService, что и у бота.
 	server.SetTrafficSource(subService)
+	server.SetNodeLiveSource(subService)
 
 	// Deactivate-blocked на экране рассылок вызывает сервис отзыва подписок:
 	// панель только принимает решение, депровижининг идёт через сервис бота.

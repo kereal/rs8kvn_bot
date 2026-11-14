@@ -121,6 +121,7 @@
     <button class="btn btn-ghost" onclick={load}>Повторить</button>
   </div>
 {:else}
+  {@const report = /** @type {any} */ (row)}
   <div class="page-head">
     <div>
       <h1>
@@ -204,26 +205,46 @@
   </div>
 
   <section class="panel errors">
-    <h2>Ошибки доставки{row.errors_preview && row.errors_preview.length ? ` (первые ${row.errors_preview.length})` : ''}</h2>
-    {#if !row.errors_preview || row.errors_preview.length === 0}
-      <p class="muted">Ошибок доставки нет</p>
+    <h2>Не доставлено</h2>
+    {#if report.blocked?.length === 0 && report.unreachable?.length === 0 && (report.errors?.length ?? 0) === 0}
+      <p class="muted">Все получатели доставлены, проблем нет</p>
     {:else}
-      <table>
-        <thead>
-          <tr>
-            <th>TELEGRAM ID</th>
-            <th>ПРИЧИНА</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each row.errors_preview as item (item.telegram_id)}
-            <tr>
-              <td class="mono">{item.telegram_id}</td>
-              <td>{item.error}</td>
-            </tr>
+      <p class="muted undelivered-count">Доставлено: {report.delivered_count ?? row.sent_count}</p>
+      {#if report.blocked?.length}
+        <h3>Заблокировали бота ({report.blocked.length})</h3>
+        <div class="id-list">
+          {#each report.blocked as tid (tid)}
+            <span class="mono id-chip">{tid}</span>
           {/each}
-        </tbody>
-      </table>
+        </div>
+      {/if}
+      {#if report.unreachable?.length}
+        <h3>Недоступны ({report.unreachable.length})</h3>
+        <div class="id-list">
+          {#each report.unreachable as tid (tid)}
+            <span class="mono id-chip">{tid}</span>
+          {/each}
+        </div>
+      {/if}
+      {#if report.errors?.length}
+        <h3>Ошибки ({report.errors.length})</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>TELEGRAM ID</th>
+              <th>ПРИЧИНА</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each report.errors as item (item.telegram_id)}
+              <tr>
+                <td class="mono">{item.telegram_id}</td>
+                <td>{item.error}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
     {/if}
   </section>
 {/if}
@@ -342,6 +363,28 @@
   .errors {
     margin-top: 14px;
     padding: 14px 16px;
+  }
+
+  .undelivered-count {
+    margin: 0 0 8px;
+  }
+
+  .errors h3 {
+    margin: 12px 0 6px;
+    font-size: 12.5px;
+    color: var(--text);
+  }
+
+  .id-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .id-chip {
+    background: color-mix(in srgb, var(--border) 40%, transparent);
+    border-radius: 4px;
+    padding: 2px 6px;
   }
 
   .badge-fail,

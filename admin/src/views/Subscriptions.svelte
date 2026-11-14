@@ -20,7 +20,9 @@
 
   let status = $state('')
   let planID = $state('')
-  let expiring = $state(false)
+  // Часы для фильтра expiring_in: '' = без фильтра, иначе строка часов
+  // (24/168/336/720) — сервер ждёт положительное число часов.
+  let expiring = $state('')
   let qInput = $state('')
   let qApplied = $state('')
   let sort = $state('id')
@@ -30,6 +32,9 @@
 
   /** @type {import('../lib/types.js').Plan[]} */
   let plans = $state([])
+
+  // Подписи окна истечения — для примечания под фильтром.
+  const EXPIRING_LABELS = { 24: '24 ч', 168: '7 дней', 336: '14 дней', 720: '30 дней' }
 
   let debounceTimer
 
@@ -42,7 +47,7 @@
     if (status) params.set('status', status)
     if (planID) params.set('plan_id', planID)
     if (qApplied) params.set('q', qApplied)
-    if (expiring) params.set('expiring_in', '24')
+    if (expiring) params.set('expiring_in', expiring)
     params.set('sort', sort)
     params.set('order', order)
 
@@ -67,6 +72,27 @@
   }
 
   onMount(() => {
+    // Карточка «Истекают» на «Состоянии» кладёт предустановку сюда; флаг
+    // одноразовый: применяется один раз и снимается.
+    const preset = sessionStorage.getItem('expiring_in')
+    if (preset) {
+      expiring = preset
+      sessionStorage.removeItem('expiring_in')
+    }
+    // Глобальный поиск кладёт предустановку сюда; ключ одноразовый.
+    const search = sessionStorage.getItem('admin_search')
+    if (search) {
+      sessionStorage.removeItem('admin_search')
+      try {
+        const parsed = JSON.parse(search)
+        if (parsed.screen === 'subscriptions' && parsed.q) {
+          qInput = parsed.q
+          qApplied = parsed.q
+        }
+      } catch {
+        // мусор в хранилище — игнорируем
+      }
+    }
     loadPlans()
     load()
   })
@@ -79,7 +105,7 @@
   function resetFilters() {
     status = ''
     planID = ''
-    expiring = false
+    expiring = ''
     qInput = ''
     qApplied = ''
     sort = 'id'
@@ -176,14 +202,20 @@
       {/each}
     </select>
     <label class="check">
-      <input type="checkbox" bind:checked={expiring} onchange={resetAndLoad} />
-      истекают за 24 ч
+      <span>истекают за</span>
+      <select bind:value={expiring} onchange={resetAndLoad} aria-label="Окно истечения">
+        <option value="">Без фильтра</option>
+        <option value="24">24 ч</option>
+        <option value="168">7 дней</option>
+        <option value="336">14 дней</option>
+        <option value="720">30 дней</option>
+      </select>
     </label>
     <span class="muted">найдено {total}</span>
   </div>
 
   {#if expiring}
-    <div class="muted expiring-note">истекает в ближайшие 24 ч</div>
+    <div class="muted expiring-note">истекают в ближайшие {EXPIRING_LABELS[expiring] || `${expiring} ч`}</div>
   {/if}
 
   {#if loading}

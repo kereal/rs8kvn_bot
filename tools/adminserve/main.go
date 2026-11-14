@@ -75,6 +75,7 @@ func main() {
 	server.SetSubscriptionServices(store, subService, syncService)
 	// Живой трафик карточки подписки — тот же SubscriptionService.
 	server.SetTrafficSource(subService)
+	server.SetNodeLiveSource(subService)
 	server.SetBroadcastDeactivator(subService)
 	server.SetBuildInfo(admin.BuildInfo{
 		Version:   "dev",

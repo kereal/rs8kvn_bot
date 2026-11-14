@@ -11,6 +11,7 @@ import (
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/service"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 )
 
@@ -259,6 +260,76 @@ func (s *Server) checkNodeHealth(r *http.Request, node *database.Node) nodeHealt
 	result.Available = true
 
 	return result
+}
+
+// NodeLiveSource is the narrow service contract for the live read on the node
+// detail page (SetNodeLiveSource). Как /traffic у подписок: единственный
+// эндпоинт экрана «Ноды», который опрашивает панели, поэтому он отдельный и
+// не входит в NodeStore.
+type NodeLiveSource interface {
+	GetNodeLive(ctx context.Context, nodeID uint) (*service.NodeLiveInfo, error)
+}
+
+// nodeLiveResult — DTO ответа GET /admin/api/nodes/{id}/live.
+type nodeLiveResult struct {
+	NodeID        uint   `json:"node_id"`
+	Available     bool   `json:"available"`
+	PingLatencyMS int64  `json:"ping_latency_ms"`
+	PingError     string `json:"ping_error,omitempty"`
+	Clients       int    `json:"clients"`
+	Disabled      int    `json:"disabled"`
+	TrafficBytes  int64  `json:"traffic_bytes"`
+	// LastOnline — unix ms из панели, 0 = нет данных.
+	LastOnline int64 `json:"last_online"`
+}
+
+// SetNodeLiveSource wires the live node read for the node detail page. Without
+// it the endpoint answers 503: опрос панелей — тяжёлый вызов, остальной экран
+// работает и без него.
+func (s *Server) SetNodeLiveSource(src NodeLiveSource) {
+	s.nodeLive = src
+}
+
+// handleNodeLive отвечает за живые данные ноды: пинг панели и суммарный
+// трафик её активных клиентов. Best-effort: недоступность панели — данные
+// (available:false), а не ошибка протокола.
+func (s *Server) handleNodeLive(w http.ResponseWriter, r *http.Request) {
+	if s.nodeLive == nil {
+		writeError(w, http.StatusServiceUnavailable, "internal",
+			"node live service is not wired into the panel")
+
+		return
+	}
+
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	// 404 на неизвестную ноду — sentinel из store; живой опрос дальше.
+	if _, err := s.nodes.GetNodeByID(r.Context(), id); err != nil {
+		s.writeStoreError(w, "load node for live", err)
+
+		return
+	}
+
+	info, err := s.nodeLive.GetNodeLive(r.Context(), id)
+	if err != nil {
+		s.writeStoreError(w, "node live", err)
+
+		return
+	}
+
+	writeJSON(w, http.StatusOK, nodeLiveResult{
+		NodeID:        info.NodeID,
+		Available:     info.Available,
+		PingLatencyMS: info.PingLatencyMS,
+		PingError:     info.PingError,
+		Clients:       info.Clients,
+		Disabled:      info.Disabled,
+		TrafficBytes:  info.TrafficBytes,
+		LastOnline:    info.LastOnline,
+	})
 }
 
 // payloadToNode переводит тело запроса в модель. inbound_ids сериализуется в

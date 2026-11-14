@@ -24,6 +24,8 @@
   let notice = $state('')
   let limit = $state(50)
   let offset = $state(0)
+  // Фильтр списка по статусу: '' = все статусы.
+  let statusFilter = $state('')
 
   // Форма (создание/правка черновика). ever_paid — трёхсостояние:
   // '' = не важно, 'true' = платили, 'false' = не платили.
@@ -66,7 +68,9 @@
     loading = true
     error = ''
     try {
-      const data = await api.get(`/admin/api/broadcasts?limit=${limit}&offset=${offset}`)
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+      if (statusFilter) params.set('status', statusFilter)
+      const data = await api.get(`/admin/api/broadcasts?${params.toString()}`)
       items = data.items || []
       total = data.total || 0
     } catch (err) {
@@ -74,6 +78,12 @@
     } finally {
       loading = false
     }
+  }
+
+  // Смена фильтра статуса сбрасывает пагинацию на первую страницу.
+  function resetAndLoad() {
+    offset = 0
+    load()
   }
 
   onMount(load)
@@ -373,6 +383,15 @@
 {/if}
 
 <div class="panel">
+  <div class="toolbar">
+    <select bind:value={statusFilter} onchange={resetAndLoad}>
+      <option value="">Все статусы</option>
+      {#each Object.entries(STATUS) as [value, meta] (value)}
+        <option {value}>{meta.label}</option>
+      {/each}
+    </select>
+    <span class="muted">найдено {total}</span>
+  </div>
   {#if loading}
     <div class="empty">Загрузка…</div>
   {:else if items.length === 0}

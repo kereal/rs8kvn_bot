@@ -462,6 +462,7 @@ type ServiceStoreFake struct {
 	GetBroadcastRecipientsStatsFunc             func(ctx context.Context, broadcastID uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error)
 	GetByIDFunc                                 func(ctx context.Context, id uint) (*database.Subscription, error)
 	GetBySubscriptionIDFunc                     func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
+	GetActiveByNodeIDFunc                       func(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error)
 	GetByTelegramIDFunc                         func(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	GetInviteByCodeFunc                         func(ctx context.Context, code string) (*database.Invite, error)
 	GetNodeByIDFunc                             func(ctx context.Context, id uint) (*database.Node, error)
@@ -888,6 +889,14 @@ func (m *ServiceStoreFake) GetByID(ctx context.Context, id uint) (*database.Subs
 func (m *ServiceStoreFake) GetBySubscriptionID(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error) {
 	if m.GetBySubscriptionIDFunc != nil {
 		return m.GetBySubscriptionIDFunc(ctx, subscriptionID)
+	}
+
+	return nil, nil
+}
+
+func (m *ServiceStoreFake) GetActiveByNodeID(ctx context.Context, nodeID uint) ([]database.SubscriptionNode, error) {
+	if m.GetActiveByNodeIDFunc != nil {
+		return m.GetActiveByNodeIDFunc(ctx, nodeID)
 	}
 
 	return nil, nil
