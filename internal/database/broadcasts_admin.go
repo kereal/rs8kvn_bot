@@ -170,15 +170,24 @@ func (s *Service) UpdateBroadcastDraft(ctx context.Context, b *Broadcast) error 
 		return err
 	}
 
-	err = s.db.WithContext(ctx).Model(&Broadcast{}).Where("id = ?", b.ID).Updates(map[string]any{
-		"name":         b.Name,
-		"filters":      b.Filters,
-		"message_text": b.MessageText,
-		"planned_at":   b.PlannedAt,
-		"updated_at":   time.Now().UTC(),
-	}).Error
-	if err != nil {
-		return fmt.Errorf("update broadcast draft: %w", err)
+	// Условие по статусу в самом UPDATE, а не только pre-check: ClaimBroadcast
+	// может атомарно перевести рассылку в running между чтением и записью.
+	// Без этого гейта правка применилась бы к уже запущенной кампании.
+	result := s.db.WithContext(ctx).Model(&Broadcast{}).
+		Where("id = ? AND status = ?", b.ID, string(BroadcastStatusScheduled)).
+		Updates(map[string]any{
+			"name":         b.Name,
+			"filters":      b.Filters,
+			"message_text": b.MessageText,
+			"planned_at":   b.PlannedAt,
+			"updated_at":   time.Now().UTC(),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("update broadcast draft: %w", result.Error)
+	}
+
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("update broadcast draft %d: %w", b.ID, ErrBroadcastLocked)
 	}
 
 	return nil
@@ -201,7 +210,12 @@ func (s *Service) DeleteBroadcast(ctx context.Context, id uint) error {
 		return fmt.Errorf("delete broadcast %d: %w", id, ErrBroadcastLocked)
 	}
 
-	result := s.db.WithContext(ctx).Delete(&Broadcast{}, id)
+	// Условие `status <> 'running'` в самом DELETE, а не только pre-check:
+	// ClaimBroadcast может перевести рассылку в running между чтением и
+	// удалением, и воркер тогда продолжил бы слать по удалённой строке.
+	result := s.db.WithContext(ctx).
+		Where("id = ? AND status <> ?", id, string(BroadcastStatusRunning)).
+		Delete(&Broadcast{})
 	if result.Error != nil {
 		return fmt.Errorf("delete broadcast: %w", result.Error)
 	}

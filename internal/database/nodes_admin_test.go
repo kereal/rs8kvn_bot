@@ -239,6 +239,35 @@ func TestUpdateNodeAdmin_FieldsAndAudit(t *testing.T) {
 	assert.NotContains(t, newState, "api_token")
 }
 
+func TestUpdateNodeAdmin_PreservesCreatedAt(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	node := seedNode(t, svc, "panel-created")
+	original := node.CreatedAt.Truncate(time.Second).UTC()
+
+	// Хендлер собирает структуру начисто (CreatedAt = time.Time{}), поэтому
+	// Save-путь затирал созданную строку нулём. Обновление через Updates(map)
+	// не трогает created_at.
+	fresh := Node{
+		ID:              node.ID,
+		Name:            "panel-created",
+		Type:            NodeType3xUI,
+		Host:            "http://203.0.113.11:2053",
+		SubscriptionURL: "https://sub.example.com/s/",
+		InboundIDs:      "[]",
+		IsActive:        true,
+	}
+
+	require.NoError(t, svc.UpdateNodeAdmin(ctx, &fresh))
+
+	stored, err := svc.GetNodeByID(ctx, node.ID)
+	require.NoError(t, err)
+	assert.Equal(t, original, stored.CreatedAt.Truncate(time.Second).UTC())
+}
+
 func TestUpdateNodeAdmin_KeepsTokenOnEmpty(t *testing.T) {
 	t.Parallel()
 

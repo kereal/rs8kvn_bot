@@ -209,9 +209,25 @@ func (s *Service) UpdateNodeAdmin(ctx context.Context, node *Node) error {
 			node.APIToken = before.APIToken
 		}
 
-		err = tx.Save(node).Error
-		if err != nil {
-			return fmt.Errorf("save node %d: %w", node.ID, err)
+		// Точечный Updates(map), а не Save: Save пишет все колонки целиком, и
+		// autoCreateTime не защищает created_at от перезаписи нулём, когда хендлер
+		// собрал структуру начисто (CreatedAt = time.Time{}). Здесь же создаётся
+		// только updated_at.
+		result := tx.Model(&Node{}).Where("id = ?", node.ID).Updates(map[string]any{
+			"name":             node.Name,
+			"is_active":        node.IsActive,
+			"host":             node.Host,
+			"api_token":        node.APIToken,
+			"inbound_ids":      node.InboundIDs,
+			"subscription_url": node.SubscriptionURL,
+			"type":             node.Type,
+		})
+		if result.Error != nil {
+			return fmt.Errorf("save node %d: %w", node.ID, result.Error)
+		}
+
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("node %d: %w", node.ID, ErrNodeNotFound)
 		}
 
 		return nil

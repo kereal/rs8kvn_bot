@@ -138,11 +138,35 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 	// only known then, and emitting it at claim time recorded recipients_total=0
 	// for every campaign. A snapshot failure still writes the event (total 0)
 	// before returning, because the campaign is already running and the trail
-	// must show the start; the retry pass will not rewrite it.
+	// must show the start.
+	//
+	// Idempotency across a crash: if this worker claimed the campaign, the event
+	// is written right here. If the claim happened in a previous process and the
+	// process died between ClaimBroadcast and the first snapshot, the event
+	// would be lost forever — so on the resume path we backfill it when no
+	// broadcast_started exists for this campaign yet. The audit trail must show
+	// a start for every running campaign, even if the snapshot never completed.
 	emitStarted := func() {
 		if claimedNow {
 			w.auditLog(ctx, database.AuditBroadcastStarted(campaign))
+			return
 		}
+		if campaign.Status != string(database.BroadcastStatusRunning) {
+			return
+		}
+		events, err := w.h.db.GetAuditLogByEntity(ctx, database.EntityBroadcast,
+			fmt.Sprintf("%d", campaign.ID), 10)
+		if err != nil {
+			// A read failure must not fail the campaign; the start just stays lost.
+			logger.Warn("Failed to check broadcast audit trail", zap.Uint("broadcast_id", campaign.ID), zap.Error(err))
+			return
+		}
+		for i := range events {
+			if events[i].Event == database.AuditEventBroadcastStarted {
+				return
+			}
+		}
+		w.auditLog(ctx, database.AuditBroadcastStarted(campaign))
 	}
 
 	// Snapshot is idempotent and also covers a crash between claim and snapshot.

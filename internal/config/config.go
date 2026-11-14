@@ -296,7 +296,9 @@ func (c *Config) validate() error {
 
 	// Admin panel validation. The token is optional (empty disables the panel),
 	// but a configured token must come with a bindable host:port address.
-	if c.AdminToken != "" {
+	// Whitespace-only tokens are treated the same as empty ones by the runtime
+	// (TrimSpace in startAdminServer), so validation must agree.
+	if strings.TrimSpace(c.AdminToken) != "" {
 		host, port, splitErr := net.SplitHostPort(c.AdminListen)
 		if splitErr != nil {
 			return fmt.Errorf("ADMIN_LISTEN must be host:port: %w", splitErr)

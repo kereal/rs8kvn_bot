@@ -1724,6 +1724,7 @@ type BotStoreFake struct {
 	CreateBroadcastFunc                  func(ctx context.Context, b *database.Broadcast) error
 	FinishBroadcastRecipientFunc         func(ctx context.Context, broadcastID uint, id uint, expectedAttempts int, status database.BroadcastRecipientStatus, lastError string, now time.Time) error
 	GetAllReferralCountsFunc             func(ctx context.Context) (map[int64]int64, error)
+	GetAuditLogByEntityFunc              func(ctx context.Context, entityType database.EntityType, entityID string, limit int) ([]database.AuditLog, error)
 	GetBroadcastFunc                     func(ctx context.Context, id uint) (*database.Broadcast, error)
 	GetFilteredTelegramIDCountFunc       func(ctx context.Context, filter database.BroadcastFilter) (int64, error)
 	GetInviteByReferrerFunc              func(ctx context.Context, referrerTGID int64) (*database.Invite, error)
@@ -1773,6 +1774,15 @@ func (m *BotStoreFake) GetStalePendingOrdersAfterID(
 
 func (m *BotStoreFake) ExpirePendingOrder(context.Context, uint) (bool, error) {
 	return false, nil
+}
+
+// GetAuditLogByEntity реализует чтение аудита для BotStore. По умолчанию
+// фиксирует невыставленный Func, чтобы resume-путь воркера не падал молча.
+func (m *BotStoreFake) GetAuditLogByEntity(ctx context.Context, entityType database.EntityType, entityID string, limit int) ([]database.AuditLog, error) {
+	if m.GetAuditLogByEntityFunc != nil {
+		return m.GetAuditLogByEntityFunc(ctx, entityType, entityID, limit)
+	}
+	return nil, errBotStoreFakeFuncNotSet("GetAuditLogByEntityFunc")
 }
 
 func (m *BotStoreFake) CancelBroadcast(ctx context.Context, id uint, now time.Time) (bool, error) {

@@ -236,5 +236,5 @@ func TestStart_RequiresToken(t *testing.T) {
 	t.Parallel()
 
 	srv := NewServer("127.0.0.1:0", "", nil)
-	require.Error(t, srv.Start(context.Background()))
+	require.Error(t, srv.Start())
 }

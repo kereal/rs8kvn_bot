@@ -500,15 +500,29 @@ func (s *SubscriptionService) RevokeSubscription(ctx context.Context, id uint) (
 		return nil, ErrAlreadyRevoked
 	}
 
-	err = s.revokeAndDeprovision(ctx, sub)
+	// Phase 1: flip the durable status before any external effect, then record
+	// the revocation and drop the cached profile immediately. The audit and the
+	// cache invalidation must not wait for deprovisioning: once the row says
+	// revoked, the revocation is a fact even if the phase below fails and the
+	// worker finishes the VPN removal later.
+	err = s.markRevokedSub(ctx, sub)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("revoke subscription: %w", err)
 	}
 
 	s.logAudit(ctx, database.AuditSubscriptionRevokedByAdmin(sub, "admin panel revoke", adminTelegramIDFromCtx(ctx)))
 
 	if s.invalidateBySubID != nil && sub.SubscriptionID != "" {
 		s.InvalidateBySubID(ctx, sub.SubscriptionID)
+	}
+
+	// Phase 2: queue VPN removal and ask the panels to delete the clients.
+	// Queueing errors reach the caller (without pending_remove rows the
+	// background worker has nothing to retry); the sub stays revoked and the
+	// worker reconciles any profile the immediate sync missed.
+	err = s.deprovisionSub(ctx, sub.ID)
+	if err != nil {
+		return nil, err
 	}
 
 	s.RefreshActiveSubscriptionsMetric(ctx)

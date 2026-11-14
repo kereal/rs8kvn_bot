@@ -80,7 +80,7 @@ func main() {
 		BuildTime: time.Now().UTC().Format(time.RFC3339),
 	})
 
-	err = server.Start(context.Background())
+	err = server.Start()
 	if err != nil {
 		panic(err)
 	}

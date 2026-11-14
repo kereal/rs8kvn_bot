@@ -203,6 +203,16 @@ func TestLoad_AdminDefaultsDisabled(t *testing.T) {
 	assert.Equal(t, DefaultAdminListen, cfg.AdminListen)
 }
 
+// TestLoad_AdminWhitespaceTokenActsLikeEmpty: пробельный ADMIN_TOKEN трактуется
+// рантаймом (TrimSpace в startAdminServer) как выключенная панель — значит
+// validate() не может требовать корректный ADMIN_LISTEN в этом случае.
+func TestLoad_AdminWhitespaceTokenActsLikeEmpty(t *testing.T) {
+	setLoadEnv(t, map[string]string{"ADMIN_TOKEN": "   ", "ADMIN_LISTEN": "not-a-valid-listen"})
+
+	_, err := Load()
+	require.NoError(t, err, "a whitespace token disables the panel, so ADMIN_LISTEN is not validated")
+}
+
 func TestLoad_AdminTokenRequiresValidListen(t *testing.T) {
 	cases := map[string]string{
 		"no port":        "127.0.0.1",

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,6 +130,41 @@ func TestRevokeSubscription_AlreadyRevoked(t *testing.T) {
 	assert.Zero(t, updates, "a rejected revoke must not write to the database")
 	assert.Empty(t, store.AuditLogsByEvent(database.AuditEventSubscriptionRevoked),
 		"a rejected revoke is not a mutation and must not be audited")
+}
+
+// TestRevokeSubscription_FailedDeprovisionStillAudited locks the audit and the
+// cache invalidation to the durable status flip: if queueing the VPN removal
+// fails (transient DB error), the subscription is still revoked and the worker
+// must be able to finish the removal later. The audit row and the cache drop
+// must not wait for phase two.
+func TestRevokeSubscription_FailedDeprovisionStillAudited(t *testing.T) {
+	t.Parallel()
+
+	svc, store, sub, _ := revokedFixture(t)
+
+	var invalidated []string
+	svc.SetInvalidateBySubIDFunc(func(subID string) {
+		invalidated = append(invalidated, subID)
+	})
+
+	// Phase 2 fails: the store cannot mark the binding pending_remove.
+	store.UpdateSubscriptionNodeStatusFunc = func(_ context.Context, _, _ uint, _ database.SyncStatus) error {
+		return errors.New("disk full")
+	}
+
+	revoked, err := svc.RevokeSubscription(WithAuditAdmin(context.Background(), 77), sub.ID)
+	require.Error(t, err, "a failed deprovision must surface to the panel")
+	require.Nil(t, revoked)
+
+	storedPending := store.SubscriptionsByID[sub.ID].Status
+	assert.Equal(t, string(database.SubscriptionStatusRevoked), storedPending,
+		"the row must stay revoked even when deprovisioning failed")
+
+	events := store.AuditLogsByEvent(database.AuditEventSubscriptionRevoked)
+	require.Len(t, events, 1, "a revocation that already happened must be audited even if deprovisioning failed")
+	assert.Equal(t, database.ActorAdmin, events[0].ActorType)
+	assert.Equal(t, "sub-41", strings.Join(invalidated, ","),
+		"the cached profile must be dropped as soon as the row says revoked")
 }
 
 // TestResetSubscriptionTraffic_OnlyActiveNodes resets the counter on active

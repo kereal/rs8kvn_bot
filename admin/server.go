@@ -205,7 +205,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 // Start binds the listener and serves requests in a background goroutine.
-func (s *Server) Start(ctx context.Context) error {
+func (s *Server) Start() error {
 	if strings.TrimSpace(s.token) == "" {
 		return fmt.Errorf("admin: ADMIN_TOKEN must be set to start the panel")
 	}
@@ -236,8 +236,8 @@ func (s *Server) Start(ctx context.Context) error {
 	server := s.server
 	s.mu.Unlock()
 
-	logger.Info("Admin panel started", zap.String("addr", s.listenerAddr))
-
+	// Единственный лог старта панели: стартовое сообщение с URL печатает
+	// cmd/bot/main.go (там известен публичный URL и адрес привязки).
 	go func() {
 		defer logger.Recover("admin HTTP server")
 
@@ -246,8 +246,6 @@ func (s *Server) Start(ctx context.Context) error {
 			logger.Error("Admin panel server error", zap.Error(err))
 		}
 	}()
-
-	_ = ctx
 
 	return nil
 }

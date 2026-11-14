@@ -298,7 +298,7 @@ func startAdminServer(cfg *config.Config, dbService *database.Service, subServic
 	// панель только принимает решение, депровижининг идёт через сервис бота.
 	server.SetBroadcastDeactivator(subService)
 
-	err := server.Start(context.Background())
+	err := server.Start()
 	if err != nil {
 		return nil, err
 	}
