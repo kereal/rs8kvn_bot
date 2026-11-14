@@ -105,7 +105,7 @@
   </section>
 </div>
 
-<div class="panel">
+<div class="panel list-panel">
   {#if loading}
     <div class="empty">Загрузка…</div>
   {:else if items.length === 0}
@@ -180,6 +180,12 @@
 
   .card {
     padding: 14px 16px;
+  }
+
+  /* Список записей отбивается от KPI-блоков: без отступа KPI-строка и
+     таблица сливаются по вертикали (заметнее всего при пустых значениях). */
+  .list-panel {
+    margin-top: 16px;
   }
 
   .card h2 {

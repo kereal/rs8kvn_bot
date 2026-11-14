@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { formatDate, formatMoney } from '../lib/format.js'
+  import GlobalSearch from '../lib/GlobalSearch.svelte'
 
   /** @type {import('../lib/types.js').Overview|null} */
   let data = $state(null)
@@ -179,6 +180,9 @@
   <h1>Состояние</h1>
   <button class="btn" onclick={load} disabled={loading}>Обновить</button>
 </div>
+
+<!-- Глобальный поиск живёт только на «Состоянии» (решение владельца). -->
+<GlobalSearch />
 
 {#if error}
   <div class="notice notice-error">

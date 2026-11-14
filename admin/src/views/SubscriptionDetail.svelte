@@ -389,41 +389,6 @@
         <dd>{formatDate(row.started_at)}</dd>
         <dt>Истекает</dt>
         <dd>{formatDate(row.expires_at)}</dd>
-        <dt>Напоминания</dt>
-        <dd>
-          <div class="rem-group">
-            <span class="rem-title">об истечении</span>
-            {#each expiryChips() as chip}
-              <span
-                class="rem-chip"
-                class:on={chip.sent}
-                title={chip.sent ? 'Отправлено воркером' : 'Ещё не отправлялось'}
-              >{chip.label}</span>
-            {/each}
-          </div>
-          {#if planHasTrafficLimit()}
-            <div class="rem-group">
-              <span class="rem-title">о трафике</span>
-              {#each trafficChips() as chip}
-                <span
-                  class="rem-chip"
-                  class:on={chip.sent}
-                  title={chip.sent ? 'Отправлено воркером' : 'Порог ещё не достигнут — воркер отправит сам'}
-                >{chip.label}</span>
-              {/each}
-            </div>
-          {:else}
-            <div class="rem-group">
-              <span class="rem-title">о трафике</span>
-              <span class="rem-muted">план без лимита трафика</span>
-            </div>
-          {/if}
-          {#if nextExpiryReminder()}
-            <div class="rem-next">
-              Предстоит: {nextExpiryReminder().label} — {formatDate(new Date(nextExpiryReminder().due).toISOString())}
-            </div>
-          {/if}
-        </dd>
       </dl>
     </section>
 
@@ -473,6 +438,41 @@
       </dl>
     </section>
   </div>
+
+  <!-- Напоминания — отдельная секция во всю ширину (как «Узлы»/«Действия»):
+       в маленькой карточке чипы терялись. -->
+  <section class="panel reminders-panel">
+    <h2>Напоминания</h2>
+    <div class="rem-group">
+      <span class="rem-title">об истечении</span>
+      {#each expiryChips() as chip}
+        <span
+          class="rem-chip"
+          class:on={chip.sent}
+          title={chip.sent ? 'Отправлено воркером' : 'Ещё не отправлялось'}
+        >{chip.label}</span>
+      {/each}
+    </div>
+    <div class="rem-group">
+      <span class="rem-title">о трафике</span>
+      {#if planHasTrafficLimit()}
+        {#each trafficChips() as chip}
+          <span
+            class="rem-chip"
+            class:on={chip.sent}
+            title={chip.sent ? 'Отправлено воркером' : 'Порог ещё не достигнут — воркер отправит сам'}
+          >{chip.label}</span>
+        {/each}
+      {:else}
+        <span class="rem-muted">план без лимита трафика</span>
+      {/if}
+    </div>
+    {#if nextExpiryReminder()}
+      <p class="rem-next">
+        Предстоит: {nextExpiryReminder().label} — {formatDate(new Date(nextExpiryReminder().due).toISOString())}
+      </p>
+    {/if}
+  </section>
 
   <section class="panel nodes-panel">
     <h2>
@@ -644,6 +644,15 @@
     padding: 14px 16px;
   }
 
+  /* Напоминания — секция во всю ширину с внутренними отступами, как «Действия». */
+  .reminders-panel {
+    padding: 14px 16px;
+  }
+
+  .reminders-panel > h2 {
+    margin: 0 0 12px;
+  }
+
   .action-row {
     display: flex;
     flex-wrap: wrap;
@@ -677,21 +686,21 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 6px;
+    gap: 8px;
+    margin-bottom: 10px;
   }
 
   .rem-title {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--muted);
-    min-width: 88px;
+    min-width: 110px;
   }
 
   .rem-chip {
     display: inline-block;
-    padding: 2px 9px;
-    border-radius: 12px;
-    font-size: 12px;
+    padding: 4px 12px;
+    border-radius: 14px;
+    font-size: 13px;
     border: 1px solid var(--border);
     color: var(--muted);
     white-space: nowrap;

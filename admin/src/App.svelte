@@ -16,7 +16,6 @@
   import BroadcastDetail from './views/BroadcastDetail.svelte'
   import TrialRequests from './views/TrialRequests.svelte'
   import NodeDetail from './views/NodeDetail.svelte'
-  import GlobalSearch from './lib/GlobalSearch.svelte'
 
   // One entry per screen. Adding a screen means adding a route here and a view
   // file — no router dependency. `detail` is optional: it renders instead of
@@ -117,7 +116,6 @@
       </div>
     </aside>
     <main class="main">
-      <GlobalSearch />
       <!-- Key on the full route: without it a detail→detail hop ("#/orders/1"
            to "#/orders/2") reuses the same component instance and keeps the
            previous row on screen, since views load data in onMount. -->
