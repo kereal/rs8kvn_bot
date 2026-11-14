@@ -18,9 +18,10 @@ import (
 	"net/http"
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
+	"github.com/kereal/rs8kvn_bot/internal/service"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -114,8 +115,8 @@ func (s *contractSyncStub) DeleteByID(context.Context, uint) (*database.Subscrip
 	return nil, nil
 }
 
-func (s *contractSyncStub) ResetSubscriptionTraffic(context.Context, uint) (int, error) {
-	return 0, nil
+func (s *contractSyncStub) ResetSubscriptionTraffic(context.Context, uint) (service.TrafficResetResult, error) {
+	return service.TrafficResetResult{}, nil
 }
 
 func (s *contractSyncStub) SyncSubscription(context.Context, uint) error {

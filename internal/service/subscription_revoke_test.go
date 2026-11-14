@@ -200,7 +200,8 @@ func TestResetSubscriptionTraffic_OnlyActiveNodes(t *testing.T) {
 
 	reset, err := sync.ResetSubscriptionTraffic(context.Background(), sub.ID)
 	require.NoError(t, err)
-	assert.Equal(t, 1, reset)
+	assert.Equal(t, 1, reset.Reset)
+	assert.Zero(t, reset.Failed)
 	assert.True(t, activeClient.resetTrafficCalled)
 	assert.False(t, pendingClient.resetTrafficCalled, "pending_remove bindings have no client to reset")
 }
@@ -237,7 +238,8 @@ func TestResetSubscriptionTraffic_ReportsPartialFailure(t *testing.T) {
 
 	reset, err := sync.ResetSubscriptionTraffic(context.Background(), sub.ID)
 	require.Error(t, err, "a failed node must surface as an error")
-	assert.Equal(t, 1, reset, "the successful node still counts")
+	assert.Equal(t, 1, reset.Reset, "the successful node still counts")
+	assert.Equal(t, 1, reset.Failed, "the failed node is counted typed, not parsed from the error text")
 	assert.Contains(t, err.Error(), "node 8")
 }
 

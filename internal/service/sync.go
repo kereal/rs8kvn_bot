@@ -1390,24 +1390,32 @@ func (s *SubscriptionService) activeReaders(activeNodeIDs map[uint]struct{}, ema
 	return targets
 }
 
+// TrafficResetResult is the typed outcome of a per-node traffic counter reset:
+// the panel reports "reset on Reset nodes, Failed failed" without parsing the
+// aggregated error text (a node error may itself contain newlines).
+type TrafficResetResult struct {
+	Reset  int
+	Failed int
+}
+
 // ResetSubscriptionTraffic zeroes the traffic counters of a subscription's VPN
 // clients on every actively bound node. Best-effort per node: failures are
-// aggregated into the returned error while successful nodes still count, so the
-// panel can report "reset on N nodes, M failed" instead of an all-or-nothing
-// answer. Rows are not touched: this is a panel-side counter reset, not a plan
-// or status change.
-func (s *SyncService) ResetSubscriptionTraffic(ctx context.Context, subscriptionID uint) (int, error) {
+// aggregated into the returned error while the typed result still counts both
+// sides, so the panel can report "reset on N nodes, M failed" instead of an
+// all-or-nothing answer. Rows are not touched: this is a panel-side counter
+// reset, not a plan or status change.
+func (s *SyncService) ResetSubscriptionTraffic(ctx context.Context, subscriptionID uint) (TrafficResetResult, error) {
 	sub, err := s.db.GetByID(ctx, subscriptionID)
 	if err != nil {
-		return 0, fmt.Errorf("reset traffic: load subscription: %w", err)
+		return TrafficResetResult{}, fmt.Errorf("reset traffic: load subscription: %w", err)
 	}
 
 	bindings, err := s.db.GetBySubscriptionID(ctx, subscriptionID)
 	if err != nil {
-		return 0, fmt.Errorf("reset traffic: load node bindings: %w", err)
+		return TrafficResetResult{}, fmt.Errorf("reset traffic: load node bindings: %w", err)
 	}
 
-	reset := 0
+	var result TrafficResetResult
 	var errs []error
 
 	for i := range bindings {
@@ -1419,6 +1427,7 @@ func (s *SyncService) ResetSubscriptionTraffic(ctx context.Context, subscription
 		client, ok := s.clients.Provision(sn.NodeID)
 		if !ok {
 			errs = append(errs, fmt.Errorf("node %d: client is not configured", sn.NodeID))
+			result.Failed++
 
 			continue
 		}
@@ -1428,6 +1437,7 @@ func (s *SyncService) ResetSubscriptionTraffic(ctx context.Context, subscription
 		provision, provErr := s.buildNodeProvision(ctx, sub, sn.NodeID, profileDefault)
 		if provErr != nil {
 			errs = append(errs, fmt.Errorf("node %d: %w", sn.NodeID, provErr))
+			result.Failed++
 
 			continue
 		}
@@ -1435,14 +1445,15 @@ func (s *SyncService) ResetSubscriptionTraffic(ctx context.Context, subscription
 		resetErr := client.ResetTraffic(ctx, provision)
 		if resetErr != nil {
 			errs = append(errs, fmt.Errorf("node %d: reset traffic: %w", sn.NodeID, resetErr))
+			result.Failed++
 
 			continue
 		}
 
-		reset++
+		result.Reset++
 	}
 
-	return reset, errors.Join(errs...)
+	return result, errors.Join(errs...)
 }
 
 // activeBindingNodeIDs builds the set of node IDs a subscription is actively

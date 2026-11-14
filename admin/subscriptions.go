@@ -47,7 +47,7 @@ type SubscriptionActions interface {
 // subscription. Both live on *service.SyncService, so the panel takes one
 // dependency instead of two views of the same object.
 type SubscriptionSyncActions interface {
-	ResetSubscriptionTraffic(ctx context.Context, subscriptionID uint) (int, error)
+	ResetSubscriptionTraffic(ctx context.Context, subscriptionID uint) (service.TrafficResetResult, error)
 	// SyncSubscription re-runs the reconciler for one subscription: pending_add,
 	// pending_update and pending_remove bindings are pushed to the nodes. It is
 	// idempotent and safe to call for any status.
@@ -342,7 +342,7 @@ func (s *Server) handleResetSubscriptionTraffic(w http.ResponseWriter, r *http.R
 	}
 
 	reset, err := s.subSync.ResetSubscriptionTraffic(service.WithAuditAdmin(r.Context(), 0), id)
-	if reset == 0 {
+	if reset.Reset == 0 {
 		// Ни один узел не ответил — счётчик не изменился нигде.
 		writeError(w, http.StatusConflict, "in_use", "no active nodes answered the reset",
 			map[string]any{"nodes": 0})
@@ -350,19 +350,16 @@ func (s *Server) handleResetSubscriptionTraffic(w http.ResponseWriter, r *http.R
 	}
 
 	// Аудит пишется всегда, даже при частичном сбое (ТЗ §6). Число упавших
-	// узлов равно числу агрегированных ошибок.
-	failed := 0
-	if err != nil {
-		failed = strings.Count(err.Error(), "\n") + 1
-	}
+	// узлов приходит типизированным результатом, а не парсингом текста ошибки.
+	failed := reset.Failed
 
-	auditErr := s.subs.InsertAuditLog(r.Context(), database.AuditTrafficReset(sub, reset, failed))
+	auditErr := s.subs.InsertAuditLog(r.Context(), database.AuditTrafficReset(sub, reset.Reset, failed))
 	if auditErr != nil {
 		// Журнал не влияет на бизнес-операцию: сброс уже выполнен.
 		logger.Warn("admin: traffic_reset audit failed", zap.Error(auditErr))
 	}
 
-	payload := map[string]any{"reset_nodes": reset}
+	payload := map[string]any{"reset_nodes": reset.Reset}
 	if err != nil {
 		payload["failed_nodes"] = failed
 		payload["warning"] = "счётчик сброшен не на всех узлах: часть панелей недоступна, повторите позже"
@@ -506,27 +503,13 @@ func toSubscriptionItem(row *database.SubscriptionOverview) subscriptionItem {
 // Whitelist violations and malformed values are bad_request, never silent;
 // limit above the cap is clamped, not rejected.
 func parseSubscriptionFilter(w http.ResponseWriter, r *http.Request) (database.SubscriptionFilter, bool) {
-	f := database.SubscriptionFilter{Limit: subscriptionsDefaultLimit}
+	shared, ok := parseListParams(w, r, subscriptionsDefaultLimit, subscriptionsMaxLimit, subscriptionSortColumns)
+	if !ok {
+		return database.SubscriptionFilter{}, false
+	}
+	f := database.SubscriptionFilter{Limit: shared.Limit, Offset: shared.Offset, Sort: shared.Sort, Desc: shared.Desc}
 
 	query := r.URL.Query()
-
-	if raw := query.Get("limit"); raw != "" {
-		limit, err := strconv.Atoi(raw)
-		if err != nil || limit <= 0 {
-			writeError(w, http.StatusBadRequest, "bad_request", "limit must be a positive integer")
-			return f, false
-		}
-		f.Limit = min(limit, subscriptionsMaxLimit)
-	}
-
-	if raw := query.Get("offset"); raw != "" {
-		offset, err := strconv.Atoi(raw)
-		if err != nil || offset < 0 {
-			writeError(w, http.StatusBadRequest, "bad_request", "offset must be a non-negative integer")
-			return f, false
-		}
-		f.Offset = offset
-	}
 
 	if raw := query.Get("status"); raw != "" {
 		if !subscriptionStatuses[raw] {
@@ -555,25 +538,6 @@ func parseSubscriptionFilter(w http.ResponseWriter, r *http.Request) (database.S
 			return f, false
 		}
 		f.ExpiringIn = time.Duration(hours) * time.Hour
-	}
-
-	if raw := query.Get("sort"); raw != "" {
-		if !subscriptionSortColumns[raw] {
-			writeError(w, http.StatusBadRequest, "bad_request", "unknown sort column")
-			return f, false
-		}
-		f.Sort = raw
-	}
-
-	switch raw := query.Get("order"); raw {
-	case "":
-		f.Desc = true
-	case "desc":
-		f.Desc = true
-	case "asc":
-	default:
-		writeError(w, http.StatusBadRequest, "bad_request", "order must be asc or desc")
-		return f, false
 	}
 
 	return f, true

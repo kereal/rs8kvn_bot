@@ -25,8 +25,8 @@ type fakeSubSyncActions struct {
 	lastSyncID uint
 }
 
-func (f *fakeSubSyncActions) ResetSubscriptionTraffic(context.Context, uint) (int, error) {
-	return 0, nil
+func (f *fakeSubSyncActions) ResetSubscriptionTraffic(context.Context, uint) (service.TrafficResetResult, error) {
+	return service.TrafficResetResult{}, nil
 }
 
 func (f *fakeSubSyncActions) SyncSubscription(_ context.Context, subscriptionID uint) error {
