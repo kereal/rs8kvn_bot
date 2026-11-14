@@ -1,12 +1,19 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
-  import { formatDate } from '../lib/format.js'
+  import { formatDate, formatMoney } from '../lib/format.js'
 
   /** @type {import('../lib/types.js').Overview|null} */
   let data = $state(null)
   let loading = $state(true)
   let error = $state('')
+
+  /** @type {import('../lib/types.js').RevenueResponse|null} */
+  let revenue = $state(null)
+  let revenueDays = $state(30)
+  // Выручка грузится отдельно и молча: сбой агрегата не должен гасить весь
+  // экран «Состояние» — карточка показывает «—», остальное остаётся живым.
+  let revenueError = $state(false)
 
   async function load() {
     loading = true
@@ -18,6 +25,28 @@
     } finally {
       loading = false
     }
+    loadRevenue()
+  }
+
+  async function loadRevenue() {
+    revenueError = false
+    try {
+      revenue = await api.get(`/admin/api/revenue?days=${revenueDays}`)
+    } catch {
+      revenue = null
+      revenueError = true
+    }
+  }
+
+  function changeRevenueDays() {
+    revenue = null
+    loadRevenue()
+  }
+
+  // Высота столбика в процентах от максимума; нулевые дни — минимальная полоска.
+  function revBarPct(cents) {
+    const max = Math.max(...(revenue?.days || []).map((d) => d.revenue_cents), 1)
+    return Math.max(2, Math.round((cents / max) * 100))
   }
 
   onMount(load)
@@ -151,6 +180,50 @@
     </section>
 
     <section class="panel card">
+      <h2>
+        Выручка
+        <select class="rev-days" bind:value={revenueDays} onchange={changeRevenueDays} aria-label="Период выручки">
+          <option value={7}>7 дней</option>
+          <option value={30}>30 дней</option>
+          <option value={90}>90 дней</option>
+        </select>
+      </h2>
+      {#if revenueError}
+        <div class="kv"><span>—</span><span class="muted">не удалось загрузить</span></div>
+      {:else if !revenue}
+        <div class="kv"><span>—</span><span class="muted">Загружаем…</span></div>
+      {:else if revenue.totals.paid_orders === 0}
+        <div class="kv"><span>Всего</span><span class="muted">Оплат за период нет</span></div>
+        <div class="kv"><span>Отменено / истекло</span><span>{revenue.totals.canceled} / {revenue.totals.expired}</span></div>
+        <div class="rev-chart" role="img" aria-label="Выручка по дням">
+          {#each revenue.days as d (d.date)}
+            <div class="rev-bar zero" style="height:2%" title={`${d.date}: 0 зак. — 0`}></div>
+          {/each}
+        </div>
+      {:else}
+        <div class="kv">
+          <span>Всего</span>
+          <span class="rev-total">
+            {revenue.currency ? formatMoney(revenue.totals.revenue_cents, revenue.currency) : (revenue.totals.revenue_cents / 100).toLocaleString('ru-RU')}
+            {#if !revenue.currency}<span class="muted"> (несколько валют)</span>{/if}
+          </span>
+        </div>
+        <div class="kv"><span>Оплачено</span><span>{revenue.totals.paid_orders} · ср. чек {revenue.currency ? formatMoney(revenue.totals.avg_check_cents, revenue.currency) : (revenue.totals.avg_check_cents / 100).toLocaleString('ru-RU')}</span></div>
+        <div class="kv"><span>Отменено / истекло</span><span>{revenue.totals.canceled} / {revenue.totals.expired}</span></div>
+        <div class="rev-chart" role="img" aria-label="Выручка по дням">
+          {#each revenue.days as d (d.date)}
+            <div
+              class="rev-bar"
+              class:zero={d.revenue_cents === 0}
+              style={`height:${revBarPct(d.revenue_cents)}%`}
+              title={`${d.date}: ${d.orders} зак. — ${d.revenue_cents / 100}`}
+            ></div>
+          {/each}
+        </div>
+      {/if}
+    </section>
+
+    <section class="panel card">
       <h2>Подписки</h2>
       <div class="kv"><span>Всего</span><span class="strong">{data.subscriptions.total}</span></div>
       <div class="badges">
@@ -229,6 +302,46 @@
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.04em;
+  }
+
+  /* Период выручки — маленький селект прямо в заголовке карточки. */
+  .rev-days {
+    margin-left: auto;
+    font-size: 12px;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: inherit;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  .rev-total {
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  /* Мини-гистограмма выручки по дням: чистый div/flex, без зависимостей. */
+  .rev-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 56px;
+    margin-top: 12px;
+  }
+
+  .rev-bar {
+    flex: 1 1 0;
+    min-width: 3px;
+    background: var(--accent);
+    border-radius: 2px 2px 0 0;
+    opacity: 0.85;
+  }
+
+  .rev-bar.zero {
+    background: var(--border);
+    opacity: 1;
   }
 
   .kv {

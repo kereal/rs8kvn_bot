@@ -50,6 +50,39 @@
   let resetBusy = $state(false)
   let syncBusy = $state(false)
 
+  // Живой трафик карточки: отдельный ленивый запрос, основной load() не
+  // блокирует. Ошибка — тихое «—»: карточка не должна ломаться из-за
+  // недоступности узлов.
+  /** @type {import('../lib/types.js').TrafficResponse|null} */
+  let traffic = $state(null)
+  let trafficFailed = $state(false)
+
+  // Класс цвета полосы: <80 % ok, 80–99 % warn, ≥100 % danger.
+  function trafficClass() {
+    const pct = traffic?.percentage ?? 0
+    if (pct >= 100) return 'bar-danger'
+    if (pct >= 80) return 'bar-warn'
+    return 'bar-ok'
+  }
+
+  // Цветной бейдж процента: тот же порог, что у полосы.
+  function pctClass() {
+    const pct = traffic?.percentage ?? 0
+    if (pct >= 100) return 'badge-cancel'
+    if (pct >= 80) return 'badge-warn'
+    return 'badge-ok'
+  }
+
+  async function loadTraffic() {
+    trafficFailed = false
+    try {
+      traffic = await api.get(`/admin/api/subscriptions/${id}/traffic`)
+    } catch {
+      // Тихая деградация: показываем «—», карточка остаётся рабочей.
+      trafficFailed = true
+    }
+  }
+
   // jsonCount считает элементы сохранённого JSON-массива (devices/ips).
   function jsonCount(raw) {
     if (!raw) return 0
@@ -85,6 +118,7 @@
   onMount(() => {
     loadPlans()
     load()
+    loadTraffic()
   })
 
   function statusMeta() {
@@ -404,6 +438,33 @@
         <dd class="mono small">{jsonCount(row.ips)} шт.</dd>
         <dt>Последний запрос</dt>
         <dd>{formatDate(row.last_request)}</dd>
+        <dt>Трафик</dt>
+        <dd>
+          {#if trafficFailed || (!traffic && !trafficFailed)}
+            <span class="muted">—</span>
+          {:else if traffic.unlimited}
+            <span class="muted">Без лимита</span>
+            {#if traffic.reset_info}
+              <div class="muted small">{traffic.reset_info}</div>
+            {/if}
+          {:else if !traffic.available}
+            <span class="muted">Недоступен: нода не ответила</span>
+            {#if traffic.reset_info}
+              <div class="muted small">{traffic.reset_info}</div>
+            {/if}
+          {:else}
+            <div class="traffic-bar {trafficClass()}">
+              <div class="traffic-fill" style="width: {Math.min(traffic.percentage, 100)}%"></div>
+            </div>
+            <div class="traffic-caption">
+              Использовано {traffic.used_gb} из {traffic.limit_gb} ГБ
+              <span class="badge {pctClass()}">{traffic.percentage}%</span>
+            </div>
+            {#if traffic.reset_info}
+              <div class="muted small">{traffic.reset_info}</div>
+            {/if}
+          {/if}
+        </dd>
         <dt>Ссылка подписки</dt>
         <dd class="mono small">
           {row.sub_url}

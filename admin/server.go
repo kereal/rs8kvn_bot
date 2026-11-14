@@ -66,6 +66,7 @@ type Server struct {
 	subs       SubscriptionReadStore
 	subActions SubscriptionActions
 	subSync    SubscriptionSyncActions
+	traffic    TrafficSource // detail card: live traffic read (SetTrafficSource)
 
 	// screen: overview — aggregates over the domain tables (see database
 	// GetOverviewSnapshot) plus the build stamp and uptime.
@@ -167,6 +168,7 @@ func (s *Server) Handler() http.Handler {
 	// --- orders ---
 	mux.HandleFunc("GET /admin/api/orders", s.withAuth(s.handleListOrders))
 	mux.HandleFunc("GET /admin/api/orders/{id}", s.withAuth(s.handleGetOrder))
+	mux.HandleFunc("GET /admin/api/revenue", s.withAuth(s.handleRevenue))
 
 	// --- broadcasts ---
 	mux.HandleFunc("GET /admin/api/broadcasts", s.withAuth(s.handleListBroadcasts))
@@ -193,6 +195,7 @@ func (s *Server) Handler() http.Handler {
 	// --- subscriptions ---
 	mux.HandleFunc("GET /admin/api/subscriptions", s.withAuth(s.handleListSubscriptions))
 	mux.HandleFunc("GET /admin/api/subscriptions/{id}", s.withAuth(s.handleGetSubscription))
+	mux.HandleFunc("GET /admin/api/subscriptions/{id}/traffic", s.withAuth(s.handleGetSubscriptionTraffic))
 	mux.HandleFunc("POST /admin/api/subscriptions/{id}/plan", s.withAuth(s.handleSetSubscriptionPlan))
 	mux.HandleFunc("POST /admin/api/subscriptions/{id}/revoke", s.withAuth(s.handleRevokeSubscription))
 	mux.HandleFunc("POST /admin/api/subscriptions/{id}/reset-traffic", s.withAuth(s.handleResetSubscriptionTraffic))

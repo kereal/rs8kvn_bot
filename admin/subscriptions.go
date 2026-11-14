@@ -54,6 +54,13 @@ type SubscriptionSyncActions interface {
 	SyncSubscription(ctx context.Context, subscriptionID uint) error
 }
 
+// TrafficSource is the narrow service contract for the live traffic read on
+// the detail card. It is the only endpoint that polls 3x-ui nodes, so it is
+// kept out of the list (owner decision) and out of SubscriptionReadStore.
+type TrafficSource interface {
+	GetWithTraffic(ctx context.Context, telegramID int64) (*database.Subscription, *service.TrafficInfo, error)
+}
+
 // SetSubscriptionServices wires the service layer used by the mutating
 // subscription endpoints. Without it the screen stays read-only and mutations
 // answer 503.
@@ -61,6 +68,13 @@ func (s *Server) SetSubscriptionServices(read SubscriptionReadStore, actions Sub
 	s.subs = read
 	s.subActions = actions
 	s.subSync = sync
+}
+
+// SetTrafficSource wires the live traffic read for the detail card
+// (SetSubscriptionServices already wired the rest). Without it the endpoint
+// answers 503: polling nodes is a heavier call than the rest of the screen.
+func (s *Server) SetTrafficSource(ts TrafficSource) {
+	s.traffic = ts
 }
 
 // Screen constants: pagination boundaries and default expiry window (hours).
@@ -176,6 +190,60 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// subscriptionTraffic is the live traffic DTO for the detail card
+// (service.TrafficInfo, display-oriented). unlimited=true — план без лимита:
+// узлы не опрашиваются и UsedGB не meaningful.
+type subscriptionTraffic struct {
+	UsedGB     float64 `json:"used_gb"`
+	LimitGB    int     `json:"limit_gb"`
+	Percentage float64 `json:"percentage"`
+	Unlimited  bool    `json:"unlimited"`
+	Available  bool    `json:"available"`
+	ResetInfo  string  `json:"reset_info"`
+	PlanName   string  `json:"plan_name"`
+}
+
+// handleGetSubscriptionTraffic answers the live «использовано X из Y» read for
+// the detail card. The list never calls this: единственный эндпоинт панели,
+// который опрашивает 3x-ui, поэтому он отдельный и ленивый со стороны SPA.
+func (s *Server) handleGetSubscriptionTraffic(w http.ResponseWriter, r *http.Request) {
+	if s.traffic == nil {
+		writeError(w, http.StatusServiceUnavailable, "internal",
+			"traffic service is not wired into the panel")
+		return
+	}
+
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	// Загрузка строки — чтение через уже доступный store; опрос узлов
+	// происходит дальше в сервисе.
+	sub, err := s.subs.GetByID(r.Context(), id)
+	if err != nil {
+		s.writeSubStoreError(w, "load subscription", err)
+		return
+	}
+
+	_, info, err := s.traffic.GetWithTraffic(r.Context(), sub.TelegramID)
+	if err != nil {
+		// user-initiated read: ошибки наружу по общим правилам ТЗ.
+		s.writeSubActionError(w, "get traffic", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, subscriptionTraffic{
+		UsedGB:     info.UsedGB,
+		LimitGB:    info.LimitGB,
+		Percentage: info.Percentage,
+		Unlimited:  info.LimitGB == 0,
+		Available:  info.Available,
+		ResetInfo:  info.ResetInfo,
+		PlanName:   info.PlanName,
+	})
 }
 
 // buildSubscriptionDetail assembles the detail DTO from three reads: the

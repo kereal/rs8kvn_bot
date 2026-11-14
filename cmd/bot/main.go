@@ -293,6 +293,8 @@ func startAdminServer(cfg *config.Config, dbService *database.Service, subServic
 	// Экран «Подписки»: чтение — из БД, мутации (продление/отзыв/удаление и
 	// сброс трафика) — только через сервисный слой.
 	server.SetSubscriptionServices(dbService, subService, syncSvc)
+	// Живой трафик на карточке подписки: тот же SubscriptionService, что и у бота.
+	server.SetTrafficSource(subService)
 
 	// Deactivate-blocked на экране рассылок вызывает сервис отзыва подписок:
 	// панель только принимает решение, депровижининг идёт через сервис бота.

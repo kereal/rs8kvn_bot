@@ -146,3 +146,152 @@ func (s *Service) GetOrderOverview(ctx context.Context, id uint) (*OrderOverview
 
 	return &row, nil
 }
+
+// RevenueDay — выручка одного дня для экрана «Состояние». Дата — строка UTC
+// "YYYY-MM-DD": панель рисует график по ней без дополнительной обработки.
+type RevenueDay struct {
+	Date         string
+	Orders       int64
+	RevenueCents int64
+}
+
+// RevenueTotals — сводные цифры за тот же период, что и дни.
+type RevenueTotals struct {
+	PaidOrders int64
+	// RevenueCents — сумма фактических списаний (callback_amount_cents,
+	// если провайдер сообщил и списание не нулевое, иначе amount_cents).
+	RevenueCents int64
+	// AvgCheckCents — RevenueCents / PaidOrders, целочисленно; 0 при пустом периоде.
+	AvgCheckCents int64
+	Canceled      int64
+	Expired       int64
+}
+
+// RevenueStats — денежные агрегаты для GET /admin/api/revenue. Pending-заказы
+// выручку не образуют и в totals не входят.
+type RevenueStats struct {
+	Days   []RevenueDay
+	Totals RevenueTotals
+	// Currency — единственная валюта оплаченных заказов периода; "" когда
+	// валют несколько (суммы в разных валютах складывать нельзя).
+	Currency string
+}
+
+// revenueDayRow — строка GROUP BY date(paid_at) из SQLite.
+type revenueDayRow struct {
+	Day     string
+	Orders  int64
+	Revenue int64
+}
+
+// revenuePaidTotalsRow — агрегаты оплаченных заказов одним SELECT'ом.
+type revenuePaidTotalsRow struct {
+	PaidOrders int64
+	Revenue    int64
+}
+
+// revenueStatusCountsRow — отменённые/истёкшие за период одним SELECT'ом.
+type revenueStatusCountsRow struct {
+	Canceled int64
+	Expired  int64
+}
+
+// revenueExpr — выручка одного заказа: фактическое списание, если оно известно
+// и не нулевое, иначе заявленная сумма (миграция 035).
+const revenueExpr = `COALESCE(NULLIF(callback_amount_cents, 0), amount_cents)`
+
+// GetRevenueStats возвращает дневную выручку и сводные цифры за последние days
+// дней (включая сегодня, UTC). days < 1 трактуется как 1. Дни без оплаченных
+// заказов заполняются нулями в Go — SQL не порождает пустые дни. Отменённые и
+// истёкшие считаются по created_at в том же окне (paid_at у них не заполняется);
+// оплаченные — по paid_at.
+func (s *Service) GetRevenueStats(ctx context.Context, days int) (RevenueStats, error) {
+	if days < 1 {
+		days = 1
+	}
+
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	from := today.AddDate(0, 0, -(days - 1))
+	to := today.AddDate(0, 0, 1) // to — исключающая граница следующего дня
+
+	var rows []revenueDayRow
+	err := s.db.WithContext(ctx).Raw(`
+		SELECT date(paid_at) AS day, COUNT(*) AS orders, SUM(`+revenueExpr+`) AS revenue
+		FROM orders
+		WHERE status = ? AND paid_at >= ? AND paid_at < ?
+		GROUP BY date(paid_at)`, OrderStatusPaid, from, to).Scan(&rows).Error
+	if err != nil {
+		return RevenueStats{}, fmt.Errorf("failed to aggregate daily revenue: %w", err)
+	}
+
+	// Заполняем все дни периода нулями и накладываем SQL-итоги по дате.
+	byDay := make(map[string]revenueDayRow, len(rows))
+	for _, row := range rows {
+		byDay[row.Day] = row
+	}
+	dayList := make([]RevenueDay, 0, days)
+	for d := from; d.Before(to); d = d.AddDate(0, 0, 1) {
+		key := d.Format("2006-01-02")
+		day := RevenueDay{Date: key}
+		if row, ok := byDay[key]; ok {
+			day.Orders = row.Orders
+			day.RevenueCents = row.Revenue
+		}
+		dayList = append(dayList, day)
+	}
+
+	var paid revenuePaidTotalsRow
+	err = s.db.WithContext(ctx).Raw(`
+		SELECT COUNT(*) AS paid_orders, COALESCE(SUM(`+revenueExpr+`), 0) AS revenue
+		FROM orders
+		WHERE status = ? AND paid_at >= ? AND paid_at < ?`, OrderStatusPaid, from, to).Scan(&paid).Error
+	if err != nil {
+		return RevenueStats{}, fmt.Errorf("failed to aggregate paid totals: %w", err)
+	}
+
+	var counts revenueStatusCountsRow
+	err = s.db.WithContext(ctx).Raw(`
+		SELECT
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS canceled,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS expired
+		FROM orders
+		WHERE created_at >= ? AND created_at < ?`, OrderStatusCanceled, OrderStatusExpired, from, to).Scan(&counts).Error
+	if err != nil {
+		return RevenueStats{}, fmt.Errorf("failed to count canceled/expired orders: %w", err)
+	}
+
+	// Валюту отдаём одной строкой только если все оплаченные заказы периода
+	// в одной валюте; иначе суммы несравнимы и currency пуст.
+	var currencies []string
+	err = s.db.WithContext(ctx).Raw(`
+		SELECT DISTINCT currency FROM orders
+		WHERE status = ? AND paid_at >= ? AND paid_at < ?`, OrderStatusPaid, from, to).Scan(&currencies).Error
+	if err != nil {
+		return RevenueStats{}, fmt.Errorf("failed to list revenue currencies: %w", err)
+	}
+
+	stats := RevenueStats{
+		Days: dayList,
+		Totals: RevenueTotals{
+			PaidOrders:    paid.PaidOrders,
+			RevenueCents:  paid.Revenue,
+			AvgCheckCents: avgCheck(paid.Revenue, paid.PaidOrders),
+			Canceled:      counts.Canceled,
+			Expired:       counts.Expired,
+		},
+	}
+	if len(currencies) == 1 {
+		stats.Currency = currencies[0]
+	}
+
+	return stats, nil
+}
+
+// avgCheck — средний чек целочисленно (округление вниз); 0 без заказов.
+func avgCheck(revenue, orders int64) int64 {
+	if orders == 0 {
+		return 0
+	}
+
+	return revenue / orders
+}

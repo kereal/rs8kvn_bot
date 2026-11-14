@@ -298,6 +298,12 @@ func TestAPI_Contract_KeySets(t *testing.T) {
 				"last_sub_request", "nodes", "orders", "subscriptions",
 			},
 		},
+		{
+			name:     "revenue",
+			method:   http.MethodGet,
+			path:     "/admin/api/revenue?days=7",
+			expected: []string{"currency", "days", "totals"},
+		},
 	}
 
 	for _, tc := range cases {
@@ -364,6 +370,23 @@ func TestAPI_Contract_KeySets(t *testing.T) {
 			require.True(t, ok, "overview block %q must be a JSON object", name)
 			assert.Equal(t, blocks[name], contractKeys(block), "block %q", name)
 		}
+	})
+
+	// admin/src/views/Overview.svelte — карточка выручки: вложенные блоки
+	// days[i] и totals.
+	t.Run("revenue blocks", func(t *testing.T) {
+		t.Parallel()
+
+		rec := do(t, srv, http.MethodGet, "/admin/api/revenue?days=7", testToken, "")
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+		payload := contractRow(t, rec.Body.Bytes())
+		assert.Equal(t, []string{"date", "orders", "revenue_cents"}, contractKeys(payload["days"].([]any)[0].(map[string]any)))
+		assert.Len(t, payload["days"], 7)
+		assert.Equal(t,
+			[]string{"avg_check_cents", "canceled", "expired", "paid_orders", "revenue_cents"},
+			contractKeys(payload["totals"].(map[string]any)),
+		)
 	})
 
 	// admin/src/views/SubscriptionDetail.svelte — POST sync. warning не входит

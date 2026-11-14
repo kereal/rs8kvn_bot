@@ -32,6 +32,15 @@
 /** Конверт GET /admin/api/plans: total не отдаётся (admin/plans.go). @typedef {{items: Plan[]}} PlanListEnvelope */
 
 /**
+ * GET /admin/api/revenue?days=N — агрегат выручки (admin/revenue.go).
+ * days — ровно N UTC-дат от старых к новым, последний = сегодня, пустые дни нулями.
+ * @typedef {object} RevenueResponse
+ * @property {{date: string, orders: number, revenue_cents: number}[]} days
+ * @property {{paid_orders: number, revenue_cents: number, avg_check_cents: number, canceled: number, expired: number}} totals
+ * @property {string} currency — одна валюта периода или "" если несколько
+ */
+
+/**
  * GET /admin/api/nodes — строка списка нод (admin/nodes.go nodeItem).
  * @typedef {object} Node
  * @property {number} id
@@ -298,6 +307,20 @@
 /** POST /admin/api/subscriptions/{id}/reset-traffic (admin/subscriptions.go). @typedef {{reset_nodes: number, failed_nodes?: number, warning?: string}} ResetTrafficResponse */
 
 /** DELETE /admin/api/subscriptions/{id} (admin/subscriptions.go). @typedef {{id: number, deleted: boolean}} DeleteResponse */
+
+/**
+ * GET /admin/api/subscriptions/{id}/traffic — живой трафик для карточки
+ * деталей (admin/subscriptions.go subscriptionTraffic, service.TrafficInfo).
+ * Отдельный ленивый запрос: список подписок его не вызывает.
+ * @typedef {object} TrafficResponse
+ * @property {number} used_gb
+ * @property {number} limit_gb
+ * @property {number} percentage
+ * @property {boolean} unlimited — план без лимита, узлы не опрашивались
+ * @property {boolean} available — false: ни одна нода не ответила
+ * @property {string} reset_info
+ * @property {string} plan_name
+ */
 
 /**
  * GET /admin/api/overview — снимок «Состояния». Наборы ключей блоков пинует

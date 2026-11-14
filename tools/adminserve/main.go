@@ -73,6 +73,8 @@ func main() {
 
 	server := admin.NewServer(*addr, *token, store)
 	server.SetSubscriptionServices(store, subService, syncService)
+	// Живой трафик карточки подписки — тот же SubscriptionService.
+	server.SetTrafficSource(subService)
 	server.SetBroadcastDeactivator(subService)
 	server.SetBuildInfo(admin.BuildInfo{
 		Version:   "dev",

@@ -261,3 +261,153 @@ func TestGetOrderOverview_FullRow(t *testing.T) {
 	assert.Equal(t, int64(1197), *row.ProviderFeeCents)
 	require.NotNil(t, row.PaidAt)
 }
+
+// seedRevenueBase создаёт план -> продукт -> подписку для тестов выручки.
+func seedRevenueBase(t *testing.T, svc *Service) (*Product, *Subscription) {
+	t.Helper()
+	ctx := context.Background()
+
+	plan := &Plan{Name: "rev-30d", IsActive: true, DevicesLimit: 1, TrafficLimit: 100 << 30}
+	require.NoError(t, svc.CreatePlan(ctx, plan))
+
+	product := &Product{PlanID: plan.ID, Name: "rev product", DurationDays: 30, PriceCents: 10000, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+
+	sub := &Subscription{TelegramID: 222000222, ClientID: "c-rev", SubscriptionID: "s-rev", Status: string(SubscriptionStatusActive), PlanID: plan.ID}
+	require.NoError(t, svc.db.Create(sub).Error)
+
+	return product, sub
+}
+
+func TestGetRevenueStats_DayBucketsAndCallbackFallback(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	product, sub := seedRevenueBase(t, svc)
+
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	yesterday := today.AddDate(0, 0, -1)
+
+	// Вчера: callback известен и ненулевой — выручка по фактическому списанию.
+	paidAt := yesterday.Add(12 * time.Hour)
+	require.NoError(t, svc.db.Create(&Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid,
+		AmountCents: 10000, CallbackAmountCents: new(int64(9700)), Currency: "RUB", PaidAt: &paidAt,
+	}).Error)
+
+	// Сегодня: callback нулевой — фолбэк на amount_cents.
+	paidAtZero := today.Add(9 * time.Hour)
+	require.NoError(t, svc.db.Create(&Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid,
+		AmountCents: 5000, CallbackAmountCents: new(int64(0)), Currency: "RUB", PaidAt: &paidAtZero,
+	}).Error)
+
+	// Сегодня: callback неизвестен (NULL) — тоже фолбэк на amount_cents.
+	paidAtNull := today.Add(10 * time.Hour)
+	require.NoError(t, svc.db.Create(&Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid,
+		AmountCents: 3000, Currency: "RUB", PaidAt: &paidAtNull,
+	}).Error)
+
+	stats, err := svc.GetRevenueStats(ctx, 3)
+	require.NoError(t, err)
+
+	// Окно из 3 дней, заканчивающееся сегодня: [today-2, вчера, сегодня].
+	require.Len(t, stats.Days, 3)
+	assert.Equal(t, today.AddDate(0, 0, -2).Format("2006-01-02"), stats.Days[0].Date)
+	assert.Equal(t, yesterday.Format("2006-01-02"), stats.Days[1].Date)
+	assert.Equal(t, today.Format("2006-01-02"), stats.Days[2].Date)
+
+	// Первый день окна пуст — нулевой, но присутствует в выдаче.
+	assert.Equal(t, int64(0), stats.Days[0].RevenueCents)
+	assert.Equal(t, int64(0), stats.Days[0].Orders)
+
+	assert.Equal(t, int64(9700), stats.Days[1].RevenueCents)
+	assert.Equal(t, int64(1), stats.Days[1].Orders)
+
+	assert.Equal(t, int64(8000), stats.Days[2].RevenueCents)
+	assert.Equal(t, int64(2), stats.Days[2].Orders)
+}
+
+func TestGetRevenueStats_Totals(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	product, sub := seedRevenueBase(t, svc)
+
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+
+	newOrder := func(status OrderStatus, amount int64, paidAt *time.Time, createdAt time.Time) {
+		t.Helper()
+		require.NoError(t, svc.db.Create(&Order{
+			SubscriptionID: sub.ID, ProductID: product.ID, Status: status,
+			AmountCents: amount, Currency: "RUB", PaidAt: paidAt, CreatedAt: createdAt,
+		}).Error)
+	}
+
+	paidYesterday := today.AddDate(0, 0, -1).Add(8 * time.Hour)
+	newOrder(OrderStatusPaid, 2000, &paidYesterday, paidYesterday)
+	paidToday := today.Add(8 * time.Hour)
+	newOrder(OrderStatusPaid, 5000, &paidToday, paidToday)
+	paidToday2 := today.Add(9 * time.Hour)
+	newOrder(OrderStatusPaid, 3000, &paidToday2, paidToday2)
+	pendingToday := today.Add(10 * time.Hour)
+	newOrder(OrderStatusPending, 7000, nil, pendingToday)
+	canceledToday := today.Add(11 * time.Hour)
+	newOrder(OrderStatusCanceled, 7000, nil, canceledToday)
+	expiredToday := today.Add(12 * time.Hour)
+	newOrder(OrderStatusExpired, 7000, nil, expiredToday)
+
+	stats, err := svc.GetRevenueStats(ctx, 2)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(3), stats.Totals.PaidOrders)
+	assert.Equal(t, int64(10000), stats.Totals.RevenueCents)
+	// 10000 / 3 = 3333 (целочисленно).
+	assert.Equal(t, int64(3333), stats.Totals.AvgCheckCents)
+	assert.Equal(t, int64(1), stats.Totals.Canceled)
+	assert.Equal(t, int64(1), stats.Totals.Expired)
+}
+
+func TestGetRevenueStats_Currency(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	product, sub := seedRevenueBase(t, svc)
+
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	paidAt := today.Add(8 * time.Hour)
+	require.NoError(t, svc.db.Create(&Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid,
+		AmountCents: 5000, Currency: "RUB", PaidAt: &paidAt,
+	}).Error)
+
+	stats, err := svc.GetRevenueStats(ctx, 7)
+	require.NoError(t, err)
+	assert.Equal(t, "RUB", stats.Currency)
+
+	// Вторая валюта в оплаченных — currency пуст, суммы несравнимы.
+	require.NoError(t, svc.db.Create(&Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid,
+		AmountCents: 500, Currency: "USD", PaidAt: &paidAt,
+	}).Error)
+
+	stats, err = svc.GetRevenueStats(ctx, 7)
+	require.NoError(t, err)
+	assert.Empty(t, stats.Currency)
+}
+
+func TestGetRevenueStats_DaysClampedToAtLeastOne(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	stats, err := svc.GetRevenueStats(ctx, 0)
+	require.NoError(t, err)
+	assert.Len(t, stats.Days, 1)
+	assert.Equal(t, time.Now().UTC().Format("2006-01-02"), stats.Days[0].Date)
+}

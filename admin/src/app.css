@@ -431,3 +431,27 @@ dialog::backdrop {
 .login-card h1 {
   font-size: 18px;
 }
+
+/* Живой трафик на карточке подписки (SubscriptionDetail.svelte). */
+.traffic-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+  margin: 4px 0 6px;
+}
+
+.traffic-fill {
+  height: 100%;
+  border-radius: 4px;
+}
+
+.traffic-bar.bar-ok .traffic-fill { background: var(--ok); }
+.traffic-bar.bar-warn .traffic-fill { background: var(--warn); }
+.traffic-bar.bar-danger .traffic-fill { background: var(--danger); }
+
+.traffic-caption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
