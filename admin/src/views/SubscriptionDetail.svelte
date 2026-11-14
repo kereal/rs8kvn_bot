@@ -104,6 +104,54 @@
     return (row.nodes || []).filter((node) => node.status !== 'active').length
   }
 
+  // Битовые маски напоминаний: установленный бит = «отправлено». Семантика
+  // битов зафиксирована в internal/database/models.go и не меняется здесь.
+  const EXPIRY_REMINDERS = [
+    { bit: 1 << 0, label: 'за 3 дня', offsetMs: 3 * 864e5 },
+    { bit: 1 << 1, label: 'за 1 день', offsetMs: 1 * 864e5 },
+    { bit: 1 << 2, label: 'за 3 часа', offsetMs: 3 * 36e5 }
+  ]
+  const TRAFFIC_REMINDERS = [
+    { bit: 1 << 0, label: 'израсходовано 90 %' },
+    { bit: 1 << 1, label: 'лимит превышен' },
+    { bit: 1 << 2, label: 'сброс + включение' }
+  ]
+
+  function maskChips(mask, defs) {
+    return defs.map((d) => ({ label: d.label, sent: (mask & d.bit) !== 0 }))
+  }
+
+  function expiryChips() {
+    return maskChips(row.reminders_sent, EXPIRY_REMINDERS)
+  }
+
+  function trafficChips() {
+    return maskChips(row.traffic_reminders_sent, TRAFFIC_REMINDERS)
+  }
+
+  // Группа «о трафике» бессмысленна на бессрочных планах: воркер не считает
+  // трафик при лимите 0. Планы грузятся асинхронно, поэтому до загрузки
+  // считаем группу значимой — деградация безопасна.
+  function planHasTrafficLimit() {
+    const plan = plans.find((p) => p.id === row.plan_id)
+    return !plan || (plan.traffic_limit ?? 0) > 0
+  }
+
+  // Что предстоит: ближайшее неотправленное напоминание об истечении, чей
+  // момент (истечение − порог) ещё в будущем. Для активной подписки с датой.
+  function nextExpiryReminder() {
+    if (row.status !== 'active' || !row.expires_at) return null
+    const expires = new Date(row.expires_at).getTime()
+    const now = Date.now()
+    let best = null
+    for (const r of EXPIRY_REMINDERS) {
+      if (row.reminders_sent & r.bit) continue
+      const due = expires - r.offsetMs
+      if (due > now && (best === null || due < best.due)) best = { label: r.label, due }
+    }
+    return best
+  }
+
   // Принудительная сверка: тот же реконсайлер, что гоняет фоновый воркер,
   // только по одному запросу оператора. 200 с warning означает, что часть
   // панелей не ответила и привязки остались в очереди.
@@ -308,7 +356,40 @@
         <dt>Истекает</dt>
         <dd>{formatDate(row.expires_at)}</dd>
         <dt>Напоминания</dt>
-        <dd>{row.reminders_sent} об истечении · {row.traffic_reminders_sent} о трафике</dd>
+        <dd>
+          <div class="rem-group">
+            <span class="rem-title">об истечении</span>
+            {#each expiryChips() as chip}
+              <span
+                class="rem-chip"
+                class:on={chip.sent}
+                title={chip.sent ? 'Отправлено воркером' : 'Ещё не отправлялось'}
+              >{chip.label}</span>
+            {/each}
+          </div>
+          {#if planHasTrafficLimit()}
+            <div class="rem-group">
+              <span class="rem-title">о трафике</span>
+              {#each trafficChips() as chip}
+                <span
+                  class="rem-chip"
+                  class:on={chip.sent}
+                  title={chip.sent ? 'Отправлено воркером' : 'Порог ещё не достигнут — воркер отправит сам'}
+                >{chip.label}</span>
+              {/each}
+            </div>
+          {:else}
+            <div class="rem-group">
+              <span class="rem-title">о трафике</span>
+              <span class="rem-muted">план без лимита трафика</span>
+            </div>
+          {/if}
+          {#if nextExpiryReminder()}
+            <div class="rem-next">
+              Предстоит: {nextExpiryReminder().label} — {formatDate(new Date(nextExpiryReminder().due).toISOString())}
+            </div>
+          {/if}
+        </dd>
       </dl>
     </section>
 
@@ -529,6 +610,47 @@
 
   .small {
     font-size: 12px;
+  }
+
+  .rem-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+
+  .rem-title {
+    font-size: 12px;
+    color: var(--muted);
+    min-width: 88px;
+  }
+
+  .rem-chip {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 12px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .rem-chip.on {
+    background: var(--ok-soft);
+    border-color: transparent;
+    color: var(--ok);
+  }
+
+  .rem-muted {
+    font-size: 12px;
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  .rem-next {
+    font-size: 12px;
+    color: var(--warn);
   }
 
   .badge-cancel {
