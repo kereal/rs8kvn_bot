@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src/**/*.js", "src/**/*.svelte", "vite.config.js"]
+  "include": ["src/**/*.js", "src/**/*.d.ts", "src/**/*.svelte", "vite.config.js"]
 }

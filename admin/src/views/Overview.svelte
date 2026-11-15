@@ -134,6 +134,11 @@
     return c ? c.slice(0, 7) : '—'
   }
 
+  // Сумма в валюте периода; без валюты — рублёвый формат и пометка «несколько валют».
+  function money(cents) {
+    return revenue?.currency ? formatMoney(cents, revenue.currency) : (cents / 100).toLocaleString('ru-RU')
+  }
+
   // Рендерим только статусы с ненулевым счётчиком: в by_status приходят лишь
   // реально существующие ключи, но и в них нулей быть не должно.
   function badges(byStatus, dict) {
@@ -177,7 +182,10 @@
 </script>
 
 <div class="page-head">
-  <h1>Состояние</h1>
+  <div>
+    <h1>Состояние</h1>
+    <p class="subtitle">Ключевые показатели и очереди</p>
+  </div>
   <button class="btn" onclick={load} disabled={loading}>Обновить</button>
 </div>
 
@@ -189,109 +197,137 @@
 {:else if !data}
   <div class="empty">Загружаем…</div>
 {:else}
-  <div class="grid">
-    <section class="panel card">
-      <h2>Сборка</h2>
-      <div class="kv"><span>Версия</span><span>{data.build.version || '—'}</span></div>
-      <div class="kv"><span>Коммит</span><span class="mono">{shortCommit(data.build.commit)}</span></div>
-      <div class="kv"><span>Собрано</span><span>{formatDate(data.build.build_time)}</span></div>
-      <div class="kv"><span>Аптайм</span><span>{formatUptime(data.build.uptime_seconds)}</span></div>
-    </section>
-
-    <section class="panel card">
-      <h2>База данных</h2>
-      <div class="kv"><span>Файл</span><span class="mono path">{data.database.path || '—'}</span></div>
-      <div class="kv"><span>Размер</span><span>{formatSize(data.database.size_bytes)}</span></div>
-    </section>
-
-    <section class="panel card">
-      <h2>
-        Выручка
-        <select class="rev-days" bind:value={revenueDays} onchange={changeRevenueDays} aria-label="Период выручки">
-          <option value={7}>7 дней</option>
-          <option value={30}>30 дней</option>
-          <option value={90}>90 дней</option>
-        </select>
-      </h2>
+  <div class="kpis">
+    <section class="panel kpi">
+      <span class="kpi-label">Выручка · {revenueDays} дней</span>
       {#if revenueError}
-        <div class="kv"><span>—</span><span class="muted">не удалось загрузить</span></div>
+        <span class="kpi-value">—</span>
+        <span class="kpi-sub">не удалось загрузить</span>
       {:else if !revenue}
-        <div class="kv"><span>—</span><span class="muted">Загружаем…</span></div>
+        <span class="kpi-value">—</span>
+        <span class="kpi-sub">Загружаем…</span>
       {:else if revenue.totals.paid_orders === 0}
-        <div class="kv"><span>Всего</span><span class="muted">Оплат за период нет</span></div>
-        <div class="kv"><span>Отменено / истекло</span><span>{revenue.totals.canceled} / {revenue.totals.expired}</span></div>
-        <div class="rev-chart" role="img" aria-label="Выручка по дням">
-          {#each revenue.days as d (d.date)}
-            <div class="rev-bar zero" style="height:2%" title={`${d.date}: 0 зак. — 0`}></div>
-          {/each}
-        </div>
+        <span class="kpi-value">—</span>
+        <span class="kpi-sub">Оплат за период нет</span>
       {:else}
-        <div class="kv">
-          <span>Всего</span>
-          <span class="rev-total">
-            {revenue.currency ? formatMoney(revenue.totals.revenue_cents, revenue.currency) : (revenue.totals.revenue_cents / 100).toLocaleString('ru-RU')}
-            {#if !revenue.currency}<span class="muted"> (несколько валют)</span>{/if}
-          </span>
-        </div>
-        <div class="kv"><span>Оплачено</span><span>{revenue.totals.paid_orders} · ср. чек {revenue.currency ? formatMoney(revenue.totals.avg_check_cents, revenue.currency) : (revenue.totals.avg_check_cents / 100).toLocaleString('ru-RU')}</span></div>
-        <div class="kv"><span>Отменено / истекло</span><span>{revenue.totals.canceled} / {revenue.totals.expired}</span></div>
-        <div class="rev-chart" role="img" aria-label="Выручка по дням">
-          {#each revenue.days as d (d.date)}
+        <span class="kpi-value">
+          {money(revenue.totals.revenue_cents)}
+          {#if !revenue.currency}<span class="muted kpi-note">(несколько валют)</span>{/if}
+        </span>
+        <span class="kpi-sub">{revenue.totals.paid_orders} оплат · ср. чек {money(revenue.totals.avg_check_cents)}</span>
+      {/if}
+      <select class="period" bind:value={revenueDays} onchange={changeRevenueDays} aria-label="Период выручки">
+        <option value={7}>7 дней</option>
+        <option value={30}>30 дней</option>
+        <option value={90}>90 дней</option>
+      </select>
+    </section>
+
+    <section class="panel kpi">
+      <span class="kpi-label">Активные подписки</span>
+      <span class="kpi-value">{data.subscriptions.by_status?.active ?? 0}</span>
+      <span class="kpi-sub">всего {data.subscriptions.total}</span>
+    </section>
+
+    <section class="panel kpi" class:alert={data.bindings.pending_total > 0}>
+      <span class="kpi-label">Очередь узлов</span>
+      <span class="kpi-value">{data.bindings.pending_total}</span>
+      <span class="kpi-sub">
+        {#if data.bindings.pending_total > 0}
+          старейшая — {formatAge(data.bindings.oldest_pending_at)}
+        {:else}
+          все привязки синхронизированы
+        {/if}
+      </span>
+    </section>
+
+    <section class="panel kpi">
+      <span class="kpi-label">События аудита · 24 ч</span>
+      <span class="kpi-value">{data.audit.events_24h}</span>
+      <span class="kpi-sub">последний /sub — {formatDate(data.last_sub_request)}</span>
+      <span class="kpi-hint">Последний запрос к субсерверу — по нему видно, идёт ли трафик вообще.</span>
+    </section>
+  </div>
+
+  {#if data.bindings.pending_total > 0}
+    <!-- Текст и подсказка о «Пересинхронизировать» — из прежней карточки «Очередь узлов»:
+         предупреждение остаётся полноценным, а не сжатым до одной цифры. -->
+    <div class="notice nav-warn queue-note">
+      В очереди есть несинхронизированные привязки — самая старая: {formatAge(data.bindings.oldest_pending_at)}.
+      Фоновый воркер повторяет попытки сам; кнопка «Пересинхронизировать» в карточке подписки запускает синхронизацию принудительно.
+    </div>
+  {/if}
+
+  <div class="columns">
+    <div class="col-charts">
+
+    <section class="panel card">
+        <h2>
+          Выручка по дням
+          <span class="chart-sum">{revenue ? money(revenue.totals.revenue_cents) : '—'}</span>
+        </h2>
+        {#if revenueError}
+          <div class="empty">не удалось загрузить</div>
+        {:else if !revenue}
+          <div class="empty">Загружаем…</div>
+        {:else if revenue.totals.paid_orders === 0}
+          <div class="chart tall" role="img" aria-label="Выручка по дням">
+            {#each revenue.days as d (d.date)}
+              <div class="bar zero" style="height:2%" title={`${d.date}: 0 зак. — 0`}></div>
+            {/each}
+          </div>
+          <div class="chart-foot">
+            <span>Оплат за период нет</span>
+            <span>Отменено / истекло {revenue.totals.canceled} / {revenue.totals.expired}</span>
+          </div>
+        {:else}
+          <div class="chart tall" role="img" aria-label="Выручка по дням">
+            {#each revenue.days as d (d.date)}
+              <div
+                class="bar"
+                class:zero={d.revenue_cents === 0}
+                style={`height:${revBarPct(d.revenue_cents)}%`}
+                title={`${d.date}: ${d.orders} зак. — ${d.revenue_cents / 100}`}
+              ></div>
+            {/each}
+          </div>
+          <div class="chart-foot">
+            <span>Оплачено {revenue.totals.paid_orders} · ср. чек {money(revenue.totals.avg_check_cents)}</span>
+            <span>Отменено / истекло {revenue.totals.canceled} / {revenue.totals.expired}</span>
+          </div>
+        {/if}
+      </section>
+
+    <section class="panel card">
+        <h2>
+          Истекают за 30 дней
+          <span class="chart-sum">{expiringView.total}</span>
+        </h2>
+        <div class="chart mid" role="img" aria-label="Истечения по дням">
+          {#each expiringView.days as d (d.date)}
             <div
-              class="rev-bar"
-              class:zero={d.revenue_cents === 0}
-              style={`height:${revBarPct(d.revenue_cents)}%`}
-              title={`${d.date}: ${d.orders} зак. — ${d.revenue_cents / 100}`}
+              class="bar exp"
+              class:zero={d.count === 0}
+              style={`height:${expBarPct(d.count)}%`}
+              title={`${d.date}: ${d.count}`}
             ></div>
           {/each}
         </div>
-      {/if}
-    </section>
+        <button class="btn btn-ghost" onclick={openExpiring}>Открыть подписки</button>
+      </section>
+    </div>
 
-    <section class="panel card">
-      <h2>Подписки</h2>
-      <div class="kv"><span>Всего</span><span class="strong">{data.subscriptions.total}</span></div>
-      <div class="badges">
-        {#each badges(data.subscriptions.by_status, SUB_STATUS) as b (b.key)}
-          <span class="badge {b.cls}">{b.label}: {b.count}</span>
-        {/each}
-      </div>
-      <button class="btn btn-ghost" onclick={() => goTo('#/subscriptions')}>Открыть подписки</button>
-    </section>
-
-    <section class="panel card">
-      <h2>Истекают</h2>
-      <div class="kv"><span>За 30 дней</span><span class="strong">{expiringView.total}</span></div>
-      <div class="exp-chart" role="img" aria-label="Истечения по дням">
-        {#each expiringView.days as d (d.date)}
-          <div
-            class="exp-bar"
-            class:zero={d.count === 0}
-            style={`height:${expBarPct(d.count)}%`}
-            title={`${d.date}: ${d.count}`}
-          ></div>
-        {/each}
-      </div>
-      <button class="btn btn-ghost" onclick={openExpiring}>Открыть подписки</button>
-    </section>
-
-    <section class="panel card queue">
-      <h2>Очередь узлов</h2>
-      <div class="big" class:stuck={data.bindings.pending_total > 0}>{data.bindings.pending_total}</div>
-      {#if data.bindings.pending_total > 0}
-        <div class="notice nav-warn">
-          В очереди есть несинхронизированные привязки — самая старая в очереди: {formatAge(data.bindings.oldest_pending_at)}.
-          Фоновый воркер повторяет попытки сам; кнопка «Пересинхронизировать» в карточке подписки запускает синхронизацию принудительно.
+    <div class="col-side">
+      <section class="panel card">
+        <h2>Подписки</h2>
+        <div class="kv"><span>Всего</span><span class="strong">{data.subscriptions.total}</span></div>
+        <div class="badges">
+          {#each badges(data.subscriptions.by_status, SUB_STATUS) as b (b.key)}
+            <span class="badge {b.cls}">{b.label}: {b.count}</span>
+          {/each}
         </div>
-      {:else}
-        <div class="notice notice-ok">Очередь пуста — все привязки синхронизированы.</div>
-      {/if}
-      <div class="badges">
-        {#each badges(data.bindings.by_status, BINDING_STATUS) as b (b.key)}
-          <span class="badge {b.cls}">{b.label}: {b.count}</span>
-        {/each}
-      </div>
-    </section>
+        <button class="btn btn-ghost" onclick={() => goTo('#/subscriptions')}>Открыть подписки</button>
+      </section>
 
     <section class="panel card">
       <h2>Заказы</h2>
@@ -316,11 +352,22 @@
     </section>
 
     <section class="panel card">
-      <h2>Активность</h2>
-      <div class="kv"><span>События аудита за 24 ч</span><span class="strong">{data.audit.events_24h}</span></div>
-      <div class="kv"><span>Последний запрос /sub/:id</span><span>{formatDate(data.last_sub_request)}</span></div>
-      <p class="hint">Это последний запрос к серверу подписок — по нему видно, приходит ли трафик вообще.</p>
+      <h2>Привязки</h2>
+      <div class="badges">
+        {#each badges(data.bindings.by_status, BINDING_STATUS) as b (b.key)}
+          <span class="badge {b.cls}">{b.label}: {b.count}</span>
+        {/each}
+      </div>
     </section>
+
+    <section class="panel card">
+      <h2>Система</h2>
+      <div class="kv"><span>Версия</span><span>{data.build.version || '—'} ({shortCommit(data.build.commit)})</span></div>
+      <div class="kv"><span>Собрано</span><span>{formatDate(data.build.build_time)}</span></div>
+      <div class="kv"><span>Аптайм</span><span>{formatUptime(data.build.uptime_seconds)}</span></div>
+      <div class="kv"><span>База</span><span class="mono path">{data.database.path || '—'} · {formatSize(data.database.size_bytes)}</span></div>
+    </section>
+    </div>
   </div>
 {/if}
 
@@ -329,11 +376,85 @@
 <GlobalSearch />
 
 <style>
-  .grid {
+  /* Макет: строка KPI, затем два столбца — графики слева, статусы справа.
+     Ниже — «Система» в правой колонке; глобальный поиск под всем этим. */
+  .kpis {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .kpi {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 14px 16px;
+  }
+
+  .kpi-label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+
+  .kpi-value {
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .kpi-value:has(.kpi-note) {
+    font-size: 22px;
+  }
+
+  .kpi-sub {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .kpi.alert .kpi-value {
+    color: var(--warn);
+  }
+
+  .kpi-hint {
+    font-size: 11px;
+    color: var(--muted);
+    opacity: 0.85;
+  }
+
+  /* Период выручки — маленький селект в углу KPI-плитки. */
+  .period {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    font-size: 12px;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: inherit;
+  }
+
+  .queue-note {
+    margin-bottom: 16px;
+  }
+
+  .columns {
+    display: grid;
+    grid-template-columns: 3fr 2fr;
     gap: 16px;
     align-items: start;
+  }
+
+  .col-charts,
+  .col-side {
+    display: grid;
+    gap: 16px;
   }
 
   .card {
@@ -347,36 +468,34 @@
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.04em;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
   }
 
-  /* Период выручки — маленький селект прямо в заголовке карточки. */
-  .rev-days {
-    margin-left: auto;
-    font-size: 12px;
-    padding: 2px 6px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg);
-    color: inherit;
+  .chart-sum {
+    font-size: 14px;
     text-transform: none;
     letter-spacing: normal;
-  }
-
-  .rev-total {
-    font-size: 16px;
     font-weight: 600;
   }
 
-  /* Мини-гистограмма выручки по дням: чистый div/flex, без зависимостей. */
-  .rev-chart {
+  /* Гистограммы: общий стиль столбиков для выручки и истечений. */
+  .chart {
     display: flex;
     align-items: flex-end;
     gap: 2px;
-    height: 56px;
-    margin-top: 12px;
   }
 
-  .rev-bar {
+  .chart.tall {
+    height: 130px;
+  }
+
+  .chart.mid {
+    height: 70px;
+  }
+
+  .bar {
     flex: 1 1 0;
     min-width: 3px;
     background: var(--accent);
@@ -384,32 +503,21 @@
     opacity: 0.85;
   }
 
-  .rev-bar.zero {
+  .bar.exp {
+    background: var(--warn);
+  }
+
+  .bar.zero {
     background: var(--border);
     opacity: 1;
   }
 
-  /* Мини-гистограмма истечений: локальная копия стиля выручки (rev-*),
-     чтобы карточки развивались независимо. */
-  .exp-chart {
+  .chart-foot {
     display: flex;
-    align-items: flex-end;
-    gap: 2px;
-    height: 56px;
-    margin-top: 12px;
-  }
-
-  .exp-bar {
-    flex: 1 1 0;
-    min-width: 3px;
-    background: var(--accent);
-    border-radius: 2px 2px 0 0;
-    opacity: 0.85;
-  }
-
-  .exp-bar.zero {
-    background: var(--border);
-    opacity: 1;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--muted);
   }
 
   .kv {
@@ -443,26 +551,19 @@
     margin-top: 8px;
   }
 
-  .queue .big {
-    font-size: 34px;
-    font-weight: 700;
-    line-height: 1.2;
-    margin-bottom: 8px;
-  }
-
-  .queue .big.stuck {
-    color: var(--warn);
-  }
-
   .nav-warn {
     border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
     background: var(--warn-soft);
     color: var(--warn);
   }
 
-  .hint {
-    margin: 8px 0 0;
-    font-size: 13px;
-    color: var(--muted);
+  @media (max-width: 1100px) {
+    .kpis {
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    .columns {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
