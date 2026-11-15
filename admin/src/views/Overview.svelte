@@ -408,8 +408,14 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .kpi-value:has(.kpi-note) {
-    font-size: 22px;
+  /* Пояснение «несколько валют» — отдельной строкой и мелким шрифтом,
+     чтобы число оставалось крупным. */
+  .kpi-value .kpi-note {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    font-weight: 400;
+    letter-spacing: normal;
   }
 
   .kpi-sub {
