@@ -37,8 +37,8 @@ export class ApiError extends Error {
   }
 }
 
-async function request(method, path, body) {
-  const headers = { Accept: 'application/json' }
+async function request(method, path, body, extraHeaders) {
+  const headers = { Accept: 'application/json', ...extraHeaders }
   const token = normalizeToken(getToken())
   // A stale non-ASCII token from an earlier paste would make fetch() throw a
   // TypeError before any request leaves the tab. Treat it as "not signed in".
@@ -91,7 +91,10 @@ export const api = {
   // adding wrappers here: src/lib is shared, and each screen is developed on
   // its own branch (see doc/specs/admin/00-common.md).
   get: (path) => request('GET', path),
-  post: (path, body) => request('POST', path, body),
+  // extraHeaders — для заголовков уровня операции, например Idempotency-Key
+  // при создании рассылки (см. Broadcasts.svelte). Значения должны быть
+  // валидны для fetch() — вызывающий отвечает за их чистоту.
+  post: (path, body, extraHeaders) => request('POST', path, body, extraHeaders),
   put: (path, body) => request('PUT', path, body),
   del: (path) => request('DELETE', path)
 }

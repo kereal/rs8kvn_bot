@@ -27,6 +27,7 @@ type BroadcastStore interface {
 	CountBroadcastAudience(ctx context.Context, f database.BroadcastFilter) (int64, error)
 	GetBroadcast(ctx context.Context, id uint) (*database.Broadcast, error)
 	CreateBroadcast(ctx context.Context, b *database.Broadcast) error
+	ResolveBroadcastCreate(ctx context.Context, b *database.Broadcast) error
 	UpdateBroadcastDraft(ctx context.Context, b *database.Broadcast) error
 	CancelBroadcast(ctx context.Context, id uint, now time.Time) (bool, error)
 	DeleteBroadcast(ctx context.Context, id uint) error
@@ -46,6 +47,9 @@ const (
 	broadcastsMaxLimit     = 200
 	broadcastErrorsPreview = 20
 	broadcastPlannedSlack  = 5 * time.Minute
+	// broadcastIdempotencyKeyMax — максимум символов в Idempotency-Key
+	// после trim (§4: 1..128).
+	broadcastIdempotencyKeyMax = 128
 )
 
 // broadcastStatuses is the closed set of broadcasts.status values (CHECK
@@ -219,6 +223,11 @@ func (s *Server) handlePreviewBroadcast(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleCreateBroadcast(w http.ResponseWriter, r *http.Request) {
+	key, ok := idempotencyKeyFromHeader(w, r)
+	if !ok {
+		return
+	}
+
 	payload, ok := decodeBroadcastPayload(w, r)
 	if !ok {
 		return
@@ -228,12 +237,26 @@ func (s *Server) handleCreateBroadcast(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	b.IdempotencyKey = &key
 
 	// Same field validation as the draft update path: name/text limits and
 	// the filter whitelist live in one place (database.ValidateBroadcastDraft).
 	err := database.ValidateBroadcastDraft(b)
 	if err != nil {
 		s.writeBroadcastStoreError(w, "validate broadcast", err)
+
+		return
+	}
+
+	// Идемпотентность до guard'а аудитории (§4): replay/conflict не зависят
+	// от текущего состава аудитории — после первого создания подписки могли
+	// быть отозваны или удалены, retry того же payload всё равно возвращает
+	// существующую рассылку.
+	err = s.broadcasts.ResolveBroadcastCreate(r.Context(), b)
+	if err != nil {
+		if !writeBroadcastIdempotencyError(w, err) {
+			s.writeBroadcastStoreError(w, "resolve broadcast idempotency", err)
+		}
 
 		return
 	}
@@ -261,7 +284,11 @@ func (s *Server) handleCreateBroadcast(w http.ResponseWriter, r *http.Request) {
 
 	err = s.broadcasts.CreateBroadcast(r.Context(), b)
 	if err != nil {
-		s.writeBroadcastStoreError(w, "create broadcast", err)
+		// Гонка: ключ вставили параллельно после resolve — классифицируем
+		// так же, как и pre-check.
+		if !writeBroadcastIdempotencyError(w, err) {
+			s.writeBroadcastStoreError(w, "create broadcast", err)
+		}
 
 		return
 	}
@@ -269,6 +296,49 @@ func (s *Server) handleCreateBroadcast(w http.ResponseWriter, r *http.Request) {
 	s.logBroadcastAudit(r.Context(), database.AuditBroadcastCreated(b))
 
 	writeJSON(w, http.StatusCreated, toBroadcastDetail(b))
+}
+
+// writeBroadcastIdempotencyError рендерит replay (201 + существующая деталь,
+// без второго broadcast_created) и conflict (409 + details.existing_id);
+// false — ошибка другого рода, обрабатывается вызывающим.
+func writeBroadcastIdempotencyError(w http.ResponseWriter, err error) bool {
+	var (
+		replay   *database.BroadcastIdempotencyReplayError
+		conflict *database.BroadcastIdempotencyConflictError
+	)
+
+	switch {
+	case errors.As(err, &replay):
+		// Повтор того же payload: возвращаем существующую рассылку как
+		// есть, без второй строки и без второго broadcast_created (§4).
+		writeJSON(w, http.StatusCreated, toBroadcastDetail(&replay.Existing))
+	case errors.As(err, &conflict):
+		writeError(w, http.StatusConflict, "conflict", "idempotency key already used with a different payload",
+			map[string]any{"existing_id": conflict.Existing.ID})
+	default:
+		return false
+	}
+
+	return true
+}
+
+// idempotencyKeyFromHeader читает и валидирует Idempotency-Key: после trim
+// обязателен и не длиннее 128 символов (§4). Нарушение — 400 validation.
+func idempotencyKeyFromHeader(w http.ResponseWriter, r *http.Request) (string, bool) {
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+
+	switch {
+	case key == "":
+		writeError(w, http.StatusBadRequest, "validation", "idempotency key is required",
+			map[string]any{"idempotency_key": "заголовок Idempotency-Key обязателен"})
+	case len(key) > broadcastIdempotencyKeyMax:
+		writeError(w, http.StatusBadRequest, "validation", "idempotency key is too long",
+			map[string]any{"idempotency_key": "не длиннее 128 символов"})
+	default:
+		return key, true
+	}
+
+	return "", false
 }
 
 func (s *Server) handleUpdateBroadcast(w http.ResponseWriter, r *http.Request) {

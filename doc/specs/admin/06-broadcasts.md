@@ -42,9 +42,16 @@ CREATE TABLE broadcasts (
   retry_at DATETIME, retry_count INTEGER NOT NULL DEFAULT 0,
   delivery_report TEXT NOT NULL DEFAULT '{}',
   recipients_state TEXT NOT NULL DEFAULT '{"snapshot":false,"recipients":[]}',
+  idempotency_key TEXT,                      -- миграция 042, уникальный индекс; NULL = без ключа
   created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL
 );
 ```
+
+`idempotency_key` (миграция `042_broadcast_idempotency_key`): nullable,
+уникальный индекс `idx_broadcasts_idempotency_key`. NULL — рассылки без
+ключа (internal/legacy создания); в SQLite уникальный индекс допускает
+несколько NULL. Существующие строки backfill'ятся значениями `legacy:<id>`.
+Down-миграция удаляет индекс и колонку.
 
 `BroadcastFilter` (`internal/database/broadcasts.go`):
 
@@ -81,6 +88,10 @@ CREATE TABLE broadcasts (
 | create | неизвестное значение `plan_type`/`subscription_status` | `400 validation` `details.filters` |
 | create | `planned_at` в прошлом более чем на 5 минут | `400 validation` `details.planned_at` |
 | create | аудитория пуста | `409 in_use`, `details.audience=0` |
+| create | нет заголовка `Idempotency-Key` (после trim пусто) | `400 validation`, `details.idempotency_key` |
+| create | `Idempotency-Key` длиннее 128 символов | `400 validation`, `details.idempotency_key` |
+| create | тот же ключ, другой payload | `409 conflict`, `details.existing_id` |
+| create replay | тот же ключ, тот же payload | `201` + деталь существующей рассылки, **без** нового `broadcast_created` |
 | update | статус ≠ `scheduled` (уже пишется или завершена) | `409 in_use`, `details.status` |
 | cancel | статус не `scheduled`/`running` | `409 stale` |
 | delete | статус `running` | `409 in_use` |
@@ -156,7 +167,7 @@ CREATE TABLE broadcasts (
 |---|---|---|---|
 | GET | `/admin/api/broadcasts` | `?limit=&offset=&status=` | `{"items":[…],"total":N}` |
 | GET | `/admin/api/broadcasts/{id}` | — | деталь |
-| POST | `/admin/api/broadcasts` | broadcast | `201` + деталь |
+| POST | `/admin/api/broadcasts` | broadcast + header `Idempotency-Key` | `201` + деталь; replay — та же деталь без второго аудита, конфликт payload — `409 conflict` |
 | PUT | `/admin/api/broadcasts/{id}` | broadcast | `200` + деталь |
 | POST | `/admin/api/broadcasts/{id}/cancel` | — | `200` + деталь |
 | POST | `/admin/api/broadcasts/{id}/retry` | — | `200` + деталь |
@@ -220,6 +231,35 @@ DTO списка:
 
 `planned_at: null` = «отправить при ближайшем тике».
 
+### Идемпотентность создания (миграция 042)
+
+`POST /admin/api/broadcasts` требует заголовок `Idempotency-Key`: после trim
+1..128 символов, иначе `400 validation` с `details.idempotency_key`.
+
+- **Replay**: тот же ключ + тот же payload (`name`, `message_text`,
+  `filters`, `planned_at`) → `201` с деталью существующей рассылки (тот же
+  `id`); новая строка не создаётся, `broadcast_created` в аудит пишется
+  один раз — на первое создание. Replay **не зависит от текущей
+  аудитории**: если после первого создания все подписки отозваны или
+  удалены, повтор того же ключа и payload всё равно возвращает `201`, а не
+  `409 in_use` — классификация ключа выполняется до guard'а пустой
+  аудитории (`ResolveBroadcastCreate` в `BroadcastStore`).
+- **Conflict**: тот же ключ с другим payload → `409 conflict`,
+  `details.existing_id` — id существующей рассылки.
+- Гонка между pre-check и вставкой закрывается в `CreateBroadcast`:
+  после любой ошибки вставки существующая строка перечитывается и
+  классифицируется заново — клиент получает replay или conflict, но не 500;
+  строку с ключом уже удалили — возвращается исходная ошибка вставки.
+
+Сравниваются только поля payload; статусы/счётчики, которые меняет воркер,
+на идемпотентность не влияют.
+
+UI (`Broadcasts.svelte`): ключ генерируется через `crypto.getRandomValues`
+при открытии формы, сохраняется между попытками отправки одного payload
+(retry после сетевой ошибки возвращает уже созданную рассылку, а не дубль)
+и пересоздаётся при изменении любого поля payload; повторный клик по
+«Отправить» при `saving=true` отбрасывается.
+
 ## 5. Сервер
 
 Файл `internal/database/broadcasts_admin.go`:
@@ -251,7 +291,18 @@ func (s *Service) ResetBroadcastRetry(ctx context.Context, id uint, now time.Tim
   `retry_at=NULL`, `last_error` сохраняется; иначе `ErrBroadcastLocked`.
 
 Sentinel-ошибки: `ErrBroadcastInvalid`, `ErrBroadcastLocked`,
-`ErrBroadcastAudienceEmpty`, `ErrBroadcastNotFound` (существует).
+`ErrBroadcastAudienceEmpty`, `ErrBroadcastNotFound` (существует),
+`ErrBroadcastIdempotencyConflict` и `ErrBroadcastIdempotencyReplay`
+(миграция 042); две последние разворачиваются из типизированных
+`*BroadcastIdempotencyConflictError` / `*BroadcastIdempotencyReplayError`,
+несущих `Existing Broadcast` — id существующей строки для ответа 409/201.
+
+`CreateBroadcast` идемпотентен при заданном `IdempotencyKey`:
+pre-check по ключу, вставка, при ошибке вставки — повторный lookup и
+классификация (replay/conflict) по payload. Сигнатура метода не
+меняется (24 вызова в репозитории). Хендлер вызывает
+`ResolveBroadcastCreate` до guard'а пустой аудитории, чтобы replay/conflict
+не зависели от её текущего состава.
 
 Хендлеры `admin/broadcasts.go` вызывают только эти методы. Отправки нет.
 
@@ -362,6 +413,15 @@ MarkdownV2: `*жирный*`, `_курсив_`, `~зачёркнутый~`, `` `
 на правку running, `200` отмена, `401` без токена, отсутствие
 `delivery_report` в ответе списка.
 
+Идемпотентность создания (`TestAPI_BroadcastsCreate_IdempotencyKey`):
+без ключа — `400 validation` с упоминанием idempotency; ключ длиннее 128
+символов — `400`; тот же ключ + тот же payload дважды — оба ответа `201` с
+одним `id`, в таблице одна строка, `broadcast_created` в аудите один;
+тот же ключ с другим payload — `201`/`409 conflict`, строка одна;
+regression: после первого создания аудитория опустела (подписка отозвана) —
+retry того же ключа и payload возвращает `201` с тем же `id`, одна строка,
+один audit, конфликт с другим payload по-прежнему `409`.
+
 Предпросмотр: `200` с точным числом получателей и разобранным текстом,
 таблица `broadcasts` после превью пуста, пустая аудитория — `200` с нулём,
 невалидный черновик — `400`, неизвестный фильтр — `400`, без токена — `401`.
@@ -386,6 +446,7 @@ MarkdownV2: `*жирный*`, `_курсив_`, `~зачёркнутый~`, `` `
 - [x] В процессе ровно один `BroadcastWorker` (панель не запускает второй). — проверено: единственный старт — cmd/bot/main.go:686 (StartBroadcastWorker), создание один раз — internal/bot/handler.go:127; в admin/ нет StartBroadcastWorker/NewBroadcastWorker.
 - [x] Деактивация заблокировавших доступна из панели и повторяет поведение бота (revoked + deprovision), включая частичный сбой. — проверено: seam BroadcastDeactivator (admin/broadcasts.go:36-40, admin/server.go:133-138); сервис revoked+deprovision+частичный сбой — internal/service/subscription_deactivate.go; TestDeactivateBlockedBroadcastRecipients_RevokesAndDeprovisions/_ReportsPartialFailure/_RetriesFailedDeprovision, HTTP TestAPI_BroadcastsDeactivate_Completed/_PartialFailure/_Guards.
 - [x] Перед отправкой показывается предпросмотр: точное число получателей, выбранные фильтры, расписание и текст так, как его увидит получатель. Кнопка формы «Просмотр» ничего не создаёт. — проверено: `POST /admin/api/broadcasts/preview` (admin/broadcasts.go) — dry-run без записи в `broadcasts`; разбор текста — `utils.ParseMarkdownV2` (тот же `EscapeMarkdownV2`, что у воркера); UI: `Broadcasts.svelte` — форма → превью → «Назад к форме» / «Отправить N получателям»; тесты TestAPI_BroadcastsPreview/_Guards, TestParseMarkdownV2; живая проверка в браузере: превью показывает 64 получателя, жирный/курсив/зачёркнутый/ссылку и `# Заголовок` обычным текстом, подтверждение создаёт ровно одну рассылку.
+- [x] Создание идемпотентно: `Idempotency-Key` обязателен (после trim 1..128 символов), replay того же payload возвращает ту же рассылку с `201` и одним `broadcast_created` в аудите, тот же ключ с другим payload — `409 conflict`; replay/conflict не зависят от текущей аудитории (классификация до guard'а пустой аудитории). — проверено: миграция 042 (nullable `idempotency_key`, backfill `legacy:<id>`, unique index); `CreateBroadcast` — pre-check + повторный lookup после ошибки вставки, sentinel'ы + `*BroadcastIdempotencyReplayError`/`*BroadcastIdempotencyConflictError` с `Existing` (internal/database/broadcasts.go); хендлер — `idempotencyKeyFromHeader` (400 validation), `ResolveBroadcastCreate` до `CountBroadcastAudience`, replay → `201` без второго аудита, conflict → `409 conflict` (admin/broadcasts.go); UI — `crypto.getRandomValues`, ключ сохраняется для retry и пересоздаётся при изменении payload, guard `saving` (Broadcasts.svelte); тесты — TestAPI_BroadcastsCreate_IdempotencyKey (missing/oversized/replay/conflict/audience-drift).
 
 ## 10. Файлы
 

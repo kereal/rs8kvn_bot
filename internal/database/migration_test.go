@@ -48,19 +48,19 @@ func TestRunMigrationsRejectsDatabaseNewerThanEmbedded(t *testing.T) {
 
 	sqlDB, err := db.db.DB()
 	require.NoError(t, err)
-	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 42, false)
+	_, err = sqlDB.Exec("UPDATE schema_migrations SET version = ?, dirty = ?", 43, false)
 	require.NoError(t, err)
 
 	err = runMigrations(sqlDB)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "newer than the latest embedded migration 41")
+	assert.ErrorContains(t, err, "newer than the latest embedded migration 42")
 
 	var (
 		version int
 		dirty   bool
 	)
 	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
-	assert.Equal(t, 42, version, "более новая схема не переписывается")
+	assert.Equal(t, 43, version, "более новая схема не переписывается")
 	assert.False(t, dirty)
 }
 
@@ -77,7 +77,7 @@ func TestRunMigrationsCollapsesLegacyBroadcastMigration37(t *testing.T) {
 	require.NoError(t, runMigrations(sqlDB))
 	version, dirty, err := migrationState(sqlDB)
 	require.NoError(t, err)
-	assert.Equal(t, uint(41), version)
+	assert.Equal(t, uint(42), version)
 	assert.False(t, dirty)
 }
 
@@ -157,7 +157,7 @@ func TestRunMigrationsRepairsMetadataOnlyAfterCompleteNoTxMigration(t *testing.T
 		dirty   bool
 	)
 	require.NoError(t, sqlDB.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
-	assert.Equal(t, 41, version)
+	assert.Equal(t, 42, version)
 	assert.False(t, dirty)
 }
 
@@ -612,4 +612,67 @@ func TestMigration_033_NormalizesInvalidStatuses(t *testing.T) {
 
 	require.NoError(t, sqlDB.QueryRow(`SELECT status FROM subscriptions WHERE telegram_id = 777002`).Scan(&nullStatus))
 	assert.Equal(t, "revoked", nullStatus)
+}
+
+func TestMigration_042_BackfillsAndUniquesBroadcastIdempotencyKeys(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "broadcast-idempotency.db")
+	sqlDB, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+
+	source, err := iofs.New(migrationFiles, "migrations")
+	require.NoError(t, err)
+	driver, err := sqlite.WithInstance(sqlDB, &sqlite.Config{})
+	require.NoError(t, err)
+	m, err := migrate.NewWithInstance("iofs", source, "sqlite", driver)
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = m.Close() })
+
+	require.NoError(t, m.Migrate(41))
+	for i := range 2 {
+		_, err = sqlDB.Exec(`INSERT INTO broadcasts (name, message_text, created_at, updated_at)
+			VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, fmt.Sprintf("legacy-%d", i), "text")
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, m.Migrate(42))
+
+	rows, err := sqlDB.Query(`SELECT id, idempotency_key FROM broadcasts ORDER BY id`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	keys := make([]string, 0, 2)
+	for rows.Next() {
+		var id uint
+		var key string
+		require.NoError(t, rows.Scan(&id, &key))
+		assert.Equal(t, fmt.Sprintf("legacy:%d", id), key)
+		keys = append(keys, key)
+	}
+	require.NoError(t, rows.Err())
+	assert.Len(t, keys, 2)
+
+	_, err = sqlDB.Exec(`INSERT INTO broadcasts
+		(name, message_text, idempotency_key, created_at, updated_at)
+		VALUES ('duplicate', 'text', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, keys[0])
+	require.Error(t, err, "idempotency key must be unique")
+
+	require.NoError(t, m.Migrate(41))
+	rows, err = sqlDB.Query(`PRAGMA table_info(broadcasts)`)
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal any
+			primaryKey int
+		)
+		require.NoError(t, rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &primaryKey))
+		assert.NotEqual(t, "idempotency_key", name)
+	}
+	require.NoError(t, rows.Err())
 }

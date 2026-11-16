@@ -49,6 +49,26 @@
   /** @type {import('../lib/types.js').BroadcastPreview|null} */
   let preview = $state(null)
 
+  // Идемпотентность создания (ТЗ 06 §4): ключ обязателен, повтор того же
+  // payload с тем же ключом безопасен (сеть моргнула, retry). Ключ
+  // генерируется при открытии формы и пересоздаётся при изменении payload.
+  let idempotencyKey = $state('')
+  let keyPayload = $state('')
+
+  // 128 hex-символов из 64 случайных байт — crypto.getRandomValues, не Math.random.
+  function newIdempotencyKey() {
+    const bytes = new Uint8Array(64)
+    crypto.getRandomValues(bytes)
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  }
+
+  // Сигнатура payload создания: совпадение сигнатуры = тот же payload для
+  // сервера (name, message_text, filters, planned_at).
+  function payloadSignature() {
+    const p = formPayload()
+    return JSON.stringify([p.name, p.message_text, p.filters, p.planned_at])
+  }
+
   function emptyForm() {
     return {
       name: '',
@@ -172,6 +192,19 @@
     return () => clearTimeout(previewTimer)
   })
 
+  // Изменение payload создания (любое поле формы) требует новый ключ:
+  // сервер считает тот же ключ с другим payload конфликтом (409). Ключ
+  // сохраняется между попытками отправки одного payload — retry после
+  // сетевой ошибки вернёт уже созданную рассылку, а не продублирует её.
+  $effect(() => {
+    if (!formOpen || editingID) return
+    const signature = payloadSignature()
+    if (signature !== keyPayload) {
+      idempotencyKey = newIdempotencyKey()
+      keyPayload = signature
+    }
+  })
+
   function textRunes() {
     return [...form.text].length
   }
@@ -186,6 +219,10 @@
     form = emptyForm()
     audience = null
     formError = ''
+    // Свежий ключ на каждое открытие формы: прошлые создания не должны
+    // склеиваться с новым черновиком.
+    idempotencyKey = newIdempotencyKey()
+    keyPayload = payloadSignature()
     formOpen = true
   }
 
@@ -272,7 +309,10 @@
   }
 
   // Шаг 2 → отправка: запрос уходит только после подтверждения в превью.
+  // Повторный клик при сохранении отбрасывается: иначе двойной submit
+  // создал бы две рассылки или конфликт ключей.
   async function doSave() {
+    if (saving) return
     saving = true
     formError = ''
 
@@ -281,7 +321,7 @@
         await api.put(`/admin/api/broadcasts/${editingID}`, formPayload())
         notice = 'Черновик обновлён'
       } else {
-        await api.post('/admin/api/broadcasts', formPayload())
+        await api.post('/admin/api/broadcasts', formPayload(), { 'Idempotency-Key': idempotencyKey })
         notice = plannedISO()
           ? 'Рассылка запланирована'
           : 'Рассылка создана — отправка начнётся при ближайшем тике воркера'

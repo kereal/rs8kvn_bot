@@ -311,6 +311,10 @@ type Broadcast struct {
 	LastError        string     `gorm:"type:text;not null;default:''"`
 	RetryAt          *time.Time `gorm:"index"`
 	RetryCount       int        `gorm:"not null;default:0"`
+	// IdempotencyKey — ключ идемпотентного создания из панели (миграция 042,
+	// уникальный индекс idx_broadcasts_idempotency_key). NULL для рассылок
+	// без ключа: в SQLite уникальный индекс допускает несколько NULL.
+	IdempotencyKey *string `gorm:"index:idx_broadcasts_idempotency_key,unique"`
 	// RecipientsState stores the immutable audience snapshot and per-recipient
 	// delivery state as JSON. It keeps broadcast recovery durable without a
 	// separate recipient table.

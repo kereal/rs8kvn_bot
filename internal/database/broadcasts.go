@@ -125,14 +125,153 @@ func (f BroadcastFilter) MarshalJSON() ([]byte, error) {
 	return json.Marshal((Alias)(f))
 }
 
+// Sentinel-ошибки идемпотентного создания рассылки (миграция 042).
+var (
+	// ErrBroadcastIdempotencyConflict — тот же Idempotency-Key уже занят
+	// рассылкой с другим payload (name, message_text, filters, planned_at).
+	ErrBroadcastIdempotencyConflict = errors.New("idempotency key already used with a different broadcast payload")
+	// ErrBroadcastIdempotencyReplay — повтор создания с тем же ключом и тем
+	// же payload: существующая рассылка возвращается без новой строки.
+	ErrBroadcastIdempotencyReplay = errors.New("broadcast with this idempotency key already exists")
+)
+
+// BroadcastIdempotencyConflictError несёт рассылку, занявшую ключ, чтобы
+// HTTP-слой отдал 409 с её id (§3).
+type BroadcastIdempotencyConflictError struct {
+	Existing Broadcast
+}
+
+func (e *BroadcastIdempotencyConflictError) Error() string {
+	return fmt.Sprintf("%s: existing broadcast id %d", ErrBroadcastIdempotencyConflict, e.Existing.ID)
+}
+
+func (e *BroadcastIdempotencyConflictError) Unwrap() error { return ErrBroadcastIdempotencyConflict }
+
+// BroadcastIdempotencyReplayError несёт существующую рассылку: повтор с тем
+// же ключом и payload возвращает её как есть, без второй строки и без
+// второго audit-события.
+type BroadcastIdempotencyReplayError struct {
+	Existing Broadcast
+}
+
+func (e *BroadcastIdempotencyReplayError) Error() string {
+	return fmt.Sprintf("%s: existing broadcast id %d", ErrBroadcastIdempotencyReplay, e.Existing.ID)
+}
+
+func (e *BroadcastIdempotencyReplayError) Unwrap() error { return ErrBroadcastIdempotencyReplay }
+
 // CreateBroadcast создаёт новую рассылку.
+//
+// Если b.IdempotencyKey задан (панель), создание идемпотентно: тот же ключ
+// с идентичным payload возвращает существующую строку как
+// *BroadcastIdempotencyReplayError, тот же ключ с другим payload —
+// *BroadcastIdempotencyConflictError. Гонка между pre-check и insert
+// закрывается повторным lookup'ом после ошибки вставки: ключ не найден —
+// возвращается исходная ошибка вставки, найден — классификация по payload.
+// Без ключа — обычное создание (NULL в БД).
 func (s *Service) CreateBroadcast(ctx context.Context, b *Broadcast) error {
-	result := s.db.WithContext(ctx).Create(b)
-	if result.Error != nil {
-		return fmt.Errorf("failed to create broadcast: %w", result.Error)
+	key := ""
+	if b.IdempotencyKey != nil {
+		key = strings.TrimSpace(*b.IdempotencyKey)
+	}
+	if key == "" {
+		return s.insertBroadcast(ctx, b)
+	}
+
+	err := s.resolveIdempotency(ctx, b, key)
+	if err != nil {
+		return err
+	}
+
+	err = s.insertBroadcast(ctx, b)
+	if err == nil {
+		return nil
+	}
+
+	// Вставка провалилась (в том числе гонка на уникальном индексе
+	// idx_broadcasts_idempotency_key): перечитываем ключ и классифицируем
+	// заново. Строку с ключом уже удалили — resolveIdempotency вернёт nil,
+	// тогда отдаём исходную ошибку вставки как есть.
+	resolveErr := s.resolveIdempotency(ctx, b, key)
+	if resolveErr != nil {
+		return resolveErr
+	}
+
+	return err
+}
+
+// ResolveBroadcastCreate классифицирует ключ идемпотентности до guard'а
+// аудитории: replay/conflict не должны зависеть от текущего состава
+// аудитории (§4 — аудитория могла опустеть после первого создания).
+// nil — ключ свободен, можно создавать.
+func (s *Service) ResolveBroadcastCreate(ctx context.Context, b *Broadcast) error {
+	key := ""
+	if b.IdempotencyKey != nil {
+		key = strings.TrimSpace(*b.IdempotencyKey)
+	}
+	if key == "" {
+		return nil
+	}
+
+	return s.resolveIdempotency(ctx, b, key)
+}
+
+// insertBroadcast выполняет саму вставку строки рассылки.
+func (s *Service) insertBroadcast(ctx context.Context, b *Broadcast) error {
+	err := s.db.WithContext(ctx).Create(b).Error
+	if err != nil {
+		return fmt.Errorf("failed to create broadcast: %w", err)
 	}
 
 	return nil
+}
+
+// resolveIdempotency ищет рассылку с этим ключом и классифицирует исход:
+// nil — ключ свободен, replay — payload совпал, conflict — различается.
+func (s *Service) resolveIdempotency(ctx context.Context, b *Broadcast, key string) error {
+	existing, err := s.findBroadcastByIdempotencyKey(ctx, key)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return nil
+	}
+	if broadcastPayloadEqual(existing, b) {
+		return &BroadcastIdempotencyReplayError{Existing: *existing}
+	}
+
+	return &BroadcastIdempotencyConflictError{Existing: *existing}
+}
+
+// findBroadcastByIdempotencyKey возвращает nil без ошибки, если ключ свободен.
+func (s *Service) findBroadcastByIdempotencyKey(ctx context.Context, key string) (*Broadcast, error) {
+	var existing Broadcast
+
+	err := s.db.WithContext(ctx).Where("idempotency_key = ?", key).First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lookup broadcast by idempotency key: %w", err)
+	}
+
+	return &existing, nil
+}
+
+// broadcastPayloadEqual сравнивает поля, составляющие payload создания.
+func broadcastPayloadEqual(a, b *Broadcast) bool {
+	if a.Name != b.Name || a.MessageText != b.MessageText || a.Filters != b.Filters {
+		return false
+	}
+
+	switch {
+	case a.PlannedAt == nil && b.PlannedAt == nil:
+		return true
+	case a.PlannedAt == nil || b.PlannedAt == nil:
+		return false
+	default:
+		return a.PlannedAt.Equal(*b.PlannedAt)
+	}
 }
 
 // GetBroadcast возвращает рассылку по ID.

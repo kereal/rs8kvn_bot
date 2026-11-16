@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -75,6 +77,15 @@ func broadcastPayloadJSON(name, text, filters string, planned string) string {
 	return fmt.Sprintf(`{"name":%q,"message_text":%q,"filters":%s,"planned_at":%s}`, name, text, filters, plannedPart)
 }
 
+// doCreateBroadcast отправляет POST /admin/api/broadcasts с валидным
+// уникальным Idempotency-Key — после миграции 042 ключ обязателен (§4).
+func doCreateBroadcast(t *testing.T, srv *Server, key, body string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	return doWithHeaders(t, srv, http.MethodPost, "/admin/api/broadcasts", testToken, body,
+		map[string]string{"Idempotency-Key": key})
+}
+
 func auditRowsByEvent(t *testing.T, db *database.Service, event string) []database.AuditLog {
 	t.Helper()
 
@@ -91,7 +102,7 @@ func TestAPI_BroadcastsCreate(t *testing.T) {
 	seedBroadcastAudience(t, db, 700001, 3)
 
 	body := broadcastPayloadJSON("Чёрная пятница", "Скидки!", "{}", "")
-	rec := do(t, srv, http.MethodPost, "/admin/api/broadcasts", testToken, body)
+	rec := doCreateBroadcast(t, srv, "create-black-friday", body)
 	require.Equal(t, http.StatusCreated, rec.Code)
 
 	var detail map[string]any
@@ -120,12 +131,123 @@ func TestAPI_BroadcastsCreate(t *testing.T) {
 	assert.Contains(t, *rows[0].NewState, "sha256")
 }
 
+func TestAPI_BroadcastsCreate_IdempotencyKey(t *testing.T) {
+	t.Parallel()
+
+	t.Run("missing key is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		srv, db := newTestServer(t)
+		seedBroadcastAudience(t, db, 705001, 1)
+
+		rec := do(t, srv, http.MethodPost, "/admin/api/broadcasts", testToken,
+			broadcastPayloadJSON("Без ключа", "Текст", "{}", ""))
+
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "idempotency")
+	})
+
+	t.Run("oversized key is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		srv, _ := newTestServer(t)
+
+		rec := doCreateBroadcast(t, srv, strings.Repeat("k", 129),
+			broadcastPayloadJSON("Длинный ключ", "Текст", "{}", ""))
+
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "idempotency")
+	})
+
+	t.Run("same request creates one broadcast", func(t *testing.T) {
+		t.Parallel()
+
+		srv, db := newTestServer(t)
+		seedBroadcastAudience(t, db, 705002, 1)
+		body := broadcastPayloadJSON("Один раз", "Текст", "{}", "")
+		headers := map[string]string{"Idempotency-Key": "create-once"}
+
+		first := doWithHeaders(t, srv, http.MethodPost, "/admin/api/broadcasts", testToken, body, headers)
+		second := doWithHeaders(t, srv, http.MethodPost, "/admin/api/broadcasts", testToken, body, headers)
+		require.Equal(t, http.StatusCreated, first.Code, first.Body.String())
+		require.Equal(t, http.StatusCreated, second.Code, second.Body.String())
+
+		var firstDetail, secondDetail map[string]any
+		require.NoError(t, json.Unmarshal(first.Body.Bytes(), &firstDetail))
+		require.NoError(t, json.Unmarshal(second.Body.Bytes(), &secondDetail))
+		assert.Equal(t, firstDetail["id"], secondDetail["id"])
+
+		var broadcasts []database.Broadcast
+		require.NoError(t, db.GetDB().Find(&broadcasts).Error)
+		assert.Len(t, broadcasts, 1)
+		assert.Len(t, auditRowsByEvent(t, db, "broadcast_created"), 1)
+	})
+
+	t.Run("same key with different payload conflicts", func(t *testing.T) {
+		t.Parallel()
+
+		srv, db := newTestServer(t)
+		seedBroadcastAudience(t, db, 705003, 1)
+		headers := map[string]string{"Idempotency-Key": "changed-payload"}
+
+		first := doWithHeaders(t, srv, http.MethodPost, "/admin/api/broadcasts", testToken,
+			broadcastPayloadJSON("Первый", "Текст", "{}", ""), headers)
+		second := doWithHeaders(t, srv, http.MethodPost, "/admin/api/broadcasts", testToken,
+			broadcastPayloadJSON("Другой", "Текст", "{}", ""), headers)
+		require.Equal(t, http.StatusCreated, first.Code, first.Body.String())
+		require.Equal(t, http.StatusConflict, second.Code, second.Body.String())
+
+		var broadcasts []database.Broadcast
+		require.NoError(t, db.GetDB().Find(&broadcasts).Error)
+		assert.Len(t, broadcasts, 1)
+	})
+
+	t.Run("replay ignores current audience", func(t *testing.T) {
+		t.Parallel()
+
+		srv, db := newTestServer(t)
+		seedBroadcastAudience(t, db, 705004, 1)
+		body := broadcastPayloadJSON("Аудитория ушла", "Текст", "{}", "")
+		headers := map[string]string{"Idempotency-Key": "audience-drift"}
+
+		first := doWithHeaders(t, srv, http.MethodPost, "/admin/api/broadcasts", testToken, body, headers)
+		require.Equal(t, http.StatusCreated, first.Code, first.Body.String())
+
+		var created map[string]any
+		require.NoError(t, json.Unmarshal(first.Body.Bytes(), &created))
+
+		// После первого создания аудитория опустела: подписка отозвана.
+		// Retry того же payload обязан вернуть replay, а не 409 audience
+		// empty — идемпотентность не зависит от текущего состава аудитории.
+		require.NoError(t, db.GetDB().Model(&database.Subscription{}).
+			Where("telegram_id = ?", int64(705004)).
+			Update("status", string(database.SubscriptionStatusRevoked)).Error)
+
+		second := doWithHeaders(t, srv, http.MethodPost, "/admin/api/broadcasts", testToken, body, headers)
+		require.Equal(t, http.StatusCreated, second.Code, second.Body.String())
+
+		var replayed map[string]any
+		require.NoError(t, json.Unmarshal(second.Body.Bytes(), &replayed))
+		assert.Equal(t, created["id"], replayed["id"])
+
+		var broadcasts []database.Broadcast
+		require.NoError(t, db.GetDB().Find(&broadcasts).Error)
+		assert.Len(t, broadcasts, 1)
+		assert.Len(t, auditRowsByEvent(t, db, "broadcast_created"), 1)
+
+		// Конфликт тоже не зависит от аудитории: тот же ключ, другой payload.
+		third := doWithHeaders(t, srv, http.MethodPost, "/admin/api/broadcasts", testToken,
+			broadcastPayloadJSON("Другой", "Текст", "{}", ""), headers)
+		require.Equal(t, http.StatusConflict, third.Code, third.Body.String())
+	})
+}
+
 func TestAPI_BroadcastsCreate_EmptyAudience(t *testing.T) {
 	t.Parallel()
 
 	srv, _ := newTestServer(t)
 
-	rec := do(t, srv, http.MethodPost, "/admin/api/broadcasts", testToken,
+	rec := doCreateBroadcast(t, srv, "create-empty-audience",
 		broadcastPayloadJSON("Пусто", "Текст", "{}", ""))
 	require.Equal(t, http.StatusConflict, rec.Code)
 	assert.Contains(t, rec.Body.String(), "in_use")
@@ -154,11 +276,11 @@ func TestAPI_BroadcastsCreate_Validation(t *testing.T) {
 		{"planned in past", broadcastPayloadJSON("Название", "Текст", "{}", "2020-01-01T00:00:00Z"), "planned_at"},
 	}
 
-	for _, tc := range cases {
+	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			rec := do(t, srv, http.MethodPost, "/admin/api/broadcasts", testToken, tc.body)
+			rec := doCreateBroadcast(t, srv, fmt.Sprintf("create-validation-%d", i), tc.body)
 			require.Equal(t, http.StatusBadRequest, rec.Code)
 			assert.Contains(t, rec.Body.String(), "validation")
 			assert.Contains(t, rec.Body.String(), tc.details)
