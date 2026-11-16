@@ -41,12 +41,10 @@ type BroadcastWorker struct {
 	h           *Handler
 	auditReader AuditEventReader
 	mu          sync.Mutex
-	activeMu    sync.Mutex
-	active      map[uint]context.CancelFunc
 }
 
 func NewBroadcastWorker(h *Handler) *BroadcastWorker {
-	return &BroadcastWorker{h: h, auditReader: h.db, active: make(map[uint]context.CancelFunc)}
+	return &BroadcastWorker{h: h, auditReader: h.db}
 }
 
 func (w *BroadcastWorker) Run(ctx context.Context) {
@@ -112,15 +110,7 @@ func (w *BroadcastWorker) processCampaign(ctx context.Context, campaign *databas
 	}()
 
 	campaignCtx, cancel := context.WithTimeout(ctx, broadcastTimeout)
-	w.activeMu.Lock()
-	w.active[campaign.ID] = cancel
-	w.activeMu.Unlock()
-	defer func() {
-		cancel()
-		w.activeMu.Lock()
-		delete(w.active, campaign.ID)
-		w.activeMu.Unlock()
-	}()
+	defer cancel()
 
 	fresh, err := w.h.db.GetBroadcast(campaignCtx, campaign.ID)
 	if err != nil {
@@ -574,33 +564,4 @@ func (w *BroadcastWorker) sendAdminReport(ctx context.Context, campaign *databas
 	}
 	text := fmt.Sprintf("%s\n\n📦 Рассылка #%d: %s\n\n📤 Отправлено: %d\n🚫 Заблокировали бота: %d\n⚠️ Недоступны: %d\n❌ Ошибок: %d", statusText, campaign.ID, campaign.Name, sent, blocked, unreachable, failed)
 	w.h.sendBroadcastReport(ctx, w.h.cfg.TelegramAdminID, text, campaign.ID)
-}
-
-// Cancel cancels a running/scheduled campaign and prevents pending recipients
-// from being claimed by the next worker pass. The bool reports whether the
-// campaign was actually transitioned; (false, nil) means it was already
-// terminal and there was nothing to cancel.
-func (w *BroadcastWorker) Cancel(ctx context.Context, id uint) (bool, error) {
-	canceled, err := w.h.db.CancelBroadcast(ctx, id, time.Now().UTC())
-	if err != nil {
-		return false, fmt.Errorf("cancel broadcast %d: %w", id, err)
-	}
-	w.activeMu.Lock()
-	cancel := w.active[id]
-	w.activeMu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-	return canceled, nil
-}
-
-// RetryFailed makes failed recipients eligible again and reopens the campaign.
-func (w *BroadcastWorker) RetryFailed(ctx context.Context, id uint) error {
-	w.activeMu.Lock()
-	cancel := w.active[id]
-	w.activeMu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-	return w.h.db.ResetBroadcastFailedRecipients(ctx, id, time.Now().UTC())
 }

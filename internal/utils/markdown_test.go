@@ -168,6 +168,75 @@ func TestParseMarkdownV2(t *testing.T) {
 	}
 }
 
+func TestParseMarkdownV2_MalformedStaysLiteral(t *testing.T) {
+	// Незакрытые и битые конструкции остаются обычным текстом: получатель
+	// видит то, что писал админ, а не потерянные куски. Все expected —
+	// независимые литералы, выписанные из спецификации MarkdownV2,
+	// а не выведенные тем же алгоритмом.
+	tests := []struct {
+		name string
+		in   string
+		want []MarkdownRun
+	}{
+		{
+			name: "unclosed italic stays literal",
+			in:   "_не закрыто",
+			want: []MarkdownRun{{Type: "text", Text: "_не закрыто"}},
+		},
+		{
+			name: "unclosed strike stays literal",
+			in:   "~не закрыто",
+			want: []MarkdownRun{{Type: "text", Text: "~не закрыто"}},
+		},
+		{
+			name: "double strike opener stays literal",
+			in:   "~~двойная",
+			want: []MarkdownRun{{Type: "text", Text: "~~двойная"}},
+		},
+		{
+			name: "unclosed inline code stays literal",
+			in:   "`код",
+			want: []MarkdownRun{{Type: "text", Text: "`код"}},
+		},
+		{
+			name: "malformed link without closing paren stays literal",
+			in:   "[текст](без_скобки",
+			want: []MarkdownRun{{Type: "text", Text: "[текст](без_скобки"}},
+		},
+		{
+			name: "escaped backslash collapses to one",
+			in:   "путь\\файл",
+			want: []MarkdownRun{{Type: "text", Text: "путь\\файл"}},
+		},
+		{
+			name: "italic with nested bold keeps both styles",
+			in:   "_курсив с *жирным* внутри_",
+			want: []MarkdownRun{
+				{Type: "text", Text: "курсив с ", Italic: true},
+				{Type: "text", Text: "жирным", Bold: true, Italic: true},
+				{Type: "text", Text: " внутри", Italic: true},
+			},
+		},
+		{
+			name: "empty input yields no runs",
+			in:   "",
+			want: nil,
+		},
+		{
+			name: "lone asterisk stays literal",
+			in:   "*",
+			want: []MarkdownRun{{Type: "text", Text: "*"}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ParseMarkdownV2(tc.in)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestParseMarkdownV2_EscapedTextBecomesLiteral(t *testing.T) {
 	// Точка и решётка экранируются воркером: получатель видит обычный текст.
 	got := ParseMarkdownV2("100 руб. #1")

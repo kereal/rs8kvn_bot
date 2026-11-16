@@ -39,6 +39,9 @@ func newBroadcastSQLiteHandler(t *testing.T, mockBot *testutil.BotAPI) (*Handler
 
 	db, err := testutil.NewTestDatabaseService(t)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, db.Close())
+	})
 	cfg := &config.Config{TelegramAdminID: broadcastTestAdminID}
 	return NewHandler(mockBot, cfg, db, NewTestBotConfig(), nil, ""), db
 }
@@ -521,4 +524,95 @@ func TestBroadcast_StartedEventNotDuplicatedOnResume(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1, started, "resume must not duplicate the started event")
+}
+
+// TestBroadcast_RecipientSendPanicIsolated: паника в отправке одного получателя
+// не срывает процесс кампании. Получатель фиксируется как failed с текстом
+// паники, второй получатель той же партии доставляется; кампания остаётся
+// resumable и переносится на следующий проход. Ловит восстановление в
+// processRecipientSafely без test-only хуков.
+func TestBroadcast_RecipientSendPanicIsolated(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mockBot := testutil.NewBotAPI()
+	handler, db := newBroadcastSQLiteHandler(t, mockBot)
+
+	state := broadcastRecipientsStateJSON(t, []database.BroadcastRecipient{
+		{ID: 1, TelegramID: 111, Status: database.BroadcastRecipientPending, UpdatedAt: time.Now().UTC()},
+		{ID: 2, TelegramID: 222, Status: database.BroadcastRecipientPending, UpdatedAt: time.Now().UTC()},
+	})
+	b := &database.Broadcast{
+		Name: "panic", MessageText: "text",
+		Status: string(database.BroadcastStatusScheduled), RecipientsState: state,
+	}
+	require.NoError(t, db.CreateBroadcast(ctx, b))
+
+	var panicMu sync.Mutex
+	panicked := false
+	mockBot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+		if mc, ok := c.(tgbotapi.MessageConfig); ok && mc.ChatID == 111 {
+			panicMu.Lock()
+			firstPanic := !panicked
+			panicked = true
+			panicMu.Unlock()
+			if firstPanic {
+				panic("telegram send exploded")
+			}
+		}
+		return tgbotapi.Message{MessageID: 1}, nil
+	}
+
+	var processErr error
+	require.NotPanics(t, func() {
+		processErr = handler.broadcastWorker.processCampaign(ctx, b)
+	})
+
+	stored, err := db.GetBroadcast(ctx, b.ID)
+	require.NoError(t, err)
+	// Доменная семантика: ошибка партии (в т.ч. паника получателя) не финализирует
+	// кампанию сразу — она остаётся запущенной и переносится в следующий проход
+	// согласно scheduleRetry, а исход каждого получателя уже зафиксирован.
+	assert.Equal(t, string(database.BroadcastStatusRunning), stored.Status)
+	assert.Equal(t, 1, stored.RetryCount)
+	require.NotNil(t, stored.RetryAt)
+
+	var parsed struct {
+		Recipients []database.BroadcastRecipient `json:"recipients"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stored.RecipientsState), &parsed))
+	require.Len(t, parsed.Recipients, 2)
+
+	var panickedRecipient, deliveredRecipient *database.BroadcastRecipient
+	for i := range parsed.Recipients {
+		switch parsed.Recipients[i].TelegramID {
+		case 111:
+			panickedRecipient = &parsed.Recipients[i]
+		case 222:
+			deliveredRecipient = &parsed.Recipients[i]
+		}
+	}
+	require.NotNil(t, panickedRecipient)
+	require.NotNil(t, deliveredRecipient)
+	assert.Equal(t, database.BroadcastRecipientFailed, panickedRecipient.Status, "panicking recipient is marked failed, not sending")
+	assert.Contains(t, panickedRecipient.LastError, "telegram send exploded")
+	assert.Equal(t, database.BroadcastRecipientSent, deliveredRecipient.Status, "co-recipient from the same batch still delivers")
+
+	total, sent, blocked, unreachable, failed, report, err := db.GetBroadcastRecipientsStats(ctx, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	assert.Equal(t, int64(1), sent)
+	assert.Equal(t, int64(0), blocked)
+	assert.Equal(t, int64(0), unreachable)
+	assert.Equal(t, int64(1), failed)
+	assert.Equal(t, []int64{222}, report.Delivered)
+	assert.Empty(t, report.Blocked)
+	assert.Empty(t, report.Unreachable)
+	require.Len(t, report.Errors, 1)
+	assert.Equal(t, int64(111), report.Errors[0].TelegramID)
+	assert.Contains(t, report.Errors[0].Error, "telegram send exploded")
+	assert.Empty(t, report.NotProcessed)
+
+	require.Error(t, processErr)
+	assert.Contains(t, processErr.Error(), "telegram send exploded")
 }

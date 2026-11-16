@@ -51,7 +51,8 @@ func (s *SubscriptionService) GetNodeLive(ctx context.Context, nodeID uint) (*No
 	defer cancel()
 
 	start := time.Now()
-	if err := reader.Ping(ctx); err != nil {
+	err := reader.Ping(ctx)
+	if err != nil {
 		info.PingError = err.Error()
 
 		return info, nil

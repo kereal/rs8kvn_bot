@@ -207,11 +207,7 @@ func TestListAuditLogPage_PaginationKeepsTotalStable(t *testing.T) {
 	assert.Equal(t, total, secondTotal)
 	require.Len(t, second, 2)
 
-	for _, left := range first {
-		for _, right := range second {
-			assert.NotEqual(t, left.ID, right.ID, "pages must not overlap")
-		}
-	}
+	assertNoPageOverlap(t, func(row AuditLog) uint { return row.ID }, first, second)
 }
 
 func TestListAuditLogPage_ClampsLimit(t *testing.T) {
@@ -268,13 +264,15 @@ func TestListAuditLogPage_DetailsRoundTrip(t *testing.T) {
 	entityID := "5"
 	insertAuditRow(t, svc, &AuditLog{
 		EntityType: EntityOrder, EntityID: &entityID, Event: AuditEventOrderCreated,
-		ActorType: ActorUser, Details: "{}", CreatedAt: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
+		ActorType: ActorUser,
+		Details:   `{"product":"30 дней","amount_cents":39900,"nested":{"paid":true},"ids":[1,2]}`,
+		CreatedAt: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
 	})
 
 	items, _, err := svc.ListAuditLogPage(ctx, AuditLogFilter{})
 	require.NoError(t, err)
 	require.Len(t, items, 1)
-	assert.JSONEq(t, `{}`, items[0].Details)
+	assert.JSONEq(t, `{"product":"30 дней","amount_cents":39900,"nested":{"paid":true},"ids":[1,2]}`, items[0].Details)
 }
 
 func TestListAuditLogPage_InvalidLegacyDetailsDoNotBreakReads(t *testing.T) {

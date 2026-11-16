@@ -3,12 +3,15 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
@@ -57,6 +60,17 @@ func resetAuthLimiter(srv *Server) {
 func do(t *testing.T, srv *Server, method, path, token, body string) *httptest.ResponseRecorder {
 	t.Helper()
 
+	return doWithHeaders(t, srv, method, path, token, body, nil)
+}
+
+func doWithHeaders(
+	t *testing.T,
+	srv *Server,
+	method, path, token, body string,
+	headers map[string]string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
 	var reader *strings.Reader
 	if body == "" {
 		reader = strings.NewReader("")
@@ -67,6 +81,9 @@ func do(t *testing.T, srv *Server, method, path, token, body string) *httptest.R
 	req := httptest.NewRequest(method, path, reader)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	for name, value := range headers {
+		req.Header.Set(name, value)
 	}
 
 	rec := httptest.NewRecorder()
@@ -237,4 +254,63 @@ func TestStart_RequiresToken(t *testing.T) {
 
 	srv := NewServer("127.0.0.1:0", "", nil)
 	require.Error(t, srv.Start())
+}
+
+// TestServerLifecycle_TCP проходит через настоящий TCP-слушатель, а не через
+// httptest: Start на 127.0.0.1:0, реальный HTTP-запрос с bearer-токеном,
+// Stop и отказ соединения после него. Cleanup останавливает сервер, даже если
+// ассерты упали раньше Stop.
+func TestServerLifecycle_TCP(t *testing.T) {
+	t.Parallel()
+
+	srv, _ := newTestServer(t)
+
+	require.NoError(t, srv.Start())
+	// LIFO: остановка панели раньше закрытия тестовой БД.
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		require.NoError(t, srv.Stop(cleanupCtx))
+	})
+
+	addr := srv.Addr()
+	require.NotEmpty(t, addr)
+
+	host, _, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	ip := net.ParseIP(host)
+	require.NotNil(t, ip)
+	require.True(t, ip.IsLoopback(), "bound address must be loopback, got %s", addr)
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	get := func() (int, []byte, error) {
+		req, err := http.NewRequest(http.MethodGet, "http://"+addr+"/admin/api/session", nil)
+		if err != nil {
+			return 0, nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+testToken)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		body, err := io.ReadAll(resp.Body)
+
+		return resp.StatusCode, body, err
+	}
+
+	status, body, err := get()
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, string(body), `"ok":true`)
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, srv.Stop(stopCtx))
+
+	// После Stop слушатель закрыт: соединение должно быть отклонено.
+	_, _, err = get()
+	require.Error(t, err)
 }

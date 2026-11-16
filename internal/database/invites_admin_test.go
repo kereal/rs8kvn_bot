@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -66,11 +65,17 @@ func TestCreateInviteAdmin_GeneratedOriginStillValidatesFormat(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	// The handler generates an 8-char [0-9a-z] code before calling the
-	// repository; the repository accepts it and records origin="generated".
+	// Хендлер генерирует код 8 символов [0-9a-z] до вызова репозитория;
+	// репозиторий принимает его и пишет origin="generated". Проверяем
+	// фактически сохранённые значения, а не регекспом поле, которое
+	// выставил сам тест.
 	invite := &Invite{Code: "a7x9k2m1", ReferrerTGID: 1002}
 	require.NoError(t, svc.CreateInviteAdmin(ctx, invite, InviteOriginGenerated))
-	assert.Regexp(t, regexp.MustCompile(`^[0-9a-z]{8}$`), invite.Code)
+
+	stored, err := svc.GetInviteByCode(ctx, "a7x9k2m1")
+	require.NoError(t, err)
+	assert.Equal(t, "a7x9k2m1", stored.Code, "the requested code must be persisted verbatim")
+	assert.Equal(t, int64(1002), stored.ReferrerTGID)
 
 	events := readInviteAuditEvents(t, svc, "a7x9k2m1")
 	require.Len(t, events, 1)
@@ -99,8 +104,14 @@ func TestCreateInviteAdmin_RejectsBadCode(t *testing.T) {
 			t.Parallel()
 
 			svc := newTestService(t)
+			// Формат кода валидируется одинаково для обоих origin'ов:
+			// проверяем оба в одной таблице без её дублирования.
 			err := svc.CreateInviteAdmin(context.Background(),
 				&Invite{Code: tc.code, ReferrerTGID: 2001}, InviteOriginManual)
+			require.ErrorIs(t, err, ErrInviteInvalid)
+
+			err = svc.CreateInviteAdmin(context.Background(),
+				&Invite{Code: tc.code, ReferrerTGID: 2001}, InviteOriginGenerated)
 			require.ErrorIs(t, err, ErrInviteInvalid)
 		})
 	}

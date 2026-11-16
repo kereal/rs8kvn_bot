@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/kereal/rs8kvn_bot/internal/bot"
@@ -324,4 +328,78 @@ func TestPrintVersionIfRequested(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestStartAdminServer_StartsAndStopsPanel: реальный Start/Stop командной
+// обвязки — панель поднимается на настоящем TCP-слушателе (127.0.0.1:0),
+// отвечает на /admin/api/session с bearer-токеном и останавливается без ошибок.
+// Telegram и внешние сервисы не вызываются: подписки/синк передаются nil и на
+// wiring не разыменовываются.
+func TestStartAdminServer_StartsAndStopsPanel(t *testing.T) {
+	t.Parallel()
+
+	db, err := testutil.NewTestDatabaseService(t)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	cfg := &config.Config{
+		AdminListen: "127.0.0.1:0",
+		AdminToken:  "test-admin-token",
+	}
+
+	srv, err := startAdminServer(cfg, db, nil, nil)
+	require.NoError(t, err)
+	require.NotNil(t, srv)
+	// LIFO: остановка панели раньше закрытия тестовой БД, даже при падении
+	// ассертов ниже.
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		require.NoError(t, srv.Stop(cleanupCtx))
+	})
+
+	addr := srv.Addr()
+	require.NotEmpty(t, addr)
+
+	host, _, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	ip := net.ParseIP(host)
+	require.NotNil(t, ip)
+	require.True(t, ip.IsLoopback(), "bound address must be loopback, got %s", addr)
+
+	req, err := http.NewRequest(http.MethodGet, "http://"+addr+"/admin/api/session", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+cfg.AdminToken)
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, string(body), `"ok":true`)
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, srv.Stop(stopCtx))
+}
+
+// TestStartAdminServer_EmptyTokenDisablesPanel: пустой/пробельный ADMIN_TOKEN
+// полностью выключает панель — сервер не создаётся, слушателя нет.
+func TestStartAdminServer_EmptyTokenDisablesPanel(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		AdminListen: "127.0.0.1:0",
+		AdminToken:  "   ",
+	}
+
+	srv, err := startAdminServer(cfg, nil, nil, nil)
+	require.NoError(t, err)
+	require.Nil(t, srv)
 }

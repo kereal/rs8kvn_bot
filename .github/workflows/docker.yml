@@ -36,6 +36,12 @@ jobs:
 
             - name: Run tests
               run: go test -v -race -coverprofile=coverage.out -timeout 5m ./...
+
+            # Smoke-тесты собираются тегом `smoke`, поэтому обычный прогон ./...
+            # их не исполняет: юнит-зелёный не должен зависеть от окружения
+            # бинаря. Отдельный шаг поднимает бинарь через RUN_SMOKE=1.
+            - name: Run smoke tests
+              run: go test -v -race -tags=smoke -timeout 5m ./tests/smoke
               env:
                   RUN_SMOKE: "1"
 

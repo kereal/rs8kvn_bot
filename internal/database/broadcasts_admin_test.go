@@ -57,15 +57,10 @@ func TestBroadcastAdmin_CountAudience(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), expired)
 
-	// Дедупликация: запрос держит Distinct по telegram_id. Дубль строки
-	// невозможен — subscriptions.telegram_id UNIQUE, поэтому проверяем
-	// согласованность count с числом уникальных id в выборке.
-	count, err = svc.CountBroadcastAudience(ctx, BroadcastFilter{})
-	require.NoError(t, err)
-
-	var ids []int64
-	require.NoError(t, svc.broadcastAudienceQuery(ctx, BroadcastFilter{}).Distinct("telegram_id").Order("telegram_id").Pluck("telegram_id", &ids).Error)
-	assert.Equal(t, len(ids), int(count))
+	// Дедупликация: subscriptions.telegram_id UNIQUE, поэтому отдельно
+	// созданные фикстуры дают независимые известные числа — пустой фильтр
+	// (3) и план free (3) уже проверены выше; дополнительная самопроверка
+	// того же query builder'а здесь не нужна.
 
 	// Триал исключён даже при явном запросе всех статусов.
 	all, err := svc.CountBroadcastAudience(ctx, BroadcastFilter{SubscriptionStatus: "all", PlanType: "free"})
@@ -212,11 +207,7 @@ func TestBroadcastAdmin_ListPagination(t *testing.T) {
 	assert.Equal(t, int64(5), total2, "total stays stable across pages")
 	require.Len(t, second, 2)
 
-	seen := map[uint]bool{}
-	for _, row := range append(append([]BroadcastOverview{}, first...), second...) {
-		require.False(t, seen[row.ID], "pages must not overlap")
-		seen[row.ID] = true
-	}
+	assertNoPageOverlap(t, func(row BroadcastOverview) uint { return row.ID }, first, second)
 
 	last, _, err := svc.ListBroadcastOverviews(ctx, "", 2, 4)
 	require.NoError(t, err)

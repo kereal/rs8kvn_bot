@@ -53,6 +53,59 @@ func TestSubscriptionNodeRepository_GetBySubscriptionID(t *testing.T) {
 	assert.True(t, nodeIDs[node2.ID])
 }
 
+func TestSubscriptionNodeRepository_GetActiveByNodeID(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	plan := &Plan{Name: "test-plan-active-node", DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, svc.db.WithContext(ctx).Create(plan).Error)
+
+	target := &Node{Name: "node-active-target", IsActive: true, Host: "http://at", APIToken: "t1", InboundIDs: `[1]`}
+	other := &Node{Name: "node-active-other", IsActive: true, Host: "http://ao", APIToken: "t2", InboundIDs: `[1]`}
+	require.NoError(t, svc.db.WithContext(ctx).Create(target).Error)
+	require.NoError(t, svc.db.WithContext(ctx).Create(other).Error)
+
+	newSub := func(telegramID int64, clientID string) *Subscription {
+		t.Helper()
+		sub := &Subscription{
+			TelegramID:     telegramID,
+			ClientID:       clientID,
+			SubscriptionID: "sub-" + clientID,
+			Status:         "active",
+			ExpiresAt:      ptrTime(time.Now().Add(24 * time.Hour)),
+			PlanID:         plan.ID,
+		}
+		require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+		return sub
+	}
+
+	// Три биндинга на целевой ноде: только active должен вернуться.
+	activeSub := newSub(111001, "an-client-a")
+	pendingSub := newSub(111002, "an-client-b")
+	removedSub := newSub(111003, "an-client-c")
+	// Четвёртый active, но на другой ноде — не должен попасть в выборку.
+	otherSub := newSub(111004, "an-client-d")
+
+	require.NoError(t, svc.CreateSubscriptionNode(ctx, &SubscriptionNode{SubscriptionID: activeSub.ID, NodeID: target.ID, Status: SyncStatusActive}))
+	require.NoError(t, svc.CreateSubscriptionNode(ctx, &SubscriptionNode{SubscriptionID: pendingSub.ID, NodeID: target.ID, Status: SyncStatusPendingAdd}))
+	require.NoError(t, svc.CreateSubscriptionNode(ctx, &SubscriptionNode{SubscriptionID: removedSub.ID, NodeID: target.ID, Status: SyncStatusPendingRemove}))
+	require.NoError(t, svc.CreateSubscriptionNode(ctx, &SubscriptionNode{SubscriptionID: otherSub.ID, NodeID: other.ID, Status: SyncStatusActive}))
+
+	rows, err := svc.GetActiveByNodeID(ctx, target.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "only the active binding of the target node is returned")
+	assert.Equal(t, activeSub.ID, rows[0].SubscriptionID)
+	assert.Equal(t, target.ID, rows[0].NodeID)
+	assert.Equal(t, SyncStatusActive, rows[0].Status)
+
+	rows, err = svc.GetActiveByNodeID(ctx, other.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, otherSub.ID, rows[0].SubscriptionID)
+}
+
 func TestSubscriptionNodeRepository_GetBySubscriptionID_Empty(t *testing.T) {
 	t.Parallel()
 

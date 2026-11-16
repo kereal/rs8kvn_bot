@@ -19,11 +19,22 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
-	testutil.InitLogger(m)
-	os.Exit(m.Run())
+	err := testutil.InitLogger(m)
+	if err != nil {
+		os.Stderr.WriteString("Failed to initialize logger: " + err.Error() + "\n")
+		os.Exit(1)
+	}
+
+	// Lumberjack держит process-global цикл ротации лог-файла до выхода из
+	// процесса. Тестовые database/sql соединения закрываются через
+	// t.Cleanup, поэтому их opener/cleaner не скрываем.
+	goleak.VerifyTestMain(m,
+		goleak.IgnoreTopFunction("gopkg.in/natefinch/lumberjack%2ev2.(*Logger).millRun"),
+	)
 }
 
 func TestGenerateInviteCode(t *testing.T) {

@@ -200,14 +200,7 @@ func TestListSubscriptionOverviews_Pagination(t *testing.T) {
 	require.Len(t, page1, 2)
 	require.Len(t, page2, 2)
 
-	seen := make(map[uint]bool, len(page1)+len(page2))
-	for i := range page1 {
-		seen[page1[i].ID] = true
-	}
-	for i := range page2 {
-		assert.False(t, seen[page2[i].ID], "pages must not overlap")
-		seen[page2[i].ID] = true
-	}
+	assertNoPageOverlap(t, func(row SubscriptionOverview) uint { return row.ID }, page1, page2)
 }
 
 func TestListSubscriptionOverviews_PlanIDNull(t *testing.T) {
@@ -263,11 +256,53 @@ func TestListSubscriptionOverviews_SortByExpiresAt(t *testing.T) {
 
 	svc := newTestService(t)
 	ctx := context.Background()
-	seedSubscriptionFixtures(t, svc)
 
-	// Сортировка по колонке с NULL: SQL валиден, строки с NULL не роняют запрос.
-	_, _, err := svc.ListSubscriptionOverviews(ctx, SubscriptionFilter{Sort: "expires_at", Desc: false, Limit: 50})
-	require.NoError(t, err)
+	plan := &Plan{Name: "sort-expires-plan", IsActive: true, DevicesLimit: 1, TrafficLimit: 1024}
+	require.NoError(t, svc.CreatePlan(ctx, plan))
+
+	// Известные expires_at; строки вставляются не в порядке сортировки,
+	// чтобы случайное совпадение с ORDER BY id не маскировало сортировку.
+	d1 := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	d2 := d1.Add(24 * time.Hour)
+	d3 := d1.Add(48 * time.Hour)
+
+	// Порядок вставки: d2, d1, d3, NULL — id растут иначе, чем expires_at ASC.
+	rows := []*Subscription{
+		{TelegramID: 411001, ClientID: "c-sort-2d", SubscriptionID: "s-sort-2d", Status: string(SubscriptionStatusActive), PlanID: plan.ID, ExpiresAt: &d2},
+		{TelegramID: 411002, ClientID: "c-sort-1d", SubscriptionID: "s-sort-1d", Status: string(SubscriptionStatusActive), PlanID: plan.ID, ExpiresAt: &d1},
+		{TelegramID: 411003, ClientID: "c-sort-3d", SubscriptionID: "s-sort-3d", Status: string(SubscriptionStatusActive), PlanID: plan.ID, ExpiresAt: &d3},
+		{TelegramID: 411004, ClientID: "c-sort-null", SubscriptionID: "s-sort-null", Status: string(SubscriptionStatusRevoked), PlanID: plan.ID},
+	}
+	for _, row := range rows {
+		require.NoError(t, svc.db.Create(row).Error)
+	}
+
+	wantIDsByExpiry := map[time.Time]uint{
+		d1: rows[1].ID,
+		d2: rows[0].ID,
+		d3: rows[2].ID,
+	}
+
+	list := func(desc bool) []SubscriptionOverview {
+		t.Helper()
+		items, total, err := svc.ListSubscriptionOverviews(ctx, SubscriptionFilter{Sort: "expires_at", Desc: desc, Limit: 50})
+		require.NoError(t, err)
+		require.Equal(t, int64(4), total)
+		require.Len(t, items, 4)
+		return items
+	}
+
+	// ASC: в SQLite NULL первыми, затем по возрастанию expires_at.
+	asc := list(false)
+	assert.Nil(t, asc[0].ExpiresAt, "asc: the NULL row must come first in SQLite ordering")
+	assert.Equal(t, []uint{wantIDsByExpiry[d1], wantIDsByExpiry[d2], wantIDsByExpiry[d3]},
+		[]uint{asc[1].ID, asc[2].ID, asc[3].ID}, "asc: non-NULL rows must follow in ascending order")
+
+	// DESC: по убыванию expires_at, NULL последним.
+	desc := list(true)
+	assert.Equal(t, []uint{wantIDsByExpiry[d3], wantIDsByExpiry[d2], wantIDsByExpiry[d1]},
+		[]uint{desc[0].ID, desc[1].ID, desc[2].ID}, "desc: non-NULL rows must follow in descending order")
+	assert.Nil(t, desc[3].ExpiresAt, "desc: the NULL row must come last")
 }
 
 func TestListSubscriptionOverviews_SingleSQLPerPhase(t *testing.T) {

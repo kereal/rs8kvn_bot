@@ -5,7 +5,6 @@ package database
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -144,10 +143,13 @@ func TestBroadcastRecipientSnapshotIsImmutableAndStoredOnBroadcast(t *testing.T)
 
 	stored, err := svc.GetBroadcast(ctx, b.ID)
 	require.NoError(t, err)
-	assert.NotEmpty(t, stored.RecipientsState)
-	var raw map[string]any
-	require.NoError(t, json.Unmarshal([]byte(stored.RecipientsState), &raw))
-	assert.Equal(t, true, raw["snapshot"])
+	assert.NotEmpty(t, stored.RecipientsState, "snapshot state must be persisted on the broadcast")
+	assert.True(t, BroadcastSnapshotTaken(stored), "second snapshot must not change the publicly observed snapshot flag")
+
+	rows, _, err := svc.ListBroadcastOverviews(ctx, "", 10, 0)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.True(t, rows[0].SnapshotTaken, "list overview must report the taken snapshot")
 }
 
 func TestBroadcastRecipientClaimIsAtomic(t *testing.T) {
