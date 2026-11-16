@@ -51,7 +51,10 @@ func seedRevenueOrder(t *testing.T, db *database.Service) {
 	}
 	require.NoError(t, db.CreateSubscription(ctx, sub, ""))
 
-	paidAt := time.Now().UTC().Truncate(24 * time.Hour).Add(8 * time.Hour)
+	// Оплата фиксируется текущим моментом: окно выручки покрывает
+	// последние дни, поэтому заказ остаётся в окне даже если между
+	// созданием заказа и запросом сменились сутки (00:00 UTC).
+	paidAt := time.Now().UTC()
 	require.NoError(t, db.GetDB().Create(&database.Order{
 		SubscriptionID: sub.ID, ProductID: product.ID, Status: database.OrderStatusPaid,
 		AmountCents: 49900, Currency: "RUB", PaidAt: &paidAt,
@@ -76,13 +79,23 @@ func TestAPI_Revenue(t *testing.T) {
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
 
 		require.Len(t, payload.Days, 5)
-		wantToday := time.Now().UTC().Format("2006-01-02")
-		assert.Equal(t, wantToday, payload.Days[len(payload.Days)-1].Date)
-		// Дни до заказа — нулевые, но присутствуют.
-		for _, day := range payload.Days[:4] {
+		// Дата конкретного дня с заказом не фиксируется: handler сам берёт
+		// time.Now().UTC(). На границе 00:00 UTC заказ остаётся внутри
+		// многодневного окна, но может попасть в предыдущий календарный день.
+		// Проверяем инвариант: ровно один день с заказом, остальные дни окна
+		// нулевые.
+		var paidDays int
+		for _, day := range payload.Days {
+			if day.Orders != 0 || day.RevenueCents != 0 {
+				paidDays++
+				assert.Equal(t, int64(1), day.Orders)
+				assert.Equal(t, int64(49900), day.RevenueCents)
+				continue
+			}
 			assert.Equal(t, int64(0), day.Orders)
 			assert.Equal(t, int64(0), day.RevenueCents)
 		}
+		assert.Equal(t, 1, paidDays)
 		assert.Equal(t, int64(1), payload.Totals.PaidOrders)
 		assert.Equal(t, int64(49900), payload.Totals.RevenueCents)
 		assert.Equal(t, int64(49900), payload.Totals.AvgCheckCents)

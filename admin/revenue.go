@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
@@ -12,7 +13,7 @@ import (
 // RevenueStore is the narrow read contract of the revenue aggregate. The
 // concrete *database.Service satisfies it; the screen never writes anywhere.
 type RevenueStore interface {
-	GetRevenueStats(ctx context.Context, days int) (database.RevenueStats, error)
+	GetRevenueStats(ctx context.Context, days int, now time.Time) (database.RevenueStats, error)
 }
 
 // Screen constants for the days window (P7-style bounds: clamp, never reject
@@ -68,7 +69,7 @@ func (s *Server) handleRevenue(w http.ResponseWriter, r *http.Request) {
 		days = min(max(parsed, revenueMinDays), revenueMaxDays)
 	}
 
-	stats, err := store.GetRevenueStats(r.Context(), days)
+	stats, err := store.GetRevenueStats(r.Context(), days, time.Now().UTC())
 	if err != nil {
 		s.writeStoreError(w, "get revenue stats", err)
 		return

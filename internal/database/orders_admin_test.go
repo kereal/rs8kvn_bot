@@ -185,11 +185,7 @@ func TestListOrderOverviews_Pagination(t *testing.T) {
 	require.Len(t, first, 2)
 	require.Len(t, second, 2)
 	// Страницы не пересекаются, total одинаков на обеих страницах.
-	for _, a := range first {
-		for _, b := range second {
-			assert.NotEqual(t, a.ID, b.ID, "pages must not overlap")
-		}
-	}
+	assertNoPageOverlap(t, func(row OrderOverview) uint { return row.ID }, first, second)
 	assert.Equal(t, int64(4), total1)
 	assert.Equal(t, total1, total2)
 }
@@ -279,6 +275,11 @@ func seedRevenueBase(t *testing.T, svc *Service) (*Product, *Subscription) {
 	return product, sub
 }
 
+// revenueNow — фиксированные «сейчас» для всех тестов выручки: окно дня
+// считается от этого времени, поэтому тесты не зависят от 00:00 UTC и от
+// стенных часов машины.
+var revenueNow = time.Date(2026, 11, 15, 13, 45, 0, 0, time.UTC)
+
 func TestGetRevenueStats_DayBucketsAndCallbackFallback(t *testing.T) {
 	t.Parallel()
 
@@ -286,7 +287,7 @@ func TestGetRevenueStats_DayBucketsAndCallbackFallback(t *testing.T) {
 	ctx := context.Background()
 	product, sub := seedRevenueBase(t, svc)
 
-	today := time.Now().UTC().Truncate(24 * time.Hour)
+	today := revenueNow.Truncate(24 * time.Hour)
 	yesterday := today.AddDate(0, 0, -1)
 
 	// Вчера: callback известен и ненулевой — выручка по фактическому списанию.
@@ -310,7 +311,7 @@ func TestGetRevenueStats_DayBucketsAndCallbackFallback(t *testing.T) {
 		AmountCents: 3000, Currency: "RUB", PaidAt: &paidAtNull,
 	}).Error)
 
-	stats, err := svc.GetRevenueStats(ctx, 3)
+	stats, err := svc.GetRevenueStats(ctx, 3, revenueNow)
 	require.NoError(t, err)
 
 	// Окно из 3 дней, заканчивающееся сегодня: [today-2, вчера, сегодня].
@@ -337,7 +338,7 @@ func TestGetRevenueStats_Totals(t *testing.T) {
 	ctx := context.Background()
 	product, sub := seedRevenueBase(t, svc)
 
-	today := time.Now().UTC().Truncate(24 * time.Hour)
+	today := revenueNow.Truncate(24 * time.Hour)
 
 	newOrder := func(status OrderStatus, amount int64, paidAt *time.Time, createdAt time.Time) {
 		t.Helper()
@@ -360,7 +361,7 @@ func TestGetRevenueStats_Totals(t *testing.T) {
 	expiredToday := today.Add(12 * time.Hour)
 	newOrder(OrderStatusExpired, 7000, nil, expiredToday)
 
-	stats, err := svc.GetRevenueStats(ctx, 2)
+	stats, err := svc.GetRevenueStats(ctx, 2, revenueNow)
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(3), stats.Totals.PaidOrders)
@@ -378,14 +379,14 @@ func TestGetRevenueStats_Currency(t *testing.T) {
 	ctx := context.Background()
 	product, sub := seedRevenueBase(t, svc)
 
-	today := time.Now().UTC().Truncate(24 * time.Hour)
+	today := revenueNow.Truncate(24 * time.Hour)
 	paidAt := today.Add(8 * time.Hour)
 	require.NoError(t, svc.db.Create(&Order{
 		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid,
 		AmountCents: 5000, Currency: "RUB", PaidAt: &paidAt,
 	}).Error)
 
-	stats, err := svc.GetRevenueStats(ctx, 7)
+	stats, err := svc.GetRevenueStats(ctx, 7, revenueNow)
 	require.NoError(t, err)
 	assert.Equal(t, "RUB", stats.Currency)
 
@@ -395,7 +396,7 @@ func TestGetRevenueStats_Currency(t *testing.T) {
 		AmountCents: 500, Currency: "USD", PaidAt: &paidAt,
 	}).Error)
 
-	stats, err = svc.GetRevenueStats(ctx, 7)
+	stats, err = svc.GetRevenueStats(ctx, 7, revenueNow)
 	require.NoError(t, err)
 	assert.Empty(t, stats.Currency)
 }
@@ -406,8 +407,8 @@ func TestGetRevenueStats_DaysClampedToAtLeastOne(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	stats, err := svc.GetRevenueStats(ctx, 0)
+	stats, err := svc.GetRevenueStats(ctx, 0, revenueNow)
 	require.NoError(t, err)
 	assert.Len(t, stats.Days, 1)
-	assert.Equal(t, time.Now().UTC().Format("2006-01-02"), stats.Days[0].Date)
+	assert.Equal(t, revenueNow.Format("2006-01-02"), stats.Days[0].Date)
 }

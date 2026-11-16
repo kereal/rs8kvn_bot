@@ -201,16 +201,18 @@ type revenueStatusCountsRow struct {
 const revenueExpr = `COALESCE(NULLIF(callback_amount_cents, 0), amount_cents)`
 
 // GetRevenueStats возвращает дневную выручку и сводные цифры за последние days
-// дней (включая сегодня, UTC). days < 1 трактуется как 1. Дни без оплаченных
-// заказов заполняются нулями в Go — SQL не порождает пустые дни. Отменённые и
-// истёкшие считаются по created_at в том же окне (paid_at у них не заполняется);
-// оплаченные — по paid_at.
-func (s *Service) GetRevenueStats(ctx context.Context, days int) (RevenueStats, error) {
+// дней (включая «сегодня» — now, UTC). days < 1 трактуется как 1. Дни без
+// оплаченных заказов заполняются нулями в Go — SQL не порождает пустые дни.
+// Отменённые и истёкшие считаются по created_at в том же окне (paid_at у них
+// не заполняется); оплаченные — по paid_at. now передаётся вызывающей
+// стороной (хендлер — time.Now().UTC()): окно фиксируется один раз и не
+// может разъехаться между SQL-запросами на границе суток.
+func (s *Service) GetRevenueStats(ctx context.Context, days int, now time.Time) (RevenueStats, error) {
 	if days < 1 {
 		days = 1
 	}
 
-	today := time.Now().UTC().Truncate(24 * time.Hour)
+	today := now.UTC().Truncate(24 * time.Hour)
 	from := today.AddDate(0, 0, -(days - 1))
 	to := today.AddDate(0, 0, 1) // to — исключающая граница следующего дня
 
