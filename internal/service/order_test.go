@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
@@ -30,7 +29,7 @@ import (
 // the way. Configure createFunc/statusFunc to script failures or statuses.
 type funcPaymentProvider struct {
 	createFunc func(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error)
-	statusFunc func(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error)
+	statusFunc func(context.Context, string) (*platega.TransactionStatusResponse, error)
 }
 
 func (p *funcPaymentProvider) CreateTransaction(ctx context.Context, req platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
@@ -41,7 +40,7 @@ func (p *funcPaymentProvider) CreateTransaction(ctx context.Context, req platega
 	return p.createFunc(ctx, req)
 }
 
-func (p *funcPaymentProvider) GetTransactionStatus(ctx context.Context, id uuid.UUID) (*platega.TransactionStatusResponse, error) {
+func (p *funcPaymentProvider) GetTransactionStatus(ctx context.Context, id string) (*platega.TransactionStatusResponse, error) {
 	if p.statusFunc == nil {
 		return nil, errors.New("status not configured")
 	}
@@ -89,12 +88,12 @@ func TestOrderService_NotifiesAdminForUncertainPayment(t *testing.T) {
 
 func TestOrderService_NotifiesAdminForLateConfirmedPayment(t *testing.T) {
 	adminBot := testutil.NewBotAPI()
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440103")
+	providerID := "550e8400-e29b-41d4-a716-446655440103"
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			expiresAt := time.Now().UTC().Add(-6 * time.Minute)
 
-			return &database.Order{ID: 13, SubscriptionID: 4, ProductID: 8, Status: database.OrderStatusExpired, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String(), PaymentExpiresAt: &expiresAt}, nil
+			return &database.Order{ID: 13, SubscriptionID: 4, ProductID: 8, Status: database.OrderStatusExpired, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID, PaymentExpiresAt: &expiresAt}, nil
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: 4, TelegramID: 43}, nil
@@ -110,14 +109,14 @@ func TestOrderService_NotifiesAdminForLateConfirmedPayment(t *testing.T) {
 	messages := adminBot.GetAllSentMessages()
 	require.Len(t, messages, 1)
 	assert.Contains(t, messages[0].Text, "Late confirmed payment")
-	assert.Contains(t, messages[0].Text, providerID.String())
+	assert.Contains(t, messages[0].Text, providerID)
 	assert.Contains(t, messages[0].Text, "Telegram ID: 43")
 }
 
 func TestOrderService_ActivatesExpiredPaymentWithinSettlementGrace(t *testing.T) {
 	t.Parallel()
 
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440107")
+	providerID := "550e8400-e29b-41d4-a716-446655440107"
 	expiresAt := time.Now().UTC().Add(-4 * time.Minute)
 	order := &database.Order{
 		ID:                17,
@@ -126,7 +125,7 @@ func TestOrderService_ActivatesExpiredPaymentWithinSettlementGrace(t *testing.T)
 		Status:            database.OrderStatusExpired,
 		AmountCents:       2300,
 		Currency:          "RUB",
-		ProviderPaymentID: providerID.String(),
+		ProviderPaymentID: providerID,
 		PaymentExpiresAt:  &expiresAt,
 	}
 	product := &database.Product{ID: 12, PlanID: 2, Name: "Premium", DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}
@@ -134,7 +133,7 @@ func TestOrderService_ActivatesExpiredPaymentWithinSettlementGrace(t *testing.T)
 	casCalls := 0
 
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return order, nil
 		},
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
@@ -179,7 +178,7 @@ func TestOrderService_NotifiesAdminForProviderRejection(t *testing.T) {
 			return &database.Plan{ID: 2, IsActive: true}, nil
 		},
 		MarkPaymentCreationUncertainFunc: func(context.Context, uint, bool) (bool, error) { return true, nil },
-		SavePaymentDetailsFunc:           func(context.Context, uint, uuid.UUID, string, time.Time) error { return nil },
+		SavePaymentDetailsFunc:           func(context.Context, uint, string, string, time.Time) error { return nil },
 	}
 	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{createFunc: func(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
 		return nil, fmt.Errorf("%w: invalid request", platega.ErrBadRequest)
@@ -230,11 +229,11 @@ func TestOrderService_NotifiesAdminWhenProviderOutcomeIsUncertain(t *testing.T) 
 }
 
 func TestRequestPayment_SavesRedirectPaymentDetails(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440106")
+	providerID := "550e8400-e29b-41d4-a716-446655440106"
 	order := &database.Order{ID: 16, SubscriptionID: 7, ProductID: 11, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
 
 	var (
-		savedID     uuid.UUID
+		savedID     string
 		savedURL    string
 		savedExpiry time.Time
 	)
@@ -253,7 +252,7 @@ func TestRequestPayment_SavesRedirectPaymentDetails(t *testing.T) {
 			return &database.Plan{ID: 2, IsActive: true}, nil
 		},
 		MarkPaymentCreationUncertainFunc: func(context.Context, uint, bool) (bool, error) { return true, nil },
-		SavePaymentDetailsFunc: func(_ context.Context, orderID uint, id uuid.UUID, url string, expiry time.Time) error {
+		SavePaymentDetailsFunc: func(_ context.Context, orderID uint, id string, url string, expiry time.Time) error {
 			assert.Equal(t, uint(16), orderID)
 
 			savedID, savedURL, savedExpiry = id, url, expiry
@@ -263,7 +262,7 @@ func TestRequestPayment_SavesRedirectPaymentDetails(t *testing.T) {
 	}
 	provider := &funcPaymentProvider{createFunc: func(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
 		return &platega.CreateTransactionResponse{
-			TransactionID: providerID.String(), Redirect: "https://pay.example/redirect", ExpiresIn: "00:15:00",
+			TransactionID: providerID, Redirect: "https://pay.example/redirect", ExpiresIn: "00:15:00",
 		}, nil
 	}}
 	o := NewOrderService(mock, nil, nil, provider, "@testbot", &config.Config{TelegramAdminID: 999})
@@ -359,7 +358,7 @@ func TestRequestPayment_LatePlanLoadFailureNotifiesAdmin(t *testing.T) {
 
 func TestRequestPayment_SaveDetailsFailureNotifiesAdmin(t *testing.T) {
 	adminBot := testutil.NewBotAPI()
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440108")
+	providerID := "550e8400-e29b-41d4-a716-446655440108"
 	order := &database.Order{ID: 18, SubscriptionID: 9, ProductID: 13, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}
 	mock := &testutil.ServiceStoreFake{
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
@@ -375,12 +374,12 @@ func TestRequestPayment_SaveDetailsFailureNotifiesAdmin(t *testing.T) {
 			return &database.Plan{ID: 2, IsActive: true}, nil
 		},
 		MarkPaymentCreationUncertainFunc: func(context.Context, uint, bool) (bool, error) { return true, nil },
-		SavePaymentDetailsFunc: func(context.Context, uint, uuid.UUID, string, time.Time) error {
+		SavePaymentDetailsFunc: func(context.Context, uint, string, string, time.Time) error {
 			return errors.New("database unavailable")
 		},
 	}
 	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{createFunc: func(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
-		return &platega.CreateTransactionResponse{TransactionID: providerID.String(), URL: "https://pay.example", ExpiresIn: "00:15:00"}, nil
+		return &platega.CreateTransactionResponse{TransactionID: providerID, URL: "https://pay.example", ExpiresIn: "00:15:00"}, nil
 	}}, "", &config.Config{TelegramAdminID: 999})
 	o.SetAdminBot(adminBot)
 
@@ -394,15 +393,15 @@ func TestRequestPayment_SaveDetailsFailureNotifiesAdmin(t *testing.T) {
 }
 
 func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
-	firstID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440120")
-	secondID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440121")
+	firstID := "550e8400-e29b-41d4-a716-446655440120"
+	secondID := "550e8400-e29b-41d4-a716-446655440121"
 	syncStarted := make(chan struct{})
 	releaseSync := make(chan struct{})
 
 	var syncStartOnce sync.Once
 
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(_ context.Context, _ string, id uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(_ context.Context, _ string, id string) (*database.Order, error) {
 			if id == firstID {
 				return &database.Order{ID: 31, SubscriptionID: 41, ProductID: 51, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
 			}
@@ -465,12 +464,12 @@ func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
 // not be called again (a second provider transaction would bill the user
 // twice for one intent).
 func TestRequestPayment_ReusesLivePaymentLinkWithoutRecreating(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440127")
+	providerID := "550e8400-e29b-41d4-a716-446655440127"
 	expiresAt := time.Now().UTC().Add(10 * time.Minute)
 	order := &database.Order{
 		ID: 18, SubscriptionID: 9, ProductID: 13, Status: database.OrderStatusPending,
 		AmountCents: 2300, Currency: "RUB",
-		ProviderPaymentID: providerID.String(),
+		ProviderPaymentID: providerID,
 		PaymentURL:        "https://pay.example/live",
 		PaymentExpiresAt:  &expiresAt,
 	}
@@ -510,9 +509,9 @@ func TestRequestPayment_ReusesLivePaymentLinkWithoutRecreating(t *testing.T) {
 // SyncSubscription is logged best-effort and must not turn the successful
 // callback into an error (Platega would otherwise retry a settled payment).
 func TestConfirmPayment_PostCommitSyncFailureStillActivates(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440128")
+	providerID := "550e8400-e29b-41d4-a716-446655440128"
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return &database.Order{ID: 34, SubscriptionID: 44, ProductID: 54, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
 		},
 		GetProductByIDFunc: func(_ context.Context, id uint) (*database.Product, error) {
@@ -546,10 +545,10 @@ func TestConfirmPayment_ActivatedCASWithNilExpiryDoesNotPanic(t *testing.T) {
 	// The post-CAS code mirrors sub.ExpiresAt onto the order snapshot only when
 	// the CAS populated it. A CAS/fake that activates without setting
 	// sub.ExpiresAt must not panic and must leave order.ExpiresAt nil.
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440122")
+	providerID := "550e8400-e29b-41d4-a716-446655440122"
 	beforeAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("confirmed", "METRIC"))
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return &database.Order{ID: 32, SubscriptionID: 42, ProductID: 52, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "METRIC"}, nil
 		},
 		GetProductByIDFunc: func(_ context.Context, id uint) (*database.Product, error) {
@@ -579,9 +578,9 @@ func TestConfirmPayment_ActivatedCASWithNilExpiryDoesNotPanic(t *testing.T) {
 }
 
 func TestConfirmPayment_RequiresSyncServiceForPendingOrder(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440105")
+	providerID := "550e8400-e29b-41d4-a716-446655440105"
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return &database.Order{ID: 11, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
 		},
 	}
@@ -591,7 +590,7 @@ func TestConfirmPayment_RequiresSyncServiceForPendingOrder(t *testing.T) {
 }
 
 func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440109")
+	providerID := "550e8400-e29b-41d4-a716-446655440109"
 	tests := []struct {
 		name       string
 		currency   string
@@ -614,7 +613,7 @@ func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			adminBot := testutil.NewBotAPI()
 			mock := &testutil.ServiceStoreFake{
-				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+				GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 					return &database.Order{ID: 19, SubscriptionID: 10, ProductID: 14, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
 				},
 				GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
@@ -654,12 +653,12 @@ func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
 
 func TestConfirmPayment_NotifiesAdminOnActivation(t *testing.T) {
 	beforeRenewals := promtestutil.ToFloat64(metrics.SubscriptionRenewalsTotal)
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440125")
+	providerID := "550e8400-e29b-41d4-a716-446655440125"
 	sub := &database.Subscription{ID: 85, TelegramID: 55, Username: "alice", ExpiresAt: testutil.PtrTime(time.Now().Add(30 * 24 * time.Hour))}
 	product := &database.Product{ID: 66, PlanID: 2, Name: "Premium 1 месяц", PriceCents: 230000, Currency: "RUB"}
-	order := &database.Order{ID: 96, SubscriptionID: 85, ProductID: 66, Status: database.OrderStatusPending, AmountCents: 230000, Currency: "RUB", ProviderPaymentID: providerID.String()}
+	order := &database.Order{ID: 96, SubscriptionID: 85, ProductID: 66, Status: database.OrderStatusPending, AmountCents: 230000, Currency: "RUB", ProviderPaymentID: providerID}
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return order, nil
 		},
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
@@ -704,13 +703,13 @@ func TestConfirmPayment_NotifiesAdminOnActivation(t *testing.T) {
 
 func TestConfirmPayment_NotifiesAdminOnRenewal(t *testing.T) {
 	beforeRenewals := promtestutil.ToFloat64(metrics.SubscriptionRenewalsTotal)
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440130")
+	providerID := "550e8400-e29b-41d4-a716-446655440130"
 	productID := uint(67)
 	sub := &database.Subscription{ID: 87, TelegramID: 56, Username: "bob", PlanID: 2, ProductID: &productID, PricePaidCents: 230000, ExpiresAt: testutil.PtrTime(time.Now().Add(10 * 24 * time.Hour))}
 	product := &database.Product{ID: 67, PlanID: 2, Name: "Premium 1 месяц", PriceCents: 230000, Currency: "RUB"}
-	order := &database.Order{ID: 97, SubscriptionID: 87, ProductID: 67, Status: database.OrderStatusPending, AmountCents: 230000, Currency: "RUB", ProviderPaymentID: providerID.String()}
+	order := &database.Order{ID: 97, SubscriptionID: 87, ProductID: 67, Status: database.OrderStatusPending, AmountCents: 230000, Currency: "RUB", ProviderPaymentID: providerID}
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return order, nil
 		},
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
@@ -745,12 +744,12 @@ func TestConfirmPayment_NotifiesAdminOnRenewal(t *testing.T) {
 func TestConfirmPayment_InvalidatesSubserverCacheOnActivation(t *testing.T) {
 	t.Parallel()
 
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440131")
+	providerID := "550e8400-e29b-41d4-a716-446655440131"
 	sub := &database.Subscription{ID: 95, TelegramID: 57, Username: "carol", SubscriptionID: "sub-abc", ExpiresAt: testutil.PtrTime(time.Now().Add(30 * 24 * time.Hour))}
 	product := &database.Product{ID: 68, PlanID: 2, Name: "Premium 1 месяц", PriceCents: 230000, Currency: "RUB"}
-	order := &database.Order{ID: 98, SubscriptionID: 95, ProductID: 68, Status: database.OrderStatusPending, AmountCents: 230000, Currency: "RUB", ProviderPaymentID: providerID.String()}
+	order := &database.Order{ID: 98, SubscriptionID: 95, ProductID: 68, Status: database.OrderStatusPending, AmountCents: 230000, Currency: "RUB", ProviderPaymentID: providerID}
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return order, nil
 		},
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
@@ -827,7 +826,7 @@ func TestFormatAdminChargebackAlert(t *testing.T) {
 }
 
 func TestCancelPaymentByProvider_ChargebackNotifiesAdmin(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440132")
+	providerID := "550e8400-e29b-41d4-a716-446655440132"
 
 	tests := []struct {
 		name       string
@@ -842,12 +841,12 @@ func TestCancelPaymentByProvider_ChargebackNotifiesAdmin(t *testing.T) {
 			adminBot := testutil.NewBotAPI()
 			sub := &database.Subscription{ID: 92, TelegramID: 62, Username: "carol", PlanID: 99, Status: "active"}
 			product := &database.Product{ID: 72, PlanID: 99, Name: "Premium 3 месяца", PriceCents: 690000, Currency: "RUB", IsActive: true}
-			order := &database.Order{ID: 104, SubscriptionID: 92, ProductID: 72, Status: database.OrderStatusCanceled, AmountCents: 690000, Currency: "RUB", ProviderPaymentID: providerID.String()}
+			order := &database.Order{ID: 104, SubscriptionID: 92, ProductID: 72, Status: database.OrderStatusCanceled, AmountCents: 690000, Currency: "RUB", ProviderPaymentID: providerID}
 			mock := &testutil.ServiceStoreFake{
-				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
-					return &database.Order{ID: 104, SubscriptionID: 92, ProductID: 72, Status: database.OrderStatusPaid, AmountCents: 690000, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+				GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
+					return &database.Order{ID: 104, SubscriptionID: 92, ProductID: 72, Status: database.OrderStatusPaid, AmountCents: 690000, Currency: "RUB", ProviderPaymentID: providerID}, nil
 				},
-				CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+				CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
 					return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: tt.downgraded}, nil
 				},
 				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
@@ -907,7 +906,7 @@ func TestFormatMoneyCents(t *testing.T) {
 }
 
 func TestCancelPaymentByProvider_ErrorsNotifyAdmin(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440110")
+	providerID := "550e8400-e29b-41d4-a716-446655440110"
 	tests := []struct {
 		name      string
 		currency  string
@@ -926,10 +925,10 @@ func TestCancelPaymentByProvider_ErrorsNotifyAdmin(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			adminBot := testutil.NewBotAPI()
 			mock := &testutil.ServiceStoreFake{
-				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+				GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 					return &database.Order{ID: 20, SubscriptionID: 11, ProductID: 15, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
 				},
-				CancelOrderCASFunc: func(context.Context, string, uuid.UUID, []database.OrderStatus) (bool, error) {
+				CancelOrderCASFunc: func(context.Context, string, string, []database.OrderStatus) (bool, error) {
 					return false, tt.casErr
 				},
 			}
@@ -957,23 +956,23 @@ func TestCancelPaymentByProvider_PaidChargebackReturnsWasPaid(t *testing.T) {
 	beforeAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("chargeback", "RUB"))
 	calls := 0
 	mock := &testutil.ServiceStoreFake{
-		CancelOrderCASFunc: func(ctx context.Context, provider string, providerID uuid.UUID, from []database.OrderStatus) (bool, error) {
+		CancelOrderCASFunc: func(ctx context.Context, provider string, providerID string, from []database.OrderStatus) (bool, error) {
 			assert.Equal(t, "platega", provider)
-			assert.Equal(t, "550e8400-e29b-41d4-a716-446655440101", providerID.String())
+			assert.Equal(t, "550e8400-e29b-41d4-a716-446655440101", providerID)
 			assert.Contains(t, from, database.OrderStatusPaid, "chargeback must allow transition from paid")
 
 			return true, nil
 		},
-		GetOrderByProviderPaymentIDFunc: func(ctx context.Context, provider string, providerID uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(ctx context.Context, provider string, providerID string) (*database.Order, error) {
 			calls++
-			return &database.Order{ID: 7, SubscriptionID: 70, Status: database.OrderStatusPaid, PaymentProvider: provider, ProviderPaymentID: providerID.String(), AmountCents: 2300, Currency: "RUB"}, nil
+			return &database.Order{ID: 7, SubscriptionID: 70, Status: database.OrderStatusPaid, PaymentProvider: provider, ProviderPaymentID: providerID, AmountCents: 2300, Currency: "RUB"}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
 			return atomicChargebackResult(7, 70, true, false)
 		},
 	}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", nil)
-	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440101"), "CHARGEBACKED", json.Number("23.00"), "RUB")
+	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), "550e8400-e29b-41d4-a716-446655440101", "CHARGEBACKED", json.Number("23.00"), "RUB")
 	require.NoError(t, err)
 	assert.True(t, wasPaid)
 	require.NotNil(t, order)
@@ -990,20 +989,20 @@ func TestCancelPaymentByProvider_ChargebackOnPendingReportsNotPaid(t *testing.T)
 	beforeAmount := promtestutil.ToFloat64(metrics.PaymentAmountCentsTotal.WithLabelValues("chargeback", "RUB"))
 	calls := 0
 	mock := &testutil.ServiceStoreFake{
-		CancelOrderCASFunc: func(ctx context.Context, provider string, providerID uuid.UUID, from []database.OrderStatus) (bool, error) {
+		CancelOrderCASFunc: func(ctx context.Context, provider string, providerID string, from []database.OrderStatus) (bool, error) {
 			assert.Contains(t, from, database.OrderStatusPaid, "chargeback must allow transition from paid")
 			return true, nil
 		},
-		GetOrderByProviderPaymentIDFunc: func(ctx context.Context, provider string, providerID uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(ctx context.Context, provider string, providerID string) (*database.Order, error) {
 			calls++
-			return &database.Order{ID: 9, SubscriptionID: 90, Status: database.OrderStatusPending, PaymentProvider: provider, ProviderPaymentID: providerID.String(), AmountCents: 2300, Currency: "RUB"}, nil
+			return &database.Order{ID: 9, SubscriptionID: 90, Status: database.OrderStatusPending, PaymentProvider: provider, ProviderPaymentID: providerID, AmountCents: 2300, Currency: "RUB"}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
 			return atomicChargebackResult(9, 90, false, false)
 		},
 	}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", nil)
-	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440103"), "CHARGEBACKED", json.Number("23.00"), "RUB")
+	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), "550e8400-e29b-41d4-a716-446655440103", "CHARGEBACKED", json.Number("23.00"), "RUB")
 	require.NoError(t, err)
 	assert.False(t, wasPaid, "pending order chargeback must not report wasPaid")
 	require.NotNil(t, order)
@@ -1014,13 +1013,13 @@ func TestCancelPaymentByProvider_ChargebackOnPendingReportsNotPaid(t *testing.T)
 }
 
 func TestCancelPaymentByProvider_RejectsUnknownStatus(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440104")
+	providerID := "550e8400-e29b-41d4-a716-446655440104"
 	called := false
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return &database.Order{ID: 10, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
 		},
-		CancelOrderCASFunc: func(context.Context, string, uuid.UUID, []database.OrderStatus) (bool, error) {
+		CancelOrderCASFunc: func(context.Context, string, string, []database.OrderStatus) (bool, error) {
 			called = true
 			return true, nil
 		},
@@ -1034,11 +1033,11 @@ func TestCancelPaymentByProvider_RejectsUnknownStatus(t *testing.T) {
 func TestCancelPaymentByProvider_PendingCancelNotChargeback(t *testing.T) {
 	calls := 0
 	mock := &testutil.ServiceStoreFake{
-		CancelOrderCASFunc: func(ctx context.Context, provider string, providerID uuid.UUID, from []database.OrderStatus) (bool, error) {
+		CancelOrderCASFunc: func(ctx context.Context, provider string, providerID string, from []database.OrderStatus) (bool, error) {
 			assert.NotContains(t, from, database.OrderStatusPaid, "plain CANCELED must not touch paid orders")
 			return true, nil
 		},
-		GetOrderByProviderPaymentIDFunc: func(ctx context.Context, provider string, providerID uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(ctx context.Context, provider string, providerID string) (*database.Order, error) {
 			calls++
 
 			status := database.OrderStatusCanceled
@@ -1050,14 +1049,14 @@ func TestCancelPaymentByProvider_PendingCancelNotChargeback(t *testing.T) {
 		},
 	}
 	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", nil)
-	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440102"), "CANCELED", json.Number("23.00"), "RUB")
+	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), "550e8400-e29b-41d4-a716-446655440102", "CANCELED", json.Number("23.00"), "RUB")
 	require.NoError(t, err)
 	assert.False(t, wasPaid)
 	require.NotNil(t, order)
 }
 
 func TestConfirmPayment_DeletedSubscriptionOrProductReturnsNoop(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440123")
+	providerID := "550e8400-e29b-41d4-a716-446655440123"
 	tests := []struct {
 		name      string
 		productFn func(context.Context, uint) (*database.Product, error)
@@ -1091,8 +1090,8 @@ func TestConfirmPayment_DeletedSubscriptionOrProductReturnsNoop(t *testing.T) {
 			adminBot := testutil.NewBotAPI()
 			casCalled := false
 			mock := &testutil.ServiceStoreFake{
-				GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
-					return &database.Order{ID: 90, SubscriptionID: 70, ProductID: 60, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+				GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
+					return &database.Order{ID: 90, SubscriptionID: 70, ProductID: 60, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}, nil
 				},
 				GetProductByIDFunc: tt.productFn,
 				GetByIDFunc:        tt.subFn,
@@ -1151,16 +1150,16 @@ func TestRequestPayment_ConcurrentClaimReturnsAlreadyInProgress(t *testing.T) {
 }
 
 func TestCancelPaymentByProvider_ChargebackDowngradesPaidSubscription(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440124")
+	providerID := "550e8400-e29b-41d4-a716-446655440124"
 	sub := &database.Subscription{ID: 85, TelegramID: 55, PlanID: 99, Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
 	calls := 0
 	downgradePersisted := false
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			calls++
-			return &database.Order{ID: 96, SubscriptionID: 85, ProductID: 66, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+			return &database.Order{ID: 96, SubscriptionID: 85, ProductID: 66, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
 			return atomicChargebackResult(96, 85, true, true)
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
@@ -1191,16 +1190,16 @@ func TestCancelPaymentByProvider_ChargebackDowngradesPaidSubscription(t *testing
 }
 
 func TestCancelPaymentByProvider_ChargebackKeepsAccessWithAnotherPaidOrder(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440125")
+	providerID := "550e8400-e29b-41d4-a716-446655440125"
 	sub := &database.Subscription{ID: 86, TelegramID: 56, PlanID: 99, Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
 	calls := 0
 	updateCalled := false
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			calls++
-			return &database.Order{ID: 97, SubscriptionID: 86, ProductID: 67, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+			return &database.Order{ID: 97, SubscriptionID: 86, ProductID: 67, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
 			return atomicChargebackResult(97, 86, true, false)
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
@@ -1225,16 +1224,16 @@ func TestCancelPaymentByProvider_ChargebackKeepsAccessWithAnotherPaidOrder(t *te
 }
 
 func TestCancelPaymentByProvider_ChargebackDowngradeFailureAlertsAdmin(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440127")
+	providerID := "550e8400-e29b-41d4-a716-446655440127"
 	adminBot := testutil.NewBotAPI()
 	sub := &database.Subscription{ID: 88, TelegramID: 58, PlanID: 99, Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
 	calls := 0
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			calls++
-			return &database.Order{ID: 100, SubscriptionID: 88, ProductID: 69, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+			return &database.Order{ID: 100, SubscriptionID: 88, ProductID: 69, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
 			return nil, errors.New("atomic chargeback transaction failed")
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
@@ -1263,7 +1262,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T
 	// With the sync service wired, the downgrade must deprovision premium nodes
 	// via ApplyPlanToSubscription (pending_remove) + SyncSubscription instead of
 	// the fallback that deletes bindings without touching the panels.
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440128")
+	providerID := "550e8400-e29b-41d4-a716-446655440128"
 	sub := &database.Subscription{ID: 89, TelegramID: 59, PlanID: 99, Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
 	calls := 0
 	updateCalled := false
@@ -1271,11 +1270,11 @@ func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T
 	syncInvoked := false
 	premiumMarkedForRemoval := false
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			calls++
-			return &database.Order{ID: 101, SubscriptionID: 89, ProductID: 70, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}, nil
+			return &database.Order{ID: 101, SubscriptionID: 89, ProductID: 70, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, uuid.UUID, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
 			return atomicChargebackResult(101, 89, true, true)
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
@@ -1333,12 +1332,12 @@ type paymentAmountsSave struct {
 }
 
 func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440127")
+	providerID := "550e8400-e29b-41d4-a716-446655440127"
 	var casAmount int64 = -1
 	var saves []paymentAmountsSave
 
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return &database.Order{ID: 33, SubscriptionID: 43, ProductID: 53, Status: database.OrderStatusPending, AmountCents: 5000, Currency: "RUB"}, nil
 		},
 		GetProductByIDFunc: func(_ context.Context, id uint) (*database.Product, error) {
@@ -1356,14 +1355,14 @@ func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
 			return nil, nil
 		},
 		GetPaidOrdersWithoutProviderFeeFunc: func(context.Context, int) ([]database.Order, error) {
-			return []database.Order{{ID: 33, AmountCents: 5000, CallbackAmountCents: testutil.PtrInt64(5250), ProviderPaymentID: providerID.String()}}, nil
+			return []database.Order{{ID: 33, AmountCents: 5000, CallbackAmountCents: testutil.PtrInt64(5250), PaymentProvider: database.PaymentProviderPlatega, ProviderPaymentID: providerID}}, nil
 		},
 		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64) error {
 			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents})
 			return nil
 		},
 	}
-	provider := &funcPaymentProvider{statusFunc: func(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	provider := &funcPaymentProvider{statusFunc: func(context.Context, string) (*platega.TransactionStatusResponse, error) {
 		return &platega.TransactionStatusResponse{Status: "CONFIRMED", Commission: json.Number("4.5")}, nil
 	}}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
@@ -1384,12 +1383,12 @@ func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
 }
 
 func TestConfirmPayment_ProviderFeeUnavailableKeepsCallbackAmount(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440128")
+	providerID := "550e8400-e29b-41d4-a716-446655440128"
 	var casAmount int64 = -1
 	var saves []paymentAmountsSave
 
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return &database.Order{ID: 34, SubscriptionID: 44, ProductID: 54, Status: database.OrderStatusPending, AmountCents: 5000, Currency: "RUB"}, nil
 		},
 		GetProductByIDFunc: func(_ context.Context, id uint) (*database.Product, error) {
@@ -1411,7 +1410,7 @@ func TestConfirmPayment_ProviderFeeUnavailableKeepsCallbackAmount(t *testing.T) 
 			return nil
 		},
 	}
-	provider := &funcPaymentProvider{statusFunc: func(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	provider := &funcPaymentProvider{statusFunc: func(context.Context, string) (*platega.TransactionStatusResponse, error) {
 		return nil, errors.New("transaction API unreachable")
 	}}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
@@ -1425,19 +1424,19 @@ func TestConfirmPayment_ProviderFeeUnavailableKeepsCallbackAmount(t *testing.T) 
 }
 
 func TestSyncProviderFees_NotFoundIsTerminal(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440129")
+	providerID := "550e8400-e29b-41d4-a716-446655440129"
 	var saves []paymentAmountsSave
 
 	mock := &testutil.ServiceStoreFake{
 		GetPaidOrdersWithoutProviderFeeFunc: func(context.Context, int) ([]database.Order, error) {
-			return []database.Order{{ID: 35, AmountCents: 5000, CallbackAmountCents: testutil.PtrInt64(5250), ProviderPaymentID: providerID.String()}}, nil
+			return []database.Order{{ID: 35, AmountCents: 5000, CallbackAmountCents: testutil.PtrInt64(5250), PaymentProvider: database.PaymentProviderPlatega, ProviderPaymentID: providerID}}, nil
 		},
 		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64) error {
 			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents})
 			return nil
 		},
 	}
-	provider := &funcPaymentProvider{statusFunc: func(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	provider := &funcPaymentProvider{statusFunc: func(context.Context, string) (*platega.TransactionStatusResponse, error) {
 		return nil, platega.ErrTransactionNotFound
 	}}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
@@ -1451,19 +1450,19 @@ func TestSyncProviderFees_NotFoundIsTerminal(t *testing.T) {
 }
 
 func TestSyncProviderFees_NotConfirmedDeferred(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440130")
+	providerID := "550e8400-e29b-41d4-a716-446655440130"
 	var saves []paymentAmountsSave
 
 	mock := &testutil.ServiceStoreFake{
 		GetPaidOrdersWithoutProviderFeeFunc: func(context.Context, int) ([]database.Order, error) {
-			return []database.Order{{ID: 36, AmountCents: 5000, CallbackAmountCents: testutil.PtrInt64(5250), ProviderPaymentID: providerID.String()}}, nil
+			return []database.Order{{ID: 36, AmountCents: 5000, CallbackAmountCents: testutil.PtrInt64(5250), PaymentProvider: database.PaymentProviderPlatega, ProviderPaymentID: providerID}}, nil
 		},
 		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64) error {
 			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents})
 			return nil
 		},
 	}
-	provider := &funcPaymentProvider{statusFunc: func(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	provider := &funcPaymentProvider{statusFunc: func(context.Context, string) (*platega.TransactionStatusResponse, error) {
 		return &platega.TransactionStatusResponse{Status: "PENDING", Commission: json.Number("4.5")}, nil
 	}}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
@@ -1473,14 +1472,14 @@ func TestSyncProviderFees_NotConfirmedDeferred(t *testing.T) {
 }
 
 func TestSyncProviderFees_ContinuesPastDeferredFirstPage(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440131")
+	providerID := "550e8400-e29b-41d4-a716-446655440131"
 	orders := make([]database.Order, 0, 51)
 	for id := uint(1); id <= 51; id++ {
 		providerPaymentID := fmt.Sprintf("invalid-%d", id)
 		if id == 51 {
-			providerPaymentID = providerID.String()
+			providerPaymentID = providerID
 		}
-		orders = append(orders, database.Order{ID: id, AmountCents: 5000, ProviderPaymentID: providerPaymentID})
+		orders = append(orders, database.Order{ID: id, AmountCents: 5000, PaymentProvider: database.PaymentProviderPlatega, ProviderPaymentID: providerPaymentID})
 	}
 
 	var saves []paymentAmountsSave
@@ -1503,7 +1502,7 @@ func TestSyncProviderFees_ContinuesPastDeferredFirstPage(t *testing.T) {
 			return nil
 		},
 	}
-	provider := &funcPaymentProvider{statusFunc: func(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	provider := &funcPaymentProvider{statusFunc: func(context.Context, string) (*platega.TransactionStatusResponse, error) {
 		return &platega.TransactionStatusResponse{Status: "CONFIRMED", Commission: json.Number("4.5")}, nil
 	}}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), provider, "", nil)
@@ -1514,6 +1513,34 @@ func TestSyncProviderFees_ContinuesPastDeferredFirstPage(t *testing.T) {
 	assert.Equal(t, uint(51), saves[0].orderID)
 }
 
+// Тест поведения: не-Platega заказ (Stars) не имеет комиссии и не должен
+// попадать в Platega API — скип не считается ошибкой синхронизации.
+func TestSyncProviderFees_SkipsNonPlategaOrders(t *testing.T) {
+	var saves []paymentAmountsSave
+
+	mock := &testutil.ServiceStoreFake{
+		GetPaidOrdersWithoutProviderFeeAfterIDFunc: func(_ context.Context, afterID uint, _ int) ([]database.Order, error) {
+			if afterID > 0 {
+				return nil, nil
+			}
+
+			return []database.Order{{ID: 37, AmountCents: 500, CallbackAmountCents: testutil.PtrInt64(500), PaymentProvider: database.PaymentProviderTelegramStars, ProviderPaymentID: "stars-invoice-37"}}, nil
+		},
+		SaveOrderPaymentAmountsFunc: func(_ context.Context, orderID uint, callbackCents int64, feeCents *int64) error {
+			saves = append(saves, paymentAmountsSave{orderID: orderID, callbackCents: callbackCents, feeCents: feeCents})
+			return nil
+		},
+	}
+	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{statusFunc: func(context.Context, string) (*platega.TransactionStatusResponse, error) {
+		t.Fatal("провайдер не должен вызываться для не-Platega заказа")
+
+		return nil, nil
+	}}, "", nil)
+
+	require.NoError(t, o.SyncProviderFees(context.Background(), 10), "skip не-Platega заказа не должен возвращать ошибку")
+	assert.Empty(t, saves, "Stars-заказ не должен получать комиссию Platega")
+}
+
 func TestFormatPaymentIssue_TruncatesUntrustedFields(t *testing.T) {
 	message := formatPaymentIssue(PaymentIssue{Event: "event", Reason: strings.Repeat("x", 5000), Payload: strings.Repeat("y", 5000)})
 
@@ -1522,7 +1549,7 @@ func TestFormatPaymentIssue_TruncatesUntrustedFields(t *testing.T) {
 }
 
 func TestBuildPaidUserNotification_MissingSubscriptionServiceReturnsError(t *testing.T) {
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440211")
+	providerID := "550e8400-e29b-41d4-a716-446655440211"
 	db := &testutil.ServiceStoreFake{
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: 1, TelegramID: 42}, nil
@@ -1530,7 +1557,7 @@ func TestBuildPaidUserNotification_MissingSubscriptionServiceReturnsError(t *tes
 	}
 	o := NewOrderService(db, nil, nil, &funcPaymentProvider{}, "", &config.Config{})
 
-	_, _, err := o.BuildPaidUserNotification(context.Background(), &database.Order{ID: 1, SubscriptionID: 1, ProviderPaymentID: providerID.String()})
+	_, _, err := o.BuildPaidUserNotification(context.Background(), &database.Order{ID: 1, SubscriptionID: 1, ProviderPaymentID: providerID})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "subscription service is not configured")
 }
@@ -1541,7 +1568,7 @@ func TestBuildPaidUserNotification_MissingSubscriptionServiceReturnsError(t *tes
 func TestOrderService_ConfirmPayment_FindsOrderByPayloadWhenProviderIDLost(t *testing.T) {
 	t.Parallel()
 
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440118")
+	providerID := "550e8400-e29b-41d4-a716-446655440118"
 	order := &database.Order{
 		ID:             33,
 		SubscriptionID: 9,
@@ -1555,18 +1582,18 @@ func TestOrderService_ConfirmPayment_FindsOrderByPayloadWhenProviderIDLost(t *te
 	attached := 0
 
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return nil, database.ErrOrderNotFound
 		},
 		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) {
 			return order, nil
 		},
-		AttachProviderPaymentIDFunc: func(_ context.Context, orderID uint, provider string, id uuid.UUID) (bool, error) {
+		AttachProviderPaymentIDFunc: func(_ context.Context, orderID uint, provider string, id string) (bool, error) {
 			attached++
 			assert.Equal(t, order.ID, orderID)
 			assert.Equal(t, "platega", provider)
 			assert.Equal(t, providerID, id)
-			order.ProviderPaymentID = id.String()
+			order.ProviderPaymentID = id
 
 			return true, nil
 		},
@@ -1596,18 +1623,18 @@ func TestOrderService_ConfirmPayment_FindsOrderByPayloadWhenProviderIDLost(t *te
 func TestOrderService_ConfirmPayment_DoesNotHijackOrderWithOtherProviderID(t *testing.T) {
 	t.Parallel()
 
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440119")
-	otherID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440120")
-	order := &database.Order{ID: 34, SubscriptionID: 9, ProductID: 14, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: otherID.String()}
+	providerID := "550e8400-e29b-41d4-a716-446655440119"
+	otherID := "550e8400-e29b-41d4-a716-446655440120"
+	order := &database.Order{ID: 34, SubscriptionID: 9, ProductID: 14, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: otherID}
 
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return nil, database.ErrOrderNotFound
 		},
 		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) {
 			return order, nil
 		},
-		AttachProviderPaymentIDFunc: func(context.Context, uint, string, uuid.UUID) (bool, error) {
+		AttachProviderPaymentIDFunc: func(context.Context, uint, string, string) (bool, error) {
 			t.Fatal("нельзя привязывать вторую транзакцию к заказу")
 
 			return false, nil
@@ -1620,15 +1647,53 @@ func TestOrderService_ConfirmPayment_DoesNotHijackOrderWithOtherProviderID(t *te
 	assert.False(t, confirmation.Activated)
 }
 
-// Тест поведения: потерянный webhook с оплаченной транзакцией активируется
-// сверкой, а не остаётся pending навсегда.
+// Тест поведения: Stars-заказ нельзя сверять с Platega API, но истекает
+// локально, когда срок invoice истёк — иначе заказ висел бы pending вечно.
+func TestOrderService_ReconcilePendingOrders_ExpiresStarsPendingOrder(t *testing.T) {
+	t.Parallel()
+
+	order := &database.Order{
+		ID: 44, SubscriptionID: 13, ProductID: 18, Status: database.OrderStatusPending,
+		AmountCents: 2300, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars,
+		ProviderPaymentID: "stars-invoice-44", PaymentExpiresAt: testutil.PtrTime(time.Now().UTC().Add(-24 * time.Hour)),
+	}
+	expired := 0
+
+	mock := &testutil.ServiceStoreFake{
+		GetStalePendingOrdersAfterIDFunc: func(_ context.Context, _ time.Time, afterID uint, _ int) ([]database.Order, error) {
+			if order.ID <= afterID {
+				return nil, nil
+			}
+
+			return []database.Order{*order}, nil
+		},
+		ExpirePendingOrderFunc: func(_ context.Context, orderID uint) (bool, error) {
+			expired++
+			assert.Equal(t, order.ID, orderID)
+			order.Status = database.OrderStatusExpired
+
+			return true, nil
+		},
+	}
+
+	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{statusFunc: func(context.Context, string) (*platega.TransactionStatusResponse, error) {
+		t.Fatal("провайдер не должен вызываться для Stars-заказа")
+
+		return nil, nil
+	}}, "", nil)
+
+	require.NoError(t, o.ReconcilePendingOrders(context.Background(), 10))
+	assert.Equal(t, 1, expired)
+	assert.Equal(t, database.OrderStatusExpired, order.Status, "Stars-заказ истекает локально")
+}
+
 func TestOrderService_ReconcilePendingOrders_ConfirmsPaidOrder(t *testing.T) {
 	t.Parallel()
 
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440121")
+	providerID := "550e8400-e29b-41d4-a716-446655440121"
 	order := &database.Order{
 		ID: 41, SubscriptionID: 10, ProductID: 15, Status: database.OrderStatusPending,
-		AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String(),
+		AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID,
 	}
 	product := &database.Product{ID: 15, PlanID: 2, Name: "Premium", DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}
 	sub := &database.Subscription{ID: 10, TelegramID: 51, PlanID: 1, Status: "active"}
@@ -1641,7 +1706,7 @@ func TestOrderService_ReconcilePendingOrders_ConfirmsPaidOrder(t *testing.T) {
 
 			return []database.Order{*order}, nil
 		},
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return order, nil
 		},
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
@@ -1657,9 +1722,9 @@ func TestOrderService_ReconcilePendingOrders_ConfirmsPaidOrder(t *testing.T) {
 		},
 	}
 
-	provider := &funcPaymentProvider{statusFunc: func(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	provider := &funcPaymentProvider{statusFunc: func(context.Context, string) (*platega.TransactionStatusResponse, error) {
 		return &platega.TransactionStatusResponse{
-			ID:     providerID.String(),
+			ID:     providerID,
 			Status: "CONFIRMED",
 			PaymentDetails: struct {
 				Amount   json.Number `json:"amount"`
@@ -1679,10 +1744,10 @@ func TestOrderService_ReconcilePendingOrders_ConfirmsPaidOrder(t *testing.T) {
 func TestOrderService_ReconcilePendingOrders_ExpiresCanceledOrder(t *testing.T) {
 	t.Parallel()
 
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440122")
+	providerID := "550e8400-e29b-41d4-a716-446655440122"
 	order := &database.Order{
 		ID: 42, SubscriptionID: 11, ProductID: 16, Status: database.OrderStatusPending,
-		AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String(),
+		AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID,
 	}
 	expired := 0
 
@@ -1702,8 +1767,8 @@ func TestOrderService_ReconcilePendingOrders_ExpiresCanceledOrder(t *testing.T) 
 		},
 	}
 
-	provider := &funcPaymentProvider{statusFunc: func(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
-		return &platega.TransactionStatusResponse{ID: providerID.String(), Status: "CANCELED"}, nil
+	provider := &funcPaymentProvider{statusFunc: func(context.Context, string) (*platega.TransactionStatusResponse, error) {
+		return &platega.TransactionStatusResponse{ID: providerID, Status: "CANCELED"}, nil
 	}}
 	o := NewOrderService(mock, nil, nil, provider, "", nil)
 
@@ -1716,10 +1781,10 @@ func TestOrderService_ReconcilePendingOrders_ExpiresCanceledOrder(t *testing.T) 
 func TestOrderService_ReconcilePendingOrders_ProviderErrorKeepsOrder(t *testing.T) {
 	t.Parallel()
 
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440123")
+	providerID := "550e8400-e29b-41d4-a716-446655440123"
 	order := &database.Order{
 		ID: 43, SubscriptionID: 12, ProductID: 17, Status: database.OrderStatusPending,
-		AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String(),
+		AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID,
 	}
 
 	mock := &testutil.ServiceStoreFake{
@@ -1737,7 +1802,7 @@ func TestOrderService_ReconcilePendingOrders_ProviderErrorKeepsOrder(t *testing.
 		},
 	}
 
-	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{statusFunc: func(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{statusFunc: func(context.Context, string) (*platega.TransactionStatusResponse, error) {
 		return nil, errors.New("provider timeout")
 	}}, "", nil)
 

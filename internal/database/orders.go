@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -30,10 +29,10 @@ func (s *Service) GetOrderByID(ctx context.Context, id uint) (*Order, error) {
 
 // GetOrderByProviderPaymentID finds an order by provider and external payment ID.
 // Not-found results are normalized to ErrOrderNotFound for service-layer handling.
-func (s *Service) GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*Order, error) {
+func (s *Service) GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID string) (*Order, error) {
 	var order Order
 
-	result := s.db.WithContext(ctx).Where("payment_provider = ? AND provider_payment_id = ?", provider, providerPaymentID.String()).First(&order)
+	result := s.db.WithContext(ctx).Where("payment_provider = ? AND provider_payment_id = ?", provider, providerPaymentID).First(&order)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrOrderNotFound
 	}
@@ -90,13 +89,13 @@ func (s *Service) ExpirePendingOrder(ctx context.Context, orderID uint) (bool, e
 // SavePaymentDetails: callback провайдера может обогнать сохранение. CAS по
 // пустому provider_payment_id не даёт перехватить уже подтверждённый заказ.
 func (s *Service) AttachProviderPaymentID(
-	ctx context.Context, orderID uint, provider string, providerPaymentID uuid.UUID,
+	ctx context.Context, orderID uint, provider string, providerPaymentID string,
 ) (bool, error) {
 	result := s.db.WithContext(ctx).
 		Model(&Order{}).
 		Where("id = ? AND (provider_payment_id IS NULL OR provider_payment_id = '')", orderID).
 		Updates(map[string]any{
-			"provider_payment_id": providerPaymentID.String(),
+			"provider_payment_id": providerPaymentID,
 			"payment_provider":    provider,
 		})
 	if result.Error != nil {
@@ -112,7 +111,7 @@ func (s *Service) FindPendingPaymentOrder(ctx context.Context, subscriptionID, p
 	var order Order
 
 	result := s.db.WithContext(ctx).
-		Where("subscription_id = ? AND product_id = ? AND payment_provider = ? AND status = ?", subscriptionID, productID, "platega", OrderStatusPending).
+		Where("subscription_id = ? AND product_id = ? AND payment_provider = ? AND status = ?", subscriptionID, productID, PaymentProviderPlatega, OrderStatusPending).
 		Order("id ASC").First(&order)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, nil
@@ -172,7 +171,7 @@ func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscript
 	var expiredOrder *Order
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("subscription_id = ? AND product_id = ? AND payment_provider = ? AND status = ?", subscriptionID, productID, "platega", OrderStatusPending).
+		result := tx.Where("subscription_id = ? AND product_id = ? AND payment_provider = ? AND status = ?", subscriptionID, productID, PaymentProviderPlatega, OrderStatusPending).
 			Order("id ASC").First(&order)
 		if result.Error == nil {
 			if order.PaymentCreationUncertain {
@@ -203,7 +202,7 @@ func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscript
 			Status:          OrderStatusPending,
 			AmountCents:     amountCents,
 			Currency:        currency,
-			PaymentProvider: "platega",
+			PaymentProvider: PaymentProviderPlatega,
 			CreatedAt:       now,
 		}
 
@@ -227,7 +226,7 @@ func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscript
 		message := strings.ToLower(err.Error())
 		if strings.Contains(message, "unique constraint") || strings.Contains(message, "idx_orders_pending_subscription_product_unique") {
 			result := s.db.WithContext(ctx).
-				Where("subscription_id = ? AND product_id = ? AND payment_provider = ? AND status = ?", subscriptionID, productID, "platega", OrderStatusPending).
+				Where("subscription_id = ? AND product_id = ? AND payment_provider = ? AND status = ?", subscriptionID, productID, PaymentProviderPlatega, OrderStatusPending).
 				Order("id ASC").First(&order)
 			if result.Error == nil {
 				return &order, nil
@@ -275,11 +274,11 @@ func (s *Service) MarkPaymentCreationUncertain(ctx context.Context, orderID uint
 
 // SavePaymentDetails stores the provider ID, link and local link deadline in a
 // single update and clears the uncertainty flag.
-func (s *Service) SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error {
+func (s *Service) SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID string, paymentURL string, paymentExpiresAt time.Time) error {
 	result := s.db.WithContext(ctx).Model(&Order{}).
 		Where("id = ? AND status = ?", orderID, OrderStatusPending).
 		Updates(map[string]any{
-			"provider_payment_id":        providerPaymentID.String(),
+			"provider_payment_id":        providerPaymentID,
 			"payment_url":                paymentURL,
 			"payment_expires_at":         paymentExpiresAt.UTC(),
 			"payment_creation_uncertain": false,
@@ -334,7 +333,7 @@ func (s *Service) GetPaidOrdersWithoutProviderFeeAfterID(ctx context.Context, af
 	var orders []Order
 
 	query := s.db.WithContext(ctx).
-		Where("status = ? AND payment_provider = ? AND provider_payment_id IS NOT NULL AND provider_payment_id <> '' AND provider_fee_cents IS NULL", OrderStatusPaid, "platega").
+		Where("status = ? AND payment_provider = ? AND provider_payment_id IS NOT NULL AND provider_payment_id <> '' AND provider_fee_cents IS NULL", OrderStatusPaid, PaymentProviderPlatega).
 		Order("id ASC")
 	if afterID > 0 {
 		query = query.Where("id > ?", afterID)
@@ -462,7 +461,7 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 
 		// Событие в таймлайне самой подписки: payment_confirmed адресован заказу,
 		// а subscription_renewed показывает продление/активацию в истории подписки.
-		err = InsertAuditLogInTx(tx, AuditSubscriptionRenewed(&currentSub, &renewedSub, product))
+		err = InsertAuditLogInTx(tx, AuditSubscriptionRenewed(&currentSub, &renewedSub, product, order.PaymentProvider))
 		if err != nil {
 			return fmt.Errorf("audit subscription renewal: %w", err)
 		}
@@ -524,13 +523,13 @@ type ChargebackPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID 
 // transaction. A concurrent confirmation therefore cannot commit an entitlement
 // after this chargeback's decision without first observing the serialized DB
 // state. External VPN calls must happen after this method returns successfully.
-func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan ChargebackPlanInTxFn) (*ChargebackResult, error) {
+func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID string, now time.Time, freePlanID uint, applyPlan ChargebackPlanInTxFn) (*ChargebackResult, error) {
 	var result ChargebackResult
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var order Order
 
-		query := tx.Where("payment_provider = ? AND provider_payment_id = ?", provider, providerPaymentID.String()).First(&order)
+		query := tx.Where("payment_provider = ? AND provider_payment_id = ?", provider, providerPaymentID).First(&order)
 		if errors.Is(query.Error, gorm.ErrRecordNotFound) {
 			return nil
 		}
@@ -670,8 +669,8 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 
 // CancelOrderCAS cancels an order only from one of the supplied states. It
 // returns false without error when the callback is an idempotent no-op.
-func (s *Service) CancelOrderCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []OrderStatus) (bool, error) {
-	result := s.db.WithContext(ctx).Model(&Order{}).Where("payment_provider = ? AND provider_payment_id = ? AND status IN ?", provider, providerPaymentID.String(), fromStatuses).Update("status", OrderStatusCanceled)
+func (s *Service) CancelOrderCAS(ctx context.Context, provider string, providerPaymentID string, fromStatuses []OrderStatus) (bool, error) {
+	result := s.db.WithContext(ctx).Model(&Order{}).Where("payment_provider = ? AND provider_payment_id = ? AND status IN ?", provider, providerPaymentID, fromStatuses).Update("status", OrderStatusCanceled)
 	if result.Error != nil {
 		return false, fmt.Errorf("cancel order: %w", result.Error)
 	}

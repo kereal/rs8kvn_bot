@@ -7,11 +7,35 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+// TestAuditSubscriptionRenewed_UsesProviderActorID verifies that the actor_id
+// of the subscription_renewed event carries the passed payment provider,
+// falling back to Platega for an empty value.
+func TestAuditSubscriptionRenewed_UsesProviderActorID(t *testing.T) {
+	t.Parallel()
+
+	sub := &Subscription{ID: 7, Status: string(SubscriptionStatusActive)}
+
+	e := AuditSubscriptionRenewed(nil, sub, nil, PaymentProviderTelegramStars)
+	require.NotNil(t, e)
+	require.NotNil(t, e.ActorID)
+	assert.Equal(t, ActorPaymentProvider, e.ActorType)
+	assert.Equal(t, PaymentProviderTelegramStars, *e.ActorID)
+
+	plategaEvent := AuditSubscriptionRenewed(nil, sub, nil, PaymentProviderPlatega)
+	require.NotNil(t, plategaEvent.ActorID)
+	assert.Equal(t, PaymentProviderPlatega, *plategaEvent.ActorID)
+
+	// Пустой провайдер (legacy-вызов) откатывается к Platega, чтобы actor_id
+	// никогда не был пустой строкой.
+	legacyEvent := AuditSubscriptionRenewed(nil, sub, nil, "")
+	require.NotNil(t, legacyEvent.ActorID)
+	assert.Equal(t, PaymentProviderPlatega, *legacyEvent.ActorID)
+}
 
 // TestConfirmOrderPaidCAS_WritesAuditEventInTx verifies the payment
 // confirmation audit event is committed atomically with the order/subscription
@@ -111,8 +135,8 @@ func TestCancelPaidOrderAndDowngradeCAS_WritesChargebackAudit(t *testing.T) {
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	now := time.Now().UTC()
-	providerPaymentID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440307")
-	require.NoError(t, svc.db.WithContext(ctx).Model(order).Update("provider_payment_id", providerPaymentID.String()).Error)
+	providerPaymentID := "550e8400-e29b-41d4-a716-446655440307"
+	require.NoError(t, svc.db.WithContext(ctx).Model(order).Update("provider_payment_id", providerPaymentID).Error)
 
 	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, "platega", providerPaymentID, now, freePlan.ID, nil)
 	require.NoError(t, err)
@@ -209,7 +233,7 @@ func TestCancelOrderCAS_WritesOrderCanceledAudit(t *testing.T) {
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Model(order).Update("provider_payment_id", "550e8400-e29b-41d4-a716-446655440312").Error)
 
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440312")
+	providerID := "550e8400-e29b-41d4-a716-446655440312"
 	transitioned, err := svc.CancelOrderCAS(ctx, "platega", providerID, []OrderStatus{OrderStatusPending})
 	require.NoError(t, err)
 	assert.True(t, transitioned)

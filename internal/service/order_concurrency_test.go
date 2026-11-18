@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
@@ -25,10 +24,10 @@ import (
 func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T) {
 	t.Parallel()
 
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440140")
+	providerID := "550e8400-e29b-41d4-a716-446655440140"
 	sub := &database.Subscription{ID: 41, TelegramID: 71, PlanID: 2}
 	product := &database.Product{ID: 51, PlanID: 2, Name: "Premium", DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}
-	order := &database.Order{ID: 31, SubscriptionID: 41, ProductID: 51, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}
+	order := &database.Order{ID: 31, SubscriptionID: 41, ProductID: 51, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}
 
 	var firstStartedOnce sync.Once
 
@@ -38,7 +37,7 @@ func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T)
 	var casCalls atomic.Int32
 
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return order, nil
 		},
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) { return product, nil },
@@ -132,18 +131,18 @@ func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T)
 func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 	t.Parallel()
 
-	firstID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440141")
-	secondID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440142")
+	firstID := "550e8400-e29b-41d4-a716-446655440141"
+	secondID := "550e8400-e29b-41d4-a716-446655440142"
 
 	sub1 := &database.Subscription{ID: 51, TelegramID: 81, PlanID: 3}
 	sub2 := &database.Subscription{ID: 52, TelegramID: 82, PlanID: 3}
-	order1 := &database.Order{ID: 41, SubscriptionID: 51, ProductID: 61, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: firstID.String()}
-	order2 := &database.Order{ID: 42, SubscriptionID: 52, ProductID: 62, Status: database.OrderStatusPending, AmountCents: 2400, Currency: "RUB", ProviderPaymentID: secondID.String()}
+	order1 := &database.Order{ID: 41, SubscriptionID: 51, ProductID: 61, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: firstID}
+	order2 := &database.Order{ID: 42, SubscriptionID: 52, ProductID: 62, Status: database.OrderStatusPending, AmountCents: 2400, Currency: "RUB", ProviderPaymentID: secondID}
 	productFor := func(id uint) *database.Product {
 		return &database.Product{ID: id, PlanID: 3, Name: "Premium", DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}
 	}
 
-	orders := map[uuid.UUID]*database.Order{firstID: order1, secondID: order2}
+	orders := map[string]*database.Order{firstID: order1, secondID: order2}
 	// confirmPayment calls GetByID(ctx, order.SubscriptionID) — key by the
 	// subscription primary key, not the order ID.
 	subsBySubscriptionID := map[uint]*database.Subscription{sub1.ID: sub1, sub2.ID: sub2}
@@ -159,7 +158,7 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 	)
 
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(_ context.Context, _ string, id uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(_ context.Context, _ string, id string) (*database.Order, error) {
 			o, ok := orders[id]
 			if !ok {
 				return nil, database.ErrOrderNotFound
@@ -254,11 +253,11 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 	t.Parallel()
 
-	firstID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440143")
-	secondID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440144")
-	order1 := &database.Order{ID: 51, SubscriptionID: 61, ProductID: 71, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: firstID.String()}
-	order2 := &database.Order{ID: 52, SubscriptionID: 62, ProductID: 72, Status: database.OrderStatusPaid, AmountCents: 2400, Currency: "RUB", ProviderPaymentID: secondID.String()}
-	orders := map[uuid.UUID]*database.Order{firstID: order1, secondID: order2}
+	firstID := "550e8400-e29b-41d4-a716-446655440143"
+	secondID := "550e8400-e29b-41d4-a716-446655440144"
+	order1 := &database.Order{ID: 51, SubscriptionID: 61, ProductID: 71, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: firstID}
+	order2 := &database.Order{ID: 52, SubscriptionID: 62, ProductID: 72, Status: database.OrderStatusPaid, AmountCents: 2400, Currency: "RUB", ProviderPaymentID: secondID}
+	orders := map[string]*database.Order{firstID: order1, secondID: order2}
 
 	started1 := make(chan struct{})
 	started2 := make(chan struct{})
@@ -268,7 +267,7 @@ func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 	var startOnce1, startOnce2 sync.Once
 
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(_ context.Context, _ string, id uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(_ context.Context, _ string, id string) (*database.Order, error) {
 			o, ok := orders[id]
 			if !ok {
 				return nil, database.ErrOrderNotFound
@@ -276,7 +275,7 @@ func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 
 			return o, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, _ string, id uuid.UUID, _ time.Time, _ uint, _ database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, _ string, id string, _ time.Time, _ uint, _ database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
 			o := orders[id]
 			if id == firstID {
 				startOnce1.Do(func() { close(started1) })
@@ -296,7 +295,7 @@ func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 				return &database.ChargebackResult{Order: o, WasPaid: true, Transitioned: true, Downgraded: true}, nil
 			}
 
-			t.Fatalf("unexpected provider id %s", id.String())
+			t.Fatalf("unexpected provider id %s", id)
 
 			return nil, nil
 		},
@@ -360,7 +359,7 @@ func (p *countingPaymentProvider) CreateTransaction(context.Context, platega.Cre
 	}, nil
 }
 
-func (p *countingPaymentProvider) GetTransactionStatus(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+func (p *countingPaymentProvider) GetTransactionStatus(context.Context, string) (*platega.TransactionStatusResponse, error) {
 	return nil, errors.New("status not configured")
 }
 
@@ -408,7 +407,7 @@ func TestRequestPayment_ConcurrentCallersSingleProviderTransaction(t *testing.T)
 			// RequestPayment and returns ErrPaymentAlreadyInProgress.
 			return claimCount.Add(1) == 1, nil
 		},
-		SavePaymentDetailsFunc: func(context.Context, uint, uuid.UUID, string, time.Time) error {
+		SavePaymentDetailsFunc: func(context.Context, uint, string, string, time.Time) error {
 			return nil
 		},
 		// Reload from "DB" after a failed claim. Return the same pending order
@@ -482,9 +481,9 @@ func TestRequestPayment_ConcurrentCallersSingleProviderTransaction(t *testing.T)
 func TestCancelPaymentByProvider_SameOrderParallelChargebacksTransitionOnce(t *testing.T) {
 	t.Parallel()
 
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440145")
+	providerID := "550e8400-e29b-41d4-a716-446655440145"
 	sub := &database.Subscription{ID: 81, TelegramID: 91, PlanID: 99, Status: "active", ExpiresAt: testutil.PtrTime(time.Now().Add(24 * time.Hour))}
-	order := &database.Order{ID: 71, SubscriptionID: 81, ProductID: 78, Status: database.OrderStatusPaid, AmountCents: 6900, Currency: "RUB", ProviderPaymentID: providerID.String()}
+	order := &database.Order{ID: 71, SubscriptionID: 81, ProductID: 78, Status: database.OrderStatusPaid, AmountCents: 6900, Currency: "RUB", ProviderPaymentID: providerID}
 
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -498,7 +497,7 @@ func TestCancelPaymentByProvider_SameOrderParallelChargebacksTransitionOnce(t *t
 	)
 
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return order, nil
 		},
 		GetPlanByNameFunc: func(context.Context, string) (*database.Plan, error) {
@@ -507,7 +506,7 @@ func TestCancelPaymentByProvider_SameOrderParallelChargebacksTransitionOnce(t *t
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, _ string, _ uuid.UUID, _ time.Time, freePlanID uint, _ database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, _ string, _ string, _ time.Time, freePlanID uint, _ database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
 			n := lockCASCalls.Add(1)
 			if n == 1 {
 				close(started)
@@ -605,8 +604,8 @@ func TestCancelPaymentByProvider_SameOrderParallelChargebacksTransitionOnce(t *t
 func TestCancelPaymentByProvider_SameOrderParallelPendingCancelsIdempotent(t *testing.T) {
 	t.Parallel()
 
-	providerID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440146")
-	order := &database.Order{ID: 85, SubscriptionID: 95, ProductID: 105, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID.String()}
+	providerID := "550e8400-e29b-41d4-a716-446655440146"
+	order := &database.Order{ID: 85, SubscriptionID: 95, ProductID: 105, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}
 
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -618,10 +617,10 @@ func TestCancelPaymentByProvider_SameOrderParallelPendingCancelsIdempotent(t *te
 	)
 
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByProviderPaymentIDFunc: func(context.Context, string, uuid.UUID) (*database.Order, error) {
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 			return order, nil
 		},
-		CancelOrderCASFunc: func(_ context.Context, _ string, _ uuid.UUID, _ []database.OrderStatus) (bool, error) {
+		CancelOrderCASFunc: func(_ context.Context, _ string, _ string, _ []database.OrderStatus) (bool, error) {
 			n := lockCASCalls.Add(1)
 			if n == 1 {
 				close(started)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -324,8 +325,9 @@ func AuditSubscriptionReanimated(sub *Subscription) *AuditLog {
 // AuditSubscriptionRenewed фиксирует успешную оплату (продление/активацию).
 // before — состояние подписки до платежа (nil для первой активации),
 // after — состояние, сохранённое транзакцией подтверждения платежа.
+// provider — идентификатор платёжного провайдера (actor_id события).
 // NewState строится из after, иначе событие показывало бы прежний тариф и срок.
-func AuditSubscriptionRenewed(before, after *Subscription, product *Product) *AuditLog {
+func AuditSubscriptionRenewed(before, after *Subscription, product *Product, provider string) *AuditLog {
 	details := auditSubDetails(after)
 	if product != nil {
 		details["product_id"] = product.ID
@@ -338,12 +340,16 @@ func AuditSubscriptionRenewed(before, after *Subscription, product *Product) *Au
 		details["old_expires_at"] = before.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 
+	if strings.TrimSpace(provider) == "" {
+		provider = PaymentProviderPlatega
+	}
+
 	return &AuditLog{
 		EntityType: EntitySubscription,
 		EntityID:   marshalAuditJSONString(formatSubID(after)),
 		Event:      AuditEventSubscriptionRenewed,
 		ActorType:  ActorPaymentProvider,
-		ActorID:    marshalAuditJSONString("platega"),
+		ActorID:    marshalAuditJSONString(provider),
 		OldState:   marshalAuditJSON(subStateSnapshot(before)),
 		NewState:   marshalAuditJSON(subStateSnapshot(after)),
 		Details:    marshalAuditDetails(details),

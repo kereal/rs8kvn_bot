@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/service"
@@ -29,7 +28,7 @@ func (fakePaymentProvider) CreateTransaction(context.Context, platega.CreateTran
 	}, nil
 }
 
-func (fakePaymentProvider) GetTransactionStatus(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+func (fakePaymentProvider) GetTransactionStatus(context.Context, string) (*platega.TransactionStatusResponse, error) {
 	return nil, errors.New("status not configured")
 }
 
@@ -319,7 +318,7 @@ func TestHandleBuyProduct_SuccessShowsPaymentButton(t *testing.T) {
 				return &database.Order{ID: 3, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPending, AmountCents: tt.priceCents, Currency: "RUB"}, nil
 			}
 			mockDB.MarkPaymentCreationUncertainFunc = func(context.Context, uint, bool) (bool, error) { return true, nil }
-			mockDB.SavePaymentDetailsFunc = func(context.Context, uint, uuid.UUID, string, time.Time) error { return nil }
+			mockDB.SavePaymentDetailsFunc = func(context.Context, uint, string, string, time.Time) error { return nil }
 			h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
 			err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)

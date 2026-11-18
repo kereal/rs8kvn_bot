@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -86,7 +85,7 @@ func (p fixedPaymentProvider) CreateTransaction(_ context.Context, _ platega.Cre
 	}, nil
 }
 
-func (fixedPaymentProvider) GetTransactionStatus(_ context.Context, _ uuid.UUID) (*platega.TransactionStatusResponse, error) {
+func (fixedPaymentProvider) GetTransactionStatus(_ context.Context, _ string) (*platega.TransactionStatusResponse, error) {
 	return nil, errors.New("status not configured")
 }
 

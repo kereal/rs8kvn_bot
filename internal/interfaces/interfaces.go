@@ -5,7 +5,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
@@ -209,14 +208,14 @@ type ProductRepository interface {
 // OrderRepository provides order lifecycle and payment-intent operations.
 type OrderRepository interface {
 	GetOrderByID(ctx context.Context, id uint) (*database.Order, error)
-	GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*database.Order, error)
+	GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID string) (*database.Order, error)
 	FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error)
 	FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
 	MarkPaymentCreationUncertain(ctx context.Context, orderID uint, uncertain bool) (bool, error)
-	SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
+	SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID string, paymentURL string, paymentExpiresAt time.Time) error
 	// AttachProviderPaymentID привязывает id провайдера к заказу, у которого его
 	// ещё нет (callback обогнал сохранение деталей).
-	AttachProviderPaymentID(ctx context.Context, orderID uint, provider string, providerPaymentID uuid.UUID) (bool, error)
+	AttachProviderPaymentID(ctx context.Context, orderID uint, provider string, providerPaymentID string) (bool, error)
 	// Реконсиляция зависших pending-заказов воркером.
 	GetStalePendingOrdersAfterID(ctx context.Context, before time.Time, afterID uint, limit int) ([]database.Order, error)
 	ExpirePendingOrder(ctx context.Context, orderID uint) (bool, error)
@@ -224,8 +223,8 @@ type OrderRepository interface {
 	GetPaidOrdersWithoutProviderFee(ctx context.Context, limit int) ([]database.Order, error)
 	GetPaidOrdersWithoutProviderFeeAfterID(ctx context.Context, afterID uint, limit int) ([]database.Order, error)
 	ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error)
-	CancelOrderCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error)
-	CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error)
+	CancelOrderCAS(ctx context.Context, provider string, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error)
+	CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID string, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error)
 }
 
 // BroadcastRepository provides CRUD for broadcast cards

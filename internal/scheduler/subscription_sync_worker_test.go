@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -30,7 +29,7 @@ func (hourlyReconcileProvider) CreateTransaction(
 }
 
 func (hourlyReconcileProvider) GetTransactionStatus(
-	context.Context, uuid.UUID,
+	context.Context, string,
 ) (*platega.TransactionStatusResponse, error) {
 	return nil, platega.ErrTransactionNotFound
 }
