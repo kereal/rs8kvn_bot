@@ -14,7 +14,7 @@
 | Одновременный выбор Platega/Stars в одном Telegram UI | Нет в этой задаче | Отдельное продуктовое/юридическое решение |
 | Изменение схемы БД | **Не делается** | Вся интеграция ложится в существующие колонки |
 
-Официальная база: [Telegram Stars](https://core.telegram.org/bots/payments-stars), [sendInvoice](https://core.telegram.org/bots/api/methods/sendinvoice), [answerPreCheckoutQuery](https://core.telegram.org/bots/api/methods/answerprecheckoutquery), [SuccessfulPayment](https://core.telegram.org/bots/api/types/successfulpayment), [refundStarPayment](https://core.telegram.org/bots/api/methods/refundstarpayment).
+Официальная база: см. раздел «Официальные ссылки API Telegram» в конце документа.
 
 ## 2. Non-goals
 
@@ -26,6 +26,7 @@
 - Не ослаблять транзакционность `ConfirmOrderPaidCAS`.
 - Не добавлять новый HTTP-эндпоинт для Stars: Stars приходят через Telegram updates.
 - **Не добавлять миграцию схемы БД.**
+- **Не менять пользовательский интерфейс бота, кроме неизбежных адаптаций** (см. раздел 5.5): текущие кнопки, тексты и flow сохраняются; изменения — только там, где Stars физически не работает как Platega (нет URL-кнопки, валюта XTR).
 
 ## 3. Целевая архитектура
 
@@ -175,7 +176,7 @@ UPDATE products SET price_cents = <рубли>, currency = 'RUB' WHERE id = <id>
 
 Один товар хранит цену только для одного активного провайдера. Оператор записывает RUB-цены перед переключением. При едином активном провайдере это безопасно.
 
-При переключении обратно на Platega цены в рублях восстанавливаются из записи оператора (документируется в `doc/telegram-stars-rollout.md`).
+При переключении обратно на Platega цены в рублях восстанавливаются из записи оператора (см. раздел 9 «Rollout и rollback»).
 
 В Go `Product.PriceMinorUnits` (существующее) — без переименования колонки.
 
@@ -230,6 +231,12 @@ Flow:
 Результат: `Checkout{Kind: CheckoutTelegramInvoice, MessageID: <message_id>}`.
 Кнопка-ссылка не отправляется: invoice приходит отдельным сообщением.
 
+**Back-кнопка — известный критический паттерн навигации проекта.** Invoice — это «контент в отдельном сообщении», как QR-код. Правила:
+
+- при покупке: карточка тарифа редактируется в «Счёт отправлен ниже», invoice отправляется **новым сообщением**;
+- «⬅️ Назад» на карточке: удаляется **только** сообщение invoice (его `messageID` приходит в callback), карточка не пересоздаётся — повторная отправка карточки создаёт дубликат (известный баг, guard `TestNavigation_OpenAndBack`);
+- регресс-тест: аналог `TestNavigation_OpenAndBack` для сценария invoice+Back — в этапе 6.
+
 ### 5.2 Pre-checkout
 
 Новый inbound `pre_checkout_query`:
@@ -265,11 +272,25 @@ Flow:
 
 Если Telegram прошёл, а БД не записала — операционная ошибка, alert, ручная сверка по charge ID.
 
+### 5.5 UI: минимальные изменения (принцип)
+
+Пользовательский интерфейс бота сохраняется. Изменения — только там, где Stars физически не работает как Platega:
+
+| Элемент | Platega (сейчас) | Stars (новое) | Обязательность |
+|---|---|---|---|
+| Список тарифов (`BuyProductList`) | `Название — 199₽` | `Название — 199XTR` (без formatter — сломано) | Обязательно: валюта из товара |
+| Кнопка оплаты (`BuyProductConfirm`) | `💳 Оплатить 199₽` (URL) | Не существует: `sendInvoice` сам открывает invoice | Обязательно: у Stars нет URL |
+| Текст карточки покупки | `После оплаты тариф активируется автоматически... _Платёжная система может дополнительно взимать комиссию._` | Без строки про комиссию | Обязательно: у Stars нет комиссии пользователю |
+| Текст ошибки `MsgPaymentInProgress` | `...Откройте ссылку, отправленную ранее...` | `...Нажмите на счёт, отправленный ранее...` | Обязательно: у Stars нет ссылки |
+| Возврат после invoice (Back) | Не применим | Удаляется только сообщение invoice, карточка не пересоздаётся | Обязательно: известный паттерн дублирования |
+| Всё остальное UI | Текущее | Текущее, без изменений | — |
+
+Минимум изменений: 5 точек выше. Остальной UI не трогаем.
+
 ## 6. Ожидаемые изменения по файлам
 
 | Файл/пакет | Изменение |
 |---|---|
-| `internal/service/payment/` | типы, интерфейс, Stars adapter |
 | `internal/service/payment/platega/` | реализация `payment.Provider`/`Reconciler` |
 | `internal/service/order.go` | provider-neutral `RequestPayment`/`ConfirmPayment`, убрать Platega-типы |
 | `internal/interfaces/interfaces.go` | `OrderService` без uuid.UUID и Platega-типов |
@@ -282,7 +303,6 @@ Flow:
 | `internal/utils/format.go` | currency-aware `FormatAmount(payment.Amount)` |
 | `cmd/bot/main.go` | wiring Stars adapter, `AllowedUpdates` |
 | `internal/web/web.go` | Platega callback остаётся, использует новый контракт |
-| `doc/telegram-stars-rollout.md` | процедура переключения и rollback с ценами |
 
 Миграция БД: **не делается.**
 
@@ -330,13 +350,15 @@ Flow:
 
 Проверка: unit-тесты `HandleUpdate`, в т.ч. неверный пользователь/сумма.
 
-### Этап 6. UI
+### Этап 6. UI (минимальные изменения, см. раздел 5.5)
 
-- форматтер цены currency-aware.
-- Platega — URL-кнопка.
-- Stars — «счёт отправлен», без URL-кнопки.
+- Форматтер цены currency-aware: `FormatPriceCents` → поддержка `XTR` (5 точек из раздела 5.5).
+- Platega — URL-кнопка (текущее поведение, без изменений).
+- Stars — «Счёт отправлен ниже» + invoice отдельным сообщением.
+- Back после invoice: удалить только сообщение invoice (паттерн дублирования).
+- Текст `MsgPaymentInProgress` для Stars: без упоминания ссылки.
 
-Проверка: bot-тесты.
+Проверка: bot-тесты + регресс-тест аналога `TestNavigation_OpenAndBack`.
 
 ### Этап 7. Refund
 
@@ -348,7 +370,8 @@ Flow:
 
 ### Этап 8. Документация
 
-- `doc/telegram-stars-rollout.md`: как переключить провайдера, как хранить RUB-цены, rollback.
+- Проверить раздел 9 «Rollout и rollback» этого плана актуальным для README.
+- При необходимости — обновить README.md (секция платёжных способов).
 
 ## 8. Тесты
 
@@ -393,3 +416,15 @@ go test -race ./...
 2. Восстановить RUB-цены из записей (шаг 2).
 3. Новые Stars invoices не создаются.
 4. Истечь старые Stars pending.
+
+## Официальные ссылки API Telegram
+
+Факты, использованные в плане, и их первоисточники:
+
+| Тема | Ссылка |
+|---|---|
+| Telegram Stars (ограничения digital goods/services) | https://core.telegram.org/bots/payments-stars |
+| sendInvoice (XTR, пустой provider_token, один price) | https://core.telegram.org/bots/api/methods/sendinvoice |
+| answerPreCheckoutQuery (лимит 10 секунд) | https://core.telegram.org/bots/api/methods/answerprecheckoutquery |
+| SuccessfulPayment (источник истины) | https://core.telegram.org/bots/api/types/successfulpayment |
+| refundStarPayment (возврат средств) | https://core.telegram.org/bots/api/methods/refundstarpayment |
