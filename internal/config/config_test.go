@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -291,6 +292,7 @@ func TestConfig_Validate_InvalidPaymentMerchantUUID(t *testing.T) {
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
 		GlobalSubURL:       "https://vpn.example.com/sub/",
+		StarsInvoiceTTL:    DefaultStarsInvoiceTTL,
 		PaymentEnabled:     true,
 		PaymentProvider:    "platega",
 		PlategaMerchantID:  "not-a-uuid",
@@ -314,6 +316,7 @@ func TestConfig_Validate_Valid(t *testing.T) {
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
 		GlobalSubURL:       "https://vpn.example.com/sub/",
+		StarsInvoiceTTL:    DefaultStarsInvoiceTTL,
 	}
 
 	err := cfg.validate()
@@ -334,6 +337,7 @@ func TestConfig_Validate_SentryDSN_Valid(t *testing.T) {
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
 		GlobalSubURL:       "https://vpn.example.com/sub/",
+		StarsInvoiceTTL:    DefaultStarsInvoiceTTL,
 	}
 
 	err := cfg.validate()
@@ -367,6 +371,7 @@ func TestConfig_Validate_WithHeartbeatURL(t *testing.T) {
 		TrialDurationHours: 3,
 		TrialRateLimit:     3,
 		GlobalSubURL:       "https://vpn.example.com/sub/",
+		StarsInvoiceTTL:    DefaultStarsInvoiceTTL,
 	}
 
 	err := cfg.validate()
@@ -568,6 +573,7 @@ func TestConfig_Validate_AuditRetention(t *testing.T) {
 		TrialDurationHours:    3,
 		TrialRateLimit:        3,
 		GlobalSubURL:          "https://vpn.example.com/sub/",
+		StarsInvoiceTTL:       DefaultStarsInvoiceTTL,
 		AuditLogRetentionDays: 0,
 	}
 
@@ -578,4 +584,200 @@ func TestConfig_Validate_AuditRetention(t *testing.T) {
 
 	base.AuditLogRetentionDays = 3650
 	require.NoError(t, base.validate())
+}
+
+func TestLoad_PaymentProvider_Allowlist(t *testing.T) {
+	for _, provider := range []string{"platega", "telegram_stars"} {
+		env := map[string]string{
+			"PAYMENT_ENABLED":  "true",
+			"PAYMENT_PROVIDER": provider,
+		}
+		if provider == "platega" {
+			env["PLATEGA_MERCHANT_ID"] = "6f9619ff-8b86-d011-b42d-00c04fc964ff"
+			env["PLATEGA_SECRET"] = "secret"
+		}
+		setLoadEnv(t, env)
+
+		cfg, err := Load()
+		require.NoError(t, err, "provider %q должен быть валиден при PAYMENT_ENABLED=true", provider)
+		assert.Equal(t, provider, cfg.PaymentProvider, "PaymentProvider")
+	}
+
+	setLoadEnv(t, map[string]string{
+		"PAYMENT_ENABLED":  "true",
+		"PAYMENT_PROVIDER": "bitcoin",
+	})
+
+	_, err := Load()
+	require.Error(t, err, "неизвестный провайдер должен отклоняться")
+	assert.Contains(t, err.Error(), "PAYMENT_PROVIDER")
+}
+
+func TestLoad_PaymentDisabled_NoCredentialsRequired(t *testing.T) {
+	// B1-регрессия: .env.example-подобный дефолт — оплаты выключены,
+	// провайдер по умолчанию platega, креды пустые — конфиг валиден.
+	setLoadEnv(t, nil)
+
+	cfg, err := Load()
+	require.NoError(t, err, "Load() error")
+	assert.False(t, cfg.PaymentEnabled, "PaymentEnabled")
+	assert.Equal(t, "platega", cfg.PaymentProvider, "PaymentProvider default")
+	assert.False(t, cfg.PlategaCallbackEnabled, "PlategaCallbackEnabled default")
+	assert.False(t, cfg.ShouldEnablePlategaCallback(), "callback должен быть выключен")
+}
+
+func TestLoad_PlategaCallbackEnabled_RequiresCredentials(t *testing.T) {
+	setLoadEnv(t, map[string]string{"PLATEGA_CALLBACK_ENABLED": "true"})
+	_, err := Load()
+	require.Error(t, err, "callback без Platega-кредов невалиден")
+	assert.Contains(t, err.Error(), "PLATEGA_MERCHANT_ID")
+
+	setLoadEnv(t, map[string]string{
+		"PAYMENT_PROVIDER":         "telegram_stars",
+		"PLATEGA_CALLBACK_ENABLED": "true",
+	})
+	_, err = Load()
+	require.Error(t, err, "Stars + callback без Platega-кредов невалиден")
+	assert.Contains(t, err.Error(), "PLATEGA_MERCHANT_ID")
+
+	setLoadEnv(t, map[string]string{
+		"PLATEGA_CALLBACK_ENABLED": "true",
+		"PLATEGA_MERCHANT_ID":      "6f9619ff-8b86-d011-b42d-00c04fc964ff",
+		"PLATEGA_SECRET":           "secret",
+	})
+	cfg, err := Load()
+	require.NoError(t, err, "callback с валидными кредами должен загружаться")
+	assert.True(t, cfg.ShouldEnablePlategaCallback(), "callback должен включаться по флагу")
+}
+
+func TestLoad_TelegramStars_NoPlategaCredentials(t *testing.T) {
+	setLoadEnv(t, map[string]string{
+		"PAYMENT_ENABLED":  "true",
+		"PAYMENT_PROVIDER": "telegram_stars",
+	})
+
+	cfg, err := Load()
+	require.NoError(t, err, "Stars без Platega-кредов валиден")
+	assert.Equal(t, "telegram_stars", cfg.PaymentProvider, "PaymentProvider")
+	assert.False(t, cfg.ShouldEnablePlategaCallback(), "callback выключен при Stars")
+}
+
+func TestLoad_StarsInvoiceTTL(t *testing.T) {
+	setLoadEnv(t, nil)
+	cfg, err := Load()
+	require.NoError(t, err, "Load() error")
+	assert.Equal(t, 15*time.Minute, cfg.StarsInvoiceTTL, "STARS_INVOICE_TTL default")
+
+	setLoadEnv(t, map[string]string{"STARS_INVOICE_TTL": "30m"})
+	cfg, err = Load()
+	require.NoError(t, err, "Load() error")
+	assert.Equal(t, 30*time.Minute, cfg.StarsInvoiceTTL, "STARS_INVOICE_TTL custom")
+
+	setLoadEnv(t, map[string]string{"STARS_INVOICE_TTL": "0"})
+	_, err = Load()
+	require.Error(t, err, "нулевой TTL должен отклоняться")
+	assert.Contains(t, err.Error(), "STARS_INVOICE_TTL")
+
+	setLoadEnv(t, map[string]string{"STARS_INVOICE_TTL": "-5m"})
+	_, err = Load()
+	require.Error(t, err, "отрицательный TTL должен отклоняться")
+	assert.Contains(t, err.Error(), "STARS_INVOICE_TTL")
+
+	setLoadEnv(t, map[string]string{"STARS_INVOICE_TTL": "bogus"})
+	_, err = Load()
+	require.Error(t, err, "нечисловое значение должно отклоняться")
+	assert.Contains(t, err.Error(), "STARS_INVOICE_TTL")
+}
+
+func TestConfig_Validate_PlategaCredentials(t *testing.T) {
+	t.Parallel()
+
+	newCfg := func() *Config {
+		return &Config{
+			TelegramBotToken:   testBotToken,
+			TelegramAdminID:    123456,
+			HeartbeatInterval:  60,
+			LogLevel:           "info",
+			WebServerPort:      DefaultWebServerPort,
+			SiteURL:            "https://vpn.site",
+			TrialDurationHours: 3,
+			TrialRateLimit:     3,
+			GlobalSubURL:       "https://vpn.example.com/sub/",
+			StarsInvoiceTTL:    DefaultStarsInvoiceTTL,
+			PaymentProvider:    "platega",
+		}
+	}
+
+	// Выключенные оплаты без кредов — валидно.
+	require.NoError(t, newCfg().validate(), "payments disabled без кредов валиден")
+
+	// Включённые оплаты platega без кредов — ошибка.
+	cfg := newCfg()
+	cfg.PaymentEnabled = true
+	require.ErrorContains(t, cfg.validate(), "PLATEGA_MERCHANT_ID")
+
+	// С валидными кредами — ок.
+	cfg = newCfg()
+	cfg.PaymentEnabled = true
+	cfg.PlategaMerchantID = "6f9619ff-8b86-d011-b42d-00c04fc964ff"
+	cfg.PlategaSecret = "secret"
+	require.NoError(t, cfg.validate())
+
+	// Некорректный UUID — ошибка.
+	cfg.PlategaMerchantID = "not-a-uuid"
+	require.ErrorContains(t, cfg.validate(), "PLATEGA_MERCHANT_ID")
+}
+
+func TestConfig_ShouldEnablePlategaCallback(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                   string
+		paymentEnabled         bool
+		paymentProvider        string
+		plategaCallbackEnabled bool
+		want                   bool
+	}{
+		{"disabled payments, platega default, flag off", false, "platega", false, false},
+		{"disabled payments, flag on", false, "platega", true, true},
+		{"enabled payments, platega", true, "platega", false, true},
+		{"enabled payments, stars, flag off", true, "telegram_stars", false, false},
+		{"enabled payments, stars, flag on", true, "telegram_stars", true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &Config{
+				PaymentEnabled:         tt.paymentEnabled,
+				PaymentProvider:        tt.paymentProvider,
+				PlategaCallbackEnabled: tt.plategaCallbackEnabled,
+			}
+			assert.Equal(t, tt.want, cfg.ShouldEnablePlategaCallback())
+		})
+	}
+}
+
+func TestConfig_String_NoSecrets(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{
+		TelegramBotToken:       testBotToken,
+		SentryDSN:              "https://key@sentry.example.com/1",
+		PaymentEnabled:         true,
+		PaymentProvider:        "telegram_stars",
+		PlategaCallbackEnabled: true,
+		StarsInvoiceTTL:        DefaultStarsInvoiceTTL,
+		PlategaMerchantID:      "6f9619ff-8b86-d011-b42d-00c04fc964ff",
+		PlategaSecret:          "supersecret",
+	}
+
+	s := cfg.String()
+	assert.Contains(t, s, "PaymentEnabled=true", "PaymentEnabled")
+	assert.Contains(t, s, "PaymentProvider=telegram_stars", "PaymentProvider")
+	assert.Contains(t, s, "PlategaCallbackEnabled=true", "PlategaCallbackEnabled")
+	assert.Contains(t, s, "StarsInvoiceTTL=15m0s", "StarsInvoiceTTL")
+	assert.NotContains(t, s, "supersecret", "PlategaSecret не должен попадать в String()")
+	assert.NotContains(t, s, "6f9619ff", "PlategaMerchantID не должен попадать в String()")
 }
