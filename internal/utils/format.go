@@ -132,7 +132,7 @@ func FormatStarsAmount(amountMinor int64) string {
 // empty/unknown currencies keep the ruble rendering: whole amounts drop the
 // fractional part ("127₽"), fractional amounts keep two digits ("127.37₽").
 func FormatPriceCents(amountMinor int64, currency string) string {
-	if currency == "XTR" {
+	if strings.EqualFold(currency, "XTR") {
 		return FormatStarsAmount(amountMinor)
 	}
 

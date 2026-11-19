@@ -760,7 +760,7 @@ func (h *Handler) HandleRefund(ctx context.Context, update tgbotapi.Update) erro
 
 	orderID := uint(parsedID)
 
-	err = h.orderService.RefundStarsOrder(ctx, orderID)
+	result, err := h.orderService.RefundStarsOrder(ctx, orderID)
 	if err != nil {
 		logger.Warn("Stars refund failed",
 			zap.Uint("order_id", orderID),
@@ -773,9 +773,50 @@ func (h *Handler) HandleRefund(ctx context.Context, update tgbotapi.Update) erro
 		return nil
 	}
 
+	if result != nil {
+		// Refund применён: уведомление покупателю best-effort — ошибка отправки
+		// не превращает успешный refund в ошибку. nil result (no-op, например
+		// заказ уже отменён) — без повторного уведомления.
+		h.notifyRefundUser(ctx, result)
+	}
+
 	h.SendMessage(ctx, chatID, fmt.Sprintf("✅ Возврат по заказу #%d выполнен: заказ отменён, Stars возвращены пользователю.", orderID))
 
 	logger.Info("Stars refund completed", zap.Uint("order_id", orderID), zap.Int64("admin_chat_id", chatID))
 
 	return nil
+}
+
+// notifyRefundUser отправляет покупателю уведомление о возврате Stars: заказ,
+// сумму и валюту. Best-effort: ошибка отправки фиксируется в issue-событии,
+// но не отменяет уже выполненный refund.
+func (h *Handler) notifyRefundUser(ctx context.Context, result *service.StarsRefundResult) {
+	if result.TelegramID <= 0 {
+		logger.Warn("stars refund result without buyer telegram id",
+			zap.Uint("order_id", result.OrderID))
+
+		return
+	}
+
+	text := fmt.Sprintf("💸 Возврат по заказу #%d выполнен: %s возвращены на ваш аккаунт.\nЕсли остались вопросы, напишите в /paysupport.",
+		result.OrderID, utils.FormatStarsAmount(result.AmountCents))
+
+	notice := tgbotapi.NewMessage(result.TelegramID, text)
+	_, sendErr := h.paymentAPI().Send(notice)
+	if sendErr != nil {
+		logger.Warn("failed to notify user about stars refund",
+			zap.Uint("order_id", result.OrderID),
+			zap.Int64("telegram_id", result.TelegramID),
+			zap.Error(sendErr))
+
+		h.orderService.NotifyPaymentIssue(ctx, service.PaymentIssue{
+			Event:       "refund_user_notification_failed",
+			Reason:      sendErr.Error(),
+			Action:      "send the refund confirmation to the buyer manually",
+			OrderID:     result.OrderID,
+			TelegramID:  result.TelegramID,
+			AmountCents: result.AmountCents,
+			Currency:    result.Currency,
+		})
+	}
 }

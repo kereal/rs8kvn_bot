@@ -175,8 +175,8 @@ func (h *Handler) handleBuyPremiumList(ctx context.Context, chatID int64, userna
 	return h.getSubHandler().handleBuyPremiumList(ctx, chatID, username, messageID)
 }
 
-func (h *Handler) handleBuyProduct(ctx context.Context, chatID int64, username string, messageID int, productID uint) error {
-	return h.getSubHandler().handleBuyProduct(ctx, chatID, username, messageID, productID)
+func (h *Handler) handleBuyProduct(ctx context.Context, chatID, telegramID int64, username string, messageID int, productID uint) error {
+	return h.getSubHandler().handleBuyProduct(ctx, chatID, telegramID, username, messageID, productID)
 }
 
 func (h *Handler) SetOrderService(orderService *service.OrderService) {
@@ -895,18 +895,27 @@ func (h *Handler) handleSuccessfulPayment(ctx context.Context, update tgbotapi.U
 			ProviderID:     payment.TelegramPaymentChargeID,
 		})
 
-		notice := tgbotapi.NewMessage(chatID,
-			"✅ Оплата получена, но подтвердить заказ не удалось. Напишите в /paysupport")
-		_, sendErr := h.paymentAPI().Send(notice)
-		if sendErr != nil {
-			logger.Warn("failed to notify user about confirm failure",
-				zap.Int64("chat_id", chatID), zap.Error(sendErr))
-		}
+		h.sendPaymentSupportNotice(ctx, chatID)
 
 		return fmt.Errorf("confirm stars payment: %w", err)
 	}
 
 	if !confirmation.Activated {
+		if confirmation.Order == nil {
+			// Заказ ссылается на удалённый product/subscription: активировать
+			// нечего — ручной разбор. Сообщение в /paysupport, не «отменённый
+			// заказ» (сервис уже сообщил об этом в issue-событии).
+			h.sendPaymentSupportNotice(ctx, chatID)
+
+			return nil
+		}
+
+		if confirmation.Order.Status == database.OrderStatusPaid {
+			// Повторная доставка successful_payment: идемпотентный no-op без
+			// второго продления и без предупреждения об отмене.
+			return nil
+		}
+
 		// Заказ canceled: деньги списаны, доступ отозван — ручная сверка.
 		warning := tgbotapi.NewMessage(chatID,
 			"⚠️ Оплата по отменённому заказу. Деньги списаны, доступ отозван. Обратитесь в /paysupport")
@@ -926,28 +935,8 @@ func (h *Handler) handleSuccessfulPayment(ctx context.Context, update tgbotapi.U
 			zap.Uint("order_id", confirmation.Order.ID),
 			zap.Error(err))
 
-		h.orderService.NotifyPaymentIssue(ctx, service.PaymentIssue{
-			Event:          "paid_notification_build_failed",
-			Reason:         err.Error(),
-			Action:         "send the confirmed payment details to the user manually",
-			OrderID:        confirmation.Order.ID,
-			TelegramID:     chatID,
-			SubscriptionID: confirmation.Order.SubscriptionID,
-			ProductID:      confirmation.Order.ProductID,
-			AmountCents:    confirmation.Order.AmountCents,
-			Currency:       confirmation.Order.Currency,
-			ProviderID:     payment.TelegramPaymentChargeID,
-			CallbackStatus: "successful_payment",
-			Payload:        payment.InvoicePayload,
-		})
-
-		fallback := tgbotapi.NewMessage(chatID,
-			"Оплата подтверждена. Напишите в /paysupport, если доступ не появился")
-		_, sendErr := h.paymentAPI().Send(fallback)
-		if sendErr != nil {
-			logger.Warn("failed to notify user about paid notification fallback",
-				zap.Int64("chat_id", chatID), zap.Error(sendErr))
-		}
+		h.sendPaidNotificationFallback(ctx, "paid_notification_build_failed", err.Error(),
+			confirmation.Order, chatID, payment.TelegramPaymentChargeID, payment.InvoicePayload)
 
 		return nil
 	}
@@ -967,31 +956,51 @@ func (h *Handler) handleSuccessfulPayment(ctx context.Context, update tgbotapi.U
 			zap.Int64("telegram_id", targetID),
 			zap.Error(err))
 
-		h.orderService.NotifyPaymentIssue(ctx, service.PaymentIssue{
-			Event:          "paid_notification_send_failed",
-			Reason:         err.Error(),
-			Action:         "send the confirmed payment details to the user manually",
-			OrderID:        confirmation.Order.ID,
-			TelegramID:     targetID,
-			SubscriptionID: confirmation.Order.SubscriptionID,
-			ProductID:      confirmation.Order.ProductID,
-			AmountCents:    confirmation.Order.AmountCents,
-			Currency:       confirmation.Order.Currency,
-			ProviderID:     payment.TelegramPaymentChargeID,
-			CallbackStatus: "successful_payment",
-			Payload:        payment.InvoicePayload,
-		})
-
-		fallback := tgbotapi.NewMessage(targetID,
-			"Оплата подтверждена. Напишите в /paysupport, если доступ не появился")
-		_, fallbackErr := h.paymentAPI().Send(fallback)
-		if fallbackErr != nil {
-			logger.Warn("failed to send paid notification fallback",
-				zap.Int64("chat_id", targetID), zap.Error(fallbackErr))
-		}
+		h.sendPaidNotificationFallback(ctx, "paid_notification_send_failed", err.Error(),
+			confirmation.Order, targetID, payment.TelegramPaymentChargeID, payment.InvoicePayload)
 	}
 
 	return nil
+}
+
+// sendPaymentSupportNotice сообщает покупателю об оплате, которую не удалось
+// подтвердить: указывает обратиться в /paysupport. Best-effort.
+func (h *Handler) sendPaymentSupportNotice(ctx context.Context, chatID int64) {
+	notice := tgbotapi.NewMessage(chatID,
+		"✅ Оплата получена, но подтвердить заказ не удалось. Напишите в /paysupport")
+	_, sendErr := h.paymentAPI().Send(notice)
+	if sendErr != nil {
+		logger.Warn("failed to notify user about confirm failure",
+			zap.Int64("chat_id", chatID), zap.Error(sendErr))
+	}
+}
+
+// sendPaidNotificationFallback сообщает в ops о непрошедшем уведомлении об
+// оплате и отправляет покупателю статичный fallback с подсказкой /paysupport.
+func (h *Handler) sendPaidNotificationFallback(ctx context.Context, event, reason string,
+	order *database.Order, telegramID int64, chargeID, payload string) {
+	h.orderService.NotifyPaymentIssue(ctx, service.PaymentIssue{
+		Event:          event,
+		Reason:         reason,
+		Action:         "send the confirmed payment details to the user manually",
+		OrderID:        order.ID,
+		TelegramID:     telegramID,
+		SubscriptionID: order.SubscriptionID,
+		ProductID:      order.ProductID,
+		AmountCents:    order.AmountCents,
+		Currency:       order.Currency,
+		ProviderID:     chargeID,
+		CallbackStatus: "successful_payment",
+		Payload:        payload,
+	})
+
+	fallback := tgbotapi.NewMessage(telegramID,
+		"Оплата подтверждена. Напишите в /paysupport, если доступ не появился")
+	_, sendErr := h.paymentAPI().Send(fallback)
+	if sendErr != nil {
+		logger.Warn("failed to send paid notification fallback",
+			zap.Int64("telegram_id", telegramID), zap.Error(sendErr))
+	}
 }
 
 // HandlePaySupport delegates the /paysupport command to the command layer.

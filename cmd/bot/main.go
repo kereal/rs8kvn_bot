@@ -44,9 +44,6 @@ var (
 // Telegram — 10 секунд, бюджет ответа в боте — 6 секунд (плана D1, §5.2).
 const paymentClientTimeout = 5 * time.Second
 
-// starsProvider — значение PAYMENT_PROVIDER для Telegram Stars.
-const starsProvider = "telegram_stars"
-
 // Option is a functional option for Run.
 type Option func(*runOptions)
 
@@ -631,7 +628,7 @@ func main() {
 	if svc.orderService != nil {
 		// Stars-клиент — только при активном провайдере Telegram Stars:
 		// при platega payment остаётся nil — это нормально (§4.4).
-		if cfg.PaymentProvider == starsProvider {
+		if cfg.PaymentProvider == database.PaymentProviderTelegramStars {
 			svc.orderService.SetStarsClient(stars.New(paymentAPI))
 		}
 

@@ -1839,6 +1839,9 @@ func TestRequestPayment_StarsCreatesPendingWithTTL(t *testing.T) {
 		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
 			return &database.Subscription{ID: 3, TelegramID: 42}, nil
 		},
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return &database.Plan{ID: 2, IsActive: true}, nil
+		},
 		FindPendingPaymentOrderFunc: func(_ context.Context, _, _ uint, provider string, _ time.Time) (*database.Order, error) {
 			findProvider = provider
 
@@ -1881,6 +1884,9 @@ func TestRequestPayment_StarsLivePendingReturnsAlreadyInProgress(t *testing.T) {
 		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
 			return &database.Subscription{ID: 3, TelegramID: 42}, nil
 		},
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return &database.Plan{ID: 2, IsActive: true}, nil
+		},
 		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 			return pending, nil
 		},
@@ -1915,6 +1921,55 @@ func TestRequestPayment_StarsRUBProductFailsClosed(t *testing.T) {
 	_, _, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 7})
 	require.Error(t, err, "RUB products must fail closed in Stars mode: ренты в Stars не отправляются")
 	assert.NotErrorIs(t, err, ErrPaymentDisabled)
+}
+
+func TestRequestPayment_StarsExistingSubscriptionRejectsInactiveProduct(t *testing.T) {
+	t.Parallel()
+
+	mock := &testutil.ServiceStoreFake{
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return &database.Product{ID: 7, PlanID: 2, Name: "Premium", PriceCents: 199, Currency: stars.Currency, IsActive: false}, nil
+		},
+		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+			return &database.Subscription{ID: 3, TelegramID: 42}, nil
+		},
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
+			t.Fatal("inactive product must not reach pending lookup")
+
+			return nil, errors.New("unreachable")
+		},
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars})
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	_, _, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 7})
+	require.Error(t, err, "inactive Stars product must be rejected even when a subscription exists")
+}
+
+func TestRequestPayment_StarsExistingSubscriptionRejectsInactivePlan(t *testing.T) {
+	t.Parallel()
+
+	mock := &testutil.ServiceStoreFake{
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return &database.Product{ID: 7, PlanID: 2, Name: "Premium", PriceCents: 199, Currency: stars.Currency, IsActive: true}, nil
+		},
+		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+			return &database.Subscription{ID: 3, TelegramID: 42}, nil
+		},
+		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
+			return &database.Plan{ID: 2, IsActive: false}, nil
+		},
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
+			t.Fatal("inactive plan must not reach pending lookup")
+
+			return nil, errors.New("unreachable")
+		},
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars})
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	_, _, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 7})
+	require.Error(t, err, "inactive Stars plan must be rejected even when a subscription exists")
 }
 
 func TestValidateStarsPreCheckout_ValidPayloadReturnsNil(t *testing.T) {
@@ -2119,6 +2174,48 @@ func starsRefundOrder() *database.Order {
 	return &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusPaid, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars, ProviderPaymentID: "charge_ref"}
 }
 
+func TestRefundStarsOrder_AdminActorAndResult(t *testing.T) {
+	t.Parallel()
+
+	order := starsRefundOrder()
+	var auditEvent *database.AuditLog
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) {
+			return order, nil
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+		GetPlanByNameFunc: func(context.Context, string) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: database.FreePlanName}, nil
+		},
+		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, _, _ string, _ time.Time, _ uint, _ database.ChargebackPlanInTxFn, auditFn func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
+			auditEvent = auditFn(order, &database.Subscription{ID: 4}, true)
+
+			return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: true}, nil
+		},
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars})
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	ctx := WithAuditAdmin(context.Background(), 999)
+	result, err := o.RefundStarsOrder(ctx, 31)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, uint(31), result.OrderID)
+	assert.Equal(t, int64(42), result.TelegramID)
+	assert.Equal(t, int64(199), result.AmountCents)
+	assert.Equal(t, stars.Currency, result.Currency)
+	assert.True(t, result.Downgraded)
+
+	require.NotNil(t, auditEvent)
+	assert.Equal(t, database.AuditEventPaymentRefunded, auditEvent.Event)
+	assert.Equal(t, database.ActorAdmin, auditEvent.ActorType)
+	require.NotNil(t, auditEvent.ActorID)
+	assert.Equal(t, "999", *auditEvent.ActorID)
+}
+
 func TestRefundStarsOrder_SuccessCancelsDowngradesAndAudits(t *testing.T) {
 	t.Parallel()
 
@@ -2150,7 +2247,7 @@ func TestRefundStarsOrder_SuccessCancelsDowngradesAndAudits(t *testing.T) {
 	o.SetAdminBot(adminBot)
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
-	err := o.RefundStarsOrder(context.Background(), 31)
+	_, err := o.RefundStarsOrder(context.Background(), 31)
 	require.NoError(t, err)
 
 	assert.Equal(t, "telegram_stars", casProvider)
@@ -2192,7 +2289,7 @@ func TestRefundStarsOrder_AlreadyCanceledIsNoOp(t *testing.T) {
 	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
 	o.SetStarsClient(stars.New(starsBot))
 
-	err := o.RefundStarsOrder(context.Background(), 31)
+	_, err := o.RefundStarsOrder(context.Background(), 31)
 	require.NoError(t, err)
 	assert.False(t, makeRequestCalled, "canceled order must not hit Telegram")
 	assert.False(t, casCalled, "canceled order must not run CAS")
@@ -2226,7 +2323,7 @@ func TestRefundStarsOrder_TelegramErrorKeepsDBUntouched(t *testing.T) {
 	o.SetAdminBot(adminBot)
 	o.SetStarsClient(stars.New(starsBot))
 
-	err := o.RefundStarsOrder(context.Background(), 31)
+	_, err := o.RefundStarsOrder(context.Background(), 31)
 	require.Error(t, err)
 	assert.False(t, casCalled, "failed Telegram refund must not touch the DB")
 
@@ -2265,7 +2362,7 @@ func TestRefundStarsOrder_ChargeAlreadyRefundedProceedsToCAS(t *testing.T) {
 	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
 	o.SetStarsClient(stars.New(starsBot))
 
-	err := o.RefundStarsOrder(context.Background(), 31)
+	_, err := o.RefundStarsOrder(context.Background(), 31)
 	require.NoError(t, err, "CHARGE_ALREADY_REFUNDED must be treated as success (M2)")
 	assert.True(t, casCalled, "already-refunded charge must still reach the cancel CAS")
 }
@@ -2297,7 +2394,7 @@ func TestRefundStarsOrder_DowngradedRunsPostCommitSync(t *testing.T) {
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
-	err := o.RefundStarsOrder(context.Background(), 31)
+	_, err := o.RefundStarsOrder(context.Background(), 31)
 	require.NoError(t, err)
 	assert.True(t, syncInvoked, "downgrade after refund must run post-commit SyncSubscription")
 }
@@ -2323,7 +2420,7 @@ func TestRefundStarsOrder_NonStarsOrderRejected(t *testing.T) {
 	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
 	o.SetStarsClient(stars.New(starsBot))
 
-	err := o.RefundStarsOrder(context.Background(), 31)
+	_, err := o.RefundStarsOrder(context.Background(), 31)
 	require.Error(t, err, "non-Stars orders must not go through the Stars refund path")
 	assert.False(t, makeRequestCalled)
 }
@@ -2335,6 +2432,6 @@ func TestRefundStarsOrder_ClientDisabledReturnsPaymentDisabled(t *testing.T) {
 	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
 	// intentionally not calling SetStarsClient
 
-	err := o.RefundStarsOrder(context.Background(), 31)
+	_, err := o.RefundStarsOrder(context.Background(), 31)
 	require.ErrorIs(t, err, ErrPaymentDisabled)
 }

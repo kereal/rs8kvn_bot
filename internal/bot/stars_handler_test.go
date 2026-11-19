@@ -23,7 +23,7 @@ import (
 func newStarsTestHandler(t *testing.T, mockDB *testutil.BotStoreFake) (*Handler, *testutil.BotAPI, *testutil.BotAPI) {
 	t.Helper()
 
-	cfg := &config.Config{TelegramAdminID: 123, PaymentEnabled: true, PaymentProvider: starsProvider}
+	cfg := &config.Config{TelegramAdminID: 123, PaymentEnabled: true, PaymentProvider: database.PaymentProviderTelegramStars}
 	mainBot := testutil.NewBotAPI()
 	paymentBot := testutil.NewBotAPI()
 
@@ -77,7 +77,7 @@ func TestStarsBuy_SendsInvoiceAndEditsCard(t *testing.T) {
 	starsOrderMocks(mockDB, 199)
 	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	// Invoice уходит через payment-инстанс, НЕ через основной бот (D1/D3).
@@ -124,7 +124,7 @@ func TestStarsBuy_InvoiceSendErrorShowsSeparateText(t *testing.T) {
 
 	paymentBot.SendError = errors.New("telegram down")
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	// M5: отдельный текст — не «счёт уже отправлен».
@@ -143,12 +143,15 @@ func TestStarsBuy_AlreadyInProgressShowsStarsText(t *testing.T) {
 	mockDB.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) {
 		return &database.Subscription{ID: 7, TelegramID: 42}, nil
 	}
+	mockDB.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
+		return &database.Plan{ID: 2, IsActive: true}, nil
+	}
 	mockDB.FindPendingPaymentOrderFunc = func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 		return &database.Order{ID: 3, Status: database.OrderStatusPending}, nil
 	}
 	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	assert.Empty(t, paymentBot.AllChattablesSafe(), "no second invoice must be created")
@@ -268,7 +271,7 @@ func TestHandleUpdate_PreCheckoutFallsBackToMainBot(t *testing.T) {
 	// paymentBot не задан (тестовый Handler) → ответ уходит через основной бот.
 	mockDB := testutil.NewBotStoreFake()
 	starsPreCheckoutMocks(mockDB, database.OrderStatusPending)
-	cfg := &config.Config{TelegramAdminID: 123, PaymentEnabled: true, PaymentProvider: starsProvider}
+	cfg := &config.Config{TelegramAdminID: 123, PaymentEnabled: true, PaymentProvider: database.PaymentProviderTelegramStars}
 	mainBot := testutil.NewBotAPI()
 	h := NewHandler(mainBot, cfg, mockDB, NewTestBotConfig(), nil, "")
 	o := service.NewOrderService(mockDB, nil, nil, nil, "testbot", cfg)
@@ -358,6 +361,76 @@ func TestHandleUpdate_SuccessfulPaymentServiceErrorAsksForSupport(t *testing.T) 
 	sent := paymentBot.GetAllSentMessages()
 	require.Len(t, sent, 1)
 	assert.Contains(t, sent[0].Text, "/paysupport")
+}
+
+func TestHandleUpdate_SuccessfulPaymentDuplicatePaidIsSilentNoop(t *testing.T) {
+	t.Parallel()
+
+	// Повторная доставка successful_payment по уже оплаченному заказу:
+	// идемпотентный no-op — без «отменённого заказа» и без повторного уведомления.
+	mockDB := testutil.NewBotStoreFake()
+	starsPreCheckoutMocks(mockDB, database.OrderStatusPaid)
+	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
+
+	h.HandleUpdate(context.Background(), successfulPaymentUpdate("charge-1", "3", 199))
+
+	assert.Empty(t, paymentBot.GetAllSentMessages(), "duplicate paid delivery must not re-notify the user")
+	assert.Empty(t, mainBot.GetAllSentMessages())
+}
+
+func TestHandleUpdate_SuccessfulPaymentNilOrderAsksSupportNotCanceled(t *testing.T) {
+	t.Parallel()
+
+	// Заказ ссылается на удалённый product: подтверждение возвращает
+	// confirmation.Order == nil — сообщение в /paysupport, не «отменённый заказ».
+	mockDB := testutil.NewBotStoreFake()
+	starsPreCheckoutMocks(mockDB, database.OrderStatusPending)
+	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
+		return nil, database.ErrProductNotFound
+	}
+	h, _, paymentBot := newStarsTestHandler(t, mockDB)
+
+	h.HandleUpdate(context.Background(), successfulPaymentUpdate("charge-1", "3", 199))
+
+	sent := paymentBot.GetAllSentMessages()
+	require.Len(t, sent, 1)
+	assert.Contains(t, sent[0].Text, "/paysupport")
+	assert.NotContains(t, sent[0].Text, "отменённому заказу")
+}
+
+func TestStarsBuy_CallbackChatDiffersFromTelegramID(t *testing.T) {
+	t.Parallel()
+
+	// callback-чат (5000) и Telegram user ID покупателя (42) различны:
+	// invoice уходит в private chat по telegram_id, карточка редактируется в chatID.
+	mockDB := testutil.NewBotStoreFake()
+	starsOrderMocks(mockDB, 199)
+	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
+
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "cb1",
+			From: &tgbotapi.User{ID: 42, UserName: "user"},
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: 5000},
+				MessageID: 99,
+			},
+			Data: "buy_product_1",
+		},
+	}
+
+	err := h.HandleCallback(context.Background(), update)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, paymentBot.AllChattablesSafe(), "invoice must be sent via paymentBot")
+	invoice, ok := paymentBot.AllChattablesSafe()[0].(tgbotapi.InvoiceConfig)
+	require.True(t, ok, "expected an InvoiceConfig sent via paymentBot")
+	assert.Equal(t, int64(42), invoice.ChatID, "invoice must target the buyer telegram_id, not the callback chat")
+
+	edit, ok := mainBot.LastChattableSafe().(tgbotapi.EditMessageTextConfig)
+	require.True(t, ok, "expected the card to be edited in place")
+	assert.Equal(t, int64(5000), edit.ChatID, "card must be edited in the callback chat")
+	assert.Equal(t, 99, edit.MessageID)
 }
 
 func TestStarsInvoiceBack_DeletesOnlyInvoiceAndRendersList(t *testing.T) {
@@ -468,9 +541,9 @@ func TestHandleRefund_AdminUsageAndSuccess(t *testing.T) {
 	mockDB.CancelPaidOrderAndDowngradeCASFunc = func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
 		refunded = true
 
-		return &database.ChargebackResult{Downgraded: false}, nil
+		return &database.ChargebackResult{Order: &database.Order{ID: 3}, WasPaid: true, Transitioned: true, Downgraded: false}, nil
 	}
-	h, mainBot, _ := newStarsTestHandler(t, mockDB)
+	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
 
 	t.Run("usage", func(t *testing.T) {
 		update := tgbotapi.Update{
@@ -503,7 +576,86 @@ func TestHandleRefund_AdminUsageAndSuccess(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.True(t, refunded, "RefundStarsOrder must reach the cancel CAS")
+
+		// Покупатель получает уведомление о возврате через payment-инстанс:
+		// заказ, сумма и валюта.
+		notifications := paymentBot.GetAllSentMessages()
+		require.Len(t, notifications, 1)
+		assert.Equal(t, int64(42), notifications[0].ChatID, "refund notice must go to the buyer telegram_id")
+		assert.Contains(t, notifications[0].Text, "#3")
+		assert.Contains(t, notifications[0].Text, "199 XTR")
+
+		// Админский success-текст сохранён.
 		messages := mainBot.GetAllSentMessages()
+		require.NotEmpty(t, messages)
+		assert.Contains(t, messages[len(messages)-1].Text, "✅ Возврат по заказу #3")
+	})
+
+	t.Run("noop sends no user notification", func(t *testing.T) {
+		noopedDB := testutil.NewBotStoreFake()
+		noopedDB.GetOrderByIDFunc = func(context.Context, uint) (*database.Order, error) {
+			// Заказ уже отменён: RefundStarsOrder — идемпотентный no-op (nil result).
+			return &database.Order{
+				ID: 3, SubscriptionID: 7, Status: database.OrderStatusCanceled,
+				AmountCents: 199, Currency: stars.Currency,
+				PaymentProvider: database.PaymentProviderTelegramStars, ProviderPaymentID: "charge-1",
+			}, nil
+		}
+		noopH, noopMain, noopPayment := newStarsTestHandler(t, noopedDB)
+
+		update := tgbotapi.Update{
+			Message: &tgbotapi.Message{
+				Chat:     &tgbotapi.Chat{ID: 123},
+				From:     &tgbotapi.User{ID: 123},
+				Text:     "/refund 3",
+				Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: len("/refund")}},
+			},
+		}
+
+		err := noopH.HandleRefund(context.Background(), update)
+		require.NoError(t, err)
+
+		assert.Empty(t, noopPayment.GetAllSentMessages(), "no-op refund must not re-notify the buyer")
+
+		messages := noopMain.GetAllSentMessages()
+		require.NotEmpty(t, messages)
+		assert.Contains(t, messages[len(messages)-1].Text, "✅ Возврат по заказу #3")
+	})
+
+	t.Run("user notification error keeps admin success", func(t *testing.T) {
+		failedDB := testutil.NewBotStoreFake()
+		failedDB.GetOrderByIDFunc = func(context.Context, uint) (*database.Order, error) {
+			return &database.Order{
+				ID: 3, SubscriptionID: 7, Status: database.OrderStatusPaid,
+				AmountCents: 199, Currency: stars.Currency,
+				PaymentProvider: database.PaymentProviderTelegramStars, ProviderPaymentID: "charge-1",
+			}, nil
+		}
+		failedDB.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 7, TelegramID: 42}, nil
+		}
+		failedDB.GetPlanByNameFunc = func(context.Context, string) (*database.Plan, error) {
+			return &database.Plan{ID: 1, Name: "free", IsActive: true}, nil
+		}
+		failedDB.CancelPaidOrderAndDowngradeCASFunc = func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
+			return &database.ChargebackResult{Order: &database.Order{ID: 3}, WasPaid: true, Transitioned: true, Downgraded: false}, nil
+		}
+		failedH, failedMain, failedPayment := newStarsTestHandler(t, failedDB)
+		failedPayment.SendError = errors.New("telegram down")
+
+		update := tgbotapi.Update{
+			Message: &tgbotapi.Message{
+				Chat:     &tgbotapi.Chat{ID: 123},
+				From:     &tgbotapi.User{ID: 123},
+				Text:     "/refund 3",
+				Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: len("/refund")}},
+			},
+		}
+
+		err := failedH.HandleRefund(context.Background(), update)
+		require.NoError(t, err, "user notification failure must not fail the refund")
+
+		messages := failedMain.GetAllSentMessages()
 		require.NotEmpty(t, messages)
 		assert.Contains(t, messages[len(messages)-1].Text, "✅ Возврат по заказу #3")
 	})

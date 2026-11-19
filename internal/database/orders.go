@@ -531,14 +531,21 @@ func CalculatePaymentExpiry(now time.Time, sub *Subscription, product *Product) 
 // chargeback transaction is open. It must not perform external network calls.
 type ChargebackPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint, freePlanID uint) error
 
-// CancelPaidOrderAndDowngradeCAS atomically records a paid-order chargeback and,
-// when no other currently-valid paid order covers the subscription, resets the
-// subscription to the free plan and materializes its pending sync state.
+// CancelPaidOrderAndDowngradeCAS atomically records a paid-order chargeback (or
+// refund, per auditFn) and, when no other currently-valid paid order covers the
+// subscription, resets the subscription to the free plan and materializes its
+// pending sync state. The auditFn event is journaled exactly once in the same
+// transaction for every successful paid→canceled transition — including the
+// branches without downgrade (subscription not active, or another active paid
+// order exists) — with the downgraded flag reflecting the actual decision.
+// A pending→canceled transition journals only order_canceled, never the
+// chargeback/refund event.
 //
 // The order status, entitlement update, and pending node transitions share one
 // transaction. A concurrent confirmation therefore cannot commit an entitlement
 // after this chargeback's decision without first observing the serialized DB
-// state. External VPN calls must happen after this method returns successfully.
+// state. An auditFn error rolls back the whole transaction. External VPN calls
+// must happen after this method returns successfully.
 func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID string, now time.Time, freePlanID uint, applyPlan ChargebackPlanInTxFn, auditFn func(*Order, *Subscription, bool) *AuditLog) (*ChargebackResult, error) {
 	var result ChargebackResult
 
@@ -611,70 +618,73 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 
 		order.Status = OrderStatusCanceled
 		if !result.WasPaid {
+			// pending→canceled получает только order_canceled; событие
+			// чарджбэка/возврата для него не журналируется.
 			result.Order = &order
 			return nil
 		}
+
+		downgraded := false
+
 		// A chargeback must never resurrect a subscription that was already
 		// revoked/canceled by another lifecycle flow. The order transition is
 		// still committed, but only active subscriptions may be downgraded to
 		// the active free plan below.
-		if currentSub.Status != string(SubscriptionStatusActive) {
-			result.Order = &order
-			return nil
-		}
+		if currentSub.Status == string(SubscriptionStatusActive) {
+			var activePaid int64
 
-		var activePaid int64
-
-		// Count all paid orders for this subscription, INCLUDING the order
-		// being charged back (it is still OrderStatusPaid at this point in
-		// the transaction). This is intentional: if this is the only paid
-		// order, activePaid == 1, which correctly triggers a downgrade to
-		// free. If another active paid order exists, activePaid > 1 and
-		// access is preserved. The count is taken BEFORE the order status
-		// update below, so it reflects the pre-chargeback state.
-		err = tx.Model(&Order{}).
-			Where("subscription_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)", order.SubscriptionID, OrderStatusPaid, now).
-			Count(&activePaid).Error
-		if err != nil {
-			return fmt.Errorf("check active paid coverage: %w", err)
-		}
-
-		if activePaid > 0 {
-			result.Order = &order
-			return nil
-		}
-
-		updated = tx.Model(&Subscription{}).Where("id = ?", order.SubscriptionID).Updates(map[string]any{
-			"status":           string(SubscriptionStatusActive),
-			"expires_at":       nil,
-			"plan_id":          freePlanID,
-			"product_id":       nil,
-			"started_at":       nil,
-			"price_paid_cents": 0,
-			"currency":         nil,
-		})
-		if updated.Error != nil {
-			return fmt.Errorf("downgrade subscription after chargeback: %w", updated.Error)
-		}
-
-		if updated.RowsAffected == 0 {
-			return fmt.Errorf("downgrade subscription after chargeback: %w", ErrSubscriptionNotFound)
-		}
-
-		if applyPlan != nil {
-			err := applyPlan(ctx, tx, order.SubscriptionID, freePlanID)
+			// Count all paid orders for this subscription, INCLUDING the order
+			// being charged back (it is still OrderStatusPaid at this point in
+			// the transaction). This is intentional: if this is the only paid
+			// order, activePaid == 1, which correctly triggers a downgrade to
+			// free. If another active paid order exists, activePaid > 1 and
+			// access is preserved. The count is taken BEFORE the order status
+			// update below, so it reflects the pre-chargeback state.
+			err = tx.Model(&Order{}).
+				Where("subscription_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)", order.SubscriptionID, OrderStatusPaid, now).
+				Count(&activePaid).Error
 			if err != nil {
-				return fmt.Errorf("apply free plan after chargeback: %w", err)
+				return fmt.Errorf("check active paid coverage: %w", err)
+			}
+
+			if activePaid == 0 {
+				updated = tx.Model(&Subscription{}).Where("id = ?", order.SubscriptionID).Updates(map[string]any{
+					"status":           string(SubscriptionStatusActive),
+					"expires_at":       nil,
+					"plan_id":          freePlanID,
+					"product_id":       nil,
+					"started_at":       nil,
+					"price_paid_cents": 0,
+					"currency":         nil,
+				})
+				if updated.Error != nil {
+					return fmt.Errorf("downgrade subscription after chargeback: %w", updated.Error)
+				}
+
+				if updated.RowsAffected == 0 {
+					return fmt.Errorf("downgrade subscription after chargeback: %w", ErrSubscriptionNotFound)
+				}
+
+				if applyPlan != nil {
+					err := applyPlan(ctx, tx, order.SubscriptionID, freePlanID)
+					if err != nil {
+						return fmt.Errorf("apply free plan after chargeback: %w", err)
+					}
+				}
+
+				downgraded = true
 			}
 		}
 
-		// Чарджбэк с понижением до free — самое важное событие для расследований.
-		err = InsertAuditLogInTx(tx, auditEvent(&order, &currentSub, true))
+		// Чарджбэк/возврат журналируется в той же транзакции ровно один раз для
+		// любого успешного paid→canceled перехода — даже когда downgrade не
+		// потребовался. Ошибка аудита откатывает отмену и downgrade.
+		err = InsertAuditLogInTx(tx, auditEvent(&order, &currentSub, downgraded))
 		if err != nil {
 			return fmt.Errorf("audit chargeback: %w", err)
 		}
 
-		result.Downgraded = true
+		result.Downgraded = downgraded
 		result.Order = &order
 
 		return nil

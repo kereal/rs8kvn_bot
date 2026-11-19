@@ -427,3 +427,220 @@ func TestCancelPaidOrderAndDowngradeCAS_NilAuditFnDefaultsToChargeback(t *testin
 	require.NoError(t, err)
 	require.Len(t, chargebacks, 1)
 }
+
+// TestCancelPaidOrderAndDowngradeCAS_AuditsPaidCancelWhenSubscriptionNotActive
+// verifies the first no-downgrade branch: paid→canceled на неактивной (revoked)
+// подписке всё равно журналирует событие чарджбэка в той же транзакции, но
+// downgrade подписки не происходит, а details["downgraded"] равен false.
+func TestCancelPaidOrderAndDowngradeCAS_AuditsPaidCancelWhenSubscriptionNotActive(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	freePlan, err := svc.GetPlanByName(ctx, FreePlanName)
+	require.NoError(t, err)
+
+	paidPlan := &Plan{Name: "audit-notactive-plan", IsActive: true}
+	require.NoError(t, svc.db.Create(paidPlan).Error)
+	sub := &Subscription{TelegramID: 994021, Username: "audit-notactive", ClientID: "audit-notactive-client", SubscriptionID: "audit-notactive-sub", Status: "revoked", PlanID: paidPlan.ID, ExpiresAt: ptrTime(time.Now().UTC().Add(24 * time.Hour))}
+	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+
+	product := &Product{PlanID: paidPlan.ID, Name: "NotActive 30", DurationDays: 30, PriceCents: 700, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+
+	now := time.Now().UTC()
+	providerPaymentID := "550e8400-e29b-41d4-a716-446655440321"
+	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 700, Currency: "RUB", PaymentProvider: PaymentProviderPlatega, ProviderPaymentID: providerPaymentID, ExpiresAt: ptrTime(now.Add(time.Hour)), CreatedAt: now}
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, PaymentProviderPlatega, providerPaymentID, now, freePlan.ID, nil, AuditChargebackReceived)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Transitioned)
+	require.True(t, result.WasPaid)
+	require.False(t, result.Downgraded)
+
+	// Подписка не понижена: статус, план и срок не изменились.
+	updated, err := svc.GetByID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "revoked", updated.Status)
+	assert.Equal(t, paidPlan.ID, updated.PlanID)
+	require.NotNil(t, updated.ExpiresAt)
+
+	// Событие чарджбэка существует и записано ровно один раз.
+	chargebacks, err := svc.GetAuditLogByEvent(ctx, AuditEventChargebackReceived, 10)
+	require.NoError(t, err)
+	require.Len(t, chargebacks, 1)
+
+	e := chargebacks[0]
+	assert.Equal(t, ActorPaymentProvider, e.ActorType)
+	assert.Equal(t, EntityOrder, e.EntityType)
+	require.NotNil(t, e.EntityID)
+	assert.Equal(t, strconv.FormatUint(uint64(order.ID), 10), *e.EntityID)
+
+	details := map[string]any{}
+	require.NoError(t, json.Unmarshal([]byte(e.Details), &details))
+	assert.Equal(t, false, details["downgraded"])
+	assert.Equal(t, float64(700), details["amount_cents"])
+	assert.Equal(t, PaymentProviderPlatega, details["provider"])
+}
+
+// TestCancelPaidOrderAndDowngradeCAS_AuditsPaidCancelWhenOtherPaidOrderActive
+// verifies the second no-downgrade branch: активный paid-order сохраняет
+// покрытие подписки, но событие возврата всё равно журналируется в той же
+// транзакции с downgraded=false, и downgrade подписки не происходит.
+func TestCancelPaidOrderAndDowngradeCAS_AuditsPaidCancelWhenOtherPaidOrderActive(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	freePlan, err := svc.GetPlanByName(ctx, FreePlanName)
+	require.NoError(t, err)
+
+	paidPlan := &Plan{Name: "audit-covered-plan", IsActive: true}
+	require.NoError(t, svc.db.Create(paidPlan).Error)
+	sub := &Subscription{TelegramID: 994022, Username: "audit-covered", ClientID: "audit-covered-client", SubscriptionID: "audit-covered-sub", Status: "active", PlanID: paidPlan.ID, ExpiresAt: ptrTime(time.Now().UTC().Add(48 * time.Hour))}
+	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+
+	product := &Product{PlanID: paidPlan.ID, Name: "Covered 30", DurationDays: 30, PriceCents: 900, Currency: "XTR", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+
+	now := time.Now().UTC()
+	refundID := "tg-charge-audit-covered"
+	otherID := "tg-charge-audit-covered-other"
+	refundOrder := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 900, Currency: "XTR", PaymentProvider: PaymentProviderTelegramStars, ProviderPaymentID: refundID, ExpiresAt: ptrTime(now.Add(time.Hour)), CreatedAt: now.Add(-2 * time.Hour)}
+	otherOrder := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 900, Currency: "XTR", PaymentProvider: PaymentProviderTelegramStars, ProviderPaymentID: otherID, ExpiresAt: ptrTime(now.Add(2 * time.Hour)), CreatedAt: now.Add(-time.Hour)}
+	require.NoError(t, svc.db.WithContext(ctx).Create(refundOrder).Error)
+	require.NoError(t, svc.db.WithContext(ctx).Create(otherOrder).Error)
+
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, PaymentProviderTelegramStars, refundID, now, freePlan.ID, nil, AuditPaymentRefunded)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Transitioned)
+	require.True(t, result.WasPaid)
+	require.False(t, result.Downgraded)
+
+	// Подписка не понижена: активна, план и срок сохранены.
+	updated, err := svc.GetByID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, string(SubscriptionStatusActive), updated.Status)
+	assert.Equal(t, paidPlan.ID, updated.PlanID)
+	require.NotNil(t, updated.ExpiresAt)
+
+	// Событие возврата существует и записано ровно один раз.
+	refunds, err := svc.GetAuditLogByEvent(ctx, AuditEventPaymentRefunded, 10)
+	require.NoError(t, err)
+	require.Len(t, refunds, 1)
+
+	e := refunds[0]
+	assert.Equal(t, ActorPaymentProvider, e.ActorType)
+	assert.Equal(t, EntityOrder, e.EntityType)
+	require.NotNil(t, e.EntityID)
+	assert.Equal(t, strconv.FormatUint(uint64(refundOrder.ID), 10), *e.EntityID)
+
+	details := map[string]any{}
+	require.NoError(t, json.Unmarshal([]byte(e.Details), &details))
+	assert.Equal(t, false, details["downgraded"])
+	assert.Equal(t, float64(900), details["amount_cents"])
+	assert.Equal(t, PaymentProviderTelegramStars, details["provider"])
+
+	// Событие чарджбэка при возврате не журналируется.
+	chargebacks, err := svc.GetAuditLogByEvent(ctx, AuditEventChargebackReceived, 10)
+	require.NoError(t, err)
+	assert.Empty(t, chargebacks)
+}
+
+// TestCancelPaidOrderAndDowngradeCAS_PendingCancelWritesNoChargebackAudit
+// verifies that a pending→canceled transition journals only order_canceled:
+// ни chargeback_received, ни payment_refunded для него не создаются.
+func TestCancelPaidOrderAndDowngradeCAS_PendingCancelWritesNoChargebackAudit(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	freePlan, err := svc.GetPlanByName(ctx, FreePlanName)
+	require.NoError(t, err)
+
+	sub := createTestSubscription(t, svc, 994023, "audit-pending", "audit-pending-client")
+	plan := &Plan{Name: "audit-pending-plan", IsActive: true}
+	require.NoError(t, svc.db.Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "Pending 30", DurationDays: 30, PriceCents: 600, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+
+	now := time.Now().UTC()
+	providerPaymentID := "550e8400-e29b-41d4-a716-446655440323"
+	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 600, Currency: "RUB", PaymentProvider: PaymentProviderPlatega, ProviderPaymentID: providerPaymentID, CreatedAt: now}
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, PaymentProviderPlatega, providerPaymentID, now, freePlan.ID, nil, AuditChargebackReceived)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Transitioned)
+	require.False(t, result.WasPaid)
+	require.False(t, result.Downgraded)
+
+	chargebacks, err := svc.GetAuditLogByEvent(ctx, AuditEventChargebackReceived, 10)
+	require.NoError(t, err)
+	assert.Empty(t, chargebacks, "pending→canceled must not journal a chargeback event")
+
+	refunds, err := svc.GetAuditLogByEvent(ctx, AuditEventPaymentRefunded, 10)
+	require.NoError(t, err)
+	assert.Empty(t, refunds, "pending→canceled must not journal a refund event")
+
+	canceled, err := svc.GetAuditLogByEvent(ctx, AuditEventOrderCanceled, 10)
+	require.NoError(t, err)
+	require.Len(t, canceled, 1)
+}
+
+// TestCancelPaidOrderAndDowngradeCAS_RollsBackOnAuditError verifies that an
+// auditFn error (nil entry rejected by InsertAuditLogInTx) rolls back the whole
+// transaction: заказ остаётся paid, подписка не понижается, аудит-событий нет.
+func TestCancelPaidOrderAndDowngradeCAS_RollsBackOnAuditError(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	freePlan, err := svc.GetPlanByName(ctx, FreePlanName)
+	require.NoError(t, err)
+
+	paidPlan := &Plan{Name: "audit-rollback-plan", IsActive: true}
+	require.NoError(t, svc.db.Create(paidPlan).Error)
+	sub := &Subscription{TelegramID: 994024, Username: "audit-rollback-cb", ClientID: "audit-rollback-cb-client", SubscriptionID: "audit-rollback-cb-sub", Status: "active", PlanID: paidPlan.ID, ExpiresAt: ptrTime(time.Now().UTC().Add(24 * time.Hour))}
+	require.NoError(t, svc.CreateSubscription(ctx, sub, ""))
+
+	product := &Product{PlanID: paidPlan.ID, Name: "Rollback 30", DurationDays: 30, PriceCents: 800, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+
+	now := time.Now().UTC()
+	providerPaymentID := "550e8400-e29b-41d4-a716-446655440324"
+	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 800, Currency: "RUB", PaymentProvider: PaymentProviderPlatega, ProviderPaymentID: providerPaymentID, ExpiresAt: ptrTime(now.Add(time.Hour)), CreatedAt: now}
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+
+	_, err = svc.CancelPaidOrderAndDowngradeCAS(ctx, PaymentProviderPlatega, providerPaymentID, now, freePlan.ID, nil, func(*Order, *Subscription, bool) *AuditLog {
+		return nil
+	})
+	require.Error(t, err)
+
+	// Заказ остался paid — отмена откатилась вместе с аудитом.
+	var stored Order
+	require.NoError(t, svc.db.WithContext(ctx).First(&stored, order.ID).Error)
+	assert.Equal(t, OrderStatusPaid, stored.Status)
+
+	// Подписка не понижена.
+	updated, err := svc.GetByID(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, paidPlan.ID, updated.PlanID)
+	require.NotNil(t, updated.ExpiresAt)
+
+	events, err := svc.GetAuditLogByEvent(ctx, AuditEventOrderCanceled, 10)
+	require.NoError(t, err)
+	assert.Empty(t, events, "failed transaction must not leave an order_canceled audit event")
+
+	chargebacks, err := svc.GetAuditLogByEvent(ctx, AuditEventChargebackReceived, 10)
+	require.NoError(t, err)
+	assert.Empty(t, chargebacks, "failed transaction must not leave a chargeback audit event")
+}

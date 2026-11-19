@@ -147,6 +147,7 @@ func TestFormatPriceCents(t *testing.T) {
 		{"XTR thousands", 2300, "XTR", "2 300 XTR"},
 		{"XTR large", 1234567, "XTR", "1 234 567 XTR"},
 		{"XTR negative", -199, "XTR", "-199 XTR"},
+		{"lowercase XTR", 199, "xtr", "199 XTR"},
 		{"RUB whole", 19900, "RUB", "199₽"},
 		{"RUB fractional", 12737, "RUB", "127.37₽"},
 		{"empty currency keeps RUB rendering", 19900, "", "199₽"},

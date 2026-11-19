@@ -107,7 +107,9 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 			return nil
 		}
 
-		err := c.h.handleBuyProduct(ctx, chatID, username, update.CallbackQuery.Message.MessageID, uint(id64))
+		// telegramID — Telegram user ID покупателя (invoice и заказ привязываются
+		// к нему), chatID — чат, в котором редактируется карточка тарифа.
+		err := c.h.handleBuyProduct(ctx, chatID, update.CallbackQuery.From.ID, username, update.CallbackQuery.Message.MessageID, uint(id64))
 		if err != nil {
 			return fmt.Errorf("handle buy_product: %w", err)
 		}

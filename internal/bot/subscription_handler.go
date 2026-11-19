@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -16,9 +17,6 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
-
-// starsProvider — значение конфигурационного провайдера для Telegram Stars.
-const starsProvider = "telegram_stars"
 
 // SubscriptionHandler groups subscription-related business logic.
 type SubscriptionHandler struct {
@@ -426,7 +424,9 @@ func (sh *SubscriptionHandler) handleBuyPremiumList(ctx context.Context, chatID 
 }
 
 // handleBuyProduct creates a Platega payment link for a specific product.
-func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int64, username string, messageID int, productID uint) error {
+// telegramID — Telegram user ID покупателя: заказ и invoice привязываются к нему.
+// chatID — чат, в котором редактируется карточка тарифа.
+func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID, telegramID int64, username string, messageID int, productID uint) error {
 	if sh.h.orderService == nil || !sh.h.paymentEnabled {
 		return sh.showBuyError(chatID, messageID, "❌ Платежи временно недоступны")
 	}
@@ -450,10 +450,10 @@ func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int6
 		zap.String("currency", product.Currency))
 
 	if sh.isStarsProvider() {
-		return sh.sendStarsInvoice(ctx, chatID, username, messageID, product)
+		return sh.sendStarsInvoice(ctx, chatID, telegramID, username, messageID, product)
 	}
 
-	info, _, err := sh.h.orderService.RequestPayment(ctx, chatID, username, product)
+	info, _, err := sh.h.orderService.RequestPayment(ctx, telegramID, username, product)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrPaymentDisabled):
@@ -485,7 +485,7 @@ func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int6
 
 // isStarsProvider возвращает true при активном провайдере Telegram Stars.
 func (sh *SubscriptionHandler) isStarsProvider() bool {
-	return sh.h.cfg != nil && sh.h.cfg.PaymentProvider == starsProvider
+	return sh.h.cfg != nil && sh.h.cfg.PaymentProvider == database.PaymentProviderTelegramStars
 }
 
 // filterProductsByProvider оставляет XTR-товары при провайдере Stars (M1).
@@ -497,7 +497,7 @@ func (sh *SubscriptionHandler) filterProductsByProvider(products []database.Prod
 	filtered := make([]database.Product, 0, len(products))
 
 	for _, product := range products {
-		if product.Currency == stars.Currency {
+		if strings.EqualFold(product.Currency, stars.Currency) {
 			filtered = append(filtered, product)
 		}
 	}
@@ -506,9 +506,10 @@ func (sh *SubscriptionHandler) filterProductsByProvider(products []database.Prod
 }
 
 // sendStarsInvoice создаёт pending-заказ через сервис и отправляет Stars-invoice
-// отдельным сообщением; карточка тарифа редактируется в «Счёт отправлен ниже» (§5.1).
-func (sh *SubscriptionHandler) sendStarsInvoice(ctx context.Context, chatID int64, username string, messageID int, product *database.Product) error {
-	info, order, err := sh.h.orderService.RequestPayment(ctx, chatID, username, product)
+// покупателю по telegram_id; карточка тарифа редактируется в «Счёт отправлен
+// ниже» (§5.1).
+func (sh *SubscriptionHandler) sendStarsInvoice(ctx context.Context, chatID, telegramID int64, username string, messageID int, product *database.Product) error {
+	info, order, err := sh.h.orderService.RequestPayment(ctx, telegramID, username, product)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrPaymentAlreadyInProgress):
@@ -531,7 +532,7 @@ func (sh *SubscriptionHandler) sendStarsInvoice(ctx context.Context, chatID int6
 
 	invoice, err := stars.BuildInvoice(stars.InvoiceParams{
 		OrderID:  order.ID,
-		ChatID:   chatID,
+		ChatID:   telegramID,
 		Title:    product.Name,
 		Amount:   order.AmountCents,
 		Currency: stars.Currency,

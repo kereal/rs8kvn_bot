@@ -138,7 +138,7 @@ func TestHandleBuyProduct_NotConfigured(t *testing.T) {
 	bot := testutil.NewBotAPI()
 	h := NewHandler(bot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	messages := bot.GetAllSentMessages()
@@ -155,7 +155,7 @@ func TestHandleBuyProduct_ProductLoadErrorShowsTempError(t *testing.T) {
 	}
 	h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	messages := bot.GetAllSentMessages()
@@ -184,7 +184,7 @@ func TestHandleBuyProduct_TariffUnavailable(t *testing.T) {
 			}
 			h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
-			err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+			err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 			require.NoError(t, err)
 
 			messages := bot.GetAllSentMessages()
@@ -204,7 +204,7 @@ func TestHandleBuyProduct_PaymentDisabled(t *testing.T) {
 	// orderService with a nil provider → RequestPayment returns ErrPaymentDisabled.
 	h, bot := newPaymentTestHandler(t, mockDB, nil)
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	messages := bot.GetAllSentMessages()
@@ -231,7 +231,7 @@ func TestHandleBuyProduct_PaymentAlreadyInProgress(t *testing.T) {
 	}
 	h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	messages := bot.GetAllSentMessages()
@@ -254,7 +254,7 @@ func TestHandleBuyProduct_PaymentNeedsReview(t *testing.T) {
 	}
 	h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	messages := bot.GetAllSentMessages()
@@ -277,7 +277,7 @@ func TestHandleBuyProduct_GenericRequestErrorShowsTempError(t *testing.T) {
 	}
 	h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	messages := bot.GetAllSentMessages()
@@ -321,7 +321,7 @@ func TestHandleBuyProduct_SuccessShowsPaymentButton(t *testing.T) {
 			mockDB.SavePaymentDetailsFunc = func(context.Context, uint, string, string, time.Time) error { return nil }
 			h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
-			err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+			err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 			require.NoError(t, err)
 
 			messages := bot.GetAllSentMessages()
