@@ -56,7 +56,7 @@ func TestConfirmOrderPaidCAS_WritesAuditEventInTx(t *testing.T) {
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	activatedAt := time.Now().UTC()
-	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, activatedAt, activatedAt, sub, product, nil, 500)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, activatedAt, activatedAt, sub, product, nil, 500, "", nil)
 	require.NoError(t, err)
 	assert.True(t, activated)
 
@@ -104,7 +104,7 @@ func TestConfirmOrderPaidCAS_RollsBackAuditWithTransaction(t *testing.T) {
 	activatedAt := time.Now().UTC()
 	_, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, activatedAt, activatedAt, sub, product, func(_ context.Context, _ *gorm.DB, _, _ uint) error {
 		return assert.AnError
-	}, 500)
+	}, 500, "", nil)
 	require.Error(t, err)
 
 	events, err := svc.GetAuditLogByEvent(ctx, AuditEventPaymentConfirmed, 10)
@@ -138,7 +138,7 @@ func TestCancelPaidOrderAndDowngradeCAS_WritesChargebackAudit(t *testing.T) {
 	providerPaymentID := "550e8400-e29b-41d4-a716-446655440307"
 	require.NoError(t, svc.db.WithContext(ctx).Model(order).Update("provider_payment_id", providerPaymentID).Error)
 
-	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, "platega", providerPaymentID, now, freePlan.ID, nil)
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, "platega", providerPaymentID, now, freePlan.ID, nil, AuditChargebackReceived)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Transitioned)
@@ -182,7 +182,7 @@ func TestConfirmOrderPaidCAS_WritesSubscriptionRenewed(t *testing.T) {
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	activatedAt := time.Now().UTC()
-	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, activatedAt, activatedAt, sub, product, nil, 700)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, activatedAt, activatedAt, sub, product, nil, 700, "", nil)
 	require.NoError(t, err)
 	assert.True(t, activated)
 
@@ -264,7 +264,7 @@ func TestFindPendingPaymentOrder_ExpiredOrderWritesAudit(t *testing.T) {
 	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 500, Currency: "RUB", PaymentProvider: "platega", CreatedAt: time.Now().UTC(), PaymentExpiresAt: &past}
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
-	got, err := svc.FindPendingPaymentOrder(ctx, sub.ID, 1, time.Now().UTC())
+	got, err := svc.FindPendingPaymentOrder(ctx, sub.ID, 1, "platega", time.Now().UTC())
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, OrderStatusExpired, got.Status)
@@ -344,4 +344,86 @@ func TestAuditLog_RepositoryRejectsNil(t *testing.T) {
 	svc := newTestService(t)
 	err := svc.InsertAuditLog(context.Background(), nil)
 	require.Error(t, err)
+}
+
+// TestCancelPaidOrderAndDowngradeCAS_WritesPaymentRefundedAudit verifies that a
+// refund passes its own audit-событие через auditFn: payment_refunded вместо
+// chargeback_received.
+func TestCancelPaidOrderAndDowngradeCAS_WritesPaymentRefundedAudit(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	freePlan, err := svc.GetPlanByName(ctx, FreePlanName)
+	require.NoError(t, err)
+
+	sub := createTestSubscription(t, svc, 994004, "audit-refund", "audit-refund-client")
+	plan := &Plan{Name: "audit-refund-plan", IsActive: true}
+	require.NoError(t, svc.db.Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "Refund 30", DurationDays: 30, PriceCents: 900, Currency: "XTR", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+
+	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 900, Currency: "XTR", PaymentProvider: PaymentProviderTelegramStars, PaidAt: ptrTime(time.Now().UTC()), CreatedAt: time.Now().UTC()}
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+
+	now := time.Now().UTC()
+	providerPaymentID := "tg-charge-refund-1"
+	require.NoError(t, svc.db.WithContext(ctx).Model(order).Update("provider_payment_id", providerPaymentID).Error)
+
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, PaymentProviderTelegramStars, providerPaymentID, now, freePlan.ID, nil, AuditPaymentRefunded)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Transitioned)
+	require.True(t, result.Downgraded)
+
+	// Событие возврата, не чарджбэка.
+	refunds, err := svc.GetAuditLogByEvent(ctx, AuditEventPaymentRefunded, 10)
+	require.NoError(t, err)
+	require.Len(t, refunds, 1)
+	assert.Equal(t, ActorPaymentProvider, refunds[0].ActorType)
+
+	details := map[string]any{}
+	require.NoError(t, json.Unmarshal([]byte(refunds[0].Details), &details))
+	assert.Equal(t, true, details["downgraded"])
+	assert.Equal(t, float64(900), details["amount_cents"])
+	assert.Equal(t, PaymentProviderTelegramStars, details["provider"])
+
+	chargebacks, err := svc.GetAuditLogByEvent(ctx, AuditEventChargebackReceived, 10)
+	require.NoError(t, err)
+	assert.Empty(t, chargebacks, "refund must not journal the chargeback event")
+}
+
+// TestCancelPaidOrderAndDowngradeCAS_NilAuditFnDefaultsToChargeback verifies
+// the safety default: a nil auditFn still journals chargeback_received.
+func TestCancelPaidOrderAndDowngradeCAS_NilAuditFnDefaultsToChargeback(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	freePlan, err := svc.GetPlanByName(ctx, FreePlanName)
+	require.NoError(t, err)
+
+	sub := createTestSubscription(t, svc, 994005, "audit-nil-auditfn", "audit-nil-auditfn-client")
+	plan := &Plan{Name: "audit-nil-auditfn-plan", IsActive: true}
+	require.NoError(t, svc.db.Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "Default audit 30", DurationDays: 30, PriceCents: 800, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+
+	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 800, Currency: "RUB", PaymentProvider: PaymentProviderPlatega, PaidAt: ptrTime(time.Now().UTC()), CreatedAt: time.Now().UTC()}
+	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
+
+	now := time.Now().UTC()
+	providerPaymentID := "550e8400-e29b-41d4-a716-446655440304"
+	require.NoError(t, svc.db.WithContext(ctx).Model(order).Update("provider_payment_id", providerPaymentID).Error)
+
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, PaymentProviderPlatega, providerPaymentID, now, freePlan.ID, nil, nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Downgraded)
+
+	chargebacks, err := svc.GetAuditLogByEvent(ctx, AuditEventChargebackReceived, 10)
+	require.NoError(t, err)
+	require.Len(t, chargebacks, 1)
 }

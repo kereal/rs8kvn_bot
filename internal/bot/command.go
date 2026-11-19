@@ -317,3 +317,35 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 
 	return nil
 }
+
+// HandlePaySupport processes the /paysupport command (Telegram Bot Developer
+// Terms 6.2): обязательная команда поддержки при продажах цифровых товаров.
+func (c *CommandHandler) HandlePaySupport(ctx context.Context, update tgbotapi.Update) error {
+	if update.Message == nil {
+		logger.Error("HandlePaySupport called with nil Message")
+		return fmt.Errorf("nil message")
+	}
+
+	chatID := update.Message.Chat.ID
+
+	msg := tgbotapi.NewMessage(chatID, SupportText())
+	c.h.send(ctx, msg)
+
+	return nil
+}
+
+// HandleTerms processes the /terms command (Telegram Bot Developer Terms 6.2):
+// доступ к Пользовательскому соглашению командой, кнопка menu_terms уже есть.
+func (c *CommandHandler) HandleTerms(ctx context.Context, update tgbotapi.Update) error {
+	if update.Message == nil {
+		logger.Error("HandleTerms called with nil Message")
+		return fmt.Errorf("nil message")
+	}
+
+	chatID := update.Message.Chat.ID
+
+	msg := tgbotapi.NewMessage(chatID, TermsText())
+	c.h.send(ctx, msg)
+
+	return nil
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	flag "github.com/kereal/rs8kvn_bot/internal/flag"
@@ -66,12 +67,25 @@ type Config struct {
 	// false for local runs against a production-DB copy.
 	NotificationsEnabled bool
 
+	// PlategaCallbackEnabled включает legacy HTTP-callback Platega для расчёта
+	// старых заказов, даже когда новые продажи идут через Telegram Stars.
+	// Итоговый гейт — ShouldEnablePlategaCallback.
+	PlategaCallbackEnabled bool
+	// StarsInvoiceTTL — локальный срок жизни Stars-invoice (payment_expires_at).
+	StarsInvoiceTTL time.Duration
+
 	// Payment configuration
 	PaymentEnabled    bool
 	PaymentProvider   string
 	PlategaMerchantID string
 	PlategaSecret     string
 }
+
+// DefaultStarsInvoiceTTL — срок жизни Stars-invoice, когда STARS_INVOICE_TTL не задан.
+const DefaultStarsInvoiceTTL = 15 * time.Minute
+
+// paymentProviders — допустимые значения PAYMENT_PROVIDER при PAYMENT_ENABLED=true.
+var paymentProviders = map[string]bool{"platega": true, "telegram_stars": true}
 
 // configFlags holds typed flag values for config fields.
 type configFlags struct {
@@ -100,6 +114,8 @@ type configFlags struct {
 	paymentProvider        *flag.StringValue
 	plategaMerchantID      *flag.StringValue
 	plategaSecret          *flag.StringValue
+	plategaCallbackEnabled *flag.BoolValue
+	starsInvoiceTTL        *flag.StringValue
 }
 
 // registerFlags creates a new flag.Registry and initializes a configFlags instance with defaults,
@@ -118,6 +134,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		donateURL: flag.NewString(DonateURL), donateEnabled: flag.NewBool(DefaultDonateEnabled),
 		globalSubURL: flag.NewString(""), subServerAccessLogPath: flag.NewString(""),
 		paymentEnabled: flag.NewBool(false), paymentProvider: flag.NewString("platega"), plategaMerchantID: flag.NewString(""), plategaSecret: flag.NewString(""),
+		plategaCallbackEnabled: flag.NewBool(false), starsInvoiceTTL: flag.NewString("15m"),
 		notificationsEnabled: flag.NewBool(DefaultNotificationsEnabled), metricsToken: flag.NewString(""),
 		auditRetentionDays: flag.NewInt(DefaultAuditLogRetentionDays),
 	}
@@ -144,6 +161,8 @@ func registerFlags() (*flag.Registry, *configFlags) {
 	r.Register("PAYMENT_PROVIDER", f.paymentProvider)
 	r.Register("PLATEGA_MERCHANT_ID", f.plategaMerchantID)
 	r.Register("PLATEGA_SECRET", f.plategaSecret)
+	r.Register("PLATEGA_CALLBACK_ENABLED", f.plategaCallbackEnabled)
+	r.Register("STARS_INVOICE_TTL", f.starsInvoiceTTL)
 	r.Register("METRICS_TOKEN", f.metricsToken)
 	r.Register("AUDIT_LOG_RETENTION_DAYS", f.auditRetentionDays)
 
@@ -174,7 +193,15 @@ func Load() (*Config, error) {
 		PaymentEnabled:         f.paymentEnabled.Get(), PaymentProvider: f.paymentProvider.Get(),
 		NotificationsEnabled: f.notificationsEnabled.Get(),
 		PlategaMerchantID:    f.plategaMerchantID.Get(), PlategaSecret: f.plategaSecret.Get(),
+		PlategaCallbackEnabled: f.plategaCallbackEnabled.Get(),
 	}
+
+	ttl, err := time.ParseDuration(f.starsInvoiceTTL.Get())
+	if err != nil {
+		return nil, fmt.Errorf("configuration validation failed: STARS_INVOICE_TTL is not a valid duration: %w", err)
+	}
+	cfg.StarsInvoiceTTL = ttl
+
 	// Validate all required fields
 	err = cfg.validate()
 	if err != nil {
@@ -236,19 +263,31 @@ func (c *Config) validate() error {
 		}
 	}
 
-	if c.PaymentEnabled {
-		if c.PaymentProvider != "platega" {
-			return fmt.Errorf("PAYMENT_PROVIDER must be platega when PAYMENT_ENABLED=true")
-		}
+	// PAYMENT_PROVIDER: allowlist при включённых оплатах.
+	if c.PaymentEnabled && !paymentProviders[c.PaymentProvider] {
+		return fmt.Errorf("PAYMENT_PROVIDER must be one of: platega, telegram_stars (got %q)", c.PaymentProvider)
+	}
 
+	// Platega-креды обязательны, только если Platega реально используется:
+	// активный провайдер platega при включённых оплатах либо включённый
+	// legacy-callback (в т.ч. для расчёта старых заказов при провайдере Stars).
+	// Выключенные оплаты с дефолтным провайдером и пустыми кредами — валидный
+	// конфиг (.env.example без оплат).
+	plategaInUse := (c.PaymentEnabled && c.PaymentProvider == "platega") || c.PlategaCallbackEnabled
+	if plategaInUse {
 		if strings.TrimSpace(c.PlategaMerchantID) == "" || strings.TrimSpace(c.PlategaSecret) == "" {
-			return fmt.Errorf("PLATEGA_MERCHANT_ID and PLATEGA_SECRET are required when PAYMENT_ENABLED=true")
+			return fmt.Errorf("PLATEGA_MERCHANT_ID and PLATEGA_SECRET are required when Platega is in use (PAYMENT_ENABLED=true with PAYMENT_PROVIDER=platega, or PLATEGA_CALLBACK_ENABLED=true)")
 		}
 
 		_, err := uuid.Parse(strings.TrimSpace(c.PlategaMerchantID))
 		if err != nil {
 			return fmt.Errorf("PLATEGA_MERCHANT_ID must be a UUID: %w", err)
 		}
+	}
+
+	// Локальный TTL Stars-invoice должен быть положительным.
+	if c.StarsInvoiceTTL <= 0 {
+		return fmt.Errorf("STARS_INVOICE_TTL must be positive (default %s)", DefaultStarsInvoiceTTL)
 	}
 	// Global subscription URL validation (required)
 	if c.GlobalSubURL == "" {
@@ -323,6 +362,10 @@ func (c *Config) String() string {
 		"HeartbeatInterval=%d, "+
 		"GlobalSubURL=%s, "+
 		"SentryDSN=***, "+
+		"PaymentEnabled=%v, "+
+		"PaymentProvider=%s, "+
+		"PlategaCallbackEnabled=%v, "+
+		"StarsInvoiceTTL=%s, "+
 		"}",
 		c.TelegramAdminID,
 		c.DatabasePath,
@@ -331,7 +374,18 @@ func (c *Config) String() string {
 		maskURL(c.HeartbeatURL),
 		c.HeartbeatInterval,
 		maskURL(c.GlobalSubURL),
+		c.PaymentEnabled,
+		c.PaymentProvider,
+		c.PlategaCallbackEnabled,
+		c.StarsInvoiceTTL,
 	)
+}
+
+// ShouldEnablePlategaCallback — итоговый гейт legacy HTTP-callback Platega:
+// callback нужен, если Platega — активный провайдер при включённых оплатах,
+// либо явно включён через PLATEGA_CALLBACK_ENABLED (расчёт старых заказов).
+func (c *Config) ShouldEnablePlategaCallback() bool {
+	return (c.PaymentEnabled && c.PaymentProvider == "platega") || c.PlategaCallbackEnabled
 }
 
 // SubURL builds a full subscription URL from a subscription ID.

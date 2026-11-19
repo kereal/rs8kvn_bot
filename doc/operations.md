@@ -11,6 +11,7 @@
 5. [Troubleshooting](#5-troubleshooting)
 6. [Scaling](#6-scaling)
 7. [Security Hardening](#7-security-hardening)
+8. [Telegram Stars](#8-telegram-stars)
 
 ---
 
@@ -919,7 +920,75 @@ limit_req_zone $binary_remote_addr zone=sub:10m rate=30r/m;
 
 ---
 
-## 8. Support
+## 8. Telegram Stars
+
+Telegram Stars — второй платёжный провайдер: счёт выставляет сам бот
+(`pre_checkout_query` + `successful_payment`), без внешнего провайдера и без webhook.
+Активный провайдер выбирается переменной `PAYMENT_PROVIDER` при `PAYMENT_ENABLED=true`;
+Platega-flow при этом не переписывается.
+
+### 8.1 Переменные окружения
+
+| Переменная | Значение | Default | Назначение |
+|------------|----------|---------|------------|
+| `PAYMENT_ENABLED` | `true` / `false` | `false` | Включает продажи в боте |
+| `PAYMENT_PROVIDER` | `platega` / `telegram_stars` | `platega` | Активный платёжный провайдер |
+| `PLATEGA_CALLBACK_ENABLED` | `true` / `false` | `false` | Legacy HTTP-callback Platega (расчёт старых заказов без новых продаж) |
+| `STARS_INVOICE_TTL` | Go-duration (`15m`, `30m`, `1h`) | `15m` | Локальный срок жизни Stars-invoice (`payment_expires_at`) |
+
+Platega-креды (`PLATEGA_MERCHANT_ID`, `PLATEGA_SECRET`) обязательны, когда Platega в работе:
+`PAYMENT_ENABLED=true` c `PAYMENT_PROVIDER=platega` либо `PLATEGA_CALLBACK_ENABLED=true`.
+При `PAYMENT_PROVIDER=telegram_stars` без Platega-callback креды не требуются.
+
+### 8.2 Переключение на Stars (rollout-чеклист)
+
+1. Развернуть код с `PAYMENT_PROVIDER=platega` — поведение не меняется (обновление — по разделу 2).
+2. Создать **отдельные** XTR-товары (`currency='XTR'`, `price_cents` = цена в Stars). RUB-товары и их цены не трогать: цену товара после первого заказа менять запрещено. После создания **деактивировать RUB-товары** (`is_active=false`) — цены и строки RUB-товаров при этом не изменяются.
+3. Проверить активные товары: `currency='XTR'`, `price_cents > 0`, лимиты Telegram соблюдены.
+4. Если есть незавершённые Platega-заказы → `PLATEGA_CALLBACK_ENABLED=true` и оставить Platega-креды (расчёт старых заказов без новых продаж).
+5. Выставить `PAYMENT_PROVIDER=telegram_stars`, `PAYMENT_ENABLED=true` и перезапустить бота.
+6. До приёма трафика проверить: `/paysupport` и `/terms` отвечают; на балансе Stars-бота достаточно средств для возвратов.
+7. Smoke: buy → invoice → pre-checkout `OK=true` → оплата → продление + уведомление; повторный клик → «счёт уже отправлен»; `/refund <id>` → `canceled` + `payment_refunded`.
+8. После расчёта старых Platega-заказов: `PLATEGA_CALLBACK_ENABLED=false`, Platega-креды ротируются по регламенту секретов (раздел 7.2).
+
+### 8.3 Rollback
+
+1. `PAYMENT_ENABLED=false` — продажи остановлены, новые Stars-invoice не создаются; legacy Platega-callback продолжает работать при `PLATEGA_CALLBACK_ENABLED=true`.
+2. Уже оплаченные Stars-заказы не откатываются — возврат выполняется командой `/refund <order_id>` (раздел 8.5).
+3. **Возврат к продажам через Platega — юридическое решение, а не технический дефолт:** цифровые товары и услуги внутри Telegram оплачиваются Stars (Bot Developer Terms 6.2). Технический rollback по умолчанию — остановка продаж с сохранением работающих возвратов.
+
+### 8.4 Обязательные шаги до прода (compliance)
+
+- `/paysupport` — обязательная команда (FAQ Telegram); текст `SupportText()` уже есть.
+- `/terms` — доступ к соглашению; текст `TermsText()` уже есть, кнопка в меню тоже.
+- Подтверждение условий — текст в карточке покупки («Оплачивая счёт, вы принимаете соглашение»). Персистентный флаг согласия не вводится: покупка сама является согласием (миграции БД не меняются).
+- Споры и возвраты — владелец бота; процедура возврата описана в разделе 8.5 и исполняется командой `/refund`.
+- На балансе Stars-бота держать запас на возвраты.
+
+### 8.5 Возврат: `/refund <order_id>`
+
+Команда admin-only, работает только с Stars-заказами (`payment_provider='telegram_stars'`).
+Возврат только полный — сумма не указывается; `refundStarPayment` списывает средства с баланса Stars-бота,
+поэтому запас на балансе должен покрывать возвраты.
+
+**Семантика идемпотентности:**
+
+| Ситуация | Результат |
+|----------|-----------|
+| Заказ уже в статусе `canceled` | No-op, **успех** (идемпотентность по БД, а не по тексту ошибки Telegram) |
+| Статус заказа не `paid` | Ошибка, состояние не меняется |
+| `CHARGE_ALREADY_REFUNDED` (возврат в Telegram уже совершён) | Трактуется как **успех**: возврат в Telegram повторять не нужно, доводится только фиксация состояния в БД |
+| Прочие ошибки Telegram (например, не хватило Stars на балансе бота) | Ошибка; **БД не трогается**, доступ сохраняется, администратору уходит уведомление о платёжной проблеме |
+| Успешный возврат | `paid → canceled` + перевод на free-план (если нет других активных paid-заказов) + событие аудита `payment_refunded` в той же транзакции; после коммита — синхронизация подписки с узлами и уведомление пользователю и админу |
+
+Отдельно обрабатывается разрыв между Telegram и БД: если возврат в Telegram прошёл, а запись в БД
+не применилась, администратор получает уведомление («деньги возвращены, состояние не применено») и
+сверяет заказ по charge ID вручную. Именно поэтому `CHARGE_ALREADY_REFUNDED` считается успехом:
+повторный `/refund` после такого разрыва не должен упираться в ошибку Telegram.
+
+---
+
+## 9. Support
 
 **Issues:** https://github.com/kereal/rs8kvn_bot/issues  
 **Security:** security@kereal.me (example — configure real email)

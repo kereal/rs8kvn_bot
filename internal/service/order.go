@@ -18,6 +18,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
+	"github.com/kereal/rs8kvn_bot/internal/service/payment/stars"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"gorm.io/gorm"
 
@@ -65,6 +66,9 @@ type OrderService struct {
 	botUsername string
 	cfg         *config.Config
 	adminBot    interfaces.BotAPI
+	// stars — клиент Telegram Stars. nil (по умолчанию): Stars недоступен
+	// даже при activeProvider()==telegram_stars (fail-closed).
+	stars *stars.Client
 
 	// paymentLocksMu guards paymentLocks. paymentLocks and the per-lock
 	// channels together give each in-flight order (provider payment UUID)
@@ -328,6 +332,24 @@ func (o *OrderService) SetBotUsername(username string) { o.botUsername = strings
 // SetAdminBot wires the Telegram client used for best-effort operational alerts.
 func (o *OrderService) SetAdminBot(bot interfaces.BotAPI) { o.adminBot = bot }
 
+// SetStarsClient подключает клиент Telegram Stars. nil — Stars недоступен.
+func (o *OrderService) SetStarsClient(c *stars.Client) { o.stars = c }
+
+// activeProvider возвращает активного платёжного провайдера из конфига.
+// Пустое значение означает Platega (обратная совместимость дефолта).
+func (o *OrderService) activeProvider() string {
+	if o.cfg == nil {
+		return database.PaymentProviderPlatega
+	}
+
+	provider := strings.TrimSpace(o.cfg.PaymentProvider)
+	if provider == "" {
+		return database.PaymentProviderPlatega
+	}
+
+	return provider
+}
+
 // notifyRequestIssue enriches an early RequestPayment failure with whichever
 // product/order context is available and routes it through the common alert path.
 func (o *OrderService) notifyRequestIssue(ctx context.Context, event, reason, action string, telegramID int64, product *database.Product, order *database.Order) {
@@ -502,7 +524,12 @@ func formatAdminChargebackAlert(sub *database.Subscription, order *database.Orde
 // formatMoneyCents renders an amount in cents as a readable value with a
 // thousands separator and currency symbol/code. Whole amounts drop the
 // fractional part ("2 300 ₽"); fractional amounts keep two digits ("2 300,50 ₽").
+// XTR делегируется в utils.FormatStarsAmount: 1 Star = 1 minor unit, делить на 100 нельзя.
 func formatMoneyCents(amountCents int64, currency string) string {
+	if strings.EqualFold(strings.TrimSpace(currency), stars.Currency) {
+		return utils.FormatStarsAmount(amountCents)
+	}
+
 	negative := amountCents < 0
 	if negative {
 		amountCents = -amountCents
@@ -559,7 +586,8 @@ func (o *OrderService) RequestPayment(ctx context.Context, telegramID int64, use
 }
 
 func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, username string, product *database.Product) (*PaymentInfo, *database.Order, error) {
-	if o.payment == nil {
+	// В Stars-режиме Platega-клиент отсутствует: o.payment == nil — не ошибка.
+	if o.payment == nil && o.activeProvider() != database.PaymentProviderTelegramStars {
 		return nil, nil, ErrPaymentDisabled
 	}
 
@@ -621,10 +649,16 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 		}
 	}
 
+	// Telegram Stars: ранний return до всех Platega-проверок — reuse ссылки,
+	// MarkPaymentCreationUncertain и CreateTransaction в Stars-режиме неприменимы.
+	if o.activeProvider() == database.PaymentProviderTelegramStars {
+		return o.requestStarsPayment(ctx, telegramID, canonical, sub)
+	}
+
 	// Return a still-valid link before validating the current product flags: an
 	// operator may deactivate a product while an already-created payment link is
 	// still usable. Expiry is terminalized by the repository lookup.
-	order, err := o.db.FindPendingPaymentOrder(ctx, sub.ID, canonical.ID, now)
+	order, err := o.db.FindPendingPaymentOrder(ctx, sub.ID, canonical.ID, database.PaymentProviderPlatega, now)
 	if err != nil {
 		o.notifyRequestIssue(ctx, "find_pending_order_failed", err.Error(), "retry after database recovery", telegramID, canonical, nil)
 		return nil, nil, fmt.Errorf("find pending payment order: %w", err)
@@ -655,7 +689,7 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 		// The repository transaction expires an old link and creates/reuses the
 		// single pending intent under the partial unique index. This is the only
 		// creation path, so concurrent requests cannot create duplicate intents.
-		order, err = o.db.FindOrCreatePendingPaymentOrder(ctx, sub.ID, canonical.ID, canonical.PriceCents, canonical.Currency, now)
+		order, err = o.db.FindOrCreatePendingPaymentOrder(ctx, sub.ID, canonical.ID, database.PaymentProviderPlatega, canonical.PriceCents, canonical.Currency, nil, now)
 		if err != nil {
 			o.notifyRequestIssue(ctx, "create_pending_order_failed", err.Error(), "retry after database recovery", telegramID, canonical, nil)
 			return nil, nil, fmt.Errorf("find or create pending payment order: %w", err)
@@ -814,6 +848,62 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 		zap.String("currency", order.Currency))
 
 	return &PaymentInfo{URL: url, Provider: "platega", PaymentID: providerPaymentID.String(), ExpiresAt: expiresAt}, order, nil
+}
+
+// requestStarsPayment обрабатывает покупку через Telegram Stars.
+// Вызывается из requestPayment после резолва подписки, до Platega-логики.
+// Ренты в Stars не отправляются: валюта обязана быть XTR с положительной ценой.
+func (o *OrderService) requestStarsPayment(ctx context.Context, telegramID int64, canonical *database.Product, sub *database.Subscription) (*PaymentInfo, *database.Order, error) {
+	if o.stars == nil {
+		return nil, nil, ErrPaymentDisabled
+	}
+
+	if canonical.Currency != stars.Currency || canonical.PriceCents <= 0 {
+		return nil, nil, errors.New("invalid paid product request")
+	}
+
+	now := time.Now().UTC()
+
+	// Ищем живой pending: оплачен — значит повторный клик, не создаём новый счёт.
+	pending, err := o.db.FindPendingPaymentOrder(ctx, sub.ID, canonical.ID, database.PaymentProviderTelegramStars, now)
+	if err != nil {
+		o.notifyRequestIssue(ctx, "stars_find_pending_failed", err.Error(), "retry after database recovery", telegramID, canonical, nil)
+		return nil, nil, fmt.Errorf("find stars pending order: %w", err)
+	}
+
+	if pending != nil && pending.Status == database.OrderStatusPending {
+		return nil, pending, ErrPaymentAlreadyInProgress
+	}
+
+	// TTL для Stars-invoice. Устанавливается атомарно внутри той же tx, что и INSERT,
+	// чтобы pending с payment_expires_at IS NULL не блокировал покупку навсегда.
+	ttl := config.DefaultStarsInvoiceTTL
+	if o.cfg != nil && o.cfg.StarsInvoiceTTL > 0 {
+		ttl = o.cfg.StarsInvoiceTTL
+	}
+
+	ttlAt := now.Add(ttl)
+
+	order, err := o.db.FindOrCreatePendingPaymentOrder(ctx, sub.ID, canonical.ID, database.PaymentProviderTelegramStars, canonical.PriceCents, canonical.Currency, &ttlAt, now)
+	if err != nil {
+		o.notifyRequestIssue(ctx, "stars_create_pending_failed", err.Error(), "retry after database recovery", telegramID, canonical, nil)
+		return nil, nil, fmt.Errorf("find or create stars pending order: %w", err)
+	}
+
+	// Конкурентный создатель: find-or-create вернул существующий pending из другой
+	// горутины (или повторный клик). Отличаем от только что созданного по CreatedAt.
+	if order.CreatedAt.Before(now) || (order.CreatedAt.Equal(now) && order.PaymentExpiresAt != nil && !order.PaymentExpiresAt.Equal(ttlAt)) {
+		return nil, order, ErrPaymentAlreadyInProgress
+	}
+
+	o.logAuditOrderCreated(ctx, order)
+
+	var expiresAt time.Time
+	if order.PaymentExpiresAt != nil {
+		expiresAt = *order.PaymentExpiresAt
+	}
+
+	return &PaymentInfo{Provider: database.PaymentProviderTelegramStars, ExpiresAt: expiresAt}, order, nil
 }
 
 // orderByCallbackPayload находит заказ по payload провайдера, когда id
@@ -1059,7 +1149,7 @@ func (o *OrderService) confirmPayment(
 		applyPlan = o.syncSvc.ApplyPlanToSubscriptionInTx
 	}
 
-	activated, err := o.db.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan, cents)
+	activated, err := o.db.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan, cents, "", nil)
 	if err != nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "confirm_payment_failed", Reason: err.Error(), Action: "retry callback; order must remain pending if DB setup rolled back", OrderID: order.ID, TelegramID: sub.TelegramID, ProductID: order.ProductID, ProductName: product.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID, CallbackStatus: "CONFIRMED"})
 		return nil, err
@@ -1068,16 +1158,22 @@ func (o *OrderService) confirmPayment(
 	if activated {
 		mirrorOrderFromSubscriptionAfterCAS(order, sub, now)
 	}
-	// The database transition and in-memory result are complete. Do not hold
-	// the per-order payment lock while contacting VPN nodes; that external
-	// call is best-effort and may take up to paymentSyncTimeout.
+
+	return o.confirmPaidOrderTail(ctx, order, sub, product, isRenewal, activated, unlock)
+}
+
+// confirmPaidOrderTail выполняет действия после успешного подтверждения оплаты:
+// освобождает per-order lock, инвалидирует кэш, шлёт админ-алерт и синхронизирует
+// подписку с VPN-нодами. Вызывается обеими ветками подтверждения (Platega, Stars).
+// unlock — разблокировщик per-order lock; передаётся явно, чтобы вызывающая сторона
+// могла удерживать его до последнего момента (Platega: unlock до sync, Stars: тоже).
+func (o *OrderService) confirmPaidOrderTail(
+	ctx context.Context, order *database.Order, sub *database.Subscription, product *database.Product,
+	isRenewal, activated bool, unlock func(),
+) (*PaymentConfirmation, error) {
 	unlock()
 
 	if activated {
-		// The subscription row changed (plan/product/price) and the subserver
-		// response cache is keyed by the unchanged subID, so a stale cached
-		// entry (old profile-title, old traffic limit) would otherwise be
-		// served until its TTL expires.
 		if o.subSvc != nil && sub.SubscriptionID != "" {
 			o.subSvc.InvalidateBySubID(ctx, sub.SubscriptionID)
 		}
@@ -1096,6 +1192,315 @@ func (o *OrderService) confirmPayment(
 	}
 
 	return &PaymentConfirmation{Order: order, Activated: activated, IsRenewal: isRenewal}, nil
+}
+
+// ValidateStarsPreCheckout проверяет pre_checkout_query без побочных эффектов:
+// nil — счёт можно оплачивать, ошибка — OK=false с этой причиной (§5.2).
+func (o *OrderService) ValidateStarsPreCheckout(ctx context.Context, payload string, telegramID int64, amount int64, currency string) error {
+	order, err := o.validateStarsPayload(ctx, payload, telegramID, amount, currency)
+	if err != nil {
+		return err
+	}
+
+	// Повторная оплата того же invoice не пройдёт: paid/canceled отклоняются.
+	// ConfirmStarsPayment статус проверяет отдельно (paid → no-op, canceled → alert).
+	if order.Status != database.OrderStatusPending && order.Status != database.OrderStatusExpired {
+		return fmt.Errorf("stars order %d has status %s: %w", order.ID, order.Status, ErrInvalidPaymentTransition)
+	}
+
+	return nil
+}
+
+// validateStarsPayload — общая валидация payload successful_payment/pre_checkout:
+// заказ по payload, provider/currency/amount/владелец, статус ∈ {pending, expired}.
+func (o *OrderService) validateStarsPayload(ctx context.Context, payload string, telegramID int64, amount int64, currency string) (*database.Order, error) {
+	orderID, convErr := strconv.ParseUint(strings.TrimSpace(payload), 10, 64)
+	if convErr != nil {
+		return nil, database.ErrOrderNotFound
+	}
+
+	order, err := o.db.GetOrderByID(ctx, uint(orderID))
+	if err != nil {
+		return nil, fmt.Errorf("load stars order %d: %w", orderID, err)
+	}
+
+	if order.PaymentProvider != database.PaymentProviderTelegramStars {
+		return nil, fmt.Errorf("order %d is not a Telegram Stars order", order.ID)
+	}
+
+	if order.Currency != stars.Currency || currency != stars.Currency {
+		return nil, ErrCurrencyMismatch
+	}
+
+	// XTR не масштабируется ×100: сумма сравнивается с точным равенством (D5).
+	if amount != order.AmountCents {
+		return nil, ErrAmountMismatch
+	}
+
+	sub, err := o.db.GetByID(ctx, order.SubscriptionID)
+	if err != nil {
+		return nil, fmt.Errorf("load stars order subscription %d: %w", order.SubscriptionID, err)
+	}
+
+	if sub == nil {
+		return nil, fmt.Errorf("load stars order subscription %d: subscription is nil", order.SubscriptionID)
+	}
+
+	if sub.TelegramID != telegramID {
+		return nil, fmt.Errorf("stars order %d belongs to a different telegram user", order.ID)
+	}
+
+	return order, nil
+}
+
+// ConfirmStarsPayment обрабатывает successful_payment: те же проверки, что и
+// pre-checkout, затем один CAS (status=paid + charge id + fee=0 в одной tx).
+// Повторная доставка — идемпотентный no-op; canceled — alert без изменения БД.
+func (o *OrderService) ConfirmStarsPayment(ctx context.Context, chargeID string, payload string, amount int64, currency string, telegramID int64) (*PaymentConfirmation, error) {
+	start := time.Now()
+	confirmation, err := o.confirmStarsPayment(ctx, chargeID, payload, amount, currency, telegramID)
+
+	result := "success"
+	if err != nil {
+		result = "error"
+	}
+
+	metrics.PaymentOperationsTotal.WithLabelValues("confirm", result).Inc()
+	metrics.PaymentOperationDuration.WithLabelValues("confirm").Observe(time.Since(start).Seconds())
+
+	if err == nil && confirmation != nil && confirmation.Activated && confirmation.Order != nil {
+		recordPaymentAmount("confirmed", confirmation.Order.AmountCents, confirmation.Order.Currency)
+		if confirmation.IsRenewal {
+			metrics.SubscriptionRenewalsTotal.Inc()
+		}
+	}
+
+	return confirmation, err
+}
+
+func (o *OrderService) confirmStarsPayment(ctx context.Context, chargeID string, payload string, amount int64, currency string, telegramID int64) (*PaymentConfirmation, error) {
+	if o.stars == nil {
+		return nil, ErrPaymentDisabled
+	}
+
+	if strings.TrimSpace(chargeID) == "" {
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "invalid_provider_id", Reason: "stars payment charge ID is empty", Action: "reject callback and inspect Telegram payload", CallbackStatus: "successful_payment"})
+		return nil, errors.New("invalid stars payment charge ID")
+	}
+
+	// Per-order serialization по charge ID, detachCtx — как в confirmPayment:
+	// разрыв webhook-соединения не отменяет lock и первичный lookup.
+	detachCtx := context.WithoutCancel(ctx)
+	unlock, err := o.lockPayment(detachCtx, chargeID)
+	if err != nil {
+		logger.Warn("could not acquire per-order payment lock", zap.String("provider_payment_id", chargeID), zap.Error(err))
+		return nil, fmt.Errorf("acquire payment lock: %w", err)
+	}
+	defer unlock()
+
+	order, err := o.validateStarsPayload(detachCtx, payload, telegramID, amount, currency)
+	if err != nil {
+		// Деньги списаны, но заказ не подошёл: нужен ручной разбор/возврат.
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "stars_payment_unmatched", Reason: err.Error(), Action: "verify the payment and refund or reconcile manually", ProviderID: chargeID, CallbackStatus: "successful_payment", Payload: payload})
+		return nil, err
+	}
+
+	if order.Status == database.OrderStatusPaid {
+		// Повторная доставка successful_payment: без второго продления.
+		return &PaymentConfirmation{Order: order}, nil
+	}
+
+	if order.Status == database.OrderStatusCanceled {
+		canceledSub, subErr := o.db.GetByID(ctx, order.SubscriptionID)
+		canceledTelegramID := telegramID
+		if subErr == nil && canceledSub != nil {
+			canceledTelegramID = canceledSub.TelegramID
+		}
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "stars_paid_after_cancel", Reason: "stars payment received for a canceled order", Action: "refund manually via /refund", OrderID: order.ID, TelegramID: canceledTelegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
+		return &PaymentConfirmation{Order: order, Activated: false}, nil
+	}
+
+	now := time.Now().UTC()
+
+	if o.syncSvc == nil {
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "payment_sync_not_ready", Reason: "post-commit synchronization service is not configured", Action: "wire SyncService before enabling payment callbacks", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
+		return nil, ErrPaymentSyncNotReady
+	}
+
+	product, err := o.db.GetProductByID(ctx, order.ProductID)
+	if err != nil {
+		if errors.Is(err, database.ErrProductNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
+			logger.Warn("stars payment for deleted product", zap.Uint("order_id", order.ID), zap.Uint("product_id", order.ProductID), zap.String("provider_payment_id", chargeID))
+			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_product_failed", Reason: "ordered product no longer exists", Action: "verify payment and refund or activate manually", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
+			return &PaymentConfirmation{Activated: false}, nil
+		}
+
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_product_failed", Reason: err.Error(), Action: "retry callback after database recovery", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
+		return nil, fmt.Errorf("get ordered product: %w", err)
+	}
+
+	sub, err := o.db.GetByID(ctx, order.SubscriptionID)
+	if err != nil {
+		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
+			logger.Warn("stars payment for deleted subscription", zap.Uint("order_id", order.ID), zap.Uint("subscription_id", order.SubscriptionID), zap.String("provider_payment_id", chargeID))
+			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_subscription_failed", Reason: "ordered subscription no longer exists", Action: "verify payment and refund or reconcile manually", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
+			return &PaymentConfirmation{Activated: false}, nil
+		}
+
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_subscription_failed", Reason: err.Error(), Action: "retry callback after database recovery", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
+		return nil, fmt.Errorf("get ordered subscription: %w", err)
+	}
+
+	isRenewal := sub.PricePaidCents > 0 || sub.ProductID != nil
+
+	var applyPlan database.ApplyPlanInTxFn
+	if o.syncSvc != nil {
+		applyPlan = o.syncSvc.ApplyPlanToSubscriptionInTx
+	}
+
+	providerFee := int64(0)
+	activated, err := o.db.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan, amount, chargeID, &providerFee)
+	if err != nil {
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "confirm_payment_failed", Reason: err.Error(), Action: "retry callback; order must remain pending if DB setup rolled back", OrderID: order.ID, TelegramID: sub.TelegramID, ProductID: order.ProductID, ProductName: product.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
+		return nil, err
+	}
+
+	if activated {
+		mirrorOrderFromSubscriptionAfterCAS(order, sub, now)
+	}
+
+	return o.confirmPaidOrderTail(ctx, order, sub, product, isRenewal, activated, unlock)
+}
+
+// RefundStarsOrder возвращает Stars-платёж: сначала Telegram refund, затем
+// CAS paid→canceled + downgrade с audit payment_refunded в той же tx (§5.4).
+func (o *OrderService) RefundStarsOrder(ctx context.Context, orderID uint) error {
+	if o.stars == nil {
+		return ErrPaymentDisabled
+	}
+
+	order, err := o.db.GetOrderByID(ctx, orderID)
+	if err != nil {
+		return fmt.Errorf("load stars order %d for refund: %w", orderID, err)
+	}
+
+	if order.PaymentProvider != database.PaymentProviderTelegramStars {
+		return fmt.Errorf("order %d is not a Telegram Stars order", orderID)
+	}
+
+	if order.Status == database.OrderStatusCanceled {
+		// Идемпотентность по БД: заказ уже отменён — телеграм не дёргаем.
+		return nil
+	}
+
+	if order.Status != database.OrderStatusPaid {
+		return fmt.Errorf("order %d cannot be refunded from status %s", orderID, order.Status)
+	}
+
+	chargeID := strings.TrimSpace(order.ProviderPaymentID)
+	if chargeID == "" {
+		return fmt.Errorf("order %d has no provider payment id", orderID)
+	}
+
+	sub, err := o.db.GetByID(ctx, order.SubscriptionID)
+	if err != nil {
+		return fmt.Errorf("load subscription for stars refund: %w", err)
+	}
+
+	if sub == nil {
+		return fmt.Errorf("load subscription for stars refund: subscription %d is nil", order.SubscriptionID)
+	}
+
+	refundErr := o.stars.Refund(ctx, sub.TelegramID, chargeID)
+	if refundErr != nil && !errors.Is(refundErr, stars.ErrAlreadyRefunded) {
+		// Telegram не вернул деньги: БД не трогаем, доступ сохраняется.
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "stars_refund_failed", Reason: refundErr.Error(), Action: "check the bot Stars balance and retry /refund", OrderID: order.ID, TelegramID: sub.TelegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID})
+		return fmt.Errorf("stars refund order %d: %w", orderID, refundErr)
+	}
+
+	freePlan, planErr := o.db.GetPlanByName(ctx, database.FreePlanName)
+	if planErr != nil {
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "stars_refund_state_failed", Reason: planErr.Error(), Action: "reconcile order and subscription manually by charge id: money is already refunded", OrderID: order.ID, TelegramID: sub.TelegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID})
+		return fmt.Errorf("resolve free plan for stars refund: %w", planErr)
+	}
+
+	result, casErr := o.db.CancelPaidOrderAndDowngradeCAS(ctx, database.PaymentProviderTelegramStars, chargeID, time.Now().UTC(), freePlan.ID, o.chargebackPlanInTx(), database.AuditPaymentRefunded)
+	if casErr != nil {
+		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "stars_refund_state_failed", Reason: casErr.Error(), Action: "reconcile order and subscription manually by charge id: money is already refunded", OrderID: order.ID, TelegramID: sub.TelegramID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID})
+		return fmt.Errorf("cancel stars order %d after refund: %w", orderID, casErr)
+	}
+
+	if result == nil || !result.Transitioned {
+		// Конкурентный refund/chargeback уже отменил заказ — идемпотентный no-op.
+		return nil
+	}
+
+	order = result.Order
+
+	if result.Downgraded {
+		o.syncChargebackAfterCommit(ctx, order.SubscriptionID)
+	}
+
+	refundSub, refundProduct := o.loadChargebackAlertContext(ctx, order)
+	o.notifyAdminRefund(ctx, refundSub, order, refundProduct, result.Downgraded)
+
+	return nil
+}
+
+// notifyAdminRefund отправляет админу best-effort refund-алерт по Stars-заказу.
+func (o *OrderService) notifyAdminRefund(ctx context.Context, sub *database.Subscription, order *database.Order, product *database.Product, downgraded bool) {
+	if o.adminBot == nil || o.cfg == nil || o.cfg.TelegramAdminID <= 0 {
+		return
+	}
+
+	msg := tgbotapi.NewMessage(o.cfg.TelegramAdminID, formatAdminRefundAlert(sub, order, product, downgraded))
+	msg.ParseMode = "Markdown"
+
+	_, err := o.adminBot.Send(msg)
+	if err != nil {
+		logger.Warn("failed to notify admin about stars refund", zap.Uint("order_id", order.ID), zap.Error(err))
+	}
+}
+
+// formatAdminRefundAlert рендерит админ-уведомление о возврате Stars-платежа.
+func formatAdminRefundAlert(sub *database.Subscription, order *database.Order, product *database.Product, downgraded bool) string {
+	productName := "—"
+	if product != nil && strings.TrimSpace(product.Name) != "" {
+		productName = utils.EscapeMarkdown(product.Name)
+	}
+
+	telegramID, subscriptionID, username := int64(0), uint(0), ""
+	if sub != nil {
+		telegramID, subscriptionID, username = sub.TelegramID, sub.ID, sub.Username
+	}
+
+	orderID, amountCents, currency, providerPaymentID := uint(0), int64(0), "", ""
+	if order != nil {
+		orderID, amountCents, currency, providerPaymentID = order.ID, order.AmountCents, order.Currency, order.ProviderPaymentID
+	}
+
+	access := "⬇️ Доступ: *понижен до бесплатного*"
+	if !downgraded {
+		access = "ℹ️ Доступ: *сохранён* (есть другой оплаченный заказ)"
+	}
+
+	return fmt.Sprintf("↩️ *Возврат Stars-платежа*\n\n"+
+		"💎 Тариф: *%s*\n"+
+		"💵 Сумма: *%s*\n"+
+		"👤 Покупатель: %s\n"+
+		"🆔 Telegram ID: `%d`\n"+
+		"🔖 Платёж: `%s`\n"+
+		"📋 Подписка: #%d\n"+
+		"🧾 Заказ: #%d\n"+
+		"%s",
+		productName,
+		formatMoneyCents(amountCents, currency),
+		utils.FormatUserLink(username, telegramID),
+		telegramID,
+		providerPaymentID,
+		subscriptionID,
+		orderID,
+		access)
 }
 
 // SyncProviderFees retries best-effort provider fee lookups for paid orders.
@@ -1187,7 +1592,8 @@ const reconcilePendingBudget = 60 * time.Second
 // последние 30 дней относительно границы с запасом; более старые pending-заказы
 // требуют отдельной проверки оператором.
 func (o *OrderService) ReconcilePendingOrders(ctx context.Context, limit int) error {
-	if o.payment == nil {
+	// Stars-режим: Platega-клиента нет, но Stars-pending должен истекать.
+	if o.payment == nil && o.activeProvider() != database.PaymentProviderTelegramStars {
 		return nil
 	}
 
@@ -1498,7 +1904,7 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 			return nil, false, fmt.Errorf("resolve free plan for chargeback: %w", planErr)
 		}
 
-		result, txErr := o.db.CancelPaidOrderAndDowngradeCAS(ctx, database.PaymentProviderPlatega, providerPaymentID, time.Now().UTC(), freePlan.ID, o.chargebackPlanInTx())
+		result, txErr := o.db.CancelPaidOrderAndDowngradeCAS(ctx, database.PaymentProviderPlatega, providerPaymentID, time.Now().UTC(), freePlan.ID, o.chargebackPlanInTx(), database.AuditChargebackReceived)
 		if txErr != nil {
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "cancel_payment_failed", Reason: txErr.Error(), Action: "retry callback after database recovery", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID, CallbackStatus: status})
 			return nil, false, fmt.Errorf("cancel payment: %w", txErr)

@@ -111,6 +111,21 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		if err != nil {
 			return fmt.Errorf("handle buy_product: %w", err)
 		}
+	case strings.HasPrefix(data, "stars_invoice_back_"):
+		raw := strings.TrimPrefix(data, "stars_invoice_back_")
+
+		invoiceMsgID, productID, ok := parseStarsInvoiceBack(raw)
+		if !ok {
+			logger.Warn("invalid stars_invoice_back callback payload",
+				zap.String("data", data))
+
+			return nil
+		}
+
+		err := c.handleStarsInvoiceBack(ctx, chatID, username, update.CallbackQuery.Message.MessageID, invoiceMsgID, productID)
+		if err != nil {
+			return fmt.Errorf("handle stars_invoice_back: %w", err)
+		}
 	case data == "menu_donate":
 		err := c.h.handleMenuDonate(ctx, chatID, username, update.CallbackQuery.Message.MessageID)
 		if err != nil {
@@ -424,4 +439,48 @@ func (c *CallbackHandler) handleQRWeb(ctx context.Context, chatID int64, usernam
 	}
 
 	return nil
+}
+
+// parseStarsInvoiceBack разбирает хвост stars_invoice_back_<invoice_msg_id>_<product_id>.
+func parseStarsInvoiceBack(raw string) (invoiceMsgID int, productID uint, ok bool) {
+	parts := strings.Split(raw, "_")
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+
+	msgID, err := strconv.Atoi(parts[0])
+	if err != nil || msgID <= 0 {
+		return 0, 0, false
+	}
+
+	parsedProduct, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil || parsedProduct == 0 || parsedProduct > uint64(^uint(0)) {
+		return 0, 0, false
+	}
+
+	return msgID, uint(parsedProduct), true
+}
+
+// handleStarsInvoiceBack удаляет только invoice-сообщение и возвращает карточку
+// тарифа к списку тарифов редактированием на месте, без дубля (§5.1, шаг 11-12).
+// Карточка НЕ пересоздаётся: её message_id — это message_id сообщения с кнопкой.
+func (c *CallbackHandler) handleStarsInvoiceBack(ctx context.Context, chatID int64, username string, cardMsgID, invoiceMsgID int, _ uint) error {
+	logger.Info("Stars invoice card back",
+		zap.Int64("chat_id", chatID),
+		zap.String("username", username),
+		zap.Int("card_msg_id", cardMsgID),
+		zap.Int("invoice_msg_id", invoiceMsgID))
+
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, invoiceMsgID)
+
+	_, err := c.h.paymentAPI().Request(deleteMsg)
+	if err != nil {
+		// Best-effort: не отзываемый invoice не должен ломать возврат карточки.
+		logger.Warn("failed to delete stars invoice message",
+			zap.Int("invoice_msg_id", invoiceMsgID),
+			zap.Int64("chat_id", chatID),
+			zap.Error(err))
+	}
+
+	return c.h.subHandler.handleBuyPremiumList(ctx, chatID, username, cardMsgID)
 }

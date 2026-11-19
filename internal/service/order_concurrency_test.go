@@ -12,6 +12,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
+	"github.com/kereal/rs8kvn_bot/internal/service/payment/stars"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,7 +43,7 @@ func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T)
 		},
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) { return product, nil },
 		GetByIDFunc:        func(context.Context, uint) (*database.Subscription, error) { return sub, nil },
-		ConfirmOrderPaidCASFunc: func(_ context.Context, orderID uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, orderID uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64, _ string, _ *int64) (bool, error) {
 			count := casCalls.Add(1)
 			if count == 1 {
 				firstStartedOnce.Do(func() { close(firstStarted) })
@@ -175,7 +176,7 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 
 			return sub, nil
 		},
-		ConfirmOrderPaidCASFunc: func(_ context.Context, orderID uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, orderID uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64, _ string, _ *int64) (bool, error) {
 			casCalls.Add(1)
 
 			if orderID == order1.ID {
@@ -275,7 +276,7 @@ func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 
 			return o, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, _ string, id string, _ time.Time, _ uint, _ database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, _ string, id string, _ time.Time, _ uint, _ database.ChargebackPlanInTxFn, _ func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
 			o := orders[id]
 			if id == firstID {
 				startOnce1.Do(func() { close(started1) })
@@ -391,7 +392,7 @@ func TestRequestPayment_ConcurrentCallersSingleProviderTransaction(t *testing.T)
 		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
 			return &database.Plan{ID: 2, IsActive: true}, nil
 		},
-		FindPendingPaymentOrderFunc: func(_ context.Context, subID, productID uint, _ time.Time) (*database.Order, error) {
+		FindPendingPaymentOrderFunc: func(_ context.Context, subID, productID uint, _ string, _ time.Time) (*database.Order, error) {
 			return &database.Order{
 				ID: 95, SubscriptionID: subID, ProductID: productID,
 				Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB",
@@ -506,7 +507,7 @@ func TestCancelPaymentByProvider_SameOrderParallelChargebacksTransitionOnce(t *t
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, _ string, _ string, _ time.Time, freePlanID uint, _ database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, _ string, _ string, _ time.Time, freePlanID uint, _ database.ChargebackPlanInTxFn, _ func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
 			n := lockCASCalls.Add(1)
 			if n == 1 {
 				close(started)
@@ -687,4 +688,92 @@ func TestCancelPaymentByProvider_SameOrderParallelPendingCancelsIdempotent(t *te
 	assert.GreaterOrEqual(t, lockCASCalls.Load(), int32(1),
 		"at least one caller must reach the atomic CAS repository")
 	assert.Empty(t, adminBot.GetAllSentMessages(), "plain CANCELED is silent for the admin (no money was collected)")
+}
+
+// TestConfirmStarsPayment_SameChargeParallelConfirmationsActivateOnlyOnce verifies
+// that two concurrent ConfirmStarsPayment calls for the same charge ID serialize
+// on the per-order lock: only the first pending→paid CAS mutates the order,
+// every later caller observes Activated=false (idempotent duplicate).
+func TestConfirmStarsPayment_SameChargeParallelConfirmationsActivateOnlyOnce(t *testing.T) {
+	t.Parallel()
+
+	sub := &database.Subscription{ID: 41, TelegramID: 71, PlanID: 2}
+	product := &database.Product{ID: 51, PlanID: 2, Name: "Premium", PriceCents: 199, Currency: "XTR"}
+	order := &database.Order{ID: 31, SubscriptionID: 41, ProductID: 51, Status: database.OrderStatusPending, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars}
+
+	var firstStartedOnce sync.Once
+
+	firstStarted := make(chan struct{})
+	release := make(chan struct{})
+
+	var casCalls atomic.Int32
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) {
+			return order, nil
+		},
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) { return product, nil },
+		GetByIDFunc:        func(context.Context, uint) (*database.Subscription, error) { return sub, nil },
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
+			count := casCalls.Add(1)
+			if count == 1 {
+				firstStartedOnce.Do(func() { close(firstStarted) })
+				// Hold the lock holder in CAS until the test signals release.
+				<-release
+
+				order.Status = database.OrderStatusPaid
+
+				return true, nil
+			}
+
+			return false, nil
+		},
+	}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	const workers = 4
+
+	type result struct {
+		activated bool
+		err       error
+	}
+
+	results := make([]result, workers)
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+
+	start := make(chan struct{})
+
+	for i := range workers {
+		go func(idx int) {
+			defer wg.Done()
+
+			<-start
+
+			confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_par", "31", 199, "XTR", 71)
+			activated := confirmation != nil && confirmation.Activated
+			results[idx] = result{activated: activated, err: err}
+		}(i)
+	}
+
+	close(start)
+	<-firstStarted
+	close(release)
+	wg.Wait()
+
+	for i, r := range results {
+		require.NoError(t, r.err, "worker %d", i)
+	}
+
+	activations := 0
+	for _, r := range results {
+		if r.activated {
+			activations++
+		}
+	}
+
+	assert.Equal(t, 1, activations, "exactly one confirm may activate the order")
+	assert.Equal(t, int32(1), casCalls.Load(), "CAS must run exactly once for the same charge ID")
 }

@@ -9,12 +9,16 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/service"
+	stars "github.com/kereal/rs8kvn_bot/internal/service/payment/stars"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
+
+// starsProvider — значение конфигурационного провайдера для Telegram Stars.
+const starsProvider = "telegram_stars"
 
 // SubscriptionHandler groups subscription-related business logic.
 type SubscriptionHandler struct {
@@ -399,6 +403,10 @@ func (sh *SubscriptionHandler) handleBuyPremiumList(ctx context.Context, chatID 
 		return sh.showBuyError(chatID, messageID, msg(MsgSubTempError))
 	}
 
+	// M1: при активном провайдере Stars в списке только XTR-товары — RUB-тариф
+	// виден иначе, но покупка упирается в fail-closed ошибку сервиса.
+	products = sh.filterProductsByProvider(products)
+
 	if len(products) == 0 {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Нет доступных тарифов")
 		kb := sh.h.keyboards.Back()
@@ -441,6 +449,10 @@ func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int6
 		zap.Int64("amount_cents", product.PriceCents),
 		zap.String("currency", product.Currency))
 
+	if sh.isStarsProvider() {
+		return sh.sendStarsInvoice(ctx, chatID, username, messageID, product)
+	}
+
 	info, _, err := sh.h.orderService.RequestPayment(ctx, chatID, username, product)
 	if err != nil {
 		switch {
@@ -461,12 +473,106 @@ func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int6
 	}
 
 	text := fmt.Sprintf("Тариф: 💎 *%s*\n\nСтоимость: *%s*\n\nПосле оплаты тариф активируется автоматически.\nЕсли тариф уже активен, новые дни прибавятся к текущему сроку.\n\n_Платёжная система может дополнительно взимать комиссию._",
-		utils.EscapeMarkdown(product.Name), utils.FormatPriceCents(product.PriceCents))
+		utils.EscapeMarkdown(product.Name), utils.FormatPriceCents(product.PriceCents, product.Currency))
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	editMsg.ParseMode = "Markdown"
 	keyboard := sh.h.keyboards.BuyProductConfirm(product, info.URL)
 	editMsg.ReplyMarkup = &keyboard
 	sh.h.safeSend(editMsg)
+
+	return nil
+}
+
+// isStarsProvider возвращает true при активном провайдере Telegram Stars.
+func (sh *SubscriptionHandler) isStarsProvider() bool {
+	return sh.h.cfg != nil && sh.h.cfg.PaymentProvider == starsProvider
+}
+
+// filterProductsByProvider оставляет XTR-товары при провайдере Stars (M1).
+func (sh *SubscriptionHandler) filterProductsByProvider(products []database.Product) []database.Product {
+	if !sh.isStarsProvider() {
+		return products
+	}
+
+	filtered := make([]database.Product, 0, len(products))
+
+	for _, product := range products {
+		if product.Currency == stars.Currency {
+			filtered = append(filtered, product)
+		}
+	}
+
+	return filtered
+}
+
+// sendStarsInvoice создаёт pending-заказ через сервис и отправляет Stars-invoice
+// отдельным сообщением; карточка тарифа редактируется в «Счёт отправлен ниже» (§5.1).
+func (sh *SubscriptionHandler) sendStarsInvoice(ctx context.Context, chatID int64, username string, messageID int, product *database.Product) error {
+	info, order, err := sh.h.orderService.RequestPayment(ctx, chatID, username, product)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrPaymentAlreadyInProgress):
+			return sh.showBuyError(chatID, messageID, msg(MsgPaymentInProgressStars))
+		case errors.Is(err, service.ErrPaymentDisabled):
+			return sh.showBuyError(chatID, messageID, "❌ Платежи временно недоступны")
+		}
+
+		logger.Warn("stars request payment failed",
+			zap.Uint("product_id", product.ID),
+			zap.Int64("chat_id", chatID),
+			zap.Error(err))
+
+		return sh.showBuyError(chatID, messageID, msg(MsgSubTempError))
+	}
+
+	if order == nil {
+		return sh.showBuyError(chatID, messageID, msg(MsgSubTempError))
+	}
+
+	invoice, err := stars.BuildInvoice(stars.InvoiceParams{
+		OrderID:  order.ID,
+		ChatID:   chatID,
+		Title:    product.Name,
+		Amount:   order.AmountCents,
+		Currency: stars.Currency,
+	})
+	if err != nil {
+		logger.Error("failed to build stars invoice",
+			zap.Uint("order_id", order.ID),
+			zap.Int64("chat_id", chatID),
+			zap.Uint("product_id", product.ID),
+			zap.Error(err))
+
+		return sh.showBuyError(chatID, messageID, msg(MsgSubTempError))
+	}
+
+	sentInvoice, err := sh.h.paymentAPI().Send(invoice)
+	if err != nil {
+		// M5: счёт фактически не отправлен — отдельный текст, не «счёт уже отправлен».
+		logger.Warn("failed to send stars invoice",
+			zap.Uint("order_id", order.ID),
+			zap.Int64("chat_id", chatID),
+			zap.Uint("product_id", product.ID),
+			zap.Error(err))
+
+		return sh.showBuyError(chatID, messageID, msg(MsgInvoiceSendFailed))
+	}
+
+	text := fmt.Sprintf("Тариф: 💎 *%s*\n\nСтоимость: *%s*\n\nСчёт отправлен ниже — нажмите «Pay» в счёте.\nПосле оплаты тариф активируется автоматически.\nЕсли тариф уже активен, новые дни прибавятся к текущему сроку.\n\nОплачивая счёт, вы принимаете Пользовательское соглашение (/terms).",
+		utils.EscapeMarkdown(product.Name), utils.FormatStarsAmount(order.AmountCents))
+
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	editMsg.ParseMode = "Markdown"
+	keyboard := sh.h.keyboards.StarsInvoiceBack(sentInvoice.MessageID, product.ID)
+	editMsg.ReplyMarkup = &keyboard
+	sh.h.safeSend(editMsg)
+
+	logger.Info("Stars invoice sent",
+		zap.Uint("order_id", order.ID),
+		zap.Int64("chat_id", chatID),
+		zap.String("username", username),
+		zap.Int("invoice_message_id", sentInvoice.MessageID),
+		zap.String("provider", info.Provider))
 
 	return nil
 }

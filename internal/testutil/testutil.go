@@ -234,8 +234,22 @@ type BotAPI struct {
 	LastRequest     tgbotapi.Chattable
 	SendFunc        func(c tgbotapi.Chattable) (tgbotapi.Message, error)
 	AllSentMessages []SentMessage
+	// AllChattables captures every Chattable passed to Send in order — needed
+	// to assert on non-text payloads like tgbotapi.InvoiceConfig (Stars).
+	AllChattables []tgbotapi.Chattable
+	// AllRequests captures every Chattable passed to Request in order
+	// (PreCheckoutConfig answers, DeleteMessage, Callback).
+	AllRequests []tgbotapi.Chattable
 	// DeletedMessageIDs captures the message ids passed to DeleteMessage.
 	DeletedMessageIDs []int
+	// MakeRequestEndpoints captures the endpoints passed to MakeRequest (Stars refunds).
+	MakeRequestEndpoints []string
+	// MakeRequestParams captures the last params passed to MakeRequest.
+	MakeRequestParams tgbotapi.Params
+	// MakeRequestError, if set, is returned by MakeRequest.
+	MakeRequestError error
+	// MakeRequestFunc, if set, replaces the default recording behaviour of MakeRequest.
+	MakeRequestFunc func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error)
 }
 
 // SentMessage represents a captured message
@@ -255,6 +269,7 @@ func (m *BotAPI) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 	m.sendCalled = true
 	m.SendCount++
 	m.LastChattable = c
+	m.AllChattables = append(m.AllChattables, c)
 
 	var msg SentMessage
 
@@ -294,6 +309,7 @@ func (m *BotAPI) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
 
 	m.requestCalled = true
 	m.LastRequest = c
+	m.AllRequests = append(m.AllRequests, c)
 
 	if dm, ok := c.(tgbotapi.DeleteMessageConfig); ok {
 		m.DeletedMessageIDs = append(m.DeletedMessageIDs, dm.MessageID)
@@ -306,12 +322,54 @@ func (m *BotAPI) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
 	return &tgbotapi.APIResponse{Ok: true}, nil
 }
 
+// AllChattablesSafe returns a copy of every Chattable passed to Send (thread-safe).
+func (m *BotAPI) AllChattablesSafe() []tgbotapi.Chattable {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	out := make([]tgbotapi.Chattable, len(m.AllChattables))
+	copy(out, m.AllChattables)
+
+	return out
+}
+
+// AllRequestsSafe returns a copy of every Chattable passed to Request (thread-safe).
+func (m *BotAPI) AllRequestsSafe() []tgbotapi.Chattable {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	out := make([]tgbotapi.Chattable, len(m.AllRequests))
+	copy(out, m.AllRequests)
+
+	return out
+}
+
 // SendCountSafe returns the number of Send calls (thread-safe).
 func (m *BotAPI) SendCountSafe() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	return m.SendCount
+}
+
+// MakeRequest mirrors BotAPI.MakeRequest (tgbotapi v5.5.1): the endpoint and
+// params are recorded so tests can assert on them.
+func (m *BotAPI) MakeRequest(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.MakeRequestFunc != nil {
+		return m.MakeRequestFunc(endpoint, params)
+	}
+
+	m.MakeRequestEndpoints = append(m.MakeRequestEndpoints, endpoint)
+	m.MakeRequestParams = params
+
+	if m.MakeRequestError != nil {
+		return nil, m.MakeRequestError
+	}
+
+	return &tgbotapi.APIResponse{Ok: true}, nil
 }
 
 // SendCalledSafe returns whether Send was called (thread-safe).
@@ -437,12 +495,12 @@ type ServiceStoreFake struct {
 	AuditLogs                                   []database.AuditLog
 	BindTrialSubscriptionFunc                   func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
 	CancelOrderCASFunc                          func(ctx context.Context, provider string, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error)
-	CancelPaidOrderAndDowngradeCASFunc          func(ctx context.Context, provider string, providerPaymentID string, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error)
+	CancelPaidOrderAndDowngradeCASFunc          func(ctx context.Context, provider string, providerPaymentID string, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn, auditFn func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error)
 	ClaimExpiredTrialsFunc                      func(ctx context.Context, hours int) ([]database.Subscription, error)
 	ClaimReminderFunc                           func(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
 	ClaimTrafficReminderFunc                    func(ctx context.Context, id uint, bit int) (bool, error)
 	CleanupExpiredTrialsFunc                    func(ctx context.Context, hours int) ([]database.Subscription, error)
-	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error)
+	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64, providerPaymentID string, providerFeeCents *int64) (bool, error)
 	CountActiveSubscriptionsFunc                func(ctx context.Context) (int64, error)
 	CountFreeSubscriptionsFunc                  func(ctx context.Context) (int64, error)
 	CountPremiumSubscriptionsFunc               func(ctx context.Context) (int64, error)
@@ -454,8 +512,8 @@ type ServiceStoreFake struct {
 	DeleteSubscriptionNodeFunc                  func(ctx context.Context, subID, nodeID uint) error
 	DeleteSubscriptionNodesBySubscriptionIDFunc func(ctx context.Context, subID uint) error
 	ExpireSubscriptionFunc                      func(ctx context.Context, id uint, freePlanID uint) error
-	FindOrCreatePendingPaymentOrderFunc         func(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
-	FindPendingPaymentOrderFunc                 func(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error)
+	FindOrCreatePendingPaymentOrderFunc         func(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, error)
+	FindPendingPaymentOrderFunc                 func(ctx context.Context, subscriptionID, productID uint, provider string, now time.Time) (*database.Order, error)
 	GetAllSubscriptionsFunc                     func(ctx context.Context) ([]database.Subscription, error)
 	GetAnyByTelegramIDFunc                      func(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	GetBroadcastRecipientsStatsFunc             func(ctx context.Context, broadcastID uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error)
@@ -553,9 +611,9 @@ func (m *ServiceStoreFake) CancelOrderCAS(ctx context.Context, provider string, 
 	return false, nil
 }
 
-func (m *ServiceStoreFake) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID string, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+func (m *ServiceStoreFake) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID string, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn, auditFn func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
 	if m.CancelPaidOrderAndDowngradeCASFunc != nil {
-		return m.CancelPaidOrderAndDowngradeCASFunc(ctx, provider, providerPaymentID, now, freePlanID, applyPlan)
+		return m.CancelPaidOrderAndDowngradeCASFunc(ctx, provider, providerPaymentID, now, freePlanID, applyPlan, auditFn)
 	}
 
 	return nil, errors.New("mock atomic chargeback requires CancelPaidOrderAndDowngradeCASFunc")
@@ -601,9 +659,9 @@ func (m *ServiceStoreFake) CleanupExpiredTrials(ctx context.Context, hours int) 
 	return nil, nil
 }
 
-func (m *ServiceStoreFake) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error) {
+func (m *ServiceStoreFake) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64, providerPaymentID string, providerFeeCents *int64) (bool, error) {
 	if m.ConfirmOrderPaidCASFunc != nil {
-		return m.ConfirmOrderPaidCASFunc(ctx, orderID, paidAt, activatedAt, sub, product, applyPlan, callbackAmountCents)
+		return m.ConfirmOrderPaidCASFunc(ctx, orderID, paidAt, activatedAt, sub, product, applyPlan, callbackAmountCents, providerPaymentID, providerFeeCents)
 	}
 
 	// The real implementation is a transactional CAS computing the new expiry
@@ -771,16 +829,16 @@ func (m *ServiceStoreFake) ExpireSubscription(ctx context.Context, id uint, free
 	return nil
 }
 
-func (m *ServiceStoreFake) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error) {
+func (m *ServiceStoreFake) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, error) {
 	if m.FindOrCreatePendingPaymentOrderFunc != nil {
-		return m.FindOrCreatePendingPaymentOrderFunc(ctx, subscriptionID, productID, amountCents, currency, now)
+		return m.FindOrCreatePendingPaymentOrderFunc(ctx, subscriptionID, productID, provider, amountCents, currency, paymentExpiresAt, now)
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	for _, order := range m.Orders {
-		if order.SubscriptionID == subscriptionID && order.ProductID == productID && order.PaymentProvider == "platega" && order.Status == database.OrderStatusPending {
+		if order.SubscriptionID == subscriptionID && order.ProductID == productID && order.PaymentProvider == provider && order.Status == database.OrderStatusPending {
 			if order.PaymentCreationUncertain {
 				return order, nil
 			}
@@ -798,22 +856,22 @@ func (m *ServiceStoreFake) FindOrCreatePendingPaymentOrder(ctx context.Context, 
 		m.Orders = make(map[uint]*database.Order)
 	}
 
-	order := &database.Order{ID: uint(len(m.Orders) + 1), SubscriptionID: subscriptionID, ProductID: productID, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: "platega", CreatedAt: now} // #nosec G115 -- slice length is non-negative
+	order := &database.Order{ID: uint(len(m.Orders) + 1), SubscriptionID: subscriptionID, ProductID: productID, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: provider, PaymentExpiresAt: paymentExpiresAt, CreatedAt: now} // #nosec G115 -- slice length is non-negative
 	m.Orders[order.ID] = order
 
 	return order, nil
 }
 
-func (m *ServiceStoreFake) FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error) {
+func (m *ServiceStoreFake) FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, now time.Time) (*database.Order, error) {
 	if m.FindPendingPaymentOrderFunc != nil {
-		return m.FindPendingPaymentOrderFunc(ctx, subscriptionID, productID, now)
+		return m.FindPendingPaymentOrderFunc(ctx, subscriptionID, productID, provider, now)
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	for _, order := range m.Orders {
-		if order.SubscriptionID == subscriptionID && order.ProductID == productID && order.PaymentProvider == "platega" && order.Status == database.OrderStatusPending {
+		if order.SubscriptionID == subscriptionID && order.ProductID == productID && order.PaymentProvider == provider && order.Status == database.OrderStatusPending {
 			if order.PaymentExpiresAt != nil && !now.Before(*order.PaymentExpiresAt) {
 				order.Status = database.OrderStatusExpired
 				continue

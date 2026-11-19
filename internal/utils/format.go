@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -108,12 +109,35 @@ func FormatDateRu(t time.Time) string {
 	return fmt.Sprintf("%d %s %d", day, month, year)
 }
 
-// FormatPriceCents renders an amount in cents as a ruble value. Whole amounts
-// drop the fractional part ("127₽"); fractional amounts keep two digits
-// ("127.37₽").
-func FormatPriceCents(amountCents int64) string {
-	value := fmt.Sprintf("%d", amountCents/100)
-	if kopeks := amountCents % 100; kopeks != 0 {
+// FormatStarsAmount renders an XTR amount as a whole number of Stars with
+// space thousand separators ("2 300 XTR"). XTR minor units are 1:1, so the
+// amount is not divided. Negative amounts keep the minus sign.
+func FormatStarsAmount(amountMinor int64) string {
+	digits := strconv.FormatInt(amountMinor, 10)
+	sign := ""
+	if strings.HasPrefix(digits, "-") {
+		sign = "-"
+		digits = digits[1:]
+	}
+
+	for i := len(digits) - 3; i > 0; i -= 3 {
+		digits = digits[:i] + " " + digits[i:]
+	}
+
+	return sign + digits + " XTR"
+}
+
+// FormatPriceCents renders an amount in minor units for the given currency.
+// "XTR" is rendered as a whole number of Stars ("2 300 XTR"); "RUB" and
+// empty/unknown currencies keep the ruble rendering: whole amounts drop the
+// fractional part ("127₽"), fractional amounts keep two digits ("127.37₽").
+func FormatPriceCents(amountMinor int64, currency string) string {
+	if currency == "XTR" {
+		return FormatStarsAmount(amountMinor)
+	}
+
+	value := fmt.Sprintf("%d", amountMinor/100)
+	if kopeks := amountMinor % 100; kopeks != 0 {
 		value += fmt.Sprintf(".%02d", kopeks)
 	}
 

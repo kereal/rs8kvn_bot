@@ -6,6 +6,7 @@ import (
 	cryptorand "crypto/rand"
 	"fmt"
 	"math/big"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -24,6 +25,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/scheduler"
 	"github.com/kereal/rs8kvn_bot/internal/service"
+	"github.com/kereal/rs8kvn_bot/internal/service/payment/stars"
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
 	"github.com/kereal/rs8kvn_bot/internal/web"
@@ -37,6 +39,13 @@ var (
 	commit    = "unknown"
 	buildTime = "unknown"
 )
+
+// paymentClientTimeout — таймаут HTTP payment-инстанса: окно pre-checkout
+// Telegram — 10 секунд, бюджет ответа в боте — 6 секунд (плана D1, §5.2).
+const paymentClientTimeout = 5 * time.Second
+
+// starsProvider — значение PAYMENT_PROVIDER для Telegram Stars.
+const starsProvider = "telegram_stars"
 
 // Option is a functional option for Run.
 type Option func(*runOptions)
@@ -283,7 +292,9 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 	webServer.SetOrderService(orderService)
 	webServer.SetBot(botAPI)
 
-	if cfg.PaymentEnabled {
+	// Web-callback Platega включается по итоговому гейту §4.1: активные продажи
+	// через platega либо legacy-расчёт старых заказов (PLATEGA_CALLBACK_ENABLED).
+	if cfg.ShouldEnablePlategaCallback() {
 		webServer.SetPaymentConfig(&web.PaymentConfig{
 			Enabled:    true,
 			MerchantID: cfg.PlategaMerchantID,
@@ -604,11 +615,26 @@ func main() {
 		logger.Fatal("Telegram bot initialization failed", zap.Error(err))
 	}
 
+	// D1: отдельный payment-инстанс с таймаутом HTTP — invoice,
+	// answerPreCheckoutQuery и refund идут через него; polling-инстанс
+	// не трогаем: его long-poll не должен упираться в общий таймаут.
+	paymentAPI, err := tgbotapi.NewBotAPIWithClient(cfg.TelegramBotToken, tgbotapi.APIEndpoint, &http.Client{Timeout: paymentClientTimeout})
+	if err != nil {
+		logger.Fatal("Telegram payment client initialization failed", zap.Error(err))
+	}
+
 	svc.handler.SetBot(api)
+	svc.handler.SetPaymentBot(paymentAPI)
 	svc.subService.SetBot(api)
 	svc.handler.SetBotConfig(bc)
 
 	if svc.orderService != nil {
+		// Stars-клиент — только при активном провайдере Telegram Stars:
+		// при platega payment остаётся nil — это нормально (§4.4).
+		if cfg.PaymentProvider == starsProvider {
+			svc.orderService.SetStarsClient(stars.New(paymentAPI))
+		}
+
 		svc.orderService.SetBotUsername(bc.Username)
 		svc.orderService.SetAdminBot(api)
 	}
@@ -623,7 +649,7 @@ func main() {
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = config.BotUpdateTimeout
-	u.AllowedUpdates = []string{"message", "callback_query"}
+	u.AllowedUpdates = []string{"message", "callback_query", "pre_checkout_query"}
 	updates := botAPI.GetUpdatesChan(u)
 
 	// 9. Setup graceful shutdown context

@@ -14,10 +14,12 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
+	"github.com/kereal/rs8kvn_bot/internal/service/payment/stars"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -67,7 +69,7 @@ func TestOrderService_NotifiesAdminForUncertainPayment(t *testing.T) {
 		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
 			return &database.Subscription{ID: 3, TelegramID: 42}, nil
 		},
-		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 			return order, nil
 		},
 	}
@@ -145,7 +147,7 @@ func TestOrderService_ActivatesExpiredPaymentWithinSettlementGrace(t *testing.T)
 		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
 			return nil, nil
 		},
-		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
 			casCalls++
 			order.Status = database.OrderStatusPaid
 
@@ -171,7 +173,7 @@ func TestOrderService_NotifiesAdminForProviderRejection(t *testing.T) {
 		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
 			return &database.Subscription{ID: 6, TelegramID: 45}, nil
 		},
-		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 			return order, nil
 		},
 		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
@@ -205,7 +207,7 @@ func TestOrderService_NotifiesAdminWhenProviderOutcomeIsUncertain(t *testing.T) 
 		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
 			return &database.Subscription{ID: 5, TelegramID: 44}, nil
 		},
-		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 			return order, nil
 		},
 		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
@@ -245,7 +247,7 @@ func TestRequestPayment_SavesRedirectPaymentDetails(t *testing.T) {
 		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
 			return &database.Subscription{ID: 7, TelegramID: 46}, nil
 		},
-		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 			return order, nil
 		},
 		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
@@ -303,7 +305,7 @@ func TestRequestPayment_InvalidProviderResponsesNotifyAdmin(t *testing.T) {
 				GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
 					return &database.Subscription{ID: 8, TelegramID: 47}, nil
 				},
-				FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+				FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 					return order, nil
 				},
 				GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
@@ -337,7 +339,7 @@ func TestRequestPayment_LatePlanLoadFailureNotifiesAdmin(t *testing.T) {
 		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
 			return &database.Subscription{ID: 12, TelegramID: 50}, nil
 		},
-		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 			return order, nil
 		},
 		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
@@ -367,7 +369,7 @@ func TestRequestPayment_SaveDetailsFailureNotifiesAdmin(t *testing.T) {
 		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
 			return &database.Subscription{ID: 9, TelegramID: 48}, nil
 		},
-		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 			return order, nil
 		},
 		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
@@ -414,7 +416,7 @@ func TestConfirmPayment_ReleasesPaymentLockBeforePostCommitSync(t *testing.T) {
 		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: id, TelegramID: 71, PlanID: 61}, nil
 		},
-		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64, _ string, _ *int64) (bool, error) {
 			sub.ExpiresAt = testutil.PtrTime(time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, 30))
 			return true, nil
 		},
@@ -481,7 +483,7 @@ func TestRequestPayment_ReusesLivePaymentLinkWithoutRecreating(t *testing.T) {
 		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
 			return &database.Subscription{ID: 9, TelegramID: 48}, nil
 		},
-		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 			return order, nil
 		},
 	}
@@ -520,7 +522,7 @@ func TestConfirmPayment_PostCommitSyncFailureStillActivates(t *testing.T) {
 		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: id, TelegramID: 72, PlanID: 64}, nil
 		},
-		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64, _ string, _ *int64) (bool, error) {
 			sub.ExpiresAt = testutil.PtrTime(time.Now().UTC().AddDate(0, 0, 30))
 
 			return true, nil
@@ -557,7 +559,7 @@ func TestConfirmPayment_ActivatedCASWithNilExpiryDoesNotPanic(t *testing.T) {
 		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: id, TelegramID: 72, PlanID: 62}, nil
 		},
-		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64, _ string, _ *int64) (bool, error) {
 			// Intentionally leaves sub.ExpiresAt nil.
 			return true, nil
 		},
@@ -630,7 +632,7 @@ func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
 
 					return &database.Subscription{ID: 10, TelegramID: 49, PlanID: 2}, nil
 				},
-				ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
+				ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
 					return false, tt.casErr
 				},
 			}
@@ -667,7 +669,7 @@ func TestConfirmPayment_NotifiesAdminOnActivation(t *testing.T) {
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
-		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
 			return true, nil
 		},
 	}
@@ -718,7 +720,7 @@ func TestConfirmPayment_NotifiesAdminOnRenewal(t *testing.T) {
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
-		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
 			return true, nil
 		},
 	}
@@ -758,7 +760,7 @@ func TestConfirmPayment_InvalidatesSubserverCacheOnActivation(t *testing.T) {
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
-		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
 			return true, nil
 		},
 	}
@@ -846,7 +848,7 @@ func TestCancelPaymentByProvider_ChargebackNotifiesAdmin(t *testing.T) {
 				GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 					return &database.Order{ID: 104, SubscriptionID: 92, ProductID: 72, Status: database.OrderStatusPaid, AmountCents: 690000, Currency: "RUB", ProviderPaymentID: providerID}, nil
 				},
-				CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+				CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
 					return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: tt.downgraded}, nil
 				},
 				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
@@ -897,6 +899,10 @@ func TestFormatMoneyCents(t *testing.T) {
 		{name: "small amount", amountCents: 2300, currency: "RUB", want: "23 ₽"},
 		{name: "empty currency", amountCents: 100, currency: "", want: "1"},
 		{name: "negative", amountCents: -2300, currency: "RUB", want: "-23 ₽"},
+		{name: "whole stars", amountCents: 199, currency: "XTR", want: "199 XTR"},
+		{name: "thousands stars", amountCents: 230050, currency: "XTR", want: "230 050 XTR"},
+		{name: "negative stars", amountCents: -2300, currency: "XTR", want: "-2 300 XTR"},
+		{name: "zero stars", amountCents: 0, currency: "XTR", want: "0 XTR"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -967,7 +973,7 @@ func TestCancelPaymentByProvider_PaidChargebackReturnsWasPaid(t *testing.T) {
 			calls++
 			return &database.Order{ID: 7, SubscriptionID: 70, Status: database.OrderStatusPaid, PaymentProvider: provider, ProviderPaymentID: providerID, AmountCents: 2300, Currency: "RUB"}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
 			return atomicChargebackResult(7, 70, true, false)
 		},
 	}
@@ -997,7 +1003,7 @@ func TestCancelPaymentByProvider_ChargebackOnPendingReportsNotPaid(t *testing.T)
 			calls++
 			return &database.Order{ID: 9, SubscriptionID: 90, Status: database.OrderStatusPending, PaymentProvider: provider, ProviderPaymentID: providerID, AmountCents: 2300, Currency: "RUB"}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
 			return atomicChargebackResult(9, 90, false, false)
 		},
 	}
@@ -1095,7 +1101,7 @@ func TestConfirmPayment_DeletedSubscriptionOrProductReturnsNoop(t *testing.T) {
 				},
 				GetProductByIDFunc: tt.productFn,
 				GetByIDFunc:        tt.subFn,
-				ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
+				ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
 					casCalled = true
 					return true, nil
 				},
@@ -1126,7 +1132,7 @@ func TestRequestPayment_ConcurrentClaimReturnsAlreadyInProgress(t *testing.T) {
 		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
 			return &database.Subscription{ID: 75, TelegramID: 55}, nil
 		},
-		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 			return order, nil
 		},
 		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
@@ -1159,7 +1165,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradesPaidSubscription(t *testing
 			calls++
 			return &database.Order{ID: 96, SubscriptionID: 85, ProductID: 66, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
 			return atomicChargebackResult(96, 85, true, true)
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
@@ -1199,7 +1205,7 @@ func TestCancelPaymentByProvider_ChargebackKeepsAccessWithAnotherPaidOrder(t *te
 			calls++
 			return &database.Order{ID: 97, SubscriptionID: 86, ProductID: 67, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
 			return atomicChargebackResult(97, 86, true, false)
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
@@ -1233,7 +1239,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradeFailureAlertsAdmin(t *testin
 			calls++
 			return &database.Order{ID: 100, SubscriptionID: 88, ProductID: 69, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
 			return nil, errors.New("atomic chargeback transaction failed")
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
@@ -1274,7 +1280,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T
 			calls++
 			return &database.Order{ID: 101, SubscriptionID: 89, ProductID: 70, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
 			return atomicChargebackResult(101, 89, true, true)
 		},
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
@@ -1346,7 +1352,7 @@ func TestConfirmPayment_PersistsCallbackAmountAndProviderFee(t *testing.T) {
 		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: id, TelegramID: 73, PlanID: 63}, nil
 		},
-		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, callbackAmountCents int64, _ string, _ *int64) (bool, error) {
 			casAmount = callbackAmountCents
 			sub.ExpiresAt = testutil.PtrTime(time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, 30))
 			return true, nil
@@ -1397,7 +1403,7 @@ func TestConfirmPayment_ProviderFeeUnavailableKeepsCallbackAmount(t *testing.T) 
 		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: id, TelegramID: 74, PlanID: 64}, nil
 		},
-		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, callbackAmountCents int64, _ string, _ *int64) (bool, error) {
 			casAmount = callbackAmountCents
 			sub.ExpiresAt = testutil.PtrTime(time.Now().UTC().Truncate(time.Minute).AddDate(0, 0, 30))
 			return true, nil
@@ -1603,7 +1609,7 @@ func TestOrderService_ConfirmPayment_FindsOrderByPayloadWhenProviderIDLost(t *te
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
-		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
 			order.Status = database.OrderStatusPaid
 
 			return true, nil
@@ -1715,7 +1721,7 @@ func TestOrderService_ReconcilePendingOrders_ConfirmsPaidOrder(t *testing.T) {
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
-		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
 			order.Status = database.OrderStatusPaid
 
 			return true, nil
@@ -1808,4 +1814,527 @@ func TestOrderService_ReconcilePendingOrders_ProviderErrorKeepsOrder(t *testing.
 
 	require.Error(t, o.ReconcilePendingOrders(context.Background(), 10))
 	assert.Equal(t, database.OrderStatusPending, order.Status)
+}
+
+// ─── Stars payment tests ─────────────────────────────────────────────────────
+
+func TestRequestPayment_StarsCreatesPendingWithTTL(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{PaymentProvider: "telegram_stars", StarsInvoiceTTL: 15 * time.Minute, TelegramAdminID: 999}
+	product := &database.Product{ID: 7, PlanID: 2, Name: "Premium", PriceCents: 199, Currency: "XTR", IsActive: true}
+
+	var (
+		gotProvider  string
+		gotTTL       *time.Time
+		gotCurrency  string
+		gotAmount    int64
+		findProvider string
+	)
+
+	mock := &testutil.ServiceStoreFake{
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return product, nil
+		},
+		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+			return &database.Subscription{ID: 3, TelegramID: 42}, nil
+		},
+		FindPendingPaymentOrderFunc: func(_ context.Context, _, _ uint, provider string, _ time.Time) (*database.Order, error) {
+			findProvider = provider
+
+			return nil, nil
+		},
+		FindOrCreatePendingPaymentOrderFunc: func(_ context.Context, _, _ uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, error) {
+			gotProvider, gotCurrency, gotAmount, gotTTL = provider, currency, amountCents, paymentExpiresAt
+
+			return &database.Order{ID: 55, SubscriptionID: 3, ProductID: 7, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: provider, PaymentExpiresAt: paymentExpiresAt, CreatedAt: now}, nil
+		},
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", cfg)
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	info, order, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 7})
+	require.NoError(t, err)
+	require.NotNil(t, order)
+
+	assert.Equal(t, "telegram_stars", findProvider, "lookup must use the Stars provider")
+	assert.Equal(t, "telegram_stars", gotProvider)
+	assert.Equal(t, "XTR", gotCurrency)
+	assert.Equal(t, int64(199), gotAmount)
+	require.NotNil(t, gotTTL, "TTL must be set atomically at creation (D8)")
+	assert.WithinDuration(t, time.Now().UTC().Add(15*time.Minute), *gotTTL, 10*time.Second)
+	assert.Equal(t, "telegram_stars", info.Provider)
+	assert.Equal(t, *gotTTL, info.ExpiresAt)
+	assert.Empty(t, info.URL, "stars flow returns no payment URL")
+}
+
+func TestRequestPayment_StarsLivePendingReturnsAlreadyInProgress(t *testing.T) {
+	t.Parallel()
+
+	liveExpiry := time.Now().UTC().Add(10 * time.Minute)
+	pending := &database.Order{ID: 55, SubscriptionID: 3, ProductID: 7, Status: database.OrderStatusPending, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars, PaymentExpiresAt: &liveExpiry}
+
+	mock := &testutil.ServiceStoreFake{
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return &database.Product{ID: 7, PlanID: 2, Name: "Premium", PriceCents: 199, Currency: "XTR", IsActive: true}, nil
+		},
+		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+			return &database.Subscription{ID: 3, TelegramID: 42}, nil
+		},
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
+			return pending, nil
+		},
+		FindOrCreatePendingPaymentOrderFunc: func(context.Context, uint, uint, string, int64, string, *time.Time, time.Time) (*database.Order, error) {
+			t.Fatal("find-or-create must not run while a live pending exists")
+
+			return nil, errors.New("unreachable")
+		},
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", TelegramAdminID: 999})
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	_, gotOrder, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 7})
+	require.ErrorIs(t, err, ErrPaymentAlreadyInProgress)
+	require.Same(t, pending, gotOrder)
+}
+
+func TestRequestPayment_StarsRUBProductFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	mock := &testutil.ServiceStoreFake{
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return &database.Product{ID: 7, PlanID: 2, Name: "Premium", PriceCents: 230000, Currency: "RUB", IsActive: true}, nil
+		},
+		GetByTelegramIDFunc: func(context.Context, int64) (*database.Subscription, error) {
+			return &database.Subscription{ID: 3, TelegramID: 42}, nil
+		},
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", TelegramAdminID: 999})
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	_, _, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 7})
+	require.Error(t, err, "RUB products must fail closed in Stars mode: ренты в Stars не отправляются")
+	assert.NotErrorIs(t, err, ErrPaymentDisabled)
+}
+
+func TestValidateStarsPreCheckout_ValidPayloadReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	order := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusPending, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars}
+	sub := &database.Subscription{ID: 4, TelegramID: 42}
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
+		GetByIDFunc:      func(context.Context, uint) (*database.Subscription, error) { return sub, nil },
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	err := o.ValidateStarsPreCheckout(context.Background(), "31", 42, 199, "XTR")
+	require.NoError(t, err, "valid payload must pass pre-checkout")
+}
+
+func TestValidateStarsPreCheckout_RejectsInvalidPayload(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		payload    string
+		telegramID int64
+		amount     int64
+		currency   string
+		wantErr    string // substring
+	}{
+		{name: "order not found", payload: "999999", telegramID: 42, amount: 199, currency: "XTR", wantErr: "not found"},
+		{name: "wrong user", payload: "31", telegramID: 99, amount: 199, currency: "XTR", wantErr: "different telegram user"},
+		{name: "amount mismatch", payload: "31", telegramID: 42, amount: 200, currency: "XTR", wantErr: "amount"},
+		{name: "currency mismatch", payload: "31", telegramID: 42, amount: 199, currency: "RUB", wantErr: "currency"},
+		{name: "wrong provider", payload: "31", telegramID: 42, amount: 199, currency: "XTR", wantErr: "not a Telegram Stars"},
+		{name: "already paid", payload: "31", telegramID: 42, amount: 199, currency: "XTR", wantErr: "invalid payment transition"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			order := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusPaid, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars}
+			// "wrong provider" overrides provider to platega
+			if tt.name == "wrong provider" {
+				order.PaymentProvider = database.PaymentProviderPlatega
+			}
+			// "already paid" keeps status paid
+			// "order not found" has GetOrderByID return error
+			mock := &testutil.ServiceStoreFake{
+				GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) {
+					if tt.name == "order not found" {
+						return nil, gorm.ErrRecordNotFound
+					}
+
+					return order, nil
+				},
+				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+					return &database.Subscription{ID: 4, TelegramID: 42}, nil
+				},
+			}
+			o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+			o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+			err := o.ValidateStarsPreCheckout(context.Background(), tt.payload, tt.telegramID, tt.amount, tt.currency)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestConfirmStarsPayment_FirstConfirmActivatesAndRecordsFeeZero(t *testing.T) {
+	t.Parallel()
+
+	order := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusPending, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars}
+	sub := &database.Subscription{ID: 4, TelegramID: 42, PlanID: 2} // free, not renewal
+	product := &database.Product{ID: 7, PlanID: 2, Name: "Premium", PriceCents: 199, Currency: "XTR"}
+
+	var capturedChargeID string
+	var capturedFee *int64
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc:   func(context.Context, uint) (*database.Order, error) { return order, nil },
+		GetByIDFunc:        func(context.Context, uint) (*database.Subscription, error) { return sub, nil },
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) { return product, nil },
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64, providerPaymentID string, fee *int64) (bool, error) {
+			capturedChargeID, capturedFee = providerPaymentID, fee
+
+			return true, nil
+		},
+	}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_abc", "31", 199, "XTR", 42)
+	require.NoError(t, err)
+	require.True(t, confirmation.Activated, "first confirm must activate subscription")
+	assert.Equal(t, "charge_abc", capturedChargeID)
+	require.NotNil(t, capturedFee)
+	assert.Equal(t, int64(0), *capturedFee, "Stars fee must be zero")
+	assert.False(t, confirmation.IsRenewal, "free→paid is not a renewal")
+}
+
+func TestConfirmStarsPayment_AlreadyPaidIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	order := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusPaid, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars}
+
+	var casCalled bool
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
+			casCalled = true
+
+			return false, nil
+		},
+	}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_dup", "31", 199, "XTR", 42)
+	require.NoError(t, err)
+	assert.False(t, confirmation.Activated, "duplicate confirm must not re-activate")
+	assert.False(t, casCalled, "CAS must not run for already-paid orders")
+}
+
+func TestConfirmStarsPayment_ExpiredOrderActivatesWithoutGrace(t *testing.T) {
+	t.Parallel()
+
+	order := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusExpired, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars}
+	sub := &database.Subscription{ID: 4, TelegramID: 42, PlanID: 2}
+	product := &database.Product{ID: 7, PlanID: 2, Name: "Premium", PriceCents: 199, Currency: "XTR"}
+
+	var casCalled bool
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc:   func(context.Context, uint) (*database.Order, error) { return order, nil },
+		GetByIDFunc:        func(context.Context, uint) (*database.Subscription, error) { return sub, nil },
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) { return product, nil },
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
+			casCalled = true
+
+			return true, nil
+		},
+	}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_exp", "31", 199, "XTR", 42)
+	require.NoError(t, err)
+	assert.True(t, confirmation.Activated, "expired→paid must activate without grace period (D7)")
+	assert.True(t, casCalled)
+}
+
+func TestConfirmStarsPayment_CanceledOrderAlertsAdmin(t *testing.T) {
+	t.Parallel()
+
+	adminBot := testutil.NewBotAPI()
+	order := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusCanceled, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars}
+
+	var casCalled bool
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
+			casCalled = true
+
+			return false, nil
+		},
+	}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars", TelegramAdminID: 999})
+	o.SetAdminBot(adminBot)
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_canc", "31", 199, "XTR", 42)
+	require.NoError(t, err)
+	assert.False(t, confirmation.Activated, "canceled→paid must not activate")
+	assert.False(t, casCalled, "CAS must not run for canceled orders")
+
+	messages := adminBot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Text, "stars_paid_after_cancel")
+}
+
+func TestConfirmStarsPayment_ClientDisabledReturnsPaymentDisabled(t *testing.T) {
+	t.Parallel()
+
+	mock := &testutil.ServiceStoreFake{}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	// intentionally not calling SetStarsClient
+
+	_, err := o.ConfirmStarsPayment(context.Background(), "charge", "31", 199, "XTR", 42)
+	require.ErrorIs(t, err, ErrPaymentDisabled)
+}
+
+func starsRefundOrder() *database.Order {
+	return &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusPaid, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars, ProviderPaymentID: "charge_ref"}
+}
+
+func TestRefundStarsOrder_SuccessCancelsDowngradesAndAudits(t *testing.T) {
+	t.Parallel()
+
+	adminBot := testutil.NewBotAPI()
+	order := starsRefundOrder()
+
+	var (
+		casProvider string
+		casChargeID string
+		auditEvent  *database.AuditLog
+	)
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+		GetPlanByNameFunc: func(_ context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: name}, nil
+		},
+		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, provider, providerPaymentID string, _ time.Time, _ uint, _ database.ChargebackPlanInTxFn, auditFn func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
+			casProvider, casChargeID = provider, providerPaymentID
+			auditEvent = auditFn(order, &database.Subscription{ID: 4}, true)
+
+			return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: true}, nil
+		},
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", TelegramAdminID: 999})
+	o.SetAdminBot(adminBot)
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	err := o.RefundStarsOrder(context.Background(), 31)
+	require.NoError(t, err)
+
+	assert.Equal(t, "telegram_stars", casProvider)
+	assert.Equal(t, "charge_ref", casChargeID)
+	require.NotNil(t, auditEvent)
+	assert.Equal(t, database.AuditEventPaymentRefunded, auditEvent.Event)
+
+	messages := adminBot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Text, "Возврат Stars-платежа")
+	assert.Contains(t, messages[0].Text, "понижен до бесплатного")
+}
+
+func TestRefundStarsOrder_AlreadyCanceledIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	order := starsRefundOrder()
+	order.Status = database.OrderStatusCanceled
+
+	var makeRequestCalled bool
+
+	starsBot := testutil.NewBotAPI()
+	starsBot.MakeRequestFunc = func(string, tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+		makeRequestCalled = true
+
+		return &tgbotapi.APIResponse{Ok: true}, nil
+	}
+
+	var casCalled bool
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
+			casCalled = true
+
+			return nil, errors.New("unreachable")
+		},
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o.SetStarsClient(stars.New(starsBot))
+
+	err := o.RefundStarsOrder(context.Background(), 31)
+	require.NoError(t, err)
+	assert.False(t, makeRequestCalled, "canceled order must not hit Telegram")
+	assert.False(t, casCalled, "canceled order must not run CAS")
+}
+
+func TestRefundStarsOrder_TelegramErrorKeepsDBUntouched(t *testing.T) {
+	t.Parallel()
+
+	adminBot := testutil.NewBotAPI()
+	order := starsRefundOrder()
+
+	starsBot := testutil.NewBotAPI()
+	starsBot.MakeRequestFunc = func(string, tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+		return &tgbotapi.APIResponse{Ok: false, Description: "Bad Request: STARS_WITHDRAWAL_BALANCE_TOO_LOW"}, errors.New("Bad Request: STARS_WITHDRAWAL_BALANCE_TOO_LOW")
+	}
+
+	var casCalled bool
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
+			casCalled = true
+
+			return nil, errors.New("unreachable")
+		},
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", TelegramAdminID: 999})
+	o.SetAdminBot(adminBot)
+	o.SetStarsClient(stars.New(starsBot))
+
+	err := o.RefundStarsOrder(context.Background(), 31)
+	require.Error(t, err)
+	assert.False(t, casCalled, "failed Telegram refund must not touch the DB")
+
+	messages := adminBot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Text, "stars_refund_failed")
+	assert.Equal(t, database.OrderStatusPaid, order.Status, "order must remain paid after a failed Telegram refund")
+}
+
+func TestRefundStarsOrder_ChargeAlreadyRefundedProceedsToCAS(t *testing.T) {
+	t.Parallel()
+
+	order := starsRefundOrder()
+
+	starsBot := testutil.NewBotAPI()
+	starsBot.MakeRequestFunc = func(string, tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+		return &tgbotapi.APIResponse{Ok: false, Description: "CHARGE_ALREADY_REFUNDED"}, errors.New("Bad Request: CHARGE_ALREADY_REFUNDED")
+	}
+
+	var casCalled bool
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+		GetPlanByNameFunc: func(_ context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: name}, nil
+		},
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
+			casCalled = true
+
+			return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: false}, nil
+		},
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o.SetStarsClient(stars.New(starsBot))
+
+	err := o.RefundStarsOrder(context.Background(), 31)
+	require.NoError(t, err, "CHARGE_ALREADY_REFUNDED must be treated as success (M2)")
+	assert.True(t, casCalled, "already-refunded charge must still reach the cancel CAS")
+}
+
+func TestRefundStarsOrder_DowngradedRunsPostCommitSync(t *testing.T) {
+	t.Parallel()
+
+	order := starsRefundOrder()
+
+	syncInvoked := false
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+		GetPlanByNameFunc: func(_ context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: name}, nil
+		},
+		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
+			return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: true}, nil
+		},
+		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			syncInvoked = true
+
+			return nil, nil
+		},
+	}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	err := o.RefundStarsOrder(context.Background(), 31)
+	require.NoError(t, err)
+	assert.True(t, syncInvoked, "downgrade after refund must run post-commit SyncSubscription")
+}
+
+func TestRefundStarsOrder_NonStarsOrderRejected(t *testing.T) {
+	t.Parallel()
+
+	order := starsRefundOrder()
+	order.PaymentProvider = database.PaymentProviderPlatega
+
+	var makeRequestCalled bool
+
+	starsBot := testutil.NewBotAPI()
+	starsBot.MakeRequestFunc = func(string, tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+		makeRequestCalled = true
+
+		return &tgbotapi.APIResponse{Ok: true}, nil
+	}
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o.SetStarsClient(stars.New(starsBot))
+
+	err := o.RefundStarsOrder(context.Background(), 31)
+	require.Error(t, err, "non-Stars orders must not go through the Stars refund path")
+	assert.False(t, makeRequestCalled)
+}
+
+func TestRefundStarsOrder_ClientDisabledReturnsPaymentDisabled(t *testing.T) {
+	t.Parallel()
+
+	mock := &testutil.ServiceStoreFake{}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	// intentionally not calling SetStarsClient
+
+	err := o.RefundStarsOrder(context.Background(), 31)
+	require.ErrorIs(t, err, ErrPaymentDisabled)
 }

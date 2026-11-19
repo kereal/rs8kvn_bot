@@ -57,7 +57,7 @@ func (kb *KeyboardBuilder) BuyProductList(products []database.Product) tgbotapi.
 			continue
 		}
 
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s — %s", product.Name, utils.FormatPriceCents(product.PriceCents)), fmt.Sprintf("buy_product_%d", product.ID))))
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s — %s", product.Name, utils.FormatPriceCents(product.PriceCents, product.Currency)), fmt.Sprintf("buy_product_%d", product.ID))))
 	}
 
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "back_to_start")))
@@ -69,13 +69,25 @@ func (kb *KeyboardBuilder) BuyProductList(products []database.Product) tgbotapi.
 func (kb *KeyboardBuilder) BuyProductConfirm(product *database.Product, paymentURL string) tgbotapi.InlineKeyboardMarkup {
 	price := ""
 	if product != nil {
-		price = utils.FormatPriceCents(product.PriceCents)
+		price = utils.FormatPriceCents(product.PriceCents, product.Currency)
 	}
 
 	return tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
 		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonURL("💳 Оплатить "+price, paymentURL)),
 		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "buy_premium_list")),
 	}}
+}
+
+// StarsInvoiceBack builds the keyboard of the «Счёт отправлен ниже» card: the
+// back button is attached to the card itself and carries the invoice message id
+// so the back callback can delete only the invoice (§5.1).
+func (kb *KeyboardBuilder) StarsInvoiceBack(invoiceMessageID int, productID uint) tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад",
+				fmt.Sprintf("stars_invoice_back_%d_%d", invoiceMessageID, productID)),
+		),
+	)
 }
 
 // Back returns the inline keyboard with a back button.

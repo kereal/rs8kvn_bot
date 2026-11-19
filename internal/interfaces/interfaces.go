@@ -209,8 +209,8 @@ type ProductRepository interface {
 type OrderRepository interface {
 	GetOrderByID(ctx context.Context, id uint) (*database.Order, error)
 	GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID string) (*database.Order, error)
-	FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error)
-	FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
+	FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, now time.Time) (*database.Order, error)
+	FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, error)
 	MarkPaymentCreationUncertain(ctx context.Context, orderID uint, uncertain bool) (bool, error)
 	SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID string, paymentURL string, paymentExpiresAt time.Time) error
 	// AttachProviderPaymentID привязывает id провайдера к заказу, у которого его
@@ -222,9 +222,9 @@ type OrderRepository interface {
 	SaveOrderPaymentAmounts(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error
 	GetPaidOrdersWithoutProviderFee(ctx context.Context, limit int) ([]database.Order, error)
 	GetPaidOrdersWithoutProviderFeeAfterID(ctx context.Context, afterID uint, limit int) ([]database.Order, error)
-	ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error)
+	ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64, providerPaymentID string, providerFeeCents *int64) (bool, error)
 	CancelOrderCAS(ctx context.Context, provider string, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error)
-	CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID string, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error)
+	CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID string, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn, auditFn func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error)
 }
 
 // BroadcastRepository provides CRUD for broadcast cards

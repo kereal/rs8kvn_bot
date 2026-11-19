@@ -64,6 +64,7 @@ const (
 	AuditEventOrderExpired          = "order_expired"
 	AuditEventOrderCanceled         = "order_canceled"
 	AuditEventChargebackReceived    = "chargeback_received"
+	AuditEventPaymentRefunded       = "payment_refunded"
 	AuditEventPaymentCreationUncert = "payment_creation_uncertain"
 
 	// Рассылки.
@@ -594,6 +595,30 @@ func AuditChargebackReceived(order *Order, sub *Subscription, downgraded bool) *
 		EntityType: EntityOrder,
 		EntityID:   marshalAuditJSONString(fmt.Sprintf("%d", order.ID)),
 		Event:      AuditEventChargebackReceived,
+		ActorType:  ActorPaymentProvider,
+		ActorID:    marshalAuditJSONString(order.PaymentProvider),
+		OldState:   marshalAuditJSON(map[string]any{"order_status": string(OrderStatusPaid)}),
+		NewState:   marshalAuditJSON(map[string]any{"order_status": string(OrderStatusCanceled)}),
+		Details:    marshalAuditDetails(details),
+	}
+}
+
+// AuditPaymentRefunded фиксирует полный возврат средств от платёжного провайдера.
+// downgraded — была ли подписка понижена до free в той же транзакции.
+func AuditPaymentRefunded(order *Order, sub *Subscription, downgraded bool) *AuditLog {
+	details := map[string]any{
+		"order_id":        order.ID,
+		"subscription_id": order.SubscriptionID,
+		"amount_cents":    order.AmountCents,
+		"currency":        order.Currency,
+		"provider":        order.PaymentProvider,
+		"downgraded":      downgraded,
+	}
+
+	return &AuditLog{
+		EntityType: EntityOrder,
+		EntityID:   marshalAuditJSONString(fmt.Sprintf("%d", order.ID)),
+		Event:      AuditEventPaymentRefunded,
 		ActorType:  ActorPaymentProvider,
 		ActorID:    marshalAuditJSONString(order.PaymentProvider),
 		OldState:   marshalAuditJSON(map[string]any{"order_status": string(OrderStatusPaid)}),

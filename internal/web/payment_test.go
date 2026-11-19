@@ -238,7 +238,7 @@ func TestHandlePaymentCallback_DuplicateConfirmedIsIdempotent(t *testing.T) {
 	order := &database.Order{ID: 8, SubscriptionID: 26, ProductID: 36, Status: database.OrderStatusPending, ProviderPaymentID: testPaymentID, AmountCents: 2300, Currency: "RUB"}
 	srv, db, bot := newPaymentTestServer(t, order)
 	confirmCalls := 0
-	db.ConfirmOrderPaidCASFunc = func(_ context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64) (bool, error) {
+	db.ConfirmOrderPaidCASFunc = func(_ context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64, _ string, _ *int64) (bool, error) {
 		confirmCalls++
 
 		if orderID != order.ID || order.Status != database.OrderStatusPending {
@@ -313,7 +313,7 @@ func TestHandlePaymentCallback_ChargebackNotifiesAdmin(t *testing.T) {
 	srv, db, bot := newPaymentTestServer(t, order)
 	// The chargeback on a paid order must downgrade the subscription to free.
 	downgradeCalled := false
-	db.CancelPaidOrderAndDowngradeCASFunc = func(ctx context.Context, _ string, _ string, _ time.Time, freePlanID uint, _ database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+	db.CancelPaidOrderAndDowngradeCASFunc = func(ctx context.Context, _ string, _ string, _ time.Time, freePlanID uint, _ database.ChargebackPlanInTxFn, _ func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
 		order.Status = database.OrderStatusCanceled
 		if db.UpdateSubscriptionFunc != nil {
 			err := db.UpdateSubscriptionFunc(ctx, &database.Subscription{ID: order.SubscriptionID, PlanID: freePlanID, Status: "active"})
@@ -549,7 +549,7 @@ func newPaymentTestServer(t *testing.T, order *database.Order) (*Server, *testut
 		return &database.Product{ID: id, PlanID: 1, DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
 	}
 	if order != nil {
-		db.ConfirmOrderPaidCASFunc = func(_ context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, _ database.ApplyPlanInTxFn, _ int64) (bool, error) {
+		db.ConfirmOrderPaidCASFunc = func(_ context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, _ database.ApplyPlanInTxFn, _ int64, _ string, _ *int64) (bool, error) {
 			if orderID != order.ID || order.Status != database.OrderStatusPending {
 				return false, nil
 			}

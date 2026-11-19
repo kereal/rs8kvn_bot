@@ -229,10 +229,12 @@ Air will automatically rebuild and restart the bot when you save changes to Go f
 | `TRIAL_DURATION_HOURS` | Trial subscription duration | `3` | ❌ | 1–168 hours (7 days max) |
 | `TRIAL_RATE_LIMIT` | Max trial requests per IP per hour | `3` | ❌ | 1–100 |
 | **Payments** | | | | |
-| `PAYMENT_ENABLED` | Enable Platega payment buttons and webhook | `false` | ❌ | Requires merchant ID and secret when `true` |
-| `PAYMENT_PROVIDER` | Payment provider | `platega` | ❌ | Only `platega` is supported |
-| `PLATEGA_MERCHANT_ID` | Platega merchant ID | *(empty)* | Required when enabled | Sent as `X-MerchantId` |
-| `PLATEGA_SECRET` | Platega webhook/API secret | *(empty)* | Required when enabled | Sent as `X-Secret`; keep private |
+| `PAYMENT_ENABLED` | Enable in-bot payment buttons (Platega or Telegram Stars) | `false` | ❌ | Requires Platega merchant ID and secret when Platega is in use |
+| `PAYMENT_PROVIDER` | Active payment provider | `platega` | ❌ | `platega` or `telegram_stars`; checked only when `PAYMENT_ENABLED=true` |
+| `PLATEGA_MERCHANT_ID` | Platega merchant ID | *(empty)* | Required when Platega is in use | Sent as `X-MerchantId`; required when `PAYMENT_ENABLED=true` with `PAYMENT_PROVIDER=platega`, or `PLATEGA_CALLBACK_ENABLED=true` |
+| `PLATEGA_SECRET` | Platega webhook/API secret | *(empty)* | Required when Platega is in use | Sent as `X-Secret`; keep private; same conditions as `PLATEGA_MERCHANT_ID` |
+| `PLATEGA_CALLBACK_ENABLED` | Keep the legacy Platega HTTP callback enabled | `false` | ❌ | Settles old Platega orders after switching to `telegram_stars`, without new Platega sales; requires Platega credentials |
+| `STARS_INVOICE_TTL` | Local lifetime of a Telegram Stars invoice (Go duration) | `15m` | ❌ | e.g. `15m`, `30m`, `1h`; must be a positive duration |
 | **User Notifications** |
 | `NOTIFICATIONS_ENABLED` | Start expiry-reminder and traffic-notification workers | `true` | ❌ | Set `false` for local runs against a copy of the production DB so real users receive no messages |
 | **Donation** |
