@@ -663,6 +663,143 @@ func TestStarsAccept_CallbackChatDiffersFromBuyerChat(t *testing.T) {
 	assert.Equal(t, 99, cardEdit.MessageID)
 }
 
+func TestStarsAccept_InFlightDoubleTapSendsSingleInvoice(t *testing.T) {
+	t.Parallel()
+
+	// Параллельный double-tap acceptance: in-flight guard пропускает первого,
+	// второй уходит — invoice отправляется ровно один. Первый тап удерживает
+	// guard, блокируясь в отправке invoice; второй тап гарантированно
+	// наталкивается на коллизию LoadOrStore.
+	mockDB := testutil.NewBotStoreFake()
+	starsOrderMocks(mockDB)
+	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
+
+	sendGate := make(chan struct{})
+	releaseSend := make(chan struct{})
+	firstSend := false
+	paymentBot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+		if !firstSend {
+			firstSend = true
+			close(sendGate)
+			<-releaseSend
+		}
+
+		return tgbotapi.Message{MessageID: 55}, nil
+	}
+
+	accept := func() tgbotapi.Update {
+		return tgbotapi.Update{
+			CallbackQuery: &tgbotapi.CallbackQuery{
+				ID:   "cb1",
+				From: &tgbotapi.User{ID: 42, UserName: "user"},
+				Message: &tgbotapi.Message{
+					Chat:      &tgbotapi.Chat{ID: 42},
+					MessageID: 77,
+				},
+				Data: "stars_accept_3_1_5000_99",
+			},
+		}
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- h.HandleCallback(context.Background(), accept()) }()
+	<-sendGate
+
+	// Второй тап синхронно: guard удержан первым — подавлен без нового invoice.
+	// (Не запрашиваем фейк под гейтом: Send держит свой мьютекс внутри SendFunc.)
+	require.NoError(t, h.HandleCallback(context.Background(), accept()))
+
+	close(releaseSend)
+	require.NoError(t, <-done)
+
+	// Ровно один invoice и две карточных правки (только победившим тапом).
+	invoices := starsInvoices(paymentBot)
+	require.Len(t, invoices, 1, "a concurrent double-tap must produce exactly one invoice")
+
+	// Карточка и accept-done редактируются ровно по одному разу (только
+	// победившим тапом); проигравший ничего не отправляет.
+	edits := mainBot.GetAllSentMessages()
+	require.Len(t, edits, 2)
+	assert.Contains(t, edits[0].Text, "счёт отправлен ниже")
+	assert.Contains(t, edits[1].Text, "Счёт отправлен в личном чате")
+}
+
+func TestStarsAccept_RedeliveryAfterSuccessIsSilentNoop(t *testing.T) {
+	t.Parallel()
+
+	// Повторный callback после успешного invoice (sent-set): дубликат
+	// подавляется молча — ни второго invoice, ни карточных правок.
+	mockDB := testutil.NewBotStoreFake()
+	starsOrderMocks(mockDB)
+	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
+
+	accept := func() tgbotapi.Update {
+		return tgbotapi.Update{
+			CallbackQuery: &tgbotapi.CallbackQuery{
+				ID:   "cb1",
+				From: &tgbotapi.User{ID: 42, UserName: "user"},
+				Message: &tgbotapi.Message{
+					Chat:      &tgbotapi.Chat{ID: 42},
+					MessageID: 77,
+				},
+				Data: "stars_accept_3_1_5000_99",
+			},
+		}
+	}
+
+	require.NoError(t, h.HandleCallback(context.Background(), accept()))
+	require.Len(t, starsInvoices(paymentBot), 1)
+	baseEdits := len(mainBot.GetAllSentMessages())
+
+	require.NoError(t, h.HandleCallback(context.Background(), accept()))
+	require.Len(t, starsInvoices(paymentBot), 1, "redelivery must not re-invoice")
+	assert.Len(t, mainBot.GetAllSentMessages(), baseEdits, "redelivery must not re-edit anything")
+}
+
+func TestStarsBuy_InvoiceSendFailureExpiresPendingOrder(t *testing.T) {
+	t.Parallel()
+
+	// Сбой отправки Terms-сообщения: заказ остался pending — сразу истекаем,
+	// чтобы повторная покупка создала новый заказ, а не упиралась в
+	// «счёт уже отправлен» по несуществующему счёту.
+	mockDB := testutil.NewBotStoreFake()
+	starsOrderMocks(mockDB)
+
+	expired := false
+	mockDB.ExpirePendingOrderFunc = func(context.Context, uint) (bool, error) {
+		expired = true
+
+		return true, nil
+	}
+
+	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
+	paymentBot.SendFunc = func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+		return tgbotapi.Message{}, errors.New("network error")
+	}
+
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "cb1",
+			From: &tgbotapi.User{ID: 42, UserName: "user"},
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: 5000},
+				MessageID: 99,
+			},
+			Data: "buy_product_1",
+		},
+	}
+
+	err := h.HandleCallback(context.Background(), update)
+	require.NoError(t, err, "send failure is a recoverable handler error, not a bot error")
+
+	assert.True(t, expired, "pending order must be expired so a retry creates a new one")
+
+	// Карточка отредактирована в buy-состояние, но не в «счёт отправлен».
+	sent := mainBot.GetAllSentMessages()
+	require.NotEmpty(t, sent)
+	assert.NotContains(t, sent[len(sent)-1].Text, "счёт отправлен")
+}
+
 func TestStarsInvoiceBack_DeletesOnlyInvoiceAndRendersList(t *testing.T) {
 	t.Parallel()
 

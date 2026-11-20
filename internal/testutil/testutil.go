@@ -1824,7 +1824,13 @@ func (m *BotStoreFake) GetStalePendingOrdersAfterID(
 	return nil, nil
 }
 
-func (m *BotStoreFake) ExpirePendingOrder(context.Context, uint) (bool, error) {
+func (m *BotStoreFake) ExpirePendingOrder(ctx context.Context, orderID uint) (bool, error) {
+	// Хук объявлен во встроенной ServiceStoreFake; без него метод возвращал
+	// всегда false и тесты не могли зафиксировать expire-исход.
+	if m.ExpirePendingOrderFunc != nil {
+		return m.ExpirePendingOrderFunc(ctx, orderID)
+	}
+
 	return false, nil
 }
 
