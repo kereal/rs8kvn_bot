@@ -476,30 +476,30 @@ func (o *OrderService) ConfirmPayment(
 	return confirmation, err
 }
 
-func (o *OrderService) confirmPayment(
-	ctx context.Context, providerPaymentID string, payload string, amount json.Number, currency string,
-) (*PaymentConfirmation, error) {
-	if o.payment == nil {
-		return nil, ErrPaymentDisabled
+// --- shared platega callback helpers ---
+
+// resolvePlategaCallbackOrder validates and loads the order for a Platega webhook.
+// Empty ID → alert + error. Load failures → alert + error. ErrOrderNotFound → no alert.
+// Currency/amount mismatch → alert + specific sentinel. Returns (order, cents, unlock, err)
+// with order guaranteed non-nil on nil error; ErrOrderNotFound returns nil order + nil unlock.
+func resolvePlategaCallbackOrder(
+	ctx context.Context, o *OrderService, providerPaymentID string, payload string,
+	amount json.Number, currency string, callbackStatus string,
+) (*database.Order, int64, func(), error) {
+	if strings.TrimSpace(providerPaymentID) == "" {
+		o.NotifyPaymentIssue(ctx, PaymentIssue{
+			Event: "invalid_provider_id", Reason: "provider payment ID is empty",
+			Action: "reject callback and inspect provider payload", CallbackStatus: callbackStatus,
+		})
+		return nil, 0, nil, errors.New("invalid provider payment ID")
 	}
-	// Per-order serialization: webhook callbacks for the same provider payment
-	// UUID run sequentially; callbacks for different orders run in parallel.
-	//
-	// detachCtx ensures that a client disconnect (aborted webhook HTTP
-	// connection) does not cancel lock acquisition or the initial order
-	// lookup. The payment processing that follows uses the caller's ctx,
-	// so DB-level timeouts still apply.
+
 	detachCtx := context.WithoutCancel(ctx)
 	unlock, err := o.lockPayment(detachCtx, providerPaymentID)
 	if err != nil {
-		logger.Warn("could not acquire per-order payment lock", zap.String("provider_payment_id", providerPaymentID), zap.Error(err))
-		return nil, fmt.Errorf("acquire payment lock: %w", err)
-	}
-	defer unlock()
-
-	if strings.TrimSpace(providerPaymentID) == "" {
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "invalid_provider_id", Reason: "provider payment ID is empty", Action: "reject callback and inspect provider payload", CallbackStatus: "CONFIRMED"})
-		return nil, errors.New("invalid provider payment ID")
+		logger.Warn("could not acquire per-order payment lock",
+			zap.String("provider_payment_id", providerPaymentID), zap.Error(err))
+		return nil, 0, nil, fmt.Errorf("acquire payment lock: %w", err)
 	}
 
 	order, err := o.db.GetOrderByProviderPaymentID(detachCtx, database.PaymentProviderPlatega, providerPaymentID)
@@ -513,35 +513,80 @@ func (o *OrderService) confirmPayment(
 
 	if err != nil {
 		if errors.Is(err, database.ErrOrderNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
-			logger.Warn("payment callback for unknown order", zap.String("provider_payment_id", providerPaymentID))
-			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "unknown_provider_id", Reason: "callback references an order that does not exist", Action: "verify the provider transaction and reconcile manually", ProviderID: providerPaymentID, CallbackStatus: "CONFIRMED"})
-
-			return &PaymentConfirmation{Activated: false}, nil
+			return nil, 0, unlock, database.ErrOrderNotFound
 		}
-
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_failed", Reason: err.Error(), Action: "retry callback after database recovery", ProviderID: providerPaymentID, CallbackStatus: "CONFIRMED"})
-
-		return nil, fmt.Errorf("find payment order: %w", err)
+		o.NotifyPaymentIssue(ctx, PaymentIssue{
+			Event: "load_order_failed", Reason: err.Error(),
+			Action:     "retry callback after database recovery",
+			ProviderID: providerPaymentID, CallbackStatus: callbackStatus,
+		})
+		return nil, 0, unlock, fmt.Errorf("find payment order: %w", err)
 	}
 
 	if order.Currency != currency {
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_currency_mismatch", Reason: fmt.Sprintf("callback currency %q does not match order currency %q", currency, order.Currency), Action: "reject callback and investigate provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: currency, ProviderID: providerPaymentID, CallbackStatus: "CONFIRMED"})
-		return nil, ErrCurrencyMismatch
+		o.NotifyPaymentIssue(ctx, PaymentIssue{
+			Event:   "callback_currency_mismatch",
+			Reason:  fmt.Sprintf("callback currency %q does not match order currency %q", currency, order.Currency),
+			Action:  "reject callback and investigate provider payload",
+			OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID,
+			AmountCents: order.AmountCents, Currency: currency, ProviderID: providerPaymentID,
+			CallbackStatus: callbackStatus,
+		})
+		return nil, 0, unlock, ErrCurrencyMismatch
 	}
 
-	cents, err := platega.ParseCallbackAmount(amount)
-	if err != nil {
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_amount_invalid", Reason: err.Error(), Action: "reject callback and inspect provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: currency, ProviderID: providerPaymentID, CallbackStatus: "CONFIRMED", Payload: amount.String()})
-		return nil, fmt.Errorf("parse callback amount: %w", err)
+	cents, parseErr := platega.ParseCallbackAmount(amount)
+	if parseErr != nil {
+		o.NotifyPaymentIssue(ctx, PaymentIssue{
+			Event: "callback_amount_invalid", Reason: parseErr.Error(),
+			Action:  "reject callback and inspect provider payload",
+			OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID,
+			AmountCents: order.AmountCents, Currency: currency, ProviderID: providerPaymentID,
+			CallbackStatus: callbackStatus, Payload: amount.String(),
+		})
+		return nil, 0, unlock, fmt.Errorf("parse callback amount: %w", parseErr)
 	}
 
-	// Platega may include its payment-method commission in the callback amount.
-	// The order amount is the merchant's requested price, so underpayment is
-	// rejected while a provider-calculated amount above it is accepted.
 	if cents < order.AmountCents {
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_amount_mismatch", Reason: fmt.Sprintf("callback amount %d cents is below order amount %d cents", cents, order.AmountCents), Action: "reject callback and investigate provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: cents, Currency: currency, ProviderID: providerPaymentID, CallbackStatus: "CONFIRMED"})
-		return nil, ErrAmountMismatch
+		o.NotifyPaymentIssue(ctx, PaymentIssue{
+			Event:   "callback_amount_mismatch",
+			Reason:  fmt.Sprintf("callback amount %d cents is below order amount %d cents", cents, order.AmountCents),
+			Action:  "reject callback and investigate provider payload",
+			OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID,
+			AmountCents: cents, Currency: currency, ProviderID: providerPaymentID,
+			CallbackStatus: callbackStatus,
+		})
+		return nil, 0, unlock, ErrAmountMismatch
 	}
+
+	return order, cents, unlock, nil
+}
+
+func (o *OrderService) confirmPayment(
+	ctx context.Context, providerPaymentID string, payload string, amount json.Number, currency string,
+) (*PaymentConfirmation, error) {
+	if o.payment == nil {
+		return nil, ErrPaymentDisabled
+	}
+
+	order, cents, unlock, err := resolvePlategaCallbackOrder(ctx, o, providerPaymentID, payload, amount, currency, "CONFIRMED")
+	if err != nil {
+		if errors.Is(err, database.ErrOrderNotFound) {
+			logger.Warn("payment callback for unknown order", zap.String("provider_payment_id", providerPaymentID))
+			o.NotifyPaymentIssue(ctx, PaymentIssue{
+				Event: "unknown_provider_id", Reason: "callback references an order that does not exist",
+				Action:     "verify the provider transaction and reconcile manually",
+				ProviderID: providerPaymentID, CallbackStatus: "CONFIRMED",
+			})
+			return &PaymentConfirmation{Activated: false}, nil
+		}
+		return nil, err
+	}
+
+	// Ранние возвраты ниже (paid, gone/transition, sync-not-ready, deleted
+	// entity, CAS-ошибка) обязаны освободить лок; успешный путь отдаёт unlock
+	// в confirmPaidOrderTail. unlock идемпотентен, поэтому двойной вызов — no-op.
+	defer unlock()
 
 	if cents > order.AmountCents {
 		logger.Info("payment callback includes provider fee", zap.Uint("order_id", order.ID), zap.Int64("order_amount_cents", order.AmountCents), zap.Int64("callback_amount_cents", cents), zap.Int64("provider_fee_cents", cents-order.AmountCents), zap.String("currency", currency), zap.String("provider_payment_id", providerPaymentID))
@@ -827,56 +872,27 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		return nil, false, ErrPaymentDisabled
 	}
 
-	if strings.TrimSpace(providerPaymentID) == "" {
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "invalid_provider_id", Reason: "provider payment ID is empty", Action: "reject callback and inspect provider payload", CallbackStatus: status})
-		return nil, false, errors.New("invalid provider payment ID")
-	}
-	// Per-order serialization: confirm/cancel of one provider payment cannot
-	// interleave with itself, but multiple distinct payments run in parallel.
-	//
-	// detachCtx ensures that a client disconnect (aborted webhook HTTP
-	// connection) does not cancel lock acquisition or the initial order
-	// lookup.
-	detachCtx := context.WithoutCancel(ctx)
-	unlock, err := o.lockPayment(detachCtx, providerPaymentID)
-	if err != nil {
-		logger.Warn("could not acquire per-order payment lock", zap.String("provider_payment_id", providerPaymentID), zap.Error(err))
-		return nil, false, fmt.Errorf("acquire payment lock: %w", err)
-	}
-	defer unlock()
-
-	order, err = o.db.GetOrderByProviderPaymentID(detachCtx, database.PaymentProviderPlatega, providerPaymentID)
-	if err != nil {
-		if errors.Is(err, database.ErrOrderNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
+	order, _, unlock, herr := resolvePlategaCallbackOrder(ctx, o, providerPaymentID, "", amount, currency, status)
+	if herr != nil {
+		if unlock != nil {
+			unlock()
+		}
+		if errors.Is(herr, database.ErrOrderNotFound) {
 			logger.Warn("payment cancellation callback for unknown order", zap.String("provider_payment_id", providerPaymentID), zap.String("status", status))
-			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "unknown_provider_id", Reason: "cancellation callback references an order that does not exist", Action: "verify the provider transaction and reconcile manually", ProviderID: providerPaymentID, CallbackStatus: status})
-
+			o.NotifyPaymentIssue(ctx, PaymentIssue{
+				Event: "unknown_provider_id", Reason: "cancellation callback references an order that does not exist",
+				Action:     "verify the provider transaction and reconcile manually",
+				ProviderID: providerPaymentID, CallbackStatus: status,
+			})
 			return nil, false, nil
 		}
-
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_failed", Reason: err.Error(), Action: "retry callback after database recovery", ProviderID: providerPaymentID, CallbackStatus: status})
-
-		return nil, false, fmt.Errorf("find payment order for cancellation: %w", err)
+		return nil, false, herr
 	}
 
-	if order.Currency != currency {
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_currency_mismatch", Reason: fmt.Sprintf("callback currency %q does not match order currency %q", currency, order.Currency), Action: "reject callback and investigate provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: currency, ProviderID: providerPaymentID, CallbackStatus: status})
-		return nil, false, ErrCurrencyMismatch
-	}
-
-	cents, err := platega.ParseCallbackAmount(amount)
-	if err != nil {
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_amount_invalid", Reason: err.Error(), Action: "reject callback and inspect provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: currency, ProviderID: providerPaymentID, CallbackStatus: status, Payload: amount.String()})
-		return nil, false, fmt.Errorf("parse cancellation amount: %w", err)
-	}
-
-	// Cancellation/chargeback callbacks carry the same provider-total amount
-	// as CONFIRMED callbacks and may therefore include the payment commission.
-	// Only an amount below the order price is rejected.
-	if cents < order.AmountCents {
-		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "callback_amount_mismatch", Reason: fmt.Sprintf("callback amount %d cents is below order amount %d cents", cents, order.AmountCents), Action: "reject callback and investigate provider payload", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: cents, Currency: currency, ProviderID: providerPaymentID, CallbackStatus: status})
-		return nil, false, ErrAmountMismatch
-	}
+	// Ранние возвраты ниже (unsupported status, chargeback-not-ready,
+	// plan/CAS-ошибки) обязаны освободить лок; успешные ветки зовут unlock()
+	// явно до notify/sync. unlock идемпотентен, двойной вызов — no-op.
+	defer unlock()
 
 	if status != "CANCELED" && status != "CHARGEBACKED" {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "invalid_payment_status", Reason: fmt.Sprintf("unsupported cancellation status %q", status), Action: "ignore callback and verify provider status", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID, CallbackStatus: status})
