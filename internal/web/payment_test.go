@@ -172,8 +172,17 @@ func TestHandlePaymentCallback_UnsupportedStatusNotifiesAdmin(t *testing.T) {
 func TestHandlePaymentCallback_RequiresUUIDProviderTransactionID(t *testing.T) {
 	t.Parallel()
 
-	_, err := platega.ParseTransactionID("tx-123")
-	assert.Error(t, err)
+	// Не-UUID id в теле: guard-цепочка отклоняет до предупреждения админу.
+	srv, _, bot := newPaymentTestServer(t, nil)
+	req := paymentRequest("SUCCESS", "tx-123", `23.00`)
+	rec := httptest.NewRecorder()
+
+	srv.handlePaymentCallback(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+
+	messages := bot.GetAllSentMessages()
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Text, "invalid_provider_id", "malformed id is rejected AND alerted")
 }
 
 func TestHandlePaymentCallback_BodySizeLimit(t *testing.T) {

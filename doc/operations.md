@@ -949,9 +949,11 @@ Platega-креды (`PLATEGA_MERCHANT_ID`, `PLATEGA_SECRET`) обязатель�
 **Recovery потерянных оплат.** Если `successful_payment` потерян (не дошёл до бота), заказ
 остаётся `pending` до локального TTL. Восстановление — сверкой `getStarTransactions`
 (реализовано в payment core: `stars.Client.GetTransactions`, internal/service/payment/stars/transaction.go):
-транзакция Stars со спиченным payload автоматически доводит заказ до `paid`.
-Ручная сверка по charge ID остаётся fallback для unmatched/manual случаев; при необходимости
-возврата — `/refund`.
+транзакция Stars со спиченным payload автоматически доводит заказ до `paid`. Транзакция,
+не сошедшаяся ни с одним заказом (или не применимая к заказу — не-Stars, чужая, удалённые
+product/subscription), автоматически возвращается покупателю; проход прерывается с удержанием
+позиции только на DB-ошибках. Ручная сверка по charge ID остаётся fallback
+для unmatched/manual случаев; при необходимости возврата — `/refund`.
 
 ### 8.2 Переключение на Stars (rollout-чеклист)
 

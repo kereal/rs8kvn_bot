@@ -65,6 +65,21 @@
 - **Не меняем формат вывода RUB** — иначе ломаются существующие ожидания тестов и тексты без выигрыша.
 - **Не переписываем Platega-flow.** Все его точки (web callback, `ConfirmPayment`, `CancelPaymentByProvider`, `SyncProviderFees`, fee-комиссия) остаются как есть.
 
+## 3.2 Отклонения реализации от плана (вторая проверка 2026-11-20)
+
+Зафиксировано финальным ревью ветки; каждое — осознанное улучшение, а не ошибка плана:
+
+| # | Отклонение | План | Реализация |
+|---|---|---|---|
+| R1 | **Acceptance-flow двухшаговый.** §5.1 описывал invoice сразу из `handleBuyProduct` с текстом согласия в карточке. Реализация: первый клик создаёт pending и отправляет в личку сообщение условий (`stars_accept_<order>_<product>_<card_chat>_<card_msg>`), invoice — только из acceptance-callback. Причина: явное согласие с условиями до выставления счёта (compliance §10.3 сильнее минимума плана) | §5.1 шаги 7–10 | `handleStarsBuy` / `handleStarsAccept`, `StarsTermsAccept` |
+| R2 | **Гвард активного провайдера в acceptance.** `handleStarsAccept` дополнительно проверяет `isStarsProvider()`: старая кнопка согласия не выставляет Stars-invoice после переключения на Platega (defense-in-depth к rollout-шагу 2) | §8.2 шаг 2 (операторская дисциплина) | `subscription_handler.go` |
+| R3 | **Авто-возврат дублирующего charge.** §5.3 для `paid`/`canceled` с новым charge ID предписывал только alert. Реализация возвращает charge автоматически (`autoRefundStarsCharge`): деньги списаны, entitlement второй раз не меняется; при сбое возврата — alert с charge ID | §5.3 | `confirmStarsPayment` |
+| R4 | **Авто-возврат при удалённом product/subscription.** После списания, если товар/подписка удалены, charge возвращается автоматически: заказ остаётся pending без charge ID — `/refund` его не найдёт, ручной возврат был бы только по alert'у | §5.3 шаг 5 (ручной) | `confirmStarsPayment` |
+| R5 | **Авто-возврат проигравшего CAS-гонку charge.** Lock keyed по charge ID — два разных charge одного заказа обрабатываются параллельно; после CAS `activated=false` заказ перечитывается, проигравший charge возвращается сразу, без ожидания recovery | §5.3 (не описано) | `confirmStarsPayment` |
+| R6 | **Немедленное истечение pending при сбое отправки invoice/acceptance.** §5.1 шаг 8 оставлял заказ pending до TTL (повторный клик — «счёт уже отправлен» по несуществующему счёту). Реализация expire'ит заказ сразу: retry создаёт новый заказ без ожидания TTL | §5.1 шаг 8 | `handleStarsBuy`, `handleStarsAccept` |
+| R7 | **Rate-limiter bypass шире плана.** §5.2 требовал обход лимита только для pre-checkout; `isFinancialUpdate` пропускает вне лимита также `successful_payment`, `/paysupport`, `/terms` — финансовые и комплаенс-апдейты не должны теряться при флуде | §5.2 | `handler.go` |
+| R8 | **Recovery-сверка: классификация ошибок валидации.** Несентинельные ошибки данных («не-Stars заказ», удалённая подписка, чужой пользователь) классифицируются как semantic mismatch → авто-возврат charge и продолжение страницы; прерывают проход и держат offset только DB/infrastructure ошибки. Иначе одна битая транзакция навсегда залипала бы страницу `getStarTransactions` | §8.1 (recovery описан упрощённо) | `validateStarsPayload`, `ReconcileStarsTransactions` |
+
 ## 4. Контракты изменений
 
 ### 4.1 Конфигурация (`internal/config/config.go`)

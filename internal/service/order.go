@@ -1318,7 +1318,11 @@ func (o *OrderService) validateStarsPayload(ctx context.Context, payload string,
 	}
 
 	if order.PaymentProvider != database.PaymentProviderTelegramStars {
-		return nil, fmt.Errorf("order %d is not a Telegram Stars order", order.ID)
+		// Не-Stars charge для не-Stars заказа — несентинельная ошибка данных,
+		// ретраем не исправится: recovery-сверка классифицирует её как semantic
+		// mismatch (деньги возвращаются автоматически), иначе страница
+		// getStarTransactions залипает навсегда (см. ReconcileStarsTransactions).
+		return nil, fmt.Errorf("order %d is not a Telegram Stars order: %w", order.ID, database.ErrOrderNotFound)
 	}
 
 	if !strings.EqualFold(order.Currency, stars.Currency) || !strings.EqualFold(currency, stars.Currency) {
@@ -1331,16 +1335,18 @@ func (o *OrderService) validateStarsPayload(ctx context.Context, payload string,
 	}
 
 	sub, err := o.db.GetByID(ctx, order.SubscriptionID)
-	if err != nil {
+	if err != nil && !errors.Is(err, database.ErrSubscriptionNotFound) {
 		return nil, fmt.Errorf("load stars order subscription %d: %w", order.SubscriptionID, err)
 	}
 
-	if sub == nil {
-		return nil, fmt.Errorf("load stars order subscription %d: subscription is nil", order.SubscriptionID)
+	// Подписка физически удалена (admin /del): несентинельная ошибка данных
+	// залипла бы страницу recovery-сверки — классифицируем как mismatch.
+	if err != nil || sub == nil {
+		return nil, fmt.Errorf("load stars order subscription %d: subscription is nil: %w", order.SubscriptionID, database.ErrSubscriptionNotFound)
 	}
 
 	if sub.TelegramID != telegramID {
-		return nil, fmt.Errorf("stars order %d belongs to a different telegram user", order.ID)
+		return nil, fmt.Errorf("stars order %d belongs to a different telegram user: %w", order.ID, database.ErrOrderNotFound)
 	}
 
 	return order, nil
@@ -1383,10 +1389,11 @@ func (o *OrderService) confirmStarsPayment(ctx context.Context, chargeID string,
 		// Деньги списаны, но заказ не подошёл: нужен ручной разбор/возврат.
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "stars_payment_unmatched", Reason: err.Error(), Action: "verify the payment and refund or reconcile manually", ProviderID: chargeID, CallbackStatus: "successful_payment", Payload: payload})
 
-		// Semantic mismatch (заказ не найден/чужая валюта/сумма/владелец/переход)
-		// не исправится ретраем — recovery помечает его typed error'ом и
-		// возвращает charge автоматически. DB/infrastructure ошибки идут как есть.
-		if errors.Is(err, database.ErrOrderNotFound) || errors.Is(err, ErrAmountMismatch) || errors.Is(err, ErrCurrencyMismatch) || errors.Is(err, ErrInvalidPaymentTransition) {
+		// Semantic mismatch (заказ не найден/не Stars/чужая валюта/сумма/
+		// владелец/удалённая подписка/переход) не исправится ретраем — recovery
+		// помечает его typed error'ом и возвращает charge автоматически.
+		// DB/infrastructure ошибки идут как есть.
+		if errors.Is(err, database.ErrOrderNotFound) || errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, ErrAmountMismatch) || errors.Is(err, ErrCurrencyMismatch) || errors.Is(err, ErrInvalidPaymentTransition) {
 			return nil, &StarsSemanticMismatchError{ChargeID: chargeID, Payload: payload, TelegramID: telegramID, Err: err}
 		}
 
@@ -1433,7 +1440,11 @@ func (o *OrderService) confirmStarsPayment(ctx context.Context, chargeID string,
 		if errors.Is(err, database.ErrProductNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Warn("stars payment for deleted product", zap.Uint("order_id", order.ID), zap.Uint("product_id", order.ProductID), zap.String("provider_payment_id", chargeID))
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_product_failed", Reason: "ordered product no longer exists", Action: "verify payment and refund or activate manually", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
-			return &PaymentConfirmation{Activated: false}, nil
+			// Товар не существует — услугу оказать нельзя: деньги возвращаем
+			// автоматически (заказ pending без charge ID, /refund его не найдёт).
+			autoRefunded := o.autoRefundStarsCharge(ctx, order, chargeID, telegramID)
+
+			return &PaymentConfirmation{Activated: false, AutoRefunded: autoRefunded}, nil
 		}
 
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_product_failed", Reason: err.Error(), Action: "retry callback after database recovery", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
@@ -1445,7 +1456,12 @@ func (o *OrderService) confirmStarsPayment(ctx context.Context, chargeID string,
 		if errors.Is(err, database.ErrSubscriptionNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Warn("stars payment for deleted subscription", zap.Uint("order_id", order.ID), zap.Uint("subscription_id", order.SubscriptionID), zap.String("provider_payment_id", chargeID))
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_subscription_failed", Reason: "ordered subscription no longer exists", Action: "verify payment and refund or reconcile manually", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
-			return &PaymentConfirmation{Activated: false}, nil
+			// Подписка удалена (admin /del) — активировать нечего: деньги
+			// возвращаем автоматически (заказ pending без charge ID, /refund
+			// его не найдёт).
+			autoRefunded := o.autoRefundStarsCharge(ctx, order, chargeID, telegramID)
+
+			return &PaymentConfirmation{Activated: false, AutoRefunded: autoRefunded}, nil
 		}
 
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "load_order_subscription_failed", Reason: err.Error(), Action: "retry callback after database recovery", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
@@ -1464,6 +1480,19 @@ func (o *OrderService) confirmStarsPayment(ctx context.Context, chargeID string,
 	if err != nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "confirm_payment_failed", Reason: err.Error(), Action: "retry callback; order must remain pending if DB setup rolled back", OrderID: order.ID, TelegramID: sub.TelegramID, ProductID: order.ProductID, ProductName: product.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
 		return nil, err
+	}
+
+	if !activated {
+		// CAS-гонка: заказ ушёл из pending между чтением и CAS — его оплатил
+		// другой charge (или отменил /refund). Проигравший charge возвращаем
+		// сразу: деньги списаны без активации, и без этого он бы висел до
+		// recovery-сверки с ложным «оплата по отменённому заказу».
+		current, rerr := o.db.GetOrderByID(ctx, order.ID)
+		if rerr == nil && (current.Status == database.OrderStatusPaid || current.Status == database.OrderStatusCanceled) {
+			autoRefunded := o.autoRefundStarsCharge(ctx, current, chargeID, sub.TelegramID)
+
+			return &PaymentConfirmation{Order: current, Activated: false, AutoRefunded: autoRefunded}, nil
+		}
 	}
 
 	if activated {

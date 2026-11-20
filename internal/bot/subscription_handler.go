@@ -621,6 +621,18 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 		return sh.showBuyError(chatID, acceptMsgID, "❌ Платежи временно недоступны")
 	}
 
+	// Активный провайдер мог переключиться (Stars→Platega) после создания
+	// pending-заказа: старая кнопка согласия не должна выставлять Stars-invoice.
+	// Defense-in-depth к rollout-чеклисту §8.2 (переключение только после
+	// закрытия settlement-окна).
+	if !sh.isStarsProvider() {
+		logger.Warn("stars acceptance rejected: active provider is not telegram_stars",
+			zap.Uint("order_id", expectedOrderID),
+			zap.Int64("telegram_id", buyerTelegramID))
+
+		return sh.showBuyError(chatID, acceptMsgID, "❌ Платежи временно недоступны")
+	}
+
 	product, err := sh.h.db.GetProductByID(ctx, productID)
 	if err != nil || product == nil {
 		logger.Warn("stars acceptance product load failed",
@@ -749,7 +761,7 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 
 		editMsg := tgbotapi.NewEditMessageText(cardChatID, cardMsgID, invoiceText)
 		editMsg.ParseMode = "Markdown"
-		keyboard := sh.h.keyboards.StarsInvoiceBack(sentInvoice.MessageID, product.ID)
+		keyboard := sh.h.keyboards.StarsInvoiceBack(buyerTelegramID, sentInvoice.MessageID, product.ID)
 		editMsg.ReplyMarkup = &keyboard
 		sh.h.safeSend(editMsg)
 	}

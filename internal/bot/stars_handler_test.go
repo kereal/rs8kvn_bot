@@ -224,7 +224,7 @@ func TestStarsBuy_AcceptanceCallbackSendsInvoiceOnce(t *testing.T) {
 	assert.Contains(t, cardEdit.Text, "Счёт отправлен в личном чате")
 	cardKeyboard := starsInlineKeyboard(t, cardEdit.ReplyMarkup)
 	require.NotNil(t, cardKeyboard.InlineKeyboard[0][0].CallbackData)
-	assert.Equal(t, "stars_invoice_back_1_1", *cardKeyboard.InlineKeyboard[0][0].CallbackData)
+	assert.Equal(t, "stars_invoice_back_42_1_1", *cardKeyboard.InlineKeyboard[0][0].CallbackData)
 
 	// Повторный (протухший) acceptance-callback: второй invoice не создаётся.
 	require.NoError(t, h.HandleCallback(context.Background(), acceptCallback("cb2")))
@@ -482,11 +482,11 @@ func TestHandleUpdate_SuccessfulPaymentServiceErrorAsksForSupport(t *testing.T) 
 	assert.Contains(t, sent[0].Text, "/paysupport")
 }
 
-func TestHandleUpdate_SuccessfulPaymentDuplicatePaidIsSilentNoop(t *testing.T) {
+func TestHandleUpdate_SuccessfulPaymentDifferentChargeAutoRefunds(t *testing.T) {
 	t.Parallel()
 
-	// Повторная доставка successful_payment по уже оплаченному заказу:
-	// идемпотентный no-op — без «отменённого заказа» и без повторного уведомления.
+	// Новый charge на уже оплаченном заказе (двойная оплата той же покупки):
+	// charge возвращается автоматически, покупателю — «Платёж возвращён».
 	mockDB := testutil.NewBotStoreFake()
 	starsPreCheckoutMocks(mockDB, database.OrderStatusPaid)
 	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
@@ -499,11 +499,34 @@ func TestHandleUpdate_SuccessfulPaymentDuplicatePaidIsSilentNoop(t *testing.T) {
 	assert.Empty(t, mainBot.GetAllSentMessages())
 }
 
-func TestHandleUpdate_SuccessfulPaymentNilOrderAsksSupportNotCanceled(t *testing.T) {
+func TestHandleUpdate_SuccessfulPaymentSameChargeIsSilentNoop(t *testing.T) {
 	t.Parallel()
 
-	// Заказ ссылается на удалённый product: подтверждение возвращает
-	// confirmation.Order == nil — сообщение в /paysupport, не «отменённый заказ».
+	// Повторная доставка successful_payment (тот же charge ID на paid-заказе):
+	// идемпотентный no-op — без второго продления и без уведомлений.
+	mockDB := testutil.NewBotStoreFake()
+	starsPreCheckoutMocks(mockDB, database.OrderStatusPaid)
+	mockDB.GetOrderByIDFunc = func(context.Context, uint) (*database.Order, error) {
+		return &database.Order{
+			ID: 3, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPaid,
+			AmountCents: 199, Currency: stars.Currency, PaymentProvider: database.PaymentProviderTelegramStars,
+			ProviderPaymentID: "charge-1",
+		}, nil
+	}
+	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
+
+	h.HandleUpdate(context.Background(), successfulPaymentUpdate("charge-1", "3", 199))
+
+	assert.Empty(t, paymentBot.GetAllSentMessages(), "same-charge redelivery must be a silent no-op")
+	assert.Empty(t, mainBot.GetAllSentMessages())
+}
+
+func TestHandleUpdate_SuccessfulPaymentDeletedProductAutoRefunds(t *testing.T) {
+	t.Parallel()
+
+	// Заказ ссылается на удалённый product: активировать нечего — charge
+	// возвращается автоматически, покупателю сообщают о возврате (не
+	// «отменённый заказ», ручной разбор не требуется).
 	mockDB := testutil.NewBotStoreFake()
 	starsPreCheckoutMocks(mockDB, database.OrderStatusPending)
 	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
@@ -515,7 +538,7 @@ func TestHandleUpdate_SuccessfulPaymentNilOrderAsksSupportNotCanceled(t *testing
 
 	sent := paymentBot.GetAllSentMessages()
 	require.Len(t, sent, 1)
-	assert.Contains(t, sent[0].Text, "/paysupport")
+	assert.Contains(t, sent[0].Text, "Платёж возвращён")
 	assert.NotContains(t, sent[0].Text, "отменённому заказу")
 }
 
@@ -617,7 +640,7 @@ func TestStarsInvoiceBack_DeletesOnlyInvoiceAndRendersList(t *testing.T) {
 				Chat:      &tgbotapi.Chat{ID: 42},
 				MessageID: 99,
 			},
-			Data: "stars_invoice_back_55_1",
+			Data: "stars_invoice_back_42_55_1",
 		},
 	}
 
@@ -661,6 +684,35 @@ func TestStarsInvoiceBack_InvalidPayloadIgnored(t *testing.T) {
 
 	assert.Empty(t, paymentBot.DeletedMessageIDs)
 	assert.Empty(t, mainBot.GetAllSentMessages())
+}
+
+func TestStarsInvoiceBack_ForeignUserIgnored(t *testing.T) {
+	t.Parallel()
+
+	// Чужой в групповом чате жмёт «⬅️ Назад» на чужой карточке: кнопка несёт
+	// telegram_id покупателя (42), нажавший (43) — не покупатель. Ничего не
+	// удаляется (в противном случае удалялось бы произвольное сообщение с тем
+	// же message_id в ЛИЧНОМ чате чужака) и ничего не редактируется.
+	mockDB := testutil.NewBotStoreFake()
+	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
+
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "cb1",
+			From: &tgbotapi.User{ID: 43, UserName: "stranger"},
+			Message: &tgbotapi.Message{
+				Chat:      &tgbotapi.Chat{ID: 5000},
+				MessageID: 99,
+			},
+			Data: "stars_invoice_back_42_55_1",
+		},
+	}
+
+	err := h.HandleCallback(context.Background(), update)
+	require.NoError(t, err)
+
+	assert.Empty(t, paymentBot.DeletedMessageIDs, "foreign user must not delete the invoice")
+	assert.Empty(t, mainBot.GetAllSentMessages(), "foreign user must not re-render the tariff list")
 }
 
 func TestHandleRefund_NonAdminSilent(t *testing.T) {
@@ -977,7 +1029,7 @@ func TestStarsInvoiceBack_DeletesInvoiceInBuyerChat(t *testing.T) {
 				Chat:      &tgbotapi.Chat{ID: 5000},
 				MessageID: 99,
 			},
-			Data: "stars_invoice_back_55_1",
+			Data: "stars_invoice_back_42_55_1",
 		},
 	}
 
