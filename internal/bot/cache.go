@@ -34,6 +34,10 @@ type SubscriptionCache struct {
 	lru     *list.List               // front = LRU, back = MRU
 	maxSize int
 	ttl     time.Duration
+	// now — источник времени для расчёта TTL. По умолчанию time.Now;
+	// тесты подменяют его, чтобы проверять истечение детерминированно,
+	// а не через гонку с реальными часами.
+	now func() time.Time
 }
 
 func NewSubscriptionCache(maxSize int, ttl time.Duration) *SubscriptionCache {
@@ -43,6 +47,7 @@ func NewSubscriptionCache(maxSize int, ttl time.Duration) *SubscriptionCache {
 		lru:     list.New(),
 		maxSize: maxSize,
 		ttl:     ttl,
+		now:     time.Now,
 	}
 }
 
@@ -58,7 +63,7 @@ func (c *SubscriptionCache) Get(telegramID int64) *database.Subscription {
 	}
 
 	item := elem.Value.(*lruItem)
-	expired := time.Now().After(item.entry.expiresAt)
+	expired := c.now().After(item.entry.expiresAt)
 	sub := item.entry.sub
 
 	c.mu.RUnlock()
@@ -67,7 +72,7 @@ func (c *SubscriptionCache) Get(telegramID int64) *database.Subscription {
 		c.mu.Lock()
 		if elem, ok = c.items[telegramID]; ok {
 			it := elem.Value.(*lruItem)
-			if time.Now().After(it.entry.expiresAt) {
+			if c.now().After(it.entry.expiresAt) {
 				c.removeElement(elem)
 			}
 		}
@@ -101,7 +106,7 @@ func (c *SubscriptionCache) Set(telegramID int64, sub *database.Subscription) {
 	if elem, ok := c.items[telegramID]; ok {
 		item := elem.Value.(*lruItem)
 		item.entry.sub = sub
-		item.entry.expiresAt = time.Now().Add(c.ttl)
+		item.entry.expiresAt = c.now().Add(c.ttl)
 		delete(c.bySubID, item.subID)
 		item.subID = subID
 
@@ -124,7 +129,7 @@ func (c *SubscriptionCache) Set(telegramID int64, sub *database.Subscription) {
 		subID:      subID,
 		entry: &cacheEntry{
 			sub:       sub,
-			expiresAt: time.Now().Add(c.ttl),
+			expiresAt: c.now().Add(c.ttl),
 		},
 	}
 	elem := c.lru.PushBack(newItem)
@@ -186,7 +191,7 @@ func (c *SubscriptionCache) Cleanup() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	now := time.Now()
+	now := c.now()
 
 	for elem := c.lru.Front(); elem != nil; {
 		item := elem.Value.(*lruItem)
