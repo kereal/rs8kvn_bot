@@ -75,7 +75,91 @@ func TestParseStarsAcceptPayload(t *testing.T) {
 	}
 }
 
-// starsOrderMocks wires the fake DB for a successful Stars purchase of product 1.
+// starsOrderFixture is the canonical Stars order fixture: order 3 /
+// subscription 7 / product 1, pending, 199 XTR via telegram_stars.
+type starsOrderFixture struct {
+	order      *database.Order
+	product    *database.Product
+	productErr error
+	orderErr   error
+}
+
+// starsOrderOpt tunes the order fixture built by starsOrderMocks.
+type starsOrderOpt func(*starsOrderFixture)
+
+func withStarsStatus(status database.OrderStatus) starsOrderOpt {
+	return func(f *starsOrderFixture) { f.order.Status = status }
+}
+
+func withStarsCharge(chargeID string) starsOrderOpt {
+	return func(f *starsOrderFixture) { f.order.ProviderPaymentID = chargeID }
+}
+
+func withStarsProductErr(err error) starsOrderOpt {
+	return func(f *starsOrderFixture) { f.productErr = err }
+}
+
+func withStarsOrderErr(err error) starsOrderOpt {
+	return func(f *starsOrderFixture) { f.orderErr = err }
+}
+
+// starsOrderMocks wires the fake DB for the canonical Stars order fixture.
+// The fixture serves the buy flow (FindOrCreatePendingPaymentOrder), the
+// pre-checkout flow and the successful-payment flow (GetOrderByID) alike.
+func starsOrderMocks(mockDB *testutil.BotStoreFake, opts ...starsOrderOpt) {
+	f := &starsOrderFixture{
+		order: &database.Order{
+			ID: 3, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPending,
+			AmountCents: 199, Currency: stars.Currency, PaymentProvider: database.PaymentProviderTelegramStars,
+		},
+		product: &database.Product{ID: 1, Name: "Месяц", PriceCents: 199, Currency: stars.Currency, IsActive: true},
+	}
+	for _, opt := range opts {
+		opt(f)
+	}
+
+	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
+		return f.product, f.productErr
+	}
+	mockDB.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) {
+		return &database.Subscription{ID: 7, TelegramID: 42}, nil
+	}
+	mockDB.FindPendingPaymentOrderFunc = func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
+		return nil, nil
+	}
+	mockDB.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
+		return &database.Plan{ID: 2, IsActive: true}, nil
+	}
+	mockDB.FindOrCreatePendingPaymentOrderFunc = func(_ context.Context, _, _ uint, provider string, amountCents int64, _ string, expiresAt *time.Time, now time.Time) (*database.Order, bool, error) {
+		if provider != database.PaymentProviderTelegramStars {
+			return nil, false, errors.New("fake: expected telegram_stars provider")
+		}
+
+		order := &database.Order{
+			ID: 3, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPending,
+			AmountCents: amountCents, Currency: stars.Currency, CreatedAt: now,
+		}
+		if expiresAt != nil {
+			order.PaymentExpiresAt = expiresAt
+		}
+
+		return order, true, nil
+	}
+	mockDB.GetOrderByIDFunc = func(_ context.Context, id uint) (*database.Order, error) {
+		if f.orderErr != nil {
+			return nil, f.orderErr
+		}
+
+		order := *f.order
+		order.ID = id
+
+		return &order, nil
+	}
+	mockDB.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
+		return &database.Subscription{ID: 7, TelegramID: 42}, nil
+	}
+}
+
 func starsInlineKeyboard(t *testing.T, markup any) tgbotapi.InlineKeyboardMarkup {
 	t.Helper()
 
@@ -106,49 +190,13 @@ func starsEditByMessageID(t *testing.T, bot *testutil.BotAPI, messageID int) tgb
 	return found
 }
 
-func starsOrderMocks(mockDB *testutil.BotStoreFake, amount int64) {
-	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
-		return &database.Product{ID: 1, Name: "Месяц", PriceCents: amount, Currency: stars.Currency, IsActive: true}, nil
-	}
-	mockDB.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) {
-		return &database.Subscription{ID: 7, TelegramID: 42}, nil
-	}
-	mockDB.FindPendingPaymentOrderFunc = func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
-		return nil, nil
-	}
-	mockDB.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
-		return &database.Plan{ID: 2, IsActive: true}, nil
-	}
-	mockDB.FindOrCreatePendingPaymentOrderFunc = func(_ context.Context, _, _ uint, provider string, amountCents int64, _ string, expiresAt *time.Time, now time.Time) (*database.Order, bool, error) {
-		if provider != database.PaymentProviderTelegramStars {
-			return nil, false, errors.New("fake: expected telegram_stars provider")
-		}
-
-		order := &database.Order{
-			ID: 3, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPending,
-			AmountCents: amountCents, Currency: stars.Currency, CreatedAt: now,
-		}
-		if expiresAt != nil {
-			order.PaymentExpiresAt = expiresAt
-		}
-
-		return order, true, nil
-	}
-	mockDB.GetOrderByIDFunc = func(_ context.Context, id uint) (*database.Order, error) {
-		return &database.Order{
-			ID: id, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPending,
-			AmountCents: amount, Currency: stars.Currency, PaymentProvider: database.PaymentProviderTelegramStars,
-		}, nil
-	}
-}
-
 func TestStarsBuy_FirstClickSendsTermsAcceptanceNoInvoice(t *testing.T) {
 	t.Parallel()
 
 	// Invoice получить без явного acceptance-callback НЕЛЬЗЯ: первый клик
 	// создаёт pending-заказ и отправляет сообщение с условиями и кнопкой.
 	mockDB := testutil.NewBotStoreFake()
-	starsOrderMocks(mockDB, 199)
+	starsOrderMocks(mockDB)
 	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
 
 	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
@@ -189,7 +237,7 @@ func TestStarsBuy_AcceptanceCallbackSendsInvoiceOnce(t *testing.T) {
 	// Acceptance-callback переиспользует pending-заказ (reuse по RequestPayment)
 	// и отправляет ровно один invoice; повторный callback дубликат не создаёт.
 	mockDB := testutil.NewBotStoreFake()
-	starsOrderMocks(mockDB, 199)
+	starsOrderMocks(mockDB)
 	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
 
 	require.NoError(t, h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1))
@@ -238,7 +286,7 @@ func TestStarsBuy_AcceptanceSendErrorShowsSeparateText(t *testing.T) {
 	// M5: отправка сообщения согласия не удалась — отдельный текст,
 	// не «счёт отправлен» и не второй invoice.
 	mockDB := testutil.NewBotStoreFake()
-	starsOrderMocks(mockDB, 199)
+	starsOrderMocks(mockDB)
 	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
 
 	paymentBot.SendError = errors.New("telegram down")
@@ -318,90 +366,102 @@ func starsPreCheckoutUpdate(amount int, payload, currency string) tgbotapi.Updat
 	}
 }
 
-func starsPreCheckoutMocks(mockDB *testutil.BotStoreFake, status database.OrderStatus) {
-	mockDB.GetOrderByIDFunc = func(_ context.Context, id uint) (*database.Order, error) {
-		return &database.Order{
-			ID: 3, SubscriptionID: 7, ProductID: 1, Status: status,
-			AmountCents: 199, Currency: stars.Currency, PaymentProvider: database.PaymentProviderTelegramStars,
-		}, nil
+// TestHandleUpdate_PreCheckout covers the pre-checkout flow: the answer must
+// ALWAYS be sent (within Telegram's 10s window), through paymentBot when it is
+// wired, otherwise through the main bot. Pre-checkout bypasses the rate
+// limiter and generic handling.
+func TestHandleUpdate_PreCheckout(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		mockDB         func(*testutil.BotStoreFake)
+		update         tgbotapi.Update
+		noPaymentBot   bool
+		wantAnswerOK   bool
+		wantErrorEmpty bool
+		wantErrorSet   bool
+		wantCount      int
+	}{
+		{
+			name:           "valid answers OK",
+			mockDB:         func(db *testutil.BotStoreFake) { starsOrderMocks(db) },
+			update:         starsPreCheckoutUpdate(199, "3", stars.Currency),
+			wantAnswerOK:   true,
+			wantErrorEmpty: true,
+			wantCount:      1,
+		},
+		{
+			name:   "invalid amount answers not OK",
+			mockDB: func(db *testutil.BotStoreFake) { starsOrderMocks(db) },
+			// Неверная сумма: точное равенство XTR не масштабируется (D5).
+			update:       starsPreCheckoutUpdate(100, "3", stars.Currency),
+			wantErrorSet: true,
+			wantCount:    1,
+		},
+		{
+			name:   "db error still answers",
+			mockDB: func(db *testutil.BotStoreFake) { starsOrderMocks(db, withStarsOrderErr(errors.New("db down"))) },
+			// Pre-checkout must never be left unanswered.
+			update:    starsPreCheckoutUpdate(199, "3", stars.Currency),
+			wantCount: 1,
+		},
+		{
+			name:   "falls back to main bot without payment bot",
+			mockDB: func(db *testutil.BotStoreFake) { starsOrderMocks(db) },
+			// paymentBot не задан (тестовый Handler) → ответ уходит через основной бот.
+			update:       starsPreCheckoutUpdate(199, "3", stars.Currency),
+			noPaymentBot: true,
+			wantAnswerOK: true,
+			wantCount:    1,
+		},
 	}
-	mockDB.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
-		return &database.Subscription{ID: 7, TelegramID: 42}, nil
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mockDB := testutil.NewBotStoreFake()
+			tt.mockDB(mockDB)
+
+			var mainBot, paymentBot *testutil.BotAPI
+			var h *Handler
+			if tt.noPaymentBot {
+				cfg := &config.Config{TelegramAdminID: 123, PaymentEnabled: true, PaymentProvider: database.PaymentProviderTelegramStars}
+				mainBot = testutil.NewBotAPI()
+				h = NewHandler(mainBot, cfg, mockDB, NewTestBotConfig(), nil, "")
+				o := service.NewOrderService(mockDB, nil, nil, nil, "testbot", cfg)
+				o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+				h.SetOrderService(o)
+			} else {
+				h, mainBot, paymentBot = newStarsTestHandler(t, mockDB)
+			}
+
+			h.HandleUpdate(context.Background(), tt.update)
+
+			// Ответ уходит ВСЕГДА и через payment-инстанс (или основной бот).
+			answerBot := paymentBot
+			if tt.noPaymentBot {
+				answerBot = mainBot
+			}
+			require.Len(t, answerBot.AllRequestsSafe(), tt.wantCount)
+			answer, ok := answerBot.AllRequestsSafe()[0].(tgbotapi.PreCheckoutConfig)
+			require.True(t, ok, "expected an answerPreCheckoutQuery request")
+			assert.Equal(t, tt.wantAnswerOK, answer.OK)
+
+			if tt.wantErrorEmpty {
+				assert.Empty(t, answer.ErrorMessage)
+			}
+			if tt.wantErrorSet {
+				assert.NotEmpty(t, answer.ErrorMessage)
+			}
+
+			// Pre-checkout идёт мимо rate-limiter и generic-обработки: основной бот молчит.
+			if !tt.noPaymentBot {
+				assert.Empty(t, mainBot.GetAllSentMessages())
+			}
+		})
 	}
-}
-
-func TestHandleUpdate_PreCheckoutValidAnswersOK(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewBotStoreFake()
-	starsPreCheckoutMocks(mockDB, database.OrderStatusPending)
-	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
-
-	h.HandleUpdate(context.Background(), starsPreCheckoutUpdate(199, "3", stars.Currency))
-
-	// Ответ уходит ВСЕГДА и через payment-инстанс.
-	require.Len(t, paymentBot.AllRequestsSafe(), 1)
-	answer, ok := paymentBot.AllRequestsSafe()[0].(tgbotapi.PreCheckoutConfig)
-	require.True(t, ok, "expected an answerPreCheckoutQuery request")
-	assert.True(t, answer.OK)
-	assert.Empty(t, answer.ErrorMessage)
-
-	// Pre-checkout идёт мимо rate-limiter и generic-обработки: основной бот молчит.
-	assert.Empty(t, mainBot.GetAllSentMessages())
-}
-
-func TestHandleUpdate_PreCheckoutInvalidAnswersNotOK(t *testing.T) {
-	t.Parallel()
-
-	// Неверная сумма: точное равенство XTR не масштабируется (D5).
-	mockDB := testutil.NewBotStoreFake()
-	starsPreCheckoutMocks(mockDB, database.OrderStatusPending)
-	h, _, paymentBot := newStarsTestHandler(t, mockDB)
-
-	h.HandleUpdate(context.Background(), starsPreCheckoutUpdate(100, "3", stars.Currency))
-
-	require.Len(t, paymentBot.AllRequestsSafe(), 1)
-	answer, ok := paymentBot.AllRequestsSafe()[0].(tgbotapi.PreCheckoutConfig)
-	require.True(t, ok)
-	assert.False(t, answer.OK)
-	assert.NotEmpty(t, answer.ErrorMessage)
-}
-
-func TestHandleUpdate_PreCheckoutDBErrorStillAnswers(t *testing.T) {
-	t.Parallel()
-
-	mockDB := testutil.NewBotStoreFake()
-	mockDB.GetOrderByIDFunc = func(context.Context, uint) (*database.Order, error) {
-		return nil, errors.New("db down")
-	}
-	h, _, paymentBot := newStarsTestHandler(t, mockDB)
-
-	h.HandleUpdate(context.Background(), starsPreCheckoutUpdate(199, "3", stars.Currency))
-
-	require.Len(t, paymentBot.AllRequestsSafe(), 1)
-	answer, ok := paymentBot.AllRequestsSafe()[0].(tgbotapi.PreCheckoutConfig)
-	require.True(t, ok)
-	assert.False(t, answer.OK, "pre-checkout must never be left unanswered")
-}
-
-func TestHandleUpdate_PreCheckoutFallsBackToMainBot(t *testing.T) {
-	t.Parallel()
-
-	// paymentBot не задан (тестовый Handler) → ответ уходит через основной бот.
-	mockDB := testutil.NewBotStoreFake()
-	starsPreCheckoutMocks(mockDB, database.OrderStatusPending)
-	cfg := &config.Config{TelegramAdminID: 123, PaymentEnabled: true, PaymentProvider: database.PaymentProviderTelegramStars}
-	mainBot := testutil.NewBotAPI()
-	h := NewHandler(mainBot, cfg, mockDB, NewTestBotConfig(), nil, "")
-	o := service.NewOrderService(mockDB, nil, nil, nil, "testbot", cfg)
-	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
-	h.SetOrderService(o)
-
-	h.HandleUpdate(context.Background(), starsPreCheckoutUpdate(199, "3", stars.Currency))
-
-	require.Len(t, mainBot.AllRequestsSafe(), 1)
-	_, ok := mainBot.AllRequestsSafe()[0].(tgbotapi.PreCheckoutConfig)
-	require.True(t, ok)
 }
 
 func successfulPaymentUpdate(chargeID, payload string, amount int) tgbotapi.Update {
@@ -423,13 +483,7 @@ func TestHandleUpdate_SuccessfulPaymentConfirmsAndNotifies(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewBotStoreFake()
-	starsPreCheckoutMocks(mockDB, database.OrderStatusPending)
-	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
-		return &database.Product{ID: 1, Name: "Месяц", PriceCents: 199, Currency: stars.Currency, IsActive: true}, nil
-	}
-	mockDB.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
-		return &database.Plan{ID: 2, IsActive: true}, nil
-	}
+	starsOrderMocks(mockDB)
 	mockDB.ConfirmOrderPaidCASFunc = func(_ context.Context, orderID uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, callbackAmountCents int64, providerPaymentID string, providerFeeCents *int64) (bool, error) {
 		assert.Equal(t, uint(3), orderID)
 		assert.Equal(t, int64(199), callbackAmountCents, "XTR amount must not be scaled ×100")
@@ -454,7 +508,7 @@ func TestHandleUpdate_SuccessfulPaymentCanceledOrderAlertsUser(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewBotStoreFake()
-	starsPreCheckoutMocks(mockDB, database.OrderStatusCanceled)
+	starsOrderMocks(mockDB, withStarsStatus(database.OrderStatusCanceled))
 	h, _, paymentBot := newStarsTestHandler(t, mockDB)
 
 	h.HandleUpdate(context.Background(), successfulPaymentUpdate("charge-1", "3", 199))
@@ -470,9 +524,7 @@ func TestHandleUpdate_SuccessfulPaymentServiceErrorAsksForSupport(t *testing.T) 
 	t.Parallel()
 
 	mockDB := testutil.NewBotStoreFake()
-	mockDB.GetOrderByIDFunc = func(context.Context, uint) (*database.Order, error) {
-		return nil, errors.New("db down")
-	}
+	starsOrderMocks(mockDB, withStarsOrderErr(errors.New("db down")))
 	h, _, paymentBot := newStarsTestHandler(t, mockDB)
 
 	h.HandleUpdate(context.Background(), successfulPaymentUpdate("charge-1", "3", 199))
@@ -488,7 +540,7 @@ func TestHandleUpdate_SuccessfulPaymentDifferentChargeAutoRefunds(t *testing.T) 
 	// Новый charge на уже оплаченном заказе (двойная оплата той же покупки):
 	// charge возвращается автоматически, покупателю — «Платёж возвращён».
 	mockDB := testutil.NewBotStoreFake()
-	starsPreCheckoutMocks(mockDB, database.OrderStatusPaid)
+	starsOrderMocks(mockDB, withStarsStatus(database.OrderStatusPaid))
 	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
 
 	h.HandleUpdate(context.Background(), successfulPaymentUpdate("charge-1", "3", 199))
@@ -505,14 +557,7 @@ func TestHandleUpdate_SuccessfulPaymentSameChargeIsSilentNoop(t *testing.T) {
 	// Повторная доставка successful_payment (тот же charge ID на paid-заказе):
 	// идемпотентный no-op — без второго продления и без уведомлений.
 	mockDB := testutil.NewBotStoreFake()
-	starsPreCheckoutMocks(mockDB, database.OrderStatusPaid)
-	mockDB.GetOrderByIDFunc = func(context.Context, uint) (*database.Order, error) {
-		return &database.Order{
-			ID: 3, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPaid,
-			AmountCents: 199, Currency: stars.Currency, PaymentProvider: database.PaymentProviderTelegramStars,
-			ProviderPaymentID: "charge-1",
-		}, nil
-	}
+	starsOrderMocks(mockDB, withStarsStatus(database.OrderStatusPaid), withStarsCharge("charge-1"))
 	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
 
 	h.HandleUpdate(context.Background(), successfulPaymentUpdate("charge-1", "3", 199))
@@ -528,10 +573,7 @@ func TestHandleUpdate_SuccessfulPaymentDeletedProductAutoRefunds(t *testing.T) {
 	// возвращается автоматически, покупателю сообщают о возврате (не
 	// «отменённый заказ», ручной разбор не требуется).
 	mockDB := testutil.NewBotStoreFake()
-	starsPreCheckoutMocks(mockDB, database.OrderStatusPending)
-	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
-		return nil, database.ErrProductNotFound
-	}
+	starsOrderMocks(mockDB, withStarsProductErr(database.ErrProductNotFound))
 	h, _, paymentBot := newStarsTestHandler(t, mockDB)
 
 	h.HandleUpdate(context.Background(), successfulPaymentUpdate("charge-1", "3", 199))
@@ -549,7 +591,7 @@ func TestStarsBuy_CallbackChatDiffersFromTelegramID(t *testing.T) {
 	// Terms-сообщение уходит в private chat по telegram_id, карточка
 	// редактируется в callback chat.
 	mockDB := testutil.NewBotStoreFake()
-	starsOrderMocks(mockDB, 199)
+	starsOrderMocks(mockDB)
 	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
 
 	update := tgbotapi.Update{
@@ -593,7 +635,7 @@ func TestStarsAccept_CallbackChatDiffersFromBuyerChat(t *testing.T) {
 	// Acceptance в личном чате покупателя (42): invoice отправляется в чат 42,
 	// карточка (callback chat 5000, msg 99 из кнопки) редактируется в chatID.
 	mockDB := testutil.NewBotStoreFake()
-	starsOrderMocks(mockDB, 199)
+	starsOrderMocks(mockDB)
 	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
 
 	update := tgbotapi.Update{
@@ -929,13 +971,7 @@ func TestHandleUpdate_SuccessfulPaymentBypassesRateLimiter(t *testing.T) {
 	// Финансовый апдейт не отбрасывается rate limiter-ом: бакет исчерпан,
 	// successful_payment всё равно доходит до подтверждения.
 	mockDB := testutil.NewBotStoreFake()
-	starsPreCheckoutMocks(mockDB, database.OrderStatusPending)
-	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
-		return &database.Product{ID: 1, Name: "Месяц", PriceCents: 199, Currency: stars.Currency, IsActive: true}, nil
-	}
-	mockDB.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
-		return &database.Plan{ID: 2, IsActive: true}, nil
-	}
+	starsOrderMocks(mockDB)
 	mockDB.ConfirmOrderPaidCASFunc = func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
 		return true, nil
 	}
@@ -1094,10 +1130,7 @@ func TestHandleUpdate_SuccessfulPaymentAutoRefunded(t *testing.T) {
 	// Canceled заказ: сервис автовозвращает Stars — покупателю уходит понятное
 	// «оплата возвращена», а не предупреждение об отменённом заказе.
 	mockDB := testutil.NewBotStoreFake()
-	starsPreCheckoutMocks(mockDB, database.OrderStatusCanceled)
-	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
-		return &database.Product{ID: 1, Name: "Месяц", PriceCents: 199, Currency: stars.Currency, IsActive: true}, nil
-	}
+	starsOrderMocks(mockDB, withStarsStatus(database.OrderStatusCanceled))
 	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
 
 	h.HandleUpdate(context.Background(), successfulPaymentUpdate("charge-1", "3", 199))

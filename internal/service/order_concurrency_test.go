@@ -366,7 +366,7 @@ func (p *countingPaymentProvider) GetTransactionStatus(context.Context, string) 
 
 // TestRequestPayment_ConcurrentCallersSingleProviderTransaction verifies the
 // per-(subscription,product) claim race: even when many goroutines race for the
-// same pending intent, only one goroutine reaches the PaymentProvider. Each
+// same pending intent, only one goroutine reaches the PlategaClient. Each
 // subsequent caller must observe ErrPaymentAlreadyInProgress from the claim
 // race resolution path. The invariant matches the production DB partial unique
 // index alongside the in-memory MarkPaymentCreationUncertain compare-and-swap
@@ -449,7 +449,7 @@ func TestRequestPayment_ConcurrentCallersSingleProviderTransaction(t *testing.T)
 	wg.Wait()
 
 	assert.Equal(t, int32(1), provider.calls.Load(),
-		"the per-claim guard must let at most one goroutine reach the PaymentProvider")
+		"the per-claim guard must let at most one goroutine reach the PlategaClient")
 	assert.Equal(t, int32(workers), claimCount.Load(),
 		"every goroutine must attempt the claim (CAS decides the winner)")
 

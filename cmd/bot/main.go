@@ -294,7 +294,6 @@ func startWebServer(subService *service.SubscriptionService, cfg *config.Config,
 	// через platega либо legacy-расчёт старых заказов (PLATEGA_CALLBACK_ENABLED).
 	if cfg.ShouldEnablePlategaCallback() {
 		webServer.SetPaymentConfig(&web.PaymentConfig{
-			Enabled:    true,
 			MerchantID: cfg.PlategaMerchantID,
 			Secret:     cfg.PlategaSecret,
 		})

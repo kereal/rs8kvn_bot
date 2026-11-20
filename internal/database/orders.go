@@ -336,13 +336,6 @@ func (s *Service) SaveOrderPaymentAmounts(ctx context.Context, orderID uint, cal
 	return nil
 }
 
-// GetPaidOrdersWithoutProviderFee returns paid Platega orders whose provider
-// commission has not been persisted yet. A NULL fee is the durable retry marker
-// for the best-effort provider status lookup.
-func (s *Service) GetPaidOrdersWithoutProviderFee(ctx context.Context, limit int) ([]Order, error) {
-	return s.GetPaidOrdersWithoutProviderFeeAfterID(ctx, 0, limit)
-}
-
 // GetPaidOrdersWithoutProviderFeeAfterID returns the next page of fee-sync
 // candidates after afterID. Paging lets the worker continue past deferred
 // orders without requiring a retry-state column.

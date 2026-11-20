@@ -1038,10 +1038,6 @@ func (m *ServiceStoreFake) GetOrderByProviderPaymentID(ctx context.Context, prov
 	return nil, gorm.ErrRecordNotFound
 }
 
-func (m *ServiceStoreFake) GetPaidOrdersWithoutProviderFee(ctx context.Context, limit int) ([]database.Order, error) {
-	return m.GetPaidOrdersWithoutProviderFeeAfterID(ctx, 0, limit)
-}
-
 func (m *ServiceStoreFake) GetPaidOrdersWithoutProviderFeeAfterID(ctx context.Context, afterID uint, limit int) ([]database.Order, error) {
 	if m.GetPaidOrdersWithoutProviderFeeAfterIDFunc != nil {
 		return m.GetPaidOrdersWithoutProviderFeeAfterIDFunc(ctx, afterID, limit)

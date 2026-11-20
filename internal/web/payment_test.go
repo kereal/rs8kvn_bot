@@ -593,7 +593,7 @@ func newPaymentTestServer(t *testing.T, order *database.Order) (*Server, *testut
 	srv := NewServer(":0", nil, cfg, "bot", subSvc, nil)
 	srv.SetOrderService(o)
 	srv.SetBot(bot)
-	srv.SetPaymentConfig(&PaymentConfig{Enabled: true, MerchantID: "merchant", Secret: "secret"})
+	srv.SetPaymentConfig(&PaymentConfig{MerchantID: "merchant", Secret: "secret"})
 	srv.SetPaymentReady(true)
 
 	return srv, db, bot

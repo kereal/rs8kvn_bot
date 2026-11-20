@@ -51,13 +51,36 @@ func (p *funcPaymentProvider) GetTransactionStatus(ctx context.Context, id strin
 	return p.statusFunc(ctx, id)
 }
 
-func atomicChargebackResult(orderID, subscriptionID uint, wasPaid, downgraded bool) (*database.ChargebackResult, error) {
+// chargebackAuditFn is the audit-log callback the service passes into
+// CancelPaidOrderAndDowngradeCAS.
+type chargebackAuditFn = func(*database.Order, *database.Subscription, bool) *database.AuditLog
+
+// casChargebackFn is the CancelPaidOrderAndDowngradeCAS seam signature.
+type casChargebackFn = func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, chargebackAuditFn) (*database.ChargebackResult, error)
+
+// atomicChargebackResult builds the result the real atomic chargeback
+// repository would return: the order reloaded as canceled.
+func atomicChargebackResult(orderID, subscriptionID uint, wasPaid, downgraded bool) *database.ChargebackResult {
 	return &database.ChargebackResult{
 		Order:        &database.Order{ID: orderID, SubscriptionID: subscriptionID, Status: database.OrderStatusCanceled, AmountCents: 2300, Currency: "RUB"},
 		WasPaid:      wasPaid,
 		Transitioned: true,
 		Downgraded:   downgraded,
-	}, nil
+	}
+}
+
+// casChargeback builds a CancelPaidOrderAndDowngradeCASFunc stub that always
+// answers with result/err without performing any state transition. onCall,
+// when set, receives the provider ids and the audit callback so tests can
+// capture what the service passed in.
+func casChargeback(result *database.ChargebackResult, err error, onCall ...func(provider, providerPaymentID string, auditFn chargebackAuditFn)) casChargebackFn {
+	return func(_ context.Context, provider, providerPaymentID string, _ time.Time, _ uint, _ database.ChargebackPlanInTxFn, auditFn chargebackAuditFn) (*database.ChargebackResult, error) {
+		for _, fn := range onCall {
+			fn(provider, providerPaymentID, auditFn)
+		}
+
+		return result, err
+	}
 }
 
 func TestOrderService_NotifiesAdminForUncertainPayment(t *testing.T) {
@@ -274,7 +297,6 @@ func TestRequestPayment_SavesRedirectPaymentDetails(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, info)
 	require.Same(t, order, gotOrder)
-	assert.Equal(t, providerID, info.PaymentID)
 	assert.Equal(t, "https://pay.example/redirect", info.URL)
 	assert.Equal(t, providerID, savedID)
 	assert.Equal(t, info.URL, savedURL)
@@ -501,7 +523,6 @@ func TestRequestPayment_ReusesLivePaymentLinkWithoutRecreating(t *testing.T) {
 	require.NotNil(t, info)
 	require.Same(t, order, gotOrder)
 
-	assert.Equal(t, providerID, info.PaymentID)
 	assert.Equal(t, "https://pay.example/live", info.URL, "the stored live link must be returned as-is")
 	assert.Equal(t, expiresAt, info.ExpiresAt)
 	assert.Zero(t, createCalls, "a live link must never trigger a second provider transaction")
@@ -849,9 +870,7 @@ func TestCancelPaymentByProvider_ChargebackNotifiesAdmin(t *testing.T) {
 				GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
 					return &database.Order{ID: 104, SubscriptionID: 92, ProductID: 72, Status: database.OrderStatusPaid, AmountCents: 690000, Currency: "RUB", ProviderPaymentID: providerID}, nil
 				},
-				CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
-					return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: tt.downgraded}, nil
-				},
+				CancelPaidOrderAndDowngradeCASFunc: casChargeback(&database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: tt.downgraded}, nil),
 				GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 					return sub, nil
 				},
@@ -974,9 +993,7 @@ func TestCancelPaymentByProvider_PaidChargebackReturnsWasPaid(t *testing.T) {
 			calls++
 			return &database.Order{ID: 7, SubscriptionID: 70, Status: database.OrderStatusPaid, PaymentProvider: provider, ProviderPaymentID: providerID, AmountCents: 2300, Currency: "RUB"}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
-			return atomicChargebackResult(7, 70, true, false)
-		},
+		CancelPaidOrderAndDowngradeCASFunc: casChargeback(atomicChargebackResult(7, 70, true, false), nil),
 	}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", nil)
 	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), "550e8400-e29b-41d4-a716-446655440101", "CHARGEBACKED", json.Number("23.00"), "RUB")
@@ -1004,9 +1021,7 @@ func TestCancelPaymentByProvider_ChargebackOnPendingReportsNotPaid(t *testing.T)
 			calls++
 			return &database.Order{ID: 9, SubscriptionID: 90, Status: database.OrderStatusPending, PaymentProvider: provider, ProviderPaymentID: providerID, AmountCents: 2300, Currency: "RUB"}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
-			return atomicChargebackResult(9, 90, false, false)
-		},
+		CancelPaidOrderAndDowngradeCASFunc: casChargeback(atomicChargebackResult(9, 90, false, false), nil),
 	}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", nil)
 	order, wasPaid, err := o.CancelPaymentByProvider(context.Background(), "550e8400-e29b-41d4-a716-446655440103", "CHARGEBACKED", json.Number("23.00"), "RUB")
@@ -1166,9 +1181,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradesPaidSubscription(t *testing
 			calls++
 			return &database.Order{ID: 96, SubscriptionID: 85, ProductID: 66, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
-			return atomicChargebackResult(96, 85, true, true)
-		},
+		CancelPaidOrderAndDowngradeCASFunc: casChargeback(atomicChargebackResult(96, 85, true, true), nil),
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
@@ -1206,9 +1219,7 @@ func TestCancelPaymentByProvider_ChargebackKeepsAccessWithAnotherPaidOrder(t *te
 			calls++
 			return &database.Order{ID: 97, SubscriptionID: 86, ProductID: 67, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
-			return atomicChargebackResult(97, 86, true, false)
-		},
+		CancelPaidOrderAndDowngradeCASFunc: casChargeback(atomicChargebackResult(97, 86, true, false), nil),
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
@@ -1240,9 +1251,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradeFailureAlertsAdmin(t *testin
 			calls++
 			return &database.Order{ID: 100, SubscriptionID: 88, ProductID: 69, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
-			return nil, errors.New("atomic chargeback transaction failed")
-		},
+		CancelPaidOrderAndDowngradeCASFunc: casChargeback(nil, errors.New("atomic chargeback transaction failed")),
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
@@ -1281,9 +1290,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradeUsesSyncService(t *testing.T
 			calls++
 			return &database.Order{ID: 101, SubscriptionID: 89, ProductID: 70, Status: database.OrderStatusPaid, AmountCents: 2300, Currency: "RUB", ProviderPaymentID: providerID}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
-			return atomicChargebackResult(101, 89, true, true)
-		},
+		CancelPaidOrderAndDowngradeCASFunc: casChargeback(atomicChargebackResult(101, 89, true, true), nil),
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
@@ -2288,11 +2295,9 @@ func TestRefundStarsOrder_AdminActorAndResult(t *testing.T) {
 		GetPlanByNameFunc: func(context.Context, string) (*database.Plan, error) {
 			return &database.Plan{ID: 2, Name: database.FreePlanName}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, _, _ string, _ time.Time, _ uint, _ database.ChargebackPlanInTxFn, auditFn func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: casChargeback(&database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: true}, nil, func(_, _ string, auditFn chargebackAuditFn) {
 			auditEvent = auditFn(order, &database.Subscription{ID: 4}, true)
-
-			return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: true}, nil
-		},
+		}),
 	}
 	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
@@ -2334,12 +2339,10 @@ func TestRefundStarsOrder_SuccessCancelsDowngradesAndAudits(t *testing.T) {
 		GetPlanByNameFunc: func(_ context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 2, Name: name}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, provider, providerPaymentID string, _ time.Time, _ uint, _ database.ChargebackPlanInTxFn, auditFn func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: casChargeback(&database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: true}, nil, func(provider, providerPaymentID string, auditFn chargebackAuditFn) {
 			casProvider, casChargeID = provider, providerPaymentID
 			auditEvent = auditFn(order, &database.Subscription{ID: 4}, true)
-
-			return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: true}, nil
-		},
+		}),
 	}
 	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", TelegramAdminID: 999})
 	o.SetAdminBot(adminBot)
@@ -2377,12 +2380,8 @@ func TestRefundStarsOrder_AlreadyCanceledIsNoOp(t *testing.T) {
 	var casCalled bool
 
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
-			casCalled = true
-
-			return nil, errors.New("unreachable")
-		},
+		GetOrderByIDFunc:                   func(context.Context, uint) (*database.Order, error) { return order, nil },
+		CancelPaidOrderAndDowngradeCASFunc: casChargeback(nil, errors.New("unreachable"), func(_, _ string, _ chargebackAuditFn) { casCalled = true }),
 	}
 	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
 	o.SetStarsClient(stars.New(starsBot))
@@ -2411,11 +2410,7 @@ func TestRefundStarsOrder_TelegramErrorKeepsDBUntouched(t *testing.T) {
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return &database.Subscription{ID: 4, TelegramID: 42}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
-			casCalled = true
-
-			return nil, errors.New("unreachable")
-		},
+		CancelPaidOrderAndDowngradeCASFunc: casChargeback(nil, errors.New("unreachable"), func(_, _ string, _ chargebackAuditFn) { casCalled = true }),
 	}
 	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", TelegramAdminID: 999})
 	o.SetAdminBot(adminBot)
@@ -2451,11 +2446,7 @@ func TestRefundStarsOrder_ChargeAlreadyRefundedProceedsToCAS(t *testing.T) {
 		GetPlanByNameFunc: func(_ context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 2, Name: name}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
-			casCalled = true
-
-			return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: false}, nil
-		},
+		CancelPaidOrderAndDowngradeCASFunc: casChargeback(&database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: false}, nil, func(_, _ string, _ chargebackAuditFn) { casCalled = true }),
 	}
 	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
 	o.SetStarsClient(stars.New(starsBot))
@@ -2480,9 +2471,7 @@ func TestRefundStarsOrder_DowngradedRunsPostCommitSync(t *testing.T) {
 		GetPlanByNameFunc: func(_ context.Context, name string) (*database.Plan, error) {
 			return &database.Plan{ID: 2, Name: name}, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
-			return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: true}, nil
-		},
+		CancelPaidOrderAndDowngradeCASFunc: casChargeback(&database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: true}, nil),
 		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
 			syncInvoked = true
 

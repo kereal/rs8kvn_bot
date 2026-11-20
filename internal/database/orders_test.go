@@ -100,7 +100,7 @@ func TestSaveOrderPaymentAmounts(t *testing.T) {
 	assert.Equal(t, int64(450), *got.ProviderFeeCents)
 }
 
-func TestGetPaidOrdersWithoutProviderFee(t *testing.T) {
+func TestGetPaidOrdersWithoutProviderFeeAfterID(t *testing.T) {
 	t.Parallel()
 
 	svc := newTestService(t)
@@ -122,7 +122,7 @@ func TestGetPaidOrdersWithoutProviderFee(t *testing.T) {
 		require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 	}
 
-	got, err := svc.GetPaidOrdersWithoutProviderFee(ctx, 10)
+	got, err := svc.GetPaidOrdersWithoutProviderFeeAfterID(ctx, 0, 10)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "paid-without-fee", got[0].ProviderPaymentID)

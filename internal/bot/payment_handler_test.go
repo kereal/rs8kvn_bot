@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakePaymentProvider satisfies service.PaymentProvider for bot-level tests.
+// fakePaymentProvider satisfies service.PlategaClient for bot-level tests.
 type fakePaymentProvider struct{}
 
 func (fakePaymentProvider) CreateTransaction(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
@@ -35,7 +35,7 @@ func (fakePaymentProvider) GetTransactionStatus(context.Context, string) (*plate
 // newPaymentTestHandler builds a Handler with payment enabled and an OrderService
 // backed by the provided DB mock and provider. Passing a nil provider yields an
 // OrderService with disabled payments (ErrPaymentDisabled from RequestPayment).
-func newPaymentTestHandler(t *testing.T, mockDB *testutil.BotStoreFake, provider service.PaymentProvider) (*Handler, *testutil.BotAPI) {
+func newPaymentTestHandler(t *testing.T, mockDB *testutil.BotStoreFake, provider service.PlategaClient) (*Handler, *testutil.BotAPI) {
 	t.Helper()
 
 	cfg := &config.Config{TelegramAdminID: 123, PaymentEnabled: true}

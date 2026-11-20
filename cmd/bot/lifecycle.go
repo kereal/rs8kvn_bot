@@ -135,7 +135,7 @@ func initServices(cfg *config.Config, dbService *database.Service, deps *runtime
 		subServer.InvalidateSubscriber(subID)
 	})
 
-	var payment service.PaymentProvider
+	var payment service.PlategaClient
 	if cfg.ShouldEnablePlategaCallback() {
 		payment = platega.New(platega.Config{MerchantID: cfg.PlategaMerchantID, Secret: cfg.PlategaSecret})
 	}

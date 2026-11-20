@@ -88,7 +88,6 @@ const subserverNotFoundLogPruneAt = 4096
 // callback endpoint. It is set via SetPaymentConfig; when nil, the endpoint
 // returns 503 to signal that payments are not available.
 type PaymentConfig struct {
-	Enabled    bool
 	MerchantID string
 	Secret     string
 }
@@ -406,7 +405,7 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	orderService := s.orderService
 	s.mu.RUnlock()
 
-	if !paymentReady || pc == nil || !pc.Enabled || orderService == nil || bot == nil {
+	if !paymentReady || pc == nil || orderService == nil || bot == nil {
 		http.Error(w, "payments not available", http.StatusServiceUnavailable)
 		return
 	}
