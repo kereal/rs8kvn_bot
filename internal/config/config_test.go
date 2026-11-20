@@ -19,7 +19,7 @@ const testBotToken = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
 // leak into validation. Without this, a host with payments enabled fails every
 // Load() test with "PLATEGA_MERCHANT_ID must be a UUID".
 func TestMain(m *testing.M) {
-	for _, key := range []string{"PAYMENT_ENABLED", "PAYMENT_PROVIDER", "PLATEGA_MERCHANT_ID", "PLATEGA_SECRET"} {
+	for _, key := range []string{"PAYMENT_ENABLED", "PAYMENT_PROVIDER", "PLATEGA_MERCHANT_ID", "PLATEGA_SECRET", "PLATEGA_CALLBACK_ENABLED", "STARS_INVOICE_TTL"} {
 		_ = os.Unsetenv(key)
 	}
 

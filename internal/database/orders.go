@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -160,9 +161,12 @@ func (s *Service) FindPendingPaymentOrder(ctx context.Context, subscriptionID, p
 // deadline is at or before now. An intent with uncertain provider creation is
 // reused even after that deadline. The partial unique index is the final
 // concurrency guard; a losing creator reloads the winning pending intent.
-// Expiry and replacement are transactional; expiry audit is best-effort after
-// commit. Database errors are returned, including a failed concurrent reload.
-func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*Order, error) {
+// created is true only when a NEW pending order was inserted by this call;
+// any reuse of an existing intent (including a concurrent reload) reports
+// created=false. Expiry and replacement are transactional; expiry audit is
+// best-effort after commit. Database errors are returned, including a failed
+// concurrent reload.
+func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*Order, bool, error) {
 	// In-process guard for providers the partial unique index 034 does not
 	// cover (it filters payment_provider='platega'). One process, one SQLite
 	// file — a mutex is enough to keep concurrent requests from creating
@@ -171,6 +175,9 @@ func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscript
 	defer s.pendingMu.Unlock()
 
 	var order Order
+	// created фиксируется только успешным INSERT нового pending; reuse,
+	// конкурентная перезагрузка и повторное чтение uncertain-intent дают false.
+	created := false
 	// expiredOrder фиксируется внутри tx, но аудит пишется ПОСЛЕ коммита:
 	// best-effort INSERT из замыкания на SQLite дедлочится на write-lock
 	// незакоммиченной транзакции, а при откате tx истечение отменилось бы —
@@ -219,6 +226,8 @@ func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscript
 			return fmt.Errorf("create pending payment order: %w", err)
 		}
 
+		created = true
+
 		return nil
 	})
 	// Аудит order_expired — только после УСПЕШНОЙ фиксации транзакции
@@ -237,16 +246,16 @@ func (s *Service) FindOrCreatePendingPaymentOrder(ctx context.Context, subscript
 				Where("subscription_id = ? AND product_id = ? AND payment_provider = ? AND status = ?", subscriptionID, productID, provider, OrderStatusPending).
 				Order("id ASC").First(&order)
 			if result.Error == nil {
-				return &order, nil
+				return &order, false, nil
 			}
 
-			return nil, fmt.Errorf("reload concurrent pending payment order: %w", result.Error)
+			return nil, false, fmt.Errorf("reload concurrent pending payment order: %w", result.Error)
 		}
 
-		return nil, err
+		return nil, false, err
 	}
 
-	return &order, nil
+	return &order, created, nil
 }
 
 // MarkPaymentCreationUncertain atomically marks whether an outbound provider
@@ -414,6 +423,15 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 
 			return fmt.Errorf("load order for payment: %w", err)
 		}
+
+		// Фактический id транзакции, который ляжет в БД: переданный charge ID
+		// (Stars) либо уже сохранённый (Platega сохраняет его заранее).
+		// Аудит и снапшот заказа должны содержать именно его.
+		effectiveProviderPaymentID := providerPaymentID
+		if strings.TrimSpace(effectiveProviderPaymentID) == "" {
+			effectiveProviderPaymentID = order.ProviderPaymentID
+		}
+		order.ProviderPaymentID = effectiveProviderPaymentID
 
 		updates := map[string]any{
 			"status":                OrderStatusPaid,
@@ -610,8 +628,18 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 
 		result.Transitioned = true
 
-		// Аудит пишется в той же транзакции, атомарно с отменой заказа.
-		err = InsertAuditLogInTx(tx, AuditOrderCanceled(&order, ActorPaymentProvider))
+		// Actor события заказа наследуется от платёжного события: admin refund
+		// wrapper меняет actor на admin, chargeback остаётся payment_provider.
+		// downgraded flag здесь ещё не известен — берём только actor.
+		actorEvent := auditEvent(&order, &currentSub, false)
+		if actorEvent == nil {
+			return errors.New("audit order event is nil")
+		}
+
+		canceledEvent := AuditOrderCanceled(&order, actorEvent.ActorType)
+		canceledEvent.ActorID = actorEvent.ActorID
+
+		err = InsertAuditLogInTx(tx, canceledEvent)
 		if err != nil {
 			return fmt.Errorf("audit order cancellation: %w", err)
 		}
@@ -679,9 +707,41 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 		// Чарджбэк/возврат журналируется в той же транзакции ровно один раз для
 		// любого успешного paid→canceled перехода — даже когда downgrade не
 		// потребовался. Ошибка аудита откатывает отмену и downgrade.
-		err = InsertAuditLogInTx(tx, auditEvent(&order, &currentSub, downgraded))
+		orderEvent := auditEvent(&order, &currentSub, downgraded)
+		if orderEvent == nil {
+			return errors.New("audit chargeback event is nil")
+		}
+
+		err = InsertAuditLogInTx(tx, orderEvent)
 		if err != nil {
 			return fmt.Errorf("audit chargeback: %w", err)
+		}
+
+		// Timeline адресуемой подписки: downgrade фиксируется событием
+		// downgraded_to_free, actor наследуется от события заказа
+		// (admin refund → admin, chargeback → payment_provider).
+		if downgraded {
+			reason := "chargeback_received"
+			if orderEvent.Event == AuditEventPaymentRefunded {
+				reason = "payment_refunded"
+			}
+
+			timeline := AuditDowngradedToFree(&currentSub, reason)
+			timeline.ActorType = orderEvent.ActorType
+			timeline.ActorID = orderEvent.ActorID
+			if strings.TrimSpace(order.ProviderPaymentID) != "" {
+				var timelineDetails map[string]any
+				jsonErr := json.Unmarshal([]byte(timeline.Details), &timelineDetails)
+				if jsonErr == nil {
+					timelineDetails["provider_payment_id"] = order.ProviderPaymentID
+					timeline.Details = marshalAuditDetails(timelineDetails)
+				}
+			}
+
+			err = InsertAuditLogInTx(tx, timeline)
+			if err != nil {
+				return fmt.Errorf("audit downgrade to free: %w", err)
+			}
 		}
 
 		result.Downgraded = downgraded

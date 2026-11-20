@@ -520,6 +520,9 @@ func AuditPaymentConfirmed(order *Order, sub *Subscription, product *Product, ne
 		"currency":        order.Currency,
 		"provider":        order.PaymentProvider,
 	}
+	if strings.TrimSpace(order.ProviderPaymentID) != "" {
+		details["provider_payment_id"] = order.ProviderPaymentID
+	}
 	if product != nil {
 		details["product_id"] = product.ID
 		details["product_name"] = product.Name
@@ -590,6 +593,9 @@ func AuditChargebackReceived(order *Order, sub *Subscription, downgraded bool) *
 		"provider":        order.PaymentProvider,
 		"downgraded":      downgraded,
 	}
+	if strings.TrimSpace(order.ProviderPaymentID) != "" {
+		details["provider_payment_id"] = order.ProviderPaymentID
+	}
 
 	return &AuditLog{
 		EntityType: EntityOrder,
@@ -613,6 +619,9 @@ func AuditPaymentRefunded(order *Order, sub *Subscription, downgraded bool) *Aud
 		"currency":        order.Currency,
 		"provider":        order.PaymentProvider,
 		"downgraded":      downgraded,
+	}
+	if strings.TrimSpace(order.ProviderPaymentID) != "" {
+		details["provider_payment_id"] = order.ProviderPaymentID
 	}
 
 	return &AuditLog{

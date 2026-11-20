@@ -2,6 +2,13 @@
 
 Дата: 2026-11-18; ревью-правки 2026-11-19 (верификация против кода на `899af44`, внесены замечания B1/B2/H1/H2). Ветка: `feature/telegram-stars`. Статус: **реализовано 2026-11-19** (этапы 2–8; все гейты зелёные: build/vet/lint 0 issues, 2227 тестов, -race чисто). План переработан после ревью (сверка кода на `899af44` + 4 независимых ревью).
 
+**Правки 2026-11-20 (safeguards):** код реализован, но **production-ready не заявляется до закрытия rollout-чеклиста §10.1** (включая закрытие legacy Platega settlement-окна). Новые гарантии:
+- Stars-клиент (`stars.New(paymentAPI)` → `orderService.SetStarsClient`) подключается в composition root **всегда**, независимо от активного `PAYMENT_PROVIDER`: старые Stars-invoices и возвраты работают и после переключения на Platega.
+- payment-клиент уменьшен до **4 c** (было 5 c); polling-инстанс по-прежнему без таймаута (D1).
+- XTR-товары создаются `is_active=false` и активируются только после переключения провайдера — активный XTR-товар не может продаваться через Platega (§10.1).
+- Rollout закрывает legacy Platega settlement/refund window до отключения callback (§10.1 шаги 2 и 8).
+- Recovery потерянных `successful_payment` через `getStarTransactions` — реализован в payment core этой же правки: `stars.Client.GetTransactions` (internal/service/payment/stars/transaction.go); транзакция Stars со спиченным payload доводит заказ до `paid` автоматически; ручная сверка по charge ID остаётся fallback для unmatched/manual случаев.
+
 **Уже реализовано (коммит `899af44`):** uuid→string во всех 5 сигнатурах `OrderRepository` + `database` + `testutil` + тесты (0 вхождений `uuid.`), `paymentLocks` строковый, `GetTransactionStatus(string)`, `AuditSubscriptionRenewed` параметризован по provider, Stars-ветка `reconcilePendingOrder` (order.go:1244-1247, с тестом), fee-skip в `SyncProviderFees`.
 
 **Осталось из прежнего этапа 2:** provider-параметр в `FindPendingPaymentOrder`/`FindOrCreatePendingPaymentOrder` (orders.go:114,174,206,229), атомарный Stars-TTL в find-or-create, in-process mutex вокруг find-or-create, `ConfirmOrderPaidCAS` += `providerPaymentID` + `provider_fee_cents`, `CancelPaidOrderAndDowngradeCAS` += `auditFn` (параметр `provider` там уже есть).
@@ -37,7 +44,7 @@
 
 | # | Решение | Почему | Что отменяет |
 |---|---|---|---|
-| D1 | Два клиента Telegram: polling-инстанс **не трогаем** (ни объект, ни отсутствие таймаута у его http.Client), плюс отдельный payment-инстанс `tgbotapi.NewBotAPIWithClient(token, APIEndpoint, &http.Client{Timeout: 5 * time.Second})` | Единственный бот в коде создан через `tgbotapi.NewBotAPI` (main.go:215) на клиенте **без** таймаута; `GetUpdates` держит соединение 60 c (`BotUpdateTimeout=60`, internal/config/constants.go:34-35) через тот же `bot.Client`, поэтому любой общий таймаут < 60 c (5 c, 9 c) убивает long-poll. Payment-инстанс изолирован: окно pre-checkout 10 c закрывается таймаутом 5 c (HTTP) + бюджетом 6 c (§5.2). `pre_checkout_query` обязательно добавляется в `AllowedUpdates` (сейчас только `message`, `callback_query`, main.go:624-627). Общий инстанс намеренно не трогаем: клиент без таймаута — текущее поведение; если таймаут когда-либо добавится, он обязан превышать `BotUpdateTimeout` (напр. 75 c), иначе polling уйдёт в цикл переподключений | «общий `NewBotAPIWithClient` с 9 s для всего бота» — такого кода в репозитории нет, а правило несовместимо с long-poll 60 c и остаётся неприменённым (5.2, этап 5, чек-лист #22 прежнего плана) |
+| D1 | Два клиента Telegram: polling-инстанс **не трогаем** (ни объект, ни отсутствие таймаута у его http.Client), плюс отдельный payment-инстанс `tgbotapi.NewBotAPIWithClient(token, APIEndpoint, &http.Client{Timeout: 4 * time.Second})` | Единственный бот в коде создан через `tgbotapi.NewBotAPI` (main.go:215) на клиенте **без** таймаута; `GetUpdates` держит соединение 60 c (`BotUpdateTimeout=60`, internal/config/constants.go:34-35) через тот же `bot.Client`, поэтому любой общий таймаут < 60 c (4 c, 9 c) убивает long-poll. Payment-инстанс изолирован: окно pre-checkout 10 c закрывается бюджетом validation 4–5 c + таймаутом HTTP 4 c = < 10 c (§5.2). `pre_checkout_query` обязательно добавляется в `AllowedUpdates` (сейчас только `message`, `callback_query`, main.go:624-627). Общий инстанс намеренно не трогаем: клиент без таймаута — текущее поведение; если таймаут когда-либо добавится, он обязан превышать `BotUpdateTimeout` (напр. 75 c), иначе polling уйдёт в цикл переподключений | «общий `NewBotAPIWithClient` с 9 s для всего бота» — такого кода в репозитории нет, а правило несовместимо с long-poll 60 c и остаётся неприменённым (5.2, этап 5, чек-лист #22 прежнего плана) |
 | D2 | Активный провайдер = `cfg.PaymentProvider` (`platega` по умолчанию \| `telegram_stars`). Существующий `service.PaymentProvider` (Platega-типы) не меняем, реестра нет | 5 гвардов `o.payment == nil` (order.go:561,903,1105,1189,1417) и Platega-специфичные типы не должны ломаться. Stars-ветка обязана обходить эти гарды ранним return (§4.4, §5.1 шаг 0) | `payment.Provider`, `Quote`, `ValidateAmount`, `Checkout`, `CheckoutKind`, `Receipt`, `Reconciler`, `Refunder` (§4.1 прежнего плана) |
 | D3 | **Invoice отправляет бот-слой.** Сервис создаёт pending-заказ, ставит локальный TTL и возвращает `PaymentInfo{Provider:"telegram_stars", ExpiresAt}` + `*database.Order` | Бот уже знает `chat_id`, `product` и получает `message_id` invoice из ответа `Send` — не нужно хранить его в БД; `payment.TelegramAPI` в сервисе не нужен | `payment.TelegramAPI{Send,Request,MakeRequest}` в сервисе, `Checkout` DTO, `payment_url = stars:<id>:<msg>` |
 | D4 | `provider_payment_id` (charge ID) Stars пишется **в том же CAS**, что и `status='paid'` | Отдельный attach+paid UPDATE делает CAS no-op (CAS смотрит `status IN ('pending','expired')`, orders.go:410) | Двухшаговый attach (§5.3 прежнего плана) |
@@ -214,7 +221,7 @@ func BuildInvoice(p InvoiceParams) (tgbotapi.InvoiceConfig, error)
 
 ### 5.2 Pre-checkout
 
-1. Отдельная ветка `HandleUpdate` **до** rate-limiter и обработки команд; собственный `ctx` с таймаутом **6 c**: ответ Telegram должен уйти ≤10 c, а payment-клиент ограничен 5 c (D1).
+1. Отдельная ветка `HandleUpdate` **до** rate-limiter и обработки команд; собственный `ctx` с таймаутом **5 c** на validation: бюджет pre-checkout — validation 4–5 c + HTTP 4 c (payment-клиент, D1) = < 10 c (окно Telegram).
 2. `OrderService.ValidateStarsPreCheckout(ctx, payload, telegramID, amount, currency)`:
    - payload → десятичный `order.ID` → `GetOrderByID`; заказ не найден → ошибка;
    - `order.PaymentProvider == "telegram_stars"`;
@@ -309,7 +316,7 @@ func BuildInvoice(p InvoiceParams) (tgbotapi.InvoiceConfig, error)
 | `internal/bot/command.go` | `HandlePaySupport`, `HandleTerms` (тексты уже есть в `legal_docs.go`) |
 | `internal/bot/messages.go` | Текст `MsgPaymentInProgress` для Stars (новый ключ, чтобы не ломать Platega) + ключ ошибки отправки invoice (M5) |
 | `internal/testutil/` | Fake `OrderRepository` под новые сигнатуры + fake payment API (`Send`/`Request`/`MakeRequest`) |
-| `cmd/bot/main.go` | `initBot` возвращает payment-инстанс (`http.Client{Timeout: 5s}`), `AllowedUpdates += pre_checkout_query` (main.go:624-627), `SetPaymentConfig` — по итоговому гейту §4.1: `(PAYMENT_ENABLED && PAYMENT_PROVIDER=platega) || PLATEGA_CALLBACK_ENABLED` (main.go:286-292) |
+| `cmd/bot/main.go` | `initBot` возвращает payment-инстанс (`http.Client{Timeout: 4s}`), `AllowedUpdates += pre_checkout_query` (main.go:624-627), `SetPaymentConfig` — по итоговому гейту §4.1: `(PAYMENT_ENABLED && PAYMENT_PROVIDER=platega) || PLATEGA_CALLBACK_ENABLED` (main.go:286-292); Stars-клиент (`stars.New(paymentAPI)` → `SetStarsClient`) создаётся **всегда**, независимо от активного провайдера — активный провайдер влияет только на новые продажи |
 | `cmd/bot/lifecycle.go` | Wiring: `stars.New(paymentAPI)` → `orderService.SetStarsClient`, `handler.SetPaymentBot`, Platega-клиент по флагам (lifecycle.go:138-146; создание только при `PAYMENT_ENABLED`, в Stars-режиме `payment interface` остаётся nil — это нормально, §4.4) |
 | `README.md`, `doc/operations.md`, `.env.example` | Новые env, порядок переключения, процедура возврата |
 
@@ -325,7 +332,7 @@ func BuildInvoice(p InvoiceParams) (tgbotapi.InvoiceConfig, error)
 | 4 | **Выполнен**: `OrderService`: Stars-ветки, `ConfirmStarsPayment`, `ValidateStarsPreCheckout`, `RefundStarsOrder`, общий хвост `confirmPaidOrderTail`, guard reconcile | `go test ./internal/service` |
 | 5 | **Выполнен**: Бот: payment-клиент, dispatch pre-checkout/successful_payment, buy-flow, back-callback, `/paysupport`, `/terms`, `/refund` | `go test ./internal/bot` |
 | 6 | **Выполнен**: UI и форматтеры (§6): `FormatStarsAmount`, `formatMoneyCents` XTR без деления на 100, XTR-фильтр списка, тексты M5/Stars | `go test ./internal/utils ./internal/bot` |
-| 7 | **Выполнен**: Wiring (`cmd/bot/main.go`: отдельный payment-инстанс D1, `AllowedUpdates += pre_checkout_query`, гейт `ShouldEnablePlategaCallback`; `lifecycle.go`: Platega-клиент по гейту). Отклонение при реализации: Stars-wiring (`SetStarsClient`/`SetPaymentBot`) — в `main.go` после `initBot` (шаг 7), а не в `initServices` (шаг 5): там paymentAPI ещё не существует; payment-инстанс один — и для invoice/pre-checkout, и для refund | `go build ./... && go test ./cmd/...` |
+| 7 | **Выполнен**: Wiring (`cmd/bot/main.go`: отдельный payment-инстанс D1, `AllowedUpdates += pre_checkout_query`, гейт `ShouldEnablePlategaCallback`; `lifecycle.go`: Platega-клиент по гейту). Отклонение при реализации: Stars-wiring (`SetStarsClient`/`SetPaymentBot`) — в `main.go` после `initBot` (шаг 7), а не в `initServices` (шаг 5): там paymentAPI ещё не существует; payment-инстанс один — и для invoice/pre-checkout, и для refund. Правка 2026-11-20: `SetStarsClient(stars.New(paymentAPI))` вызывается **безусловно** — Stars-клиент подключён всегда, независимо от активного `PAYMENT_PROVIDER` (возвраты и recovery работают после переключения на Platega) | `go build ./... && go test ./cmd/...` |
 | 8 | **Выполнен**: Документация: README, doc/operations.md (§8 Stars: rollout/rollback/compliance//refund), doc/installation.md, .env.example | — |
 
 Финальные гейты:
@@ -397,14 +404,14 @@ go test -race ./...
 
 ### 10.1 Переключение на Stars
 
-1. Развернуть код с `PAYMENT_PROVIDER=platega` — поведение не меняется.
-2. Создать **отдельные** XTR-товары (`INSERT`, `currency='XTR'`, `price_cents` = цена в Stars). RUB-товары и их цены не трогать: `UpdateProductGuarded` запрещает менять цену после первого заказа. После создания **деактивировать RUB-товары** (`is_active=false`): при `PAYMENT_PROVIDER=telegram_stars` список тарифов уже фильтруется по `currency='XTR'` (§4.5), но деактивация убирает RUB из любой другой выдачи; цены и строки RUB-товаров при этом не изменяются (M1).
-3. Проверить активные товары: `currency='XTR'`, `price_cents > 0`, лимиты Telegram.
-4. Если есть незавершённые Platega-заказы → `PLATEGA_CALLBACK_ENABLED=true` + оставить Platega-креды (расчёт старого без новых продаж).
-5. `PAYMENT_PROVIDER=telegram_stars`, `PAYMENT_ENABLED=true`, перезапуск.
+1. Развернуть код с `PAYMENT_PROVIDER=platega` — поведение продаж не меняется. Stars-клиент подключается при старте всегда: возвраты `/refund` по уже оплаченным Stars-заказам работают при любом активном провайдере.
+2. **Закрыть/settle legacy pending Platega.** Если есть незавершённые Platega-заказы — дождаться их расчёта (оплата/возврат/отмена) при `PLATEGA_CALLBACK_ENABLED=true` и оставленных Platega-кредах. Не переключать провайдера, пока окно settlement не закрыто (шаг 8).
+3. Создать **отдельные** XTR-товары (`INSERT`, `currency='XTR'`, `price_cents` = цена в Stars) в состоянии **`is_active=false`**: до переключения провайдера Platega их не видит — активный XTR-товар не может быть продан через Platega. RUB-товары и их цены не трогать: `UpdateProductGuarded` запрещает менять цену после первого заказа (M1).
+4. **Переключить провайдера:** `PAYMENT_PROVIDER=telegram_stars`, `PAYMENT_ENABLED=true`, перезапуск.
+5. **Активировать XTR-товары** (`is_active=true`) и проверить: `currency='XTR'`, `price_cents > 0`, лимиты Telegram. После переключения деактивировать RUB-товары (`is_active=false`), если они ещё активны, — список тарифов фильтруется по `currency='XTR'` (§4.5), но деактивация убирает RUB из любой другой выдачи; цены и строки RUB-товаров при этом не изменяются (M1).
 6. Проверить до приёма трафика: `/paysupport` и `/terms` отвечают; на балансе бота достаточно Stars для возвратов.
 7. Smoke: buy → invoice → pre-checkout `OK=true` → оплата → продление + уведомление; повторный клик → «счёт уже отправлен»; `/refund <id>` → `canceled` + `payment_refunded`.
-8. После расчёта старых Platega-заказов: `PLATEGA_CALLBACK_ENABLED=false`, Platega-креды ротируются по регламенту секретов.
+8. **Держать legacy callback доступным на окно settlement:** `PLATEGA_CALLBACK_ENABLED=true`, пока старые Platega-заказы рассчитываются (в т.ч. опоздавшие оплаты в течение TTL ссылок). После расчёта: `PLATEGA_CALLBACK_ENABLED=false`, Platega-креды ротируются по регламенту секретов.
 
 ### 10.2 Rollback
 
@@ -426,8 +433,8 @@ go test -race ./...
 |---|---|---|
 | 1 | Схема БД не меняется: `payment_provider`, `provider_payment_id`, `payment_expires_at`, `payment_creation_uncertain`, `provider_fee_cents` достаточно | ✓ проверено по миграциям: `provider_payment_id`=017, `payment_url/payment_expires_at/payment_creation_uncertain`=031, индексы=034, `provider_fee_cents/callback_amount_cents`=035 |
 | 2 | Активный provider из конфига; Platega-flow не переписывается; реестра провайдеров нет | D2, §4.4 |
-| 3 | Polling-инстанс не трогаем (ни объект, ни отсутствие таймаута у его клиента); payment-клиент (5 c) — отдельный инстанс; `AllowedUpdates += pre_checkout_query` | D1, этап 7 |
-| 4 | Pre-checkout: ctx 6 c, ответ ≤10 c, `OK=false` при любой ошибке | §5.2, этап 5 |
+| 3 | Polling-инстанс не трогаем (ни объект, ни отсутствие таймаута у его клиента); payment-клиент (4 c) — отдельный инстанс; `AllowedUpdates += pre_checkout_query` | D1, этап 7 |
+| 4 | Pre-checkout: ctx 5 c (validation), validation + HTTP 4 c = < 10 c, `OK=false` при любой ошибке | §5.2, этап 5 |
 | 5 | Сумма Stars — целое число Stars, точное равенство, fee=0; Platega-парсер не применяется | D5, §5.2–5.3 |
 | 6 | Charge ID и `status='paid'` — одна транзакция | D4, §4.2 |
 | 7 | `payment_creation_uncertain` Stars не выставляет + TTL проставляется атомарно в tx создания → нет вечной блокировки покупок | D8, §4.2, §5.1 |
@@ -437,11 +444,11 @@ go test -race ./...
 | 11 | Конфиг: allowlist provider, креды только под активным платежом/callback-режимом, `PLATEGA_CALLBACK_ENABLED`, `STARS_INVOICE_TTL` | §4.1 |
 | 12 | Форматтеры: XTR целым числом, RUB-вывод не изменён | §6.1 |
 | 13 | `/paysupport` + `/terms`; Terms-текст уже есть, дубли не создаём | D10, §10.3 |
-| 14 | Rollback = остановка продаж + рабочий возврат | §10.2 |
+| 14 | Rollback = остановка продаж + рабочий возврат (Stars-клиент подключён всегда) | §10.2 |
 | 15 | Список файлов, интерфейсов, fake-ов и тестов полный | §7, §9 |
 | 16 | Единственный источник XTR-форматирования, обрезка title в пределах лимита | §6.1, §4.3 |
 
-**Статус:** план приведён к непротиворечивому виду, решения приняты (D1–D14); замечания верификации от 2026-11-19 (B1/B2 — конфиг, H1 — D1, H2 — ранняя Stars-ветка, M1–M5, L1–L8 — точность ссылок и крайние случаи) внесены. Реализация начинается с этапа 2.
+**Статус:** план приведён к непротиворечивому виду, решения приняты (D1–D14); замечания верификации от 2026-11-19 (B1/B2 — конфиг, H1 — D1, H2 — ранняя Stars-ветка, M1–M5, L1–L8 — точность ссылок и крайние случаи) внесены. Реализация этапов 2–8 выполнена. **Production-ready не заявляется до закрытия rollout-чеклиста §10.1**: закрытие/settle legacy Platega pending, XTR-товары `is_active=false` до переключения провайдера, активация XTR только после switch, legacy callback доступен на окно settlement, Stars refund client работает после switch (см. safeguards в начале документа). Recovery потерянных `successful_payment` через `getStarTransactions` реализован в payment core (клиент `stars.Client.GetTransactions`); ручная сверка по charge ID — fallback для unmatched/manual случаев.
 
 ## Официальные ссылки API Telegram
 

@@ -51,6 +51,50 @@ type pendingInvite struct {
 	expiresAt time.Time
 }
 
+// starsSentInvoiceSet — bounded set успешно отправленных Stars-invoice order IDs:
+// «протухший» replay acceptance-кнопки после успеха не создаёт второй invoice.
+// Кольцевой буфер на max элементов: переполнение вытесняет самый старый id,
+// память ограничена. In-flight параллельные отправки guard-ит starsInvoiceInFlight.
+type starsSentInvoiceSet struct {
+	mu   sync.Mutex
+	ring []uint
+	pos  int
+	set  map[uint]struct{}
+}
+
+const starsSentInvoicesMax = 1024
+
+func newStarsSentInvoiceSet(max int) *starsSentInvoiceSet {
+	return &starsSentInvoiceSet{
+		ring: make([]uint, max),
+		set:  make(map[uint]struct{}, max),
+	}
+}
+
+// Has reports whether the order invoice was already sent successfully.
+func (s *starsSentInvoiceSet) Has(orderID uint) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, ok := s.set[orderID]
+
+	return ok
+}
+
+// Add records the order invoice as sent, evicting the oldest entry when full.
+func (s *starsSentInvoiceSet) Add(orderID uint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if old := s.ring[s.pos]; old != 0 {
+		delete(s.set, old)
+	}
+
+	s.ring[s.pos] = orderID
+	s.pos = (s.pos + 1) % len(s.ring)
+	s.set[orderID] = struct{}{}
+}
+
 // PendingInviteTTL -- время жизни pending invite в кэше
 const PendingInviteTTL = 60 * time.Minute
 
@@ -76,6 +120,12 @@ type Handler struct {
 	paymentEnabled      bool
 	version             string
 	referral            *ReferralHandler
+
+	// starsInvoiceInFlight — in-flight guard текущей отправки invoice (ключ order.ID,
+	// записи удаляются по завершении); starsSentInvoices — bounded set успешно
+	// отправленных invoice: «протухший» replay acceptance-кнопки не создаёт дубль.
+	starsInvoiceInFlight sync.Map
+	starsSentInvoices    *starsSentInvoiceSet
 
 	// Admin rate limiting (separate from user rate limit)
 	adminRateLimiters map[int64]*ratelimiter.TokenBucket
@@ -117,6 +167,7 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.BotStor
 		cache:               NewSubscriptionCache(CacheMaxSize, CacheTTL),
 		inProgressSyncMap:   sync.Map{},
 		pendingInvites:      make(map[int64]pendingInvite),
+		starsSentInvoices:   newStarsSentInvoiceSet(starsSentInvoicesMax),
 		pendingMu:           sync.RWMutex{},
 		documentMessages:    make(map[int][]int),
 		botConfig:           botConfig,
@@ -669,9 +720,74 @@ func (h *Handler) ClearAdminSendRateLimit(chatID int64) {
 	}
 }
 
-// preCheckoutTimeout ограничивает бюджет ответа на pre_checkout_query:
-// окно Telegram — 10 секунд, payment-клиент ограничен 5-секундным таймаутом (D1).
-const preCheckoutTimeout = 6 * time.Second
+// preCheckoutTimeout ограничивает бюджет ответа на pre_checkout_query.
+//
+// Суммарный бюджет укладывается в окно Telegram 10 секунд и строго
+// последовательный: 5s — валидация заказа в БД (ValidateStarsPreCheckout, одна
+// операция, никаких параллельных вызовов) + до 4s — HTTP-ответ answerPreCheckout
+// через payment-клиент с таймаутом 4s. Итого worst case ≤9s < 10s.
+const preCheckoutTimeout = 5 * time.Second
+
+// isFinancialUpdate сообщает, что апдейт должен пройти вне общего rate limiter:
+// pre_checkout_query обрабатывается отдельной веткой выше, здесь —
+// successful_payment и команды /paysupport, /terms (compliance: платёжные
+// апдейты не отбрасываются лимитом).
+func (h *Handler) isFinancialUpdate(update tgbotapi.Update) bool {
+	if update.Message == nil {
+		return false
+	}
+
+	if update.Message.SuccessfulPayment != nil {
+		return true
+	}
+
+	if !update.Message.IsCommand() {
+		return false
+	}
+
+	switch normalizeCommand(update.Message.Command()) {
+	case "paysupport", "terms":
+		return true
+	default:
+		return false
+	}
+}
+
+// runFinancialUpdate диспетчеризует финансовый апдейт вне общего rate limiter,
+// сохраняя стандартный HandlerTimeout и метрики.
+func (h *Handler) runFinancialUpdate(ctx context.Context, update tgbotapi.Update) {
+	ctx, cancel := h.withTimeout(ctx)
+	defer cancel()
+
+	start := time.Now()
+
+	var (
+		command string
+		err     error
+	)
+
+	switch {
+	case update.Message.SuccessfulPayment != nil:
+		command = "successful_payment"
+		err = h.handleSuccessfulPayment(ctx, update)
+	case normalizeCommand(update.Message.Command()) == "paysupport":
+		command = "paysupport"
+		err = h.HandlePaySupport(ctx, update)
+	default:
+		command = "terms"
+		err = h.HandleTerms(ctx, update)
+	}
+
+	metrics.BotUpdateDuration.WithLabelValues(command).Observe(time.Since(start).Seconds())
+
+	if err != nil {
+		metrics.BotUpdatesTotal.WithLabelValues(command, "error").Inc()
+
+		return
+	}
+
+	metrics.BotUpdatesTotal.WithLabelValues(command, "success").Inc()
+}
 
 // HandleUpdate routes incoming Telegram updates through the bot handlers.
 func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
@@ -679,6 +795,14 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 	// в окно Telegram 10 секунд независимо от лимитов и очереди обработчиков.
 	if update.PreCheckoutQuery != nil {
 		h.handlePreCheckout(ctx, update)
+
+		return
+	}
+
+	// Финансовые ветки вне общего rate limiter (compliance: платёжные апдейты
+	// не отбрасываются лимитом), но с обычным handler timeout и метриками.
+	if h.isFinancialUpdate(update) {
+		h.runFinancialUpdate(ctx, update)
 
 		return
 	}
@@ -736,10 +860,6 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 
 	if update.Message != nil {
 		switch {
-		case update.Message.SuccessfulPayment != nil:
-			// Stars successful_payment идёт до generic non-command и broadcast draft:
-			// подтверждение оплаты — финансовая ветка, а не текст/драфт.
-			err = h.handleSuccessfulPayment(ctx, update)
 		case update.Message.IsCommand():
 			if h.isAdmin(chatID) && h.broadcastSessionActive(chatID) && update.Message.Command() != "broadcast" {
 				h.clearBroadcastSession(chatID)
@@ -770,10 +890,6 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 				err = h.HandleVersion(ctx, update)
 			case "lastreg":
 				err = h.handleAdminLastReg(ctx, update.Message.Chat.ID, update.Message.From.UserName, 0)
-			case "paysupport":
-				err = h.HandlePaySupport(ctx, update)
-			case "terms":
-				err = h.HandleTerms(ctx, update)
 			case "refund":
 				err = h.HandleRefund(ctx, update)
 			default:
@@ -901,6 +1017,21 @@ func (h *Handler) handleSuccessfulPayment(ctx context.Context, update tgbotapi.U
 	}
 
 	if !confirmation.Activated {
+		if confirmation.AutoRefunded {
+			// Сервис уже вернул Stars покупателю: понятное уведомление вместо
+			// canceled-order warning; service issue alert админу уходит отдельно,
+			// если автовозврат не удался (тогда AutoRefunded == false).
+			refundNotice := tgbotapi.NewMessage(chatID,
+				"↩️ Платёж возвращён: Stars зачислены обратно на ваш аккаунт. Если остались вопросы, напишите в /paysupport")
+			_, sendErr := h.paymentAPI().Send(refundNotice)
+			if sendErr != nil {
+				logger.Warn("failed to notify user about auto refund",
+					zap.Int64("chat_id", chatID), zap.Error(sendErr))
+			}
+
+			return nil
+		}
+
 		if confirmation.Order == nil {
 			// Заказ ссылается на удалённый product/subscription: активировать
 			// нечего — ручной разбор. Сообщение в /paysupport, не «отменённый

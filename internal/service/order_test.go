@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1825,11 +1826,10 @@ func TestRequestPayment_StarsCreatesPendingWithTTL(t *testing.T) {
 	product := &database.Product{ID: 7, PlanID: 2, Name: "Premium", PriceCents: 199, Currency: "XTR", IsActive: true}
 
 	var (
-		gotProvider  string
-		gotTTL       *time.Time
-		gotCurrency  string
-		gotAmount    int64
-		findProvider string
+		gotProvider string
+		gotTTL      *time.Time
+		gotCurrency string
+		gotAmount   int64
 	)
 
 	mock := &testutil.ServiceStoreFake{
@@ -1842,15 +1842,10 @@ func TestRequestPayment_StarsCreatesPendingWithTTL(t *testing.T) {
 		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
 			return &database.Plan{ID: 2, IsActive: true}, nil
 		},
-		FindPendingPaymentOrderFunc: func(_ context.Context, _, _ uint, provider string, _ time.Time) (*database.Order, error) {
-			findProvider = provider
-
-			return nil, nil
-		},
-		FindOrCreatePendingPaymentOrderFunc: func(_ context.Context, _, _ uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, error) {
+		FindOrCreatePendingPaymentOrderFunc: func(_ context.Context, _, _ uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, bool, error) {
 			gotProvider, gotCurrency, gotAmount, gotTTL = provider, currency, amountCents, paymentExpiresAt
 
-			return &database.Order{ID: 55, SubscriptionID: 3, ProductID: 7, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: provider, PaymentExpiresAt: paymentExpiresAt, CreatedAt: now}, nil
+			return &database.Order{ID: 55, SubscriptionID: 3, ProductID: 7, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: provider, PaymentExpiresAt: paymentExpiresAt, CreatedAt: now}, true, nil
 		},
 	}
 	o := NewOrderService(mock, nil, nil, nil, "", cfg)
@@ -1860,7 +1855,6 @@ func TestRequestPayment_StarsCreatesPendingWithTTL(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, order)
 
-	assert.Equal(t, "telegram_stars", findProvider, "lookup must use the Stars provider")
 	assert.Equal(t, "telegram_stars", gotProvider)
 	assert.Equal(t, "XTR", gotCurrency)
 	assert.Equal(t, int64(199), gotAmount)
@@ -1887,13 +1881,9 @@ func TestRequestPayment_StarsLivePendingReturnsAlreadyInProgress(t *testing.T) {
 		GetPlanByIDFunc: func(context.Context, uint) (*database.Plan, error) {
 			return &database.Plan{ID: 2, IsActive: true}, nil
 		},
-		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
-			return pending, nil
-		},
-		FindOrCreatePendingPaymentOrderFunc: func(context.Context, uint, uint, string, int64, string, *time.Time, time.Time) (*database.Order, error) {
-			t.Fatal("find-or-create must not run while a live pending exists")
-
-			return nil, errors.New("unreachable")
+		FindOrCreatePendingPaymentOrderFunc: func(context.Context, uint, uint, string, int64, string, *time.Time, time.Time) (*database.Order, bool, error) {
+			// reuse через created=false: победителя определяет репозиторий.
+			return pending, false, nil
 		},
 	}
 	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", TelegramAdminID: 999})
@@ -2126,6 +2116,113 @@ func TestConfirmStarsPayment_ExpiredOrderActivatesWithoutGrace(t *testing.T) {
 	assert.True(t, casCalled)
 }
 
+func TestConfirmStarsPayment_DuplicateChargeOnPaidOrderAutoRefundsAndSetsFlag(t *testing.T) {
+	t.Parallel()
+
+	existingCharge := "charge_existing"
+	duplicateCharge := "charge_duplicate"
+
+	paidOrder := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusPaid, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars, ProviderPaymentID: existingCharge}
+	product := &database.Product{ID: 7, PlanID: 2, Name: "Premium", PriceCents: 199, Currency: "XTR"}
+
+	var capturedRefundTelegramID int64
+	var capturedRefundChargeID string
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return paidOrder, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) { return product, nil },
+	}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o.SetStarsClient(stars.New(&testutil.BotAPI{
+		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			if endpoint == "refundStarPayment" {
+				capturedRefundTelegramID, _ = strconv.ParseInt(params["user_id"], 10, 64)
+				capturedRefundChargeID = params["telegram_payment_charge_id"]
+
+				return &tgbotapi.APIResponse{Ok: true}, nil
+			}
+
+			return &tgbotapi.APIResponse{Ok: true, Result: json.RawMessage(`{}`)}, nil
+		},
+	}))
+
+	confirmation, err := o.ConfirmStarsPayment(context.Background(), duplicateCharge, "31", 199, "XTR", 42)
+	require.NoError(t, err)
+	require.NotNil(t, confirmation)
+	assert.False(t, confirmation.Activated)
+	assert.True(t, confirmation.AutoRefunded)
+	assert.Equal(t, existingCharge, confirmation.Order.ProviderPaymentID)
+	assert.Equal(t, int64(42), capturedRefundTelegramID)
+	assert.Equal(t, duplicateCharge, capturedRefundChargeID)
+}
+
+func TestConfirmStarsPayment_DuplicateChargeOnCanceledOrderAutoRefundsAndSetsFlag(t *testing.T) {
+	t.Parallel()
+
+	duplicateCharge := "charge_dup_cancel"
+
+	canceledOrder := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusCanceled, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars, ProviderPaymentID: "charge_canc"}
+
+	var capturedRefundTelegramID int64
+	var capturedRefundChargeID string
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return canceledOrder, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 99}, nil
+		},
+	}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o.SetStarsClient(stars.New(&testutil.BotAPI{
+		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			if endpoint == "refundStarPayment" {
+				capturedRefundTelegramID, _ = strconv.ParseInt(params["user_id"], 10, 64)
+				capturedRefundChargeID = params["telegram_payment_charge_id"]
+
+				return &tgbotapi.APIResponse{Ok: true}, nil
+			}
+
+			return &tgbotapi.APIResponse{Ok: true, Result: json.RawMessage(`{}`)}, nil
+		},
+	}))
+
+	confirmation, err := o.ConfirmStarsPayment(context.Background(), duplicateCharge, "31", 199, "XTR", 99)
+	require.NoError(t, err)
+	require.NotNil(t, confirmation)
+	assert.False(t, confirmation.Activated)
+	assert.True(t, confirmation.AutoRefunded)
+	assert.Equal(t, int64(99), capturedRefundTelegramID)
+	assert.Equal(t, duplicateCharge, capturedRefundChargeID)
+}
+
+func TestConfirmStarsPayment_DuplicateChargeRefundFailsStillSetsFlag(t *testing.T) {
+	t.Parallel()
+
+	paidOrder := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusPaid, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars, ProviderPaymentID: "charge_first"}
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return paidOrder, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+	}
+
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o.SetStarsClient(stars.New(&testutil.BotAPI{
+		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			return nil, errors.New("telegram rate limit")
+		},
+	}))
+
+	confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_second", "31", 199, "XTR", 42)
+	require.NoError(t, err)
+	require.NotNil(t, confirmation)
+	assert.False(t, confirmation.AutoRefunded, "refund failed should set AutoRefunded=false")
+}
+
 func TestConfirmStarsPayment_CanceledOrderAlertsAdmin(t *testing.T) {
 	t.Parallel()
 
@@ -2153,10 +2250,11 @@ func TestConfirmStarsPayment_CanceledOrderAlertsAdmin(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, confirmation.Activated, "canceled→paid must not activate")
 	assert.False(t, casCalled, "CAS must not run for canceled orders")
+	assert.True(t, confirmation.AutoRefunded)
 
 	messages := adminBot.GetAllSentMessages()
 	require.Len(t, messages, 1)
-	assert.Contains(t, messages[0].Text, "stars_paid_after_cancel")
+	assert.Contains(t, messages[0].Text, "stars_duplicate_charge_refunded")
 }
 
 func TestConfirmStarsPayment_ClientDisabledReturnsPaymentDisabled(t *testing.T) {
@@ -2434,4 +2532,82 @@ func TestRefundStarsOrder_ClientDisabledReturnsPaymentDisabled(t *testing.T) {
 
 	_, err := o.RefundStarsOrder(context.Background(), 31)
 	require.ErrorIs(t, err, ErrPaymentDisabled)
+}
+
+func TestRequestPayment_PlategaRejectsXTRBeforePendingLookup(t *testing.T) {
+	t.Parallel()
+
+	pendingLookupCalled := false
+	mock := &testutil.ServiceStoreFake{
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return &database.Product{ID: 9, PlanID: 2, Name: "Stars", PriceCents: 199, Currency: stars.Currency, IsActive: true}, nil
+		},
+		FindPendingPaymentOrderFunc: func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
+			pendingLookupCalled = true
+
+			return nil, nil
+		},
+	}
+	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{PaymentProvider: database.PaymentProviderPlatega})
+
+	_, _, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 9})
+	require.ErrorIs(t, err, ErrCurrencyMismatch)
+	assert.False(t, pendingLookupCalled, "XTR must be rejected before a Platega pending intent can be reused")
+}
+
+func TestOrderService_ReconcilePendingOrders_SkipsPlategaWhenClientUnavailable(t *testing.T) {
+	t.Parallel()
+
+	order := database.Order{
+		ID: 91, SubscriptionID: 13, ProductID: 18, Status: database.OrderStatusPending,
+		AmountCents: 2300, Currency: "RUB", PaymentProvider: database.PaymentProviderPlatega,
+		ProviderPaymentID: "550e8400-e29b-41d4-a716-446655440291", PaymentExpiresAt: testutil.PtrTime(time.Now().UTC().Add(-time.Hour)),
+	}
+	mock := &testutil.ServiceStoreFake{
+		GetStalePendingOrdersAfterIDFunc: func(_ context.Context, _ time.Time, afterID uint, _ int) ([]database.Order, error) {
+			if order.ID <= afterID {
+				return nil, nil
+			}
+
+			return []database.Order{order}, nil
+		},
+		ExpirePendingOrderFunc: func(context.Context, uint) (bool, error) {
+			t.Fatal("unavailable Platega client must not mutate the legacy order")
+
+			return false, nil
+		},
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars})
+
+	require.NoError(t, o.ReconcilePendingOrders(context.Background(), 10))
+}
+
+func TestRefundStarsOrder_ProviderRefundedStateFailureIsTyped(t *testing.T) {
+	t.Parallel()
+
+	order := starsRefundOrder()
+	starsBot := testutil.NewBotAPI()
+	starsBot.MakeRequestFunc = func(string, tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+		return &tgbotapi.APIResponse{Ok: true}, nil
+	}
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+		GetPlanByNameFunc: func(context.Context, string) (*database.Plan, error) {
+			return nil, errors.New("database unavailable")
+		},
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars})
+	o.SetStarsClient(stars.New(starsBot))
+
+	_, err := o.RefundStarsOrder(context.Background(), 31)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrStarsRefundStatePending)
+
+	var stateErr *StarsRefundStateError
+	require.ErrorAs(t, err, &stateErr)
+	assert.Equal(t, order.ID, stateErr.OrderID)
+	assert.Equal(t, order.ProviderPaymentID, stateErr.ChargeID)
 }

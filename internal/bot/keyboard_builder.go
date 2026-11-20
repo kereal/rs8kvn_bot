@@ -78,6 +78,18 @@ func (kb *KeyboardBuilder) BuyProductConfirm(product *database.Product, paymentU
 	}}
 }
 
+// StarsTermsAccept builds the keyboard of the Terms-acceptance message: the
+// only button that leads to an invoice, keyed by order/product/card IDs.
+func (kb *KeyboardBuilder) StarsTermsAccept(orderID, productID uint, cardChatID int64, cardMsgID uint) tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(
+				"✅ Принимаю условия и перехожу к оплате",
+				fmt.Sprintf("stars_accept_%d_%d_%d_%d", orderID, productID, cardChatID, cardMsgID)),
+		),
+	)
+}
+
 // StarsInvoiceBack builds the keyboard of the «Счёт отправлен ниже» card: the
 // back button is attached to the card itself and carries the invoice message id
 // so the back callback can delete only the invoice (§5.1).

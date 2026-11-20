@@ -21,9 +21,10 @@ func TestFindOrCreatePendingPaymentOrder_ReusesActiveIntent(t *testing.T) {
 	require.NoError(t, svc.db.Create(product).Error)
 
 	now := time.Now().UTC().Truncate(time.Second)
-	first, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderPlatega, product.PriceCents, product.Currency, nil, now)
+	first, firstCreated, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderPlatega, product.PriceCents, product.Currency, nil, now)
 	require.NoError(t, err)
 	require.NotNil(t, first)
+	assert.True(t, firstCreated)
 
 	first.ProviderPaymentID = "550e8400-e29b-41d4-a716-446655440201"
 	first.PaymentURL = "https://pay.example/intent"
@@ -31,9 +32,10 @@ func TestFindOrCreatePendingPaymentOrder_ReusesActiveIntent(t *testing.T) {
 	first.PaymentExpiresAt = &expires
 	require.NoError(t, svc.db.Save(first).Error)
 
-	second, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderPlatega, product.PriceCents, product.Currency, nil, now.Add(time.Minute))
+	second, secondCreated, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderPlatega, product.PriceCents, product.Currency, nil, now.Add(time.Minute))
 	require.NoError(t, err)
 	require.NotNil(t, second)
+	assert.False(t, secondCreated)
 	assert.Equal(t, first.ID, second.ID)
 	assert.Equal(t, first.ProviderPaymentID, second.ProviderPaymentID)
 }
@@ -50,7 +52,7 @@ func TestFindOrCreatePendingPaymentOrder_DoesNotAuditExpiryOnRollback(t *testing
 	require.NoError(t, svc.db.Create(product).Error)
 
 	now := time.Now().UTC().Truncate(time.Second)
-	old, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderPlatega, product.PriceCents, product.Currency, nil, now)
+	old, _, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderPlatega, product.PriceCents, product.Currency, nil, now)
 	require.NoError(t, err)
 
 	expires := now.Add(-time.Minute)
@@ -58,7 +60,7 @@ func TestFindOrCreatePendingPaymentOrder_DoesNotAuditExpiryOnRollback(t *testing
 
 	// A negative amount violates the orders CHECK constraint *after* the expiry
 	// update inside the same transaction, so the transaction rolls back.
-	_, err = svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderPlatega, -1, product.Currency, nil, now)
+	_, _, err = svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderPlatega, -1, product.Currency, nil, now)
 	require.Error(t, err)
 
 	var stored Order
@@ -82,7 +84,7 @@ func TestFindOrCreatePendingPaymentOrder_ExpiresAndCreatesReplacement(t *testing
 	require.NoError(t, svc.db.Create(product).Error)
 
 	now := time.Now().UTC().Truncate(time.Second)
-	old, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderPlatega, product.PriceCents, product.Currency, nil, now)
+	old, _, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderPlatega, product.PriceCents, product.Currency, nil, now)
 	require.NoError(t, err)
 
 	expires := now.Add(-time.Minute)
@@ -92,9 +94,10 @@ func TestFindOrCreatePendingPaymentOrder_ExpiresAndCreatesReplacement(t *testing
 		"payment_url":         "https://pay.example/old",
 	}).Error)
 
-	replacement, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderPlatega, product.PriceCents, product.Currency, nil, now)
+	replacement, replacementCreated, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderPlatega, product.PriceCents, product.Currency, nil, now)
 	require.NoError(t, err)
 	require.NotNil(t, replacement)
+	assert.True(t, replacementCreated)
 	assert.NotEqual(t, old.ID, replacement.ID)
 	assert.Equal(t, OrderStatusExpired, func() OrderStatus {
 		var stored Order
@@ -125,7 +128,7 @@ func TestFindOrCreatePendingPaymentOrder_SetsPaymentExpiresAtAtomically(t *testi
 	now := time.Now().UTC().Truncate(time.Second)
 	expires := now.Add(30 * time.Minute)
 
-	stars, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderTelegramStars, product.PriceCents, product.Currency, &expires, now)
+	stars, _, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderTelegramStars, product.PriceCents, product.Currency, &expires, now)
 	require.NoError(t, err)
 	require.NotNil(t, stars)
 	require.NotNil(t, stars.PaymentExpiresAt, "Stars TTL must be part of the pending INSERT")
@@ -137,7 +140,7 @@ func TestFindOrCreatePendingPaymentOrder_SetsPaymentExpiresAtAtomically(t *testi
 	assert.True(t, expires.Equal(*stored.PaymentExpiresAt))
 	assert.Equal(t, PaymentProviderTelegramStars, stored.PaymentProvider)
 
-	platega, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, plategaProduct.ID, PaymentProviderPlatega, plategaProduct.PriceCents, plategaProduct.Currency, nil, now)
+	platega, _, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, plategaProduct.ID, PaymentProviderPlatega, plategaProduct.PriceCents, plategaProduct.Currency, nil, now)
 	require.NoError(t, err)
 	require.NotNil(t, platega)
 
@@ -163,7 +166,7 @@ func TestFindOrCreatePendingPaymentOrder_ProviderFilterPendingLookup(t *testing.
 	require.NoError(t, svc.db.Create(plategaProduct).Error)
 
 	now := time.Now().UTC().Truncate(time.Second)
-	stars, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderTelegramStars, product.PriceCents, product.Currency, nil, now)
+	stars, _, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderTelegramStars, product.PriceCents, product.Currency, nil, now)
 	require.NoError(t, err)
 	require.NotNil(t, stars)
 
@@ -176,7 +179,13 @@ func TestFindOrCreatePendingPaymentOrder_ProviderFilterPendingLookup(t *testing.
 	require.NotNil(t, foundStars)
 	assert.Equal(t, stars.ID, foundStars.ID)
 
-	platega, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, plategaProduct.ID, PaymentProviderPlatega, plategaProduct.PriceCents, plategaProduct.Currency, nil, now)
+	plategaSameProduct, plategaSameCreated, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, product.ID, PaymentProviderPlatega, product.PriceCents, product.Currency, nil, now)
+	require.NoError(t, err)
+	require.NotNil(t, plategaSameProduct)
+	assert.True(t, plategaSameCreated)
+	assert.NotEqual(t, stars.ID, plategaSameProduct.ID, "different providers must not reuse the same pending intent")
+
+	platega, _, err := svc.FindOrCreatePendingPaymentOrder(ctx, sub.ID, plategaProduct.ID, PaymentProviderPlatega, plategaProduct.PriceCents, plategaProduct.Currency, nil, now)
 	require.NoError(t, err)
 	require.NotNil(t, platega)
 

@@ -113,6 +113,24 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 		if err != nil {
 			return fmt.Errorf("handle buy_product: %w", err)
 		}
+	case strings.HasPrefix(data, "stars_accept_"):
+		// stars_accept_<order_id>_<product_id>_<card_chat_id>_<card_msg_id> —
+		// acceptance-кнопка из сообщения с условиями в личном чате покупателя.
+		raw := strings.TrimPrefix(data, "stars_accept_")
+		orderID, productID, cardChatID, cardMsgID, ok := parseStarsAcceptPayload(raw)
+		if !ok {
+			logger.Warn("invalid stars_accept callback payload",
+				zap.String("data", data))
+
+			return nil
+		}
+
+		err := c.h.getSubHandler().handleStarsAccept(ctx,
+			chatID, cardChatID, update.CallbackQuery.From.ID, username,
+			update.CallbackQuery.Message.MessageID, cardMsgID, orderID, productID)
+		if err != nil {
+			return fmt.Errorf("handle stars_accept: %w", err)
+		}
 	case strings.HasPrefix(data, "stars_invoice_back_"):
 		raw := strings.TrimPrefix(data, "stars_invoice_back_")
 
@@ -124,7 +142,7 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 			return nil
 		}
 
-		err := c.handleStarsInvoiceBack(ctx, chatID, username, update.CallbackQuery.Message.MessageID, invoiceMsgID, productID)
+		err := c.handleStarsInvoiceBack(ctx, chatID, update.CallbackQuery.From.ID, username, update.CallbackQuery.Message.MessageID, invoiceMsgID, productID)
 		if err != nil {
 			return fmt.Errorf("handle stars_invoice_back: %w", err)
 		}
@@ -443,6 +461,35 @@ func (c *CallbackHandler) handleQRWeb(ctx context.Context, chatID int64, usernam
 	return nil
 }
 
+func parseStarsAcceptPayload(raw string) (orderID, productID uint, cardChatID int64, cardMsgID int, ok bool) {
+	parts := strings.Split(raw, "_")
+	if len(parts) != 4 {
+		return 0, 0, 0, 0, false
+	}
+
+	orderID64, err := strconv.ParseUint(parts[0], 10, 64)
+	if err != nil || orderID64 == 0 || orderID64 > uint64(^uint(0)) {
+		return 0, 0, 0, 0, false
+	}
+
+	productID64, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil || productID64 == 0 || productID64 > uint64(^uint(0)) {
+		return 0, 0, 0, 0, false
+	}
+
+	cardChatID, err = strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || cardChatID == 0 {
+		return 0, 0, 0, 0, false
+	}
+
+	cardMsgID, err = strconv.Atoi(parts[3])
+	if err != nil || cardMsgID < 0 {
+		return 0, 0, 0, 0, false
+	}
+
+	return uint(orderID64), uint(productID64), cardChatID, cardMsgID, true
+}
+
 // parseStarsInvoiceBack разбирает хвост stars_invoice_back_<invoice_msg_id>_<product_id>.
 func parseStarsInvoiceBack(raw string) (invoiceMsgID int, productID uint, ok bool) {
 	parts := strings.Split(raw, "_")
@@ -465,22 +512,25 @@ func parseStarsInvoiceBack(raw string) (invoiceMsgID int, productID uint, ok boo
 
 // handleStarsInvoiceBack удаляет только invoice-сообщение и возвращает карточку
 // тарифа к списку тарифов редактированием на месте, без дубля (§5.1, шаг 11-12).
+// Invoice отправлен в личный чат покупателя по telegram_id (не в callback chat):
+// удаление идёт по buyerTelegramID, карточка (messageID) редактируется в chatID.
 // Карточка НЕ пересоздаётся: её message_id — это message_id сообщения с кнопкой.
-func (c *CallbackHandler) handleStarsInvoiceBack(ctx context.Context, chatID int64, username string, cardMsgID, invoiceMsgID int, _ uint) error {
+func (c *CallbackHandler) handleStarsInvoiceBack(ctx context.Context, chatID, buyerTelegramID int64, username string, cardMsgID, invoiceMsgID int, _ uint) error {
 	logger.Info("Stars invoice card back",
 		zap.Int64("chat_id", chatID),
+		zap.Int64("buyer_telegram_id", buyerTelegramID),
 		zap.String("username", username),
 		zap.Int("card_msg_id", cardMsgID),
 		zap.Int("invoice_msg_id", invoiceMsgID))
 
-	deleteMsg := tgbotapi.NewDeleteMessage(chatID, invoiceMsgID)
+	deleteMsg := tgbotapi.NewDeleteMessage(buyerTelegramID, invoiceMsgID)
 
 	_, err := c.h.paymentAPI().Request(deleteMsg)
 	if err != nil {
 		// Best-effort: не отзываемый invoice не должен ломать возврат карточки.
 		logger.Warn("failed to delete stars invoice message",
 			zap.Int("invoice_msg_id", invoiceMsgID),
-			zap.Int64("chat_id", chatID),
+			zap.Int64("buyer_telegram_id", buyerTelegramID),
 			zap.Error(err))
 	}
 

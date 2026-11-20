@@ -41,8 +41,9 @@ var (
 )
 
 // paymentClientTimeout — таймаут HTTP payment-инстанса: окно pre-checkout
-// Telegram — 10 секунд, бюджет ответа в боте — 6 секунд (плана D1, §5.2).
-const paymentClientTimeout = 5 * time.Second
+// Telegram — 10 секунд; бюджет — validation 4–5 c (§5.2) + HTTP 4 c,
+// итого < 10 c (плана D1, §5.2).
+const paymentClientTimeout = 4 * time.Second
 
 // Option is a functional option for Run.
 type Option func(*runOptions)
@@ -626,11 +627,10 @@ func main() {
 	svc.handler.SetBotConfig(bc)
 
 	if svc.orderService != nil {
-		// Stars-клиент — только при активном провайдере Telegram Stars:
-		// при platega payment остаётся nil — это нормально (§4.4).
-		if cfg.PaymentProvider == database.PaymentProviderTelegramStars {
-			svc.orderService.SetStarsClient(stars.New(paymentAPI))
-		}
+		// Stars-клиент подключён всегда независимо от активного PAYMENT_PROVIDER:
+		// старые Stars-invoices и возвраты должны работать и после переключения
+		// на platega. Активный провайдер влияет только на новые продажи (§4.4).
+		svc.orderService.SetStarsClient(stars.New(paymentAPI))
 
 		svc.orderService.SetBotUsername(bc.Username)
 		svc.orderService.SetAdminBot(api)

@@ -925,7 +925,9 @@ limit_req_zone $binary_remote_addr zone=sub:10m rate=30r/m;
 Telegram Stars — второй платёжный провайдер: счёт выставляет сам бот
 (`pre_checkout_query` + `successful_payment`), без внешнего провайдера и без webhook.
 Активный провайдер выбирается переменной `PAYMENT_PROVIDER` при `PAYMENT_ENABLED=true`;
-Platega-flow при этом не переписывается.
+Platega-flow при этом не переписывается. Stars-клиент подключается при старте **всегда**,
+независимо от активного провайдера: возвраты по старым Stars-заказам и recovery
+по `getStarTransactions` продолжают работать и после переключения на Platega.
 
 ### 8.1 Переменные окружения
 
@@ -940,21 +942,32 @@ Platega-креды (`PLATEGA_MERCHANT_ID`, `PLATEGA_SECRET`) обязатель�
 `PAYMENT_ENABLED=true` c `PAYMENT_PROVIDER=platega` либо `PLATEGA_CALLBACK_ENABLED=true`.
 При `PAYMENT_PROVIDER=telegram_stars` без Platega-callback креды не требуются.
 
+**Локальный TTL Stars-invoice.** `payment_expires_at` Stars-заказа = `STARS_INVOICE_TTL`
+(по умолчанию **15 минут**); серверного TTL у Telegram-invoice нет, локальный expiry — UX-ограничение.
+Истёкший pending гасится свипом (`reconcilePendingOrder`) примерно через TTL + 10 мин запаса.
+
+**Recovery потерянных оплат.** Если `successful_payment` потерян (не дошёл до бота), заказ
+остаётся `pending` до локального TTL. Восстановление — сверкой `getStarTransactions`
+(реализовано в payment core: `stars.Client.GetTransactions`, internal/service/payment/stars/transaction.go):
+транзакция Stars со спиченным payload автоматически доводит заказ до `paid`.
+Ручная сверка по charge ID остаётся fallback для unmatched/manual случаев; при необходимости
+возврата — `/refund`.
+
 ### 8.2 Переключение на Stars (rollout-чеклист)
 
-1. Развернуть код с `PAYMENT_PROVIDER=platega` — поведение не меняется (обновление — по разделу 2).
-2. Создать **отдельные** XTR-товары (`currency='XTR'`, `price_cents` = цена в Stars). RUB-товары и их цены не трогать: цену товара после первого заказа менять запрещено. После создания **деактивировать RUB-товары** (`is_active=false`) — цены и строки RUB-товаров при этом не изменяются.
-3. Проверить активные товары: `currency='XTR'`, `price_cents > 0`, лимиты Telegram соблюдены.
-4. Если есть незавершённые Platega-заказы → `PLATEGA_CALLBACK_ENABLED=true` и оставить Platega-креды (расчёт старых заказов без новых продаж).
-5. Выставить `PAYMENT_PROVIDER=telegram_stars`, `PAYMENT_ENABLED=true` и перезапустить бота.
+1. Развернуть код с `PAYMENT_PROVIDER=platega` — поведение продаж не меняется (обновление — по разделу 2). Stars-клиент подключается при старте всегда: возвраты `/refund` по уже оплаченным Stars-заказам работают при любом активном провайдере.
+2. **Закрыть/settle legacy pending Platega.** Если есть незавершённые Platega-заказы — дождаться их расчёта (оплата/возврат/отмена) при `PLATEGA_CALLBACK_ENABLED=true` и оставленных Platega-кредах. Не переключать провайдера, пока окно settlement не закрыто (шаг 8).
+3. Создать **отдельные** XTR-товары (`currency='XTR'`, `price_cents` = цена в Stars) в состоянии **`is_active=false`**: до переключения провайдера Platega их не видит — активный XTR-товар не может быть продан через Platega. RUB-товары и их цены не трогать: цену товара после первого заказа менять запрещено.
+4. **Переключить провайдера:** `PAYMENT_PROVIDER=telegram_stars`, `PAYMENT_ENABLED=true` и перезапустить бота.
+5. **Активировать XTR-товары** (`is_active=true`) и проверить: `currency='XTR'`, `price_cents > 0`, лимиты Telegram соблюдены. После переключения деактивировать RUB-товары (`is_active=false`), если они ещё активны, — цены и строки RUB-товаров при этом не изменяются.
 6. До приёма трафика проверить: `/paysupport` и `/terms` отвечают; на балансе Stars-бота достаточно средств для возвратов.
 7. Smoke: buy → invoice → pre-checkout `OK=true` → оплата → продление + уведомление; повторный клик → «счёт уже отправлен»; `/refund <id>` → `canceled` + `payment_refunded`.
-8. После расчёта старых Platega-заказов: `PLATEGA_CALLBACK_ENABLED=false`, Platega-креды ротируются по регламенту секретов (раздел 7.2).
+8. **Держать legacy callback доступным на окно settlement:** `PLATEGA_CALLBACK_ENABLED=true`, пока старые Platega-заказы рассчитываются (в т.ч. опоздавшие оплаты в течение TTL ссылок). После расчёта: `PLATEGA_CALLBACK_ENABLED=false`, Platega-креды ротируются по регламенту секретов (раздел 7.2).
 
 ### 8.3 Rollback
 
 1. `PAYMENT_ENABLED=false` — продажи остановлены, новые Stars-invoice не создаются; legacy Platega-callback продолжает работать при `PLATEGA_CALLBACK_ENABLED=true`.
-2. Уже оплаченные Stars-заказы не откатываются — возврат выполняется командой `/refund <order_id>` (раздел 8.5).
+2. Уже оплаченные Stars-заказы не откатываются — возврат выполняется командой `/refund <order_id>` (раздел 8.5). Stars-клиент подключён всегда, поэтому возвраты работают и после возврата к Platega-продажам.
 3. **Возврат к продажам через Platega — юридическое решение, а не технический дефолт:** цифровые товары и услуги внутри Telegram оплачиваются Stars (Bot Developer Terms 6.2). Технический rollback по умолчанию — остановка продаж с сохранением работающих возвратов.
 
 ### 8.4 Обязательные шаги до прода (compliance)

@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -766,6 +767,18 @@ func (h *Handler) HandleRefund(ctx context.Context, update tgbotapi.Update) erro
 			zap.Uint("order_id", orderID),
 			zap.Int64("admin_chat_id", chatID),
 			zap.Error(err))
+
+		// Split-brain: Telegram уже вернул Stars, но состояние заказа/подписки
+		// не применено (ошибка free-plan/CAS). Повторять refund нельзя — деньги
+		// уже возвращены; нужен reconcile по заказу и подписке.
+		var stateErr *service.StarsRefundStateError
+		if errors.As(err, &stateErr) {
+			h.SendMessage(ctx, chatID,
+				fmt.Sprintf("⚠️ Stars по заказу #%d УЖЕ возвращены пользователю (charge %s), но применить состояние заказа/подписки не удалось: %v.\n\nПовторный /refund не нужен — проведите reconcile заказа #%d и подписки #%d вручную по charge ID.",
+					orderID, stateErr.ChargeID, stateErr.Err, stateErr.OrderID, stateErr.SubscriptionID))
+
+			return nil
+		}
 
 		h.SendMessage(ctx, chatID,
 			fmt.Sprintf("⚠️ Возврат по заказу #%d не выполнен: %v\n\nПроверьте статус заказа и баланс Stars бота.", orderID, err))

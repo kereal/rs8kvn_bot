@@ -314,8 +314,8 @@ func TestHandleBuyProduct_SuccessShowsPaymentButton(t *testing.T) {
 			mockDB.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
 				return &database.Plan{ID: 2, IsActive: true}, nil
 			}
-			mockDB.FindOrCreatePendingPaymentOrderFunc = func(context.Context, uint, uint, string, int64, string, *time.Time, time.Time) (*database.Order, error) {
-				return &database.Order{ID: 3, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPending, AmountCents: tt.priceCents, Currency: "RUB"}, nil
+			mockDB.FindOrCreatePendingPaymentOrderFunc = func(context.Context, uint, uint, string, int64, string, *time.Time, time.Time) (*database.Order, bool, error) {
+				return &database.Order{ID: 3, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPending, AmountCents: tt.priceCents, Currency: "RUB"}, true, nil
 			}
 			mockDB.MarkPaymentCreationUncertainFunc = func(context.Context, uint, bool) (bool, error) { return true, nil }
 			mockDB.SavePaymentDetailsFunc = func(context.Context, uint, string, string, time.Time) error { return nil }

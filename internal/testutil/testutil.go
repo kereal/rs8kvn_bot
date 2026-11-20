@@ -512,7 +512,7 @@ type ServiceStoreFake struct {
 	DeleteSubscriptionNodeFunc                  func(ctx context.Context, subID, nodeID uint) error
 	DeleteSubscriptionNodesBySubscriptionIDFunc func(ctx context.Context, subID uint) error
 	ExpireSubscriptionFunc                      func(ctx context.Context, id uint, freePlanID uint) error
-	FindOrCreatePendingPaymentOrderFunc         func(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, error)
+	FindOrCreatePendingPaymentOrderFunc         func(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, bool, error)
 	FindPendingPaymentOrderFunc                 func(ctx context.Context, subscriptionID, productID uint, provider string, now time.Time) (*database.Order, error)
 	GetAllSubscriptionsFunc                     func(ctx context.Context) ([]database.Subscription, error)
 	GetAnyByTelegramIDFunc                      func(ctx context.Context, telegramID int64) (*database.Subscription, error)
@@ -829,7 +829,7 @@ func (m *ServiceStoreFake) ExpireSubscription(ctx context.Context, id uint, free
 	return nil
 }
 
-func (m *ServiceStoreFake) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, error) {
+func (m *ServiceStoreFake) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, bool, error) {
 	if m.FindOrCreatePendingPaymentOrderFunc != nil {
 		return m.FindOrCreatePendingPaymentOrderFunc(ctx, subscriptionID, productID, provider, amountCents, currency, paymentExpiresAt, now)
 	}
@@ -840,7 +840,7 @@ func (m *ServiceStoreFake) FindOrCreatePendingPaymentOrder(ctx context.Context, 
 	for _, order := range m.Orders {
 		if order.SubscriptionID == subscriptionID && order.ProductID == productID && order.PaymentProvider == provider && order.Status == database.OrderStatusPending {
 			if order.PaymentCreationUncertain {
-				return order, nil
+				return order, false, nil
 			}
 
 			if order.PaymentExpiresAt != nil && !now.Before(*order.PaymentExpiresAt) {
@@ -848,7 +848,7 @@ func (m *ServiceStoreFake) FindOrCreatePendingPaymentOrder(ctx context.Context, 
 				continue
 			}
 
-			return order, nil
+			return order, false, nil
 		}
 	}
 
@@ -859,7 +859,7 @@ func (m *ServiceStoreFake) FindOrCreatePendingPaymentOrder(ctx context.Context, 
 	order := &database.Order{ID: uint(len(m.Orders) + 1), SubscriptionID: subscriptionID, ProductID: productID, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: provider, PaymentExpiresAt: paymentExpiresAt, CreatedAt: now} // #nosec G115 -- slice length is non-negative
 	m.Orders[order.ID] = order
 
-	return order, nil
+	return order, true, nil
 }
 
 func (m *ServiceStoreFake) FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, now time.Time) (*database.Order, error) {

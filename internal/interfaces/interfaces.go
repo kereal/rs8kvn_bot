@@ -210,7 +210,7 @@ type OrderRepository interface {
 	GetOrderByID(ctx context.Context, id uint) (*database.Order, error)
 	GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID string) (*database.Order, error)
 	FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, now time.Time) (*database.Order, error)
-	FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, error)
+	FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, bool, error)
 	MarkPaymentCreationUncertain(ctx context.Context, orderID uint, uncertain bool) (bool, error)
 	SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID string, paymentURL string, paymentExpiresAt time.Time) error
 	// AttachProviderPaymentID привязывает id провайдера к заказу, у которого его
@@ -359,6 +359,10 @@ type BotStore interface {
 	GetPlanByID(ctx context.Context, planID uint) (*database.Plan, error)
 	GetProductByID(ctx context.Context, id uint) (*database.Product, error)
 	ListActiveProducts(ctx context.Context) ([]database.Product, error)
+	// Stars acceptance flow: прямая загрузка заказа и освобождение pending
+	// при ошибке отправки (без повторного RequestPayment в callback).
+	GetOrderByID(ctx context.Context, id uint) (*database.Order, error)
+	ExpirePendingOrder(ctx context.Context, orderID uint) (bool, error)
 	GetInviteByCode(ctx context.Context, code string) (*database.Invite, error)
 	GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
 	GetInviteByReferrer(ctx context.Context, referrerTGID int64) (*database.Invite, error)
