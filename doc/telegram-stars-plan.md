@@ -332,7 +332,7 @@ func BuildInvoice(p InvoiceParams) (tgbotapi.InvoiceConfig, error)
 | `internal/bot/messages.go` | Текст `MsgPaymentInProgress` для Stars (новый ключ, чтобы не ломать Platega) + ключ ошибки отправки invoice (M5) |
 | `internal/testutil/` | Fake `OrderRepository` под новые сигнатуры + fake payment API (`Send`/`Request`/`MakeRequest`) |
 | `cmd/bot/main.go` | `initBot` возвращает payment-инстанс (`http.Client{Timeout: 4s}`), `AllowedUpdates += pre_checkout_query` (main.go:624-627), `SetPaymentConfig` — по итоговому гейту §4.1: `(PAYMENT_ENABLED && PAYMENT_PROVIDER=platega) || PLATEGA_CALLBACK_ENABLED` (main.go:286-292); Stars-клиент (`stars.New(paymentAPI)` → `SetStarsClient`) создаётся **всегда**, независимо от активного провайдера — активный провайдер влияет только на новые продажи |
-| `cmd/bot/lifecycle.go` | Wiring: `stars.New(paymentAPI)` → `orderService.SetStarsClient`, `handler.SetPaymentBot`, Platega-клиент по флагам (lifecycle.go:138-146; создание только при `PAYMENT_ENABLED`, в Stars-режиме `payment interface` остаётся nil — это нормально, §4.4) |
+| `cmd/bot/lifecycle.go` | Не содержит payment/Stars wiring (оставил импорт `platega` для типов runtimeDeps; весь платёжный wiring — в `cmd/bot/main.go`). |
 | `README.md`, `doc/operations.md`, `.env.example` | Новые env, порядок переключения, процедура возврата |
 
 Миграция БД: **не делается.**
@@ -347,7 +347,7 @@ func BuildInvoice(p InvoiceParams) (tgbotapi.InvoiceConfig, error)
 | 4 | **Выполнен**: `OrderService`: Stars-ветки, `ConfirmStarsPayment`, `ValidateStarsPreCheckout`, `RefundStarsOrder`, общий хвост `confirmPaidOrderTail`, guard reconcile | `go test ./internal/service` |
 | 5 | **Выполнен**: Бот: payment-клиент, dispatch pre-checkout/successful_payment, buy-flow, back-callback, `/paysupport`, `/terms`, `/refund` | `go test ./internal/bot` |
 | 6 | **Выполнен**: UI и форматтеры (§6): `FormatStarsAmount`, `formatMoneyCents` XTR без деления на 100, XTR-фильтр списка, тексты M5/Stars | `go test ./internal/utils ./internal/bot` |
-| 7 | **Выполнен**: Wiring (`cmd/bot/main.go`: отдельный payment-инстанс D1, `AllowedUpdates += pre_checkout_query`, гейт `ShouldEnablePlategaCallback`; `lifecycle.go`: Platega-клиент по гейту). Отклонение при реализации: Stars-wiring (`SetStarsClient`/`SetPaymentBot`) — в `main.go` после `initBot` (шаг 7), а не в `initServices` (шаг 5): там paymentAPI ещё не существует; payment-инстанс один — и для invoice/pre-checkout, и для refund. Правка 2026-11-20: `SetStarsClient(stars.New(paymentAPI))` вызывается **безусловно** — Stars-клиент подключён всегда, независимо от активного `PAYMENT_PROVIDER` (возвраты и recovery работают после переключения на Platega) | `go build ./... && go test ./cmd/...` |
+| 7 | **Выполнен**: Wiring (`cmd/bot/main.go`: отдельный payment-инстанс D1, `AllowedUpdates += pre_checkout_query`, гейт `ShouldEnablePlategaCallback`, Platega-клиент по флагам §4.1, `SetStarsClient(stars.New(paymentAPI))` безусловно, `SetPaymentBot(paymentAPI)` — всё после `initBot`, т.к. paymentAPI не существует на шаге `initServices` (шаг 5). Payment-инстанс один — и для invoice/pre-checkout, и для refund. Stars-клиент подключён всегда, независимо от активного `PAYMENT_PROVIDER` (возвраты и recovery работают после переключения на Platega). `cmd/bot/lifecycle.go` не содержит payment/Stars wiring. | `go build ./... && go test ./cmd/...` |
 | 8 | **Выполнен**: Документация: README, doc/operations.md (§8 Stars: rollout/rollback/compliance//refund), doc/installation.md, .env.example | — |
 
 Финальные гейты:

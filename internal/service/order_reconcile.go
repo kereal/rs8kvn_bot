@@ -238,9 +238,9 @@ func (o *OrderService) ReconcileStarsTransactions(ctx context.Context) error {
 		var mismatch *StarsSemanticMismatchError
 		if errors.As(confirmErr, &mismatch) {
 			// Semantic mismatch ретраем не исправить: charge возвращается
-			// автоматически (сбой возврата — payment issue alert).
-			unmatchedOrder := &database.Order{ID: 0, AmountCents: tx.Amount, Currency: stars.Currency, PaymentProvider: database.PaymentProviderTelegramStars}
-			o.autoRefundStarsCharge(ctx, unmatchedOrder, tx.ID, telegramID)
+			// автоматически (сбой возврата — payment issue alert). Заказ по
+			// payload не найден, OrderID=0 — честный маркер отсутствия заказа.
+			o.autoRefundStarsCharge(ctx, 0, telegramID, tx.Amount, stars.Currency, tx.ID)
 
 			continue
 		}
