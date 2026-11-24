@@ -63,7 +63,7 @@ func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T)
 			return nil, nil
 		},
 	}
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{PaymentEnabled: true})
 
 	const workers = 4
 
@@ -203,7 +203,7 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 			return nil, nil
 		},
 	}
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{PaymentEnabled: true})
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -423,7 +423,7 @@ func TestRequestPayment_ConcurrentCallersSingleProviderTransaction(t *testing.T)
 			}, nil
 		},
 	}
-	o := NewOrderService(mock, nil, nil, provider, "", &config.Config{})
+	o := NewOrderService(mock, nil, nil, provider, "", &config.Config{PaymentEnabled: true})
 
 	const workers = 6
 
@@ -534,7 +534,7 @@ func TestCancelPaymentByProvider_SameOrderParallelChargebacksTransitionOnce(t *t
 		},
 	}
 	adminBot := testutil.NewBotAPI()
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 	o.SetAdminBot(adminBot)
 
 	const workers = 4
@@ -639,7 +639,7 @@ func TestCancelPaymentByProvider_SameOrderParallelPendingCancelsIdempotent(t *te
 		},
 	}
 	adminBot := testutil.NewBotAPI()
-	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 	o.SetAdminBot(adminBot)
 
 	const workers = 4
@@ -729,7 +729,7 @@ func TestConfirmStarsPayment_SameChargeParallelConfirmationsActivateOnlyOnce(t *
 			return false, nil
 		},
 	}
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
 	const workers = 4

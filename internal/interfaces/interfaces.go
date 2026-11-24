@@ -341,6 +341,11 @@ type OrderStore interface {
 	GetPlanByName(ctx context.Context, name string) (*database.Plan, error)
 	GetProductByID(ctx context.Context, id uint) (*database.Product, error)
 	InsertAuditLog(ctx context.Context, e *database.AuditLog) error
+	// HasPaymentConfirmedByProviderPaymentID сообщает, подтверждался ли ранее
+	// платёж с указанным provider_payment_id: авто-возврат Stars не должен
+	// возвращать уже исполненный заказ. provider ограничивает поиск одним
+	// провайдером — одинаковые id у разных провайдеров не должны совпадать.
+	HasPaymentConfirmedByProviderPaymentID(ctx context.Context, provider string, providerPaymentID string) (bool, error)
 }
 
 // BotStore is the persistence seam of bot.Handler: broadcast management,

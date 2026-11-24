@@ -25,6 +25,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/scheduler"
 	"github.com/kereal/rs8kvn_bot/internal/service"
+	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/stars"
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
 	"github.com/kereal/rs8kvn_bot/internal/vpn"
@@ -579,6 +580,11 @@ func main() {
 	botAPI := &tgbotapi.BotAPI{Self: tgbotapi.User{UserName: ""}}
 	svc := initServices(cfg, dbService, deps, botAPI, botConfig)
 
+	// Платёжный wiring (Platega-клиент + OrderService) — здесь же, чтобы весь
+	// платёжный wiring жил в одном composition root (план §7). Stars-клиент
+	// подключается ниже, после создания payment-инстанса (D1).
+	svc.orderService = initPaymentService(cfg, dbService, svc.subService, svc.syncService, svc.handler)
+
 	// 6. Start web server so subscriptions are served; bot is initialised next.
 	// The web server starts with an empty bot username; initBot injects the real
 	// username (from Telegram getMe) via SetBotUsername once the bot is ready, so
@@ -670,10 +676,71 @@ func main() {
 	}
 
 	// 11. Run the main event loop (blocks until shutdown)
-	runEventLoop(ctx, botAPI, svc.handler, updates)
+	runEventLoop(ctx, botAPI, svc.handler, updates, newPreCheckoutAnswerer(paymentAPI))
 
 	// 12. Graceful shutdown of background workers
 	gracefulShutdown(bgWg, svc.handler, svc.subServer)
+}
+
+// preCheckoutAnswerMaxConcurrent — сколько ответов pre_checkout_query можно
+// отправлять одновременно, когда fast-lane pre-checkout переполнен.
+const preCheckoutAnswerMaxConcurrent = 4
+
+// newPreCheckoutAnswerer возвращает обработчик отказа по pre_checkout_query.
+// Ответ уходит через payment-инстанс с HTTP-таймаутом 4 c (D1), в отдельной
+// горутине, чтобы не блокировать event loop, и с ограниченным параллелизмом.
+// Если слот ответа занят, ответ всё равно отправляется (вне семафора): ответ на
+// pre_checkout_query обязателен (§5.2) — без него запрос висит до истечения
+// 10-секундного окна Telegram. Число таких ответов ограничено скоростью
+// pre_checkout-апдейтов, поэтому дополнительные горутины не растут без границ.
+func newPreCheckoutAnswerer(paymentAPI *tgbotapi.BotAPI) func(string) {
+	sem := make(chan struct{}, preCheckoutAnswerMaxConcurrent)
+
+	answer := func(queryID string) {
+		_, err := paymentAPI.Request(tgbotapi.PreCheckoutConfig{
+			PreCheckoutQueryID: queryID,
+			OK:                 false,
+			ErrorMessage:       "Платёж не может быть принят. Обратитесь в /paysupport",
+		})
+		if err != nil {
+			logger.Warn("failed to answer pre_checkout_query",
+				zap.String("query_id", queryID),
+				zap.Error(err))
+		}
+	}
+
+	return func(queryID string) {
+		select {
+		case sem <- struct{}{}:
+			go func() {
+				defer func() { <-sem }()
+
+				answer(queryID)
+			}()
+		default:
+			logger.Warn("pre-checkout answer queue full, answering without a slot",
+				zap.String("query_id", queryID))
+
+			go answer(queryID)
+		}
+	}
+}
+
+// initPaymentService создаёт Platega-клиент (по гейту §4.1: активные продажи
+// только с валидным конфигом) и OrderService, подключает его к хендлеру.
+// Вызывается из composition root в main(); Stars-клиент подключается отдельно
+// после создания payment-инстанса (D1) — он должен работать всегда, независимо
+// от активного PAYMENT_PROVIDER (§4.4 плана).
+func initPaymentService(cfg *config.Config, dbService *database.Service, subService *service.SubscriptionService, syncSvc *service.SyncService, handler *bot.Handler) *service.OrderService {
+	var payment service.PlategaClient
+	if cfg.ShouldEnablePlategaCallback() {
+		payment = platega.New(platega.Config{MerchantID: cfg.PlategaMerchantID, Secret: cfg.PlategaSecret})
+	}
+
+	orderService := service.NewOrderService(dbService, subService, syncSvc, payment, "", cfg)
+	handler.SetOrderService(orderService)
+
+	return orderService
 }
 
 // handleUpdateSafely handles a Telegram update with panic recovery.

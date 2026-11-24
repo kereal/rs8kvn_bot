@@ -13,7 +13,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service"
-	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
 
 	"github.com/getsentry/sentry-go"
@@ -119,7 +118,8 @@ type appServices struct {
 }
 
 // initServices wires the subscription service, subserver, bot handler,
-// and cache invalidation composition.
+// and cache invalidation composition. Платёжный wiring (Platega, OrderService,
+// Stars) собирается отдельно в main.go — едином composition root.
 func initServices(cfg *config.Config, dbService *database.Service, deps *runtimeDeps, botAPI *tgbotapi.BotAPI, botConfig *bot.BotConfig) *appServices {
 	syncSvc := service.NewSyncService(dbService, deps.clients, deps.nodes)
 	subService := service.NewSubscriptionService(dbService, deps.clients, deps.nodes, cfg)
@@ -135,22 +135,40 @@ func initServices(cfg *config.Config, dbService *database.Service, deps *runtime
 		subServer.InvalidateSubscriber(subID)
 	})
 
-	var payment service.PlategaClient
-	if cfg.ShouldEnablePlategaCallback() {
-		payment = platega.New(platega.Config{MerchantID: cfg.PlategaMerchantID, Secret: cfg.PlategaSecret})
-	}
-
-	orderService := service.NewOrderService(dbService, subService, syncSvc, payment, "", cfg)
-	handler.SetOrderService(orderService)
-
-	return &appServices{subService: subService, subServer: subServer, handler: handler, orderService: orderService, syncService: syncSvc}
+	return &appServices{subService: subService, subServer: subServer, handler: handler, syncService: syncSvc}
 }
+
+// preCheckoutMaxConcurrent — отдельный параллелизм для pre_checkout_query:
+// они лёгкие (валидация payload без сети), поэтому небольшой бюджет очереди
+// достаточен и не даёт неограниченного спавна горутин.
+const preCheckoutMaxConcurrent = 3
+
+// preCheckoutSlotWaitTimeout — бюджет ожидания свободного слота pre-checkout.
+// Полный worst case ответа: ожидание слота (1 c) + валидация заказа в БД
+// (bot.PreCheckoutTimeout, 4 c) + HTTP-ответ через payment-клиент (4 c) = 9 c —
+// укладывается в окно Telegram 10 c (§5.2 плана) с запасом в 1 c. Ждать в
+// очереди дольше нельзя: ответ опоздает и Telegram отклонит оплату.
+const preCheckoutSlotWaitTimeout = 1 * time.Second
+
+// preCheckoutAnswerer отвечает на pre_checkout_query OK=false, когда
+// fast-lane pre-checkout переполнен. Реализация живёт в composition root
+// (main.go): ответ уходит через payment-инстанс с HTTP-таймаутом (D1) —
+// polling-инстанс с long-poll без таймаута для этого не используется.
+type preCheckoutAnswerer func(queryID string)
 
 // runEventLoop processes Telegram updates with bounded concurrency until
 // the shutdown context is cancelled. Blocks until all in-flight handlers
 // complete or the shutdown timeout elapses.
-func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Handler, updates tgbotapi.UpdatesChannel) {
+func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Handler, updates tgbotapi.UpdatesChannel, answerPreCheckout preCheckoutAnswerer) {
 	updateSem := make(chan struct{}, config.MaxConcurrentHandlers)
+	// pre_checkout_query обслуживается отдельным путём с собственным
+	// небольшим семафором: успешная оплата держит общий слот на всё время
+	// подтверждения и post-commit SyncSubscription (до ~20 c), а окно ответа
+	// pre-checkout у Telegram — 10 c (валидация 4–5 c + HTTP 4 c, §5.2 плана).
+	// Ожидание свободного слота тоже ограничено: не хватило места — отвечаем
+	// OK=false с причиной, а не молчим (иначе Telegram повторяет запрос и
+	// заказ висит до TTL).
+	preCheckoutSem := make(chan struct{}, preCheckoutMaxConcurrent)
 
 	var updatesWg sync.WaitGroup
 
@@ -161,6 +179,33 @@ eventLoop:
 			if !ok {
 				logger.Info("Telegram updates channel closed")
 				break eventLoop
+			}
+
+			if update.PreCheckoutQuery != nil {
+				select {
+				case preCheckoutSem <- struct{}{}:
+					updatesWg.Add(1)
+
+					go func(u tgbotapi.Update) {
+						defer func() {
+							<-preCheckoutSem
+							updatesWg.Done()
+						}()
+
+						handleUpdateSafely(ctx, handler, u)
+					}(update)
+				case <-time.After(preCheckoutSlotWaitTimeout):
+					logger.Warn("pre-checkout queue full, answering with error",
+						zap.String("query_id", update.PreCheckoutQuery.ID))
+					if answerPreCheckout != nil {
+						answerPreCheckout(update.PreCheckoutQuery.ID)
+					}
+				case <-ctx.Done():
+					logger.Info("Graceful shutdown initiated, draining updates...")
+					break eventLoop
+				}
+
+				continue
 			}
 
 			select {

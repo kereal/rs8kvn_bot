@@ -2,10 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/kereal/rs8kvn_bot/internal/bot"
@@ -285,3 +290,73 @@ func TestHandleUpdate_NilMessageAndNilCallback(t *testing.T) {
 // _InvalidPort удалены: дубли покрытия internal/config (config_test.go:
 // TestConfig_Validate_*, TestValidateURL) — та же конфигурация и те же
 // ветки validate(), только через os.Setenv.
+
+// stubTelegramHTTP — заглушка HTTP-клиента Telegram: считает запросы и
+// отвечает canned-ответом (getMe — валидный бот, остальное — ok).
+type stubTelegramHTTP struct {
+	mu       sync.Mutex
+	requests []string
+}
+
+func (s *stubTelegramHTTP) Do(req *http.Request) (*http.Response, error) {
+	body := `{"ok":true,"result":true}`
+	if strings.Contains(req.URL.Path, "getMe") {
+		body = `{"ok":true,"result":{"id":1,"is_bot":true,"first_name":"t","username":"tbot"}}`
+	}
+
+	s.mu.Lock()
+	s.requests = append(s.requests, req.URL.Path)
+	s.mu.Unlock()
+
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     make(http.Header),
+	}, nil
+}
+
+func (s *stubTelegramHTTP) countPath(fragment string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	count := 0
+	for _, path := range s.requests {
+		if strings.Contains(path, fragment) {
+			count++
+		}
+	}
+
+	return count
+}
+
+// TestNewPreCheckoutAnswerer_AnswersEveryQuery — ответ на pre_checkout_query
+// обязателен: переполнение очереди ответов не должно приводить к пропуску
+// ответа (иначе запрос висит до истечения 10-секундного окна Telegram).
+func TestNewPreCheckoutAnswerer_AnswersEveryQuery(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubTelegramHTTP{}
+	api, err := tgbotapi.NewBotAPIWithClient("test-token", tgbotapi.APIEndpoint, stub)
+	require.NoError(t, err)
+
+	answer := newPreCheckoutAnswerer(api)
+
+	const queries = preCheckoutAnswerMaxConcurrent * 3
+	for i := range queries {
+		answer(fmt.Sprintf("query-%d", i))
+	}
+
+	require.Eventually(t, func() bool {
+		return stub.countPath("answerPreCheckoutQuery") == queries
+	}, 3*time.Second, 10*time.Millisecond, "every pre_checkout query must get an answer")
+}
+
+// TestPreCheckoutAnswerBudgetFitsTelegramWindow — инвариант: ответ на
+// pre_checkout_query обязан уложиться в 10-секундное окно Telegram.
+func TestPreCheckoutAnswerBudgetFitsTelegramWindow(t *testing.T) {
+	t.Parallel()
+
+	total := preCheckoutSlotWaitTimeout + bot.PreCheckoutTimeout + paymentClientTimeout
+	require.LessOrEqual(t, total, 10*time.Second,
+		"the pre-checkout answer must fit the Telegram 10s window")
+}

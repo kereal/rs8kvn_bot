@@ -198,8 +198,17 @@ func (o *OrderService) expireReconciledOrder(ctx context.Context, order *databas
 	return nil
 }
 
-// starsReconcileLimit — размер страницы getStarTransactions за один проход.
+// starsReconcileLimit — размер страницы getStarTransactions за один запрос.
 const starsReconcileLimit = 100
+
+// starsReconcileBudget ограничивает один проход recovery-сверки Stars: длинная
+// история не должна растягивать тик планировщика. При исчерпании бюджета проход
+// завершается без ошибки, offset сохраняет позицию для следующего тика.
+//
+// Бюджет проверяется между транзакциями, а не отменяет уже начатую обработку:
+// одна транзакция (confirm + post-commit sync) может занять до paymentSyncTimeout,
+// поэтому фактическая длительность прохода — бюджет плюс одна транзакция.
+const starsReconcileBudget = 60 * time.Second
 
 // ReconcileStarsTransactions сверяет историю Star-транзакций Telegram с БД:
 // обрабатывает только входящие invoice_payment, вызывая идемпотентный
@@ -207,7 +216,18 @@ const starsReconcileLimit = 100
 // под мьютексом; после рестарта обработка начинается с 0 и повторно
 // (безопасно) проходит историю. Ошибка запроса не двигает offset —
 // следующий проход повторит страницу.
+//
+// Проход пагинированный: страницы читаются подряд, пока страница не короче
+// starsReconcileLimit или не исчерпан time-budget, поэтому новая оплата не
+// ждёт час за страницу из 100 транзакций.
 func (o *OrderService) ReconcileStarsTransactions(ctx context.Context) error {
+	return o.reconcileStarsTransactions(ctx, starsReconcileBudget)
+}
+
+// reconcileStarsTransactions — рабочая часть сверки с явным бюджетом прохода:
+// тесты могут передать маленький бюджет и проверить, что проход останавливается
+// без ошибки и сохраняет позицию для следующего тика.
+func (o *OrderService) reconcileStarsTransactions(ctx context.Context, budget time.Duration) error {
 	if o.stars == nil {
 		return nil
 	}
@@ -216,46 +236,85 @@ func (o *OrderService) ReconcileStarsTransactions(ctx context.Context) error {
 	offset := o.starsOffset
 	o.starsReconcileMu.Unlock()
 
-	transactions, err := o.stars.GetTransactions(ctx, offset, starsReconcileLimit)
-	if err != nil {
-		return fmt.Errorf("load stars transactions from offset %d: %w", offset, err)
+	budgetCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+
+	// processed — фактическое число транзакций (включая не-invoice) на пройденных
+	// страницах: offset Telegram двигается по размеру страниц, а не по числу
+	// обработанных invoice_payment.
+	processed := int64(0)
+
+	for budgetCtx.Err() == nil {
+		transactions, err := o.stars.GetTransactions(budgetCtx, offset+processed, starsReconcileLimit)
+		if err != nil {
+			if budgetCtx.Err() != nil {
+				break
+			}
+
+			return fmt.Errorf("load stars transactions from offset %d: %w", offset+processed, err)
+		}
+
+		page := transactions.Transactions
+
+		// pageDone — число транзакций страницы, дошедших до конца обработки.
+		// Если бюджет исчерпан посреди страницы, offset двигается ровно на
+		// pageDone: непрочитанные транзакции не пропускаются, следующий проход
+		// продолжит с них.
+		pageDone := 0
+
+		for range page {
+			if budgetCtx.Err() != nil {
+				break
+			}
+
+			tx := page[pageDone]
+
+			if tx.IsIncomingInvoicePayment() {
+				telegramID := tx.Source.User.ID
+				payload := tx.Source.InvoicePayload
+
+				// Идемпотентность: CAS по charge ID, повторная обработка — no-op.
+				_, confirmErr := o.ConfirmStarsPayment(ctx, tx.ID, payload, tx.Amount, stars.Currency, telegramID)
+				if confirmErr != nil {
+					var mismatch *StarsSemanticMismatchError
+
+					if !errors.As(confirmErr, &mismatch) {
+						// DB/infrastructure ошибка: состояние не применено,
+						// транзакцию нужно повторить. Прерываем проход, offset не
+						// двигается — следующий hourly-тик повторит страницу
+						// (CAS идемпотентен).
+						return fmt.Errorf("confirm reconciled stars transaction %s: %w", tx.ID, confirmErr)
+					}
+
+					// Semantic mismatch ретраем не исправить: charge возвращается
+					// автоматически (сбой возврата — payment issue alert). Заказ по
+					// payload не найден, order=nil — честный маркер отсутствия заказа.
+					o.autoRefundStarsCharge(ctx, nil, telegramID, tx.Amount, stars.Currency, tx.ID, "recovery_semantic_mismatch")
+				}
+			}
+
+			pageDone++
+		}
+
+		processed += int64(pageDone)
+
+		if pageDone < len(page) {
+			// Бюджет исчерпан посреди страницы — сохраняем позицию и выходим
+			// без ошибки: следующий проход продолжит с непрочитанной транзакции.
+			break
+		}
+
+		if len(page) < starsReconcileLimit {
+			// Неполная (или пустая) страница — история исчерпана.
+			break
+		}
 	}
 
-	for _, tx := range transactions.Transactions {
-		if !tx.IsIncomingInvoicePayment() {
-			continue
-		}
-
-		telegramID := tx.Source.User.ID
-		payload := tx.Source.InvoicePayload
-
-		// Идемпотентность: CAS по charge ID, повторная обработка — no-op.
-		_, confirmErr := o.ConfirmStarsPayment(ctx, tx.ID, payload, tx.Amount, stars.Currency, telegramID)
-		if confirmErr == nil {
-			continue
-		}
-
-		var mismatch *StarsSemanticMismatchError
-		if errors.As(confirmErr, &mismatch) {
-			// Semantic mismatch ретраем не исправить: charge возвращается
-			// автоматически (сбой возврата — payment issue alert). Заказ по
-			// payload не найден, OrderID=0 — честный маркер отсутствия заказа.
-			o.autoRefundStarsCharge(ctx, 0, telegramID, tx.Amount, stars.Currency, tx.ID)
-
-			continue
-		}
-
-		// DB/infrastructure ошибка: состояние не применено, транзакцию нужно
-		// повторить. Прерываем проход, offset не двигается — следующий
-		// hourly-тик повторит страницу (CAS идемпотентен).
-		return fmt.Errorf("confirm reconciled stars transaction %s: %w", tx.ID, confirmErr)
-	}
-
-	if len(transactions.Transactions) > 0 {
-		// Двигаем offset на размер страницы: следующий проход продолжает
-		// с новой позиции.
+	if processed > 0 {
+		// Двигаем offset на фактическое число обработанных транзакций:
+		// следующий проход продолжает с новой позиции.
 		o.starsReconcileMu.Lock()
-		o.starsOffset = offset + int64(len(transactions.Transactions))
+		o.starsOffset = offset + processed
 		o.starsReconcileMu.Unlock()
 	}
 

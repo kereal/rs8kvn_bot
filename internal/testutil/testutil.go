@@ -9,6 +9,7 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -527,6 +528,7 @@ type ServiceStoreFake struct {
 	GetOrderByIDFunc                            func(ctx context.Context, id uint) (*database.Order, error)
 	GetOrderByProviderPaymentIDFunc             func(ctx context.Context, provider string, providerPaymentID string) (*database.Order, error)
 	GetPaidOrdersWithoutProviderFeeAfterIDFunc  func(ctx context.Context, afterID uint, limit int) ([]database.Order, error)
+	HasPaymentConfirmedByProviderPaymentIDFunc  func(ctx context.Context, provider string, providerPaymentID string) (bool, error)
 	GetPaidOrdersWithoutProviderFeeFunc         func(ctx context.Context, limit int) ([]database.Order, error)
 	GetPendingBySubscriptionIDFunc              func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
 	GetPendingSyncFunc                          func(ctx context.Context) ([]database.SubscriptionNode, error)
@@ -1198,6 +1200,33 @@ func (m *ServiceStoreFake) GetTrialSubscriptionBySubID(ctx context.Context, subs
 	}
 
 	return nil, gorm.ErrRecordNotFound
+}
+
+// HasPaymentConfirmedByProviderPaymentID reports whether a payment_confirmed
+// audit event exists for the given provider and provider payment ID.
+func (m *ServiceStoreFake) HasPaymentConfirmedByProviderPaymentID(ctx context.Context, provider string, providerPaymentID string) (bool, error) {
+	if m.HasPaymentConfirmedByProviderPaymentIDFunc != nil {
+		return m.HasPaymentConfirmedByProviderPaymentIDFunc(ctx, provider, providerPaymentID)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, entry := range m.AuditLogs {
+		if entry.Event != database.AuditEventPaymentConfirmed {
+			continue
+		}
+
+		if !strings.Contains(entry.Details, `"provider_payment_id":"`+providerPaymentID+`"`) {
+			continue
+		}
+
+		if provider == "" || strings.Contains(entry.Details, `"provider":"`+provider+`"`) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // InsertAuditLog records an audit event in the in-memory fake. Tests assert on

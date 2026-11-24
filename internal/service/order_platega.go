@@ -15,7 +15,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/stars"
-	"github.com/kereal/rs8kvn_bot/internal/utils"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -61,46 +60,9 @@ func (o *OrderService) notifyAdminChargeback(ctx context.Context, sub *database.
 }
 
 // formatAdminChargebackAlert renders the admin notification for a chargeback on
-// a paid order. The message uses Telegram Markdown, so user-controlled fields
-// (product name, username) are escaped.
+// a paid order through the shared refund/chargeback formatter.
 func formatAdminChargebackAlert(sub *database.Subscription, order *database.Order, product *database.Product, downgraded bool) string {
-	productName := "—"
-	if product != nil && strings.TrimSpace(product.Name) != "" {
-		productName = utils.EscapeMarkdown(product.Name)
-	}
-
-	telegramID, subscriptionID, username := int64(0), uint(0), ""
-	if sub != nil {
-		telegramID, subscriptionID, username = sub.TelegramID, sub.ID, sub.Username
-	}
-
-	orderID, amountCents, currency, providerPaymentID := uint(0), int64(0), "", ""
-	if order != nil {
-		orderID, amountCents, currency, providerPaymentID = order.ID, order.AmountCents, order.Currency, order.ProviderPaymentID
-	}
-
-	access := "⬇️ Доступ: *понижен до бесплатного*"
-	if !downgraded {
-		access = "ℹ️ Доступ: *сохранён* (есть другой оплаченный заказ)"
-	}
-
-	return fmt.Sprintf("🚫 *Chargeback по платежу*\n\n"+
-		"💎 Тариф: *%s*\n"+
-		"💵 Сумма: *%s*\n"+
-		"👤 Покупатель: %s\n"+
-		"🆔 Telegram ID: `%d`\n"+
-		"🔖 Платёж: `%s`\n"+
-		"📋 Подписка: #%d\n"+
-		"🧾 Заказ: #%d\n"+
-		"%s",
-		productName,
-		formatMoneyCents(amountCents, currency),
-		utils.FormatUserLink(username, telegramID),
-		telegramID,
-		providerPaymentID,
-		subscriptionID,
-		orderID,
-		access)
+	return formatAdminPaymentAlert("🚫 *Chargeback по платежу*", sub, order, product, downgraded)
 }
 
 // RequestPayment validates the current product and plan, reuses a valid pending
@@ -122,7 +84,73 @@ func (o *OrderService) RequestPayment(ctx context.Context, telegramID int64, use
 	return info, order, err
 }
 
+// resolvePaymentSubscription возвращает подписку покупателя, создавая её при
+// первом платеже. Покупка нового товара требует активного товара и плана:
+// деактивированный товар не должен создавать подписку.
+func (o *OrderService) resolvePaymentSubscription(ctx context.Context, telegramID int64, username string, canonical *database.Product) (*database.Subscription, error) {
+	sub, err := o.db.GetByTelegramID(ctx, telegramID)
+	if err == nil {
+		return sub, nil
+	}
+
+	if !errors.Is(err, database.ErrSubscriptionNotFound) && !errors.Is(err, gorm.ErrRecordNotFound) {
+		o.notifyRequestIssue(ctx, "load_subscription_failed", err.Error(), "retry after database recovery", telegramID, canonical, nil)
+
+		return nil, fmt.Errorf("load payment subscription: %w", err)
+	}
+
+	err = o.validatePurchasableProduct(ctx, telegramID, canonical, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if o.subSvc == nil {
+		err := errors.New("subscription service is not configured")
+		o.notifyRequestIssue(ctx, "subscription_service_not_ready", err.Error(), "wire SubscriptionService before enabling payments", telegramID, canonical, nil)
+
+		return nil, err
+	}
+
+	sub, err = o.subSvc.GetOrCreateSubscription(ctx, telegramID, username, "")
+	if err != nil {
+		o.notifyRequestIssue(ctx, "create_subscription_failed", err.Error(), "retry after subscription service recovery", telegramID, canonical, nil)
+
+		return nil, fmt.Errorf("get or create subscription: %w", err)
+	}
+
+	return sub, nil
+}
+
+// validatePurchasableProduct проверяет, что товар активен, цена положительна и
+// план товара активен: оператор мог деактивировать товар после создания
+// pending-заказа. Уже сохранённая и действующая платёжная ссылка возвращается
+// до этой проверки.
+func (o *OrderService) validatePurchasableProduct(ctx context.Context, telegramID int64, canonical *database.Product, order *database.Order) error {
+	if !canonical.IsActive || canonical.PriceCents <= 0 {
+		return errors.New("invalid paid product request")
+	}
+
+	plan, err := o.db.GetPlanByID(ctx, canonical.PlanID)
+	if err != nil {
+		o.notifyRequestIssue(ctx, "load_plan_failed", err.Error(), "retry after database recovery", telegramID, canonical, order)
+
+		return fmt.Errorf("load product plan: %w", err)
+	}
+
+	if plan == nil || !plan.IsActive {
+		return errors.New("product plan is inactive")
+	}
+
+	return nil
+}
+
 func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, username string, product *database.Product) (*PaymentInfo, *database.Order, error) {
+	// PAYMENT_ENABLED=false блокирует выдачу новых платёжных ссылок до создания
+	// заказа/интента. Confirm/refund/recovery не затрагиваются.
+	if o.cfg != nil && !o.cfg.PaymentEnabled {
+		return nil, nil, ErrPaymentDisabled
+	}
+
 	// В Stars-режиме Platega-клиент отсутствует: o.payment == nil — не ошибка.
 	if o.payment == nil && o.activeProvider() != database.PaymentProviderTelegramStars {
 		return nil, nil, ErrPaymentDisabled
@@ -154,44 +182,13 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 	}
 
 	now := time.Now().UTC()
+
 	// Resolve the subscription before looking up the intent. Intents belong to
 	// a concrete subscription, not merely to a Telegram ID; this matters when
 	// historical data contains more than one subscription for one user.
-	var sub *database.Subscription
-
-	sub, err = o.db.GetByTelegramID(ctx, telegramID)
+	sub, err := o.resolvePaymentSubscription(ctx, telegramID, username, canonical)
 	if err != nil {
-		if !errors.Is(err, database.ErrSubscriptionNotFound) && !errors.Is(err, gorm.ErrRecordNotFound) {
-			o.notifyRequestIssue(ctx, "load_subscription_failed", err.Error(), "retry after database recovery", telegramID, canonical, nil)
-			return nil, nil, fmt.Errorf("load payment subscription: %w", err)
-		}
-
-		if !canonical.IsActive || canonical.PriceCents <= 0 {
-			return nil, nil, errors.New("invalid paid product request")
-		}
-
-		plan, planErr := o.db.GetPlanByID(ctx, canonical.PlanID)
-		if planErr != nil {
-			o.notifyRequestIssue(ctx, "load_plan_failed", planErr.Error(), "retry after database recovery", telegramID, canonical, nil)
-			return nil, nil, fmt.Errorf("load product plan: %w", planErr)
-		}
-
-		if plan == nil || !plan.IsActive {
-			return nil, nil, errors.New("product plan is inactive")
-		}
-
-		if o.subSvc == nil {
-			err := errors.New("subscription service is not configured")
-			o.notifyRequestIssue(ctx, "subscription_service_not_ready", err.Error(), "wire SubscriptionService before enabling payments", telegramID, canonical, nil)
-
-			return nil, nil, err
-		}
-
-		sub, err = o.subSvc.GetOrCreateSubscription(ctx, telegramID, username, "")
-		if err != nil {
-			o.notifyRequestIssue(ctx, "create_subscription_failed", err.Error(), "retry after subscription service recovery", telegramID, canonical, nil)
-			return nil, nil, fmt.Errorf("get or create subscription: %w", err)
-		}
+		return nil, nil, err
 	}
 
 	// Telegram Stars: ранний return до всех Platega-проверок — reuse ссылки,
@@ -200,6 +197,13 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 		return o.requestStarsPayment(ctx, telegramID, canonical, sub)
 	}
 
+	return o.requestPlategaPayment(ctx, telegramID, username, canonical, sub, now)
+}
+
+// requestPlategaPayment оформляет покупку через Platega: находит или создаёт
+// pending-интент, переиспользует действующую ссылку и создаёт транзакцию
+// провайдера. Проверка товара и плана — validatePurchasableProduct.
+func (o *OrderService) requestPlategaPayment(ctx context.Context, telegramID int64, username string, canonical *database.Product, sub *database.Subscription, now time.Time) (*PaymentInfo, *database.Order, error) {
 	// Return a still-valid link before validating the current product flags: an
 	// operator may deactivate a product while an already-created payment link is
 	// still usable. Expiry is terminalized by the repository lookup.
@@ -220,18 +224,9 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 	var created bool
 
 	if order == nil {
-		if !canonical.IsActive || canonical.PriceCents <= 0 {
-			return nil, nil, errors.New("invalid paid product request")
-		}
-
-		plan, planErr := o.db.GetPlanByID(ctx, canonical.PlanID)
-		if planErr != nil {
-			o.notifyRequestIssue(ctx, "load_plan_failed", planErr.Error(), "retry after database recovery", telegramID, canonical, nil)
-			return nil, nil, fmt.Errorf("load product plan: %w", planErr)
-		}
-
-		if plan == nil || !plan.IsActive {
-			return nil, nil, errors.New("product plan is inactive")
+		err = o.validatePurchasableProduct(ctx, telegramID, canonical, nil)
+		if err != nil {
+			return nil, nil, err
 		}
 		// The repository transaction expires an old link and creates/reuses the
 		// single pending intent under the partial unique index. This is the only
@@ -284,18 +279,9 @@ func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, use
 	// Creating a new provider transaction is a new purchase attempt. Do not
 	// start it for a product/plan that was deactivated after the pending intent
 	// was created; only an already-saved, still-valid link may be returned above.
-	if !canonical.IsActive || canonical.PriceCents <= 0 {
-		return nil, order, errors.New("invalid paid product request")
-	}
-
-	plan, planErr := o.db.GetPlanByID(ctx, canonical.PlanID)
-	if planErr != nil {
-		o.notifyRequestIssue(ctx, "load_plan_failed", planErr.Error(), "retry after database recovery", telegramID, canonical, order)
-		return nil, order, fmt.Errorf("load product plan: %w", planErr)
-	}
-
-	if plan == nil || !plan.IsActive {
-		return nil, order, errors.New("product plan is inactive")
+	err = o.validatePurchasableProduct(ctx, telegramID, canonical, order)
+	if err != nil {
+		return nil, order, err
 	}
 
 	claimed, err := o.db.MarkPaymentCreationUncertain(ctx, order.ID, true)
@@ -693,38 +679,6 @@ func (o *OrderService) confirmPayment(
 	return o.confirmPaidOrderTail(ctx, order, sub, product, isRenewal, activated, unlock)
 }
 
-// confirmPaidOrderTail выполняет действия после успешного подтверждения оплаты:
-// освобождает per-order lock, инвалидирует кэш, шлёт админ-алерт и синхронизирует
-// подписку с VPN-нодами. Вызывается обеими ветками подтверждения (Platega, Stars).
-// unlock — разблокировщик per-order lock; передаётся явно, чтобы вызывающая сторона
-// могла удерживать его до последнего момента (Platega: unlock до sync, Stars: тоже).
-func (o *OrderService) confirmPaidOrderTail(
-	ctx context.Context, order *database.Order, sub *database.Subscription, product *database.Product,
-	isRenewal, activated bool, unlock func(),
-) (*PaymentConfirmation, error) {
-	unlock()
-
-	if activated {
-		if o.subSvc != nil && sub.SubscriptionID != "" {
-			o.subSvc.InvalidateBySubID(ctx, sub.SubscriptionID)
-		}
-
-		o.notifyAdminPaid(ctx, sub, order, product, isRenewal)
-	}
-
-	if activated && o.syncSvc != nil {
-		syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), paymentSyncTimeout)
-		defer cancel()
-
-		err := o.syncSvc.SyncSubscription(syncCtx, sub.ID)
-		if err != nil {
-			logger.Warn("payment post-commit sync failed", zap.Uint("subscription_id", sub.ID), zap.Error(err))
-		}
-	}
-
-	return &PaymentConfirmation{Order: order, Activated: activated, IsRenewal: isRenewal}, nil
-}
-
 // SyncProviderFees retries best-effort provider fee lookups for paid orders.
 // The nullable provider_fee_cents column is the durable retry queue, so payment
 // callbacks do not wait for a second provider request and a later worker run can
@@ -977,78 +931,4 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 	unlock()
 
 	return order, wasPaid, nil
-}
-
-func (o *OrderService) chargebackPlanInTx() database.ChargebackPlanInTxFn {
-	if o.syncSvc == nil {
-		return nil
-	}
-
-	return func(ctx context.Context, tx *gorm.DB, subscriptionID, freePlanID uint) error {
-		return o.syncSvc.ApplyPlanToSubscriptionInTx(ctx, tx, subscriptionID, freePlanID)
-	}
-}
-
-// mirrorOrderFromSubscriptionAfterCAS keeps the order snapshot consistent with
-// the subscription state the CAS just wrote. The CAS itself only mutates the
-// caller-supplied subscription pointer; the order snapshot has to be updated
-// separately so downstream notification (admin paid alert, user confirmation,
-// subserver cache invalidation) reads a coherent picture.
-//
-// The nil guard on sub.ExpiresAt keeps the helper safe against fakes or future
-// CAS implementations that activate without setting an expiry (e.g. free plans
-// past paid activation).
-func mirrorOrderFromSubscriptionAfterCAS(order *database.Order, sub *database.Subscription, now time.Time) {
-	if sub != nil && sub.ExpiresAt != nil {
-		newExpiry := *sub.ExpiresAt
-		order.ExpiresAt = &newExpiry
-	}
-
-	order.Status = database.OrderStatusPaid
-	paidAt, activatedAt := now, now
-	order.PaidAt = &paidAt
-	order.ActivatedAt = &activatedAt
-}
-
-// loadChargebackAlertContext loads the subscription and product needed for the
-// admin chargeback alert. Each load is best-effort: a failure is logged via the
-// returned error context but never blocks the chargeback alert. Callers render
-// placeholders for any nil field, so alerts always go out.
-func (o *OrderService) loadChargebackAlertContext(ctx context.Context, order *database.Order) (*database.Subscription, *database.Product) {
-	var (
-		sub     *database.Subscription
-		product *database.Product
-	)
-
-	loaded, subErr := o.db.GetByID(ctx, order.SubscriptionID)
-	if subErr == nil && loaded != nil {
-		sub = loaded
-	} else if subErr != nil {
-		logger.Debug("chargeback admin alert: subscription lookup failed", zap.Uint("order_id", order.ID), zap.Error(subErr))
-	}
-
-	if order.ProductID != 0 {
-		loaded, pErr := o.db.GetProductByID(ctx, order.ProductID)
-		if pErr == nil && loaded != nil {
-			product = loaded
-		} else if pErr != nil {
-			logger.Debug("chargeback admin alert: product lookup failed", zap.Uint("order_id", order.ID), zap.Uint("product_id", order.ProductID), zap.Error(pErr))
-		}
-	}
-
-	return sub, product
-}
-
-func (o *OrderService) syncChargebackAfterCommit(ctx context.Context, subscriptionID uint) {
-	if o.syncSvc == nil {
-		return
-	}
-
-	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), paymentSyncTimeout)
-	defer cancel()
-
-	err := o.syncSvc.SyncSubscription(dctx, subscriptionID)
-	if err != nil {
-		logger.Warn("chargeback post-commit sync failed", zap.Uint("subscription_id", subscriptionID), zap.Error(err))
-	}
 }

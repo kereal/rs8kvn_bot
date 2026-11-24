@@ -654,13 +654,12 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 		if currentSub.Status == string(SubscriptionStatusActive) {
 			var activePaid int64
 
-			// Count all paid orders for this subscription, INCLUDING the order
-			// being charged back (it is still OrderStatusPaid at this point in
-			// the transaction). This is intentional: if this is the only paid
-			// order, activePaid == 1, which correctly triggers a downgrade to
-			// free. If another active paid order exists, activePaid > 1 and
-			// access is preserved. The count is taken BEFORE the order status
-			// update below, so it reflects the pre-chargeback state.
+			// Count the paid orders that still cover this subscription. The
+			// order being charged back was already flipped to canceled above,
+			// so it no longer counts: if it was the only paid order,
+			// activePaid == 0 and the subscription is downgraded to the free
+			// plan; if another active paid order exists, activePaid > 0 and
+			// access is preserved.
 			err = tx.Model(&Order{}).
 				Where("subscription_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)", order.SubscriptionID, OrderStatusPaid, now).
 				Count(&activePaid).Error

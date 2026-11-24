@@ -65,6 +65,7 @@ const (
 	AuditEventOrderCanceled         = "order_canceled"
 	AuditEventChargebackReceived    = "chargeback_received"
 	AuditEventPaymentRefunded       = "payment_refunded"
+	AuditEventPaymentAutoRefunded   = "payment_auto_refunded"
 	AuditEventPaymentCreationUncert = "payment_creation_uncertain"
 
 	// Рассылки.
@@ -633,6 +634,40 @@ func AuditPaymentRefunded(order *Order, sub *Subscription, downgraded bool) *Aud
 		OldState:   marshalAuditJSON(map[string]any{"order_status": string(OrderStatusPaid)}),
 		NewState:   marshalAuditJSON(map[string]any{"order_status": string(OrderStatusCanceled)}),
 		Details:    marshalAuditDetails(details),
+	}
+}
+
+// AuditPaymentAutoRefunded фиксирует автоматический возврат средств, применённый
+// сервисом (дубль оплаты Stars). order может быть nil — тогда событие
+// адресуется системе. reason описывает причину авто-возврата.
+func AuditPaymentAutoRefunded(order *Order, telegramID int64, amountCents int64, currency string, providerPaymentID string, reason string) *AuditLog {
+	entityType, entityID := EntitySystem, (*string)(nil)
+	actorID := (*string)(nil)
+
+	if order != nil {
+		entityType = EntityOrder
+		if order.ID > 0 {
+			entityID = marshalAuditJSONString(fmt.Sprintf("%d", order.ID))
+		}
+	}
+
+	if provider := strings.TrimSpace(providerPaymentID); provider != "" {
+		actorID = marshalAuditJSONString(provider)
+	}
+
+	return &AuditLog{
+		EntityType: entityType,
+		EntityID:   entityID,
+		Event:      AuditEventPaymentAutoRefunded,
+		ActorType:  ActorPaymentProvider,
+		ActorID:    actorID,
+		Details: marshalAuditDetails(map[string]any{
+			"provider_payment_id": providerPaymentID,
+			"amount_cents":        amountCents,
+			"currency":            currency,
+			"reason":              reason,
+			"telegram_id":         telegramID,
+		}),
 	}
 }
 

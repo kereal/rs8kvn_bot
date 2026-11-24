@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
+	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service"
 	stars "github.com/kereal/rs8kvn_bot/internal/service/payment/stars"
 	"github.com/kereal/rs8kvn_bot/internal/utils"
@@ -19,6 +22,50 @@ import (
 // Stars-flow: выбор тарифа, согласие с условиями и выставление счёта.
 // Вынесено из subscription_handler.go, чтобы файл подписок не содержал
 // платёжный код конкретного провайдера.
+
+// starsSentInvoiceSet — bounded set успешно отправленных Stars-invoice order IDs:
+// «протухший» replay acceptance-кнопки после успеха не создаёт второй invoice.
+// Кольцевой буфер на max элементов: переполнение вытесняет самый старый id,
+// память ограничена. In-flight параллельные отправки guard-ит starsInvoiceInFlight.
+type starsSentInvoiceSet struct {
+	mu   sync.Mutex
+	ring []uint
+	pos  int
+	set  map[uint]struct{}
+}
+
+const starsSentInvoicesMax = 1024
+
+func newStarsSentInvoiceSet(max int) *starsSentInvoiceSet {
+	return &starsSentInvoiceSet{
+		ring: make([]uint, max),
+		set:  make(map[uint]struct{}, max),
+	}
+}
+
+// Has reports whether the order invoice was already sent successfully.
+func (s *starsSentInvoiceSet) Has(orderID uint) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, ok := s.set[orderID]
+
+	return ok
+}
+
+// Add records the order invoice as sent, evicting the oldest entry when full.
+func (s *starsSentInvoiceSet) Add(orderID uint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if old := s.ring[s.pos]; old != 0 {
+		delete(s.set, old)
+	}
+
+	s.ring[s.pos] = orderID
+	s.pos = (s.pos + 1) % len(s.ring)
+	s.set[orderID] = struct{}{}
+}
 
 // isStarsProvider возвращает true при активном провайдере Telegram Stars.
 func (sh *SubscriptionHandler) isStarsProvider() bool {
@@ -114,7 +161,7 @@ func (sh *SubscriptionHandler) handleStarsBuy(ctx context.Context, chatID, teleg
 	kb := sh.h.keyboards.StarsTermsAccept(order.ID, product.ID, chatID, uint(messageID))
 	acceptMsg.ReplyMarkup = &kb
 
-	_, sendErr := sh.h.paymentAPI().Send(acceptMsg)
+	_, sendErr := sh.h.sendViaPaymentAPI(acceptMsg)
 	if sendErr != nil {
 		logger.Warn("failed to send stars terms acceptance message",
 			zap.Uint("order_id", order.ID),
@@ -122,18 +169,7 @@ func (sh *SubscriptionHandler) handleStarsBuy(ctx context.Context, chatID, teleg
 			zap.Error(sendErr))
 
 		// Заказ остался pending; освобождаем, чтобы retry создал новый.
-		_, expireErr := sh.h.db.ExpirePendingOrder(ctx, order.ID)
-		if expireErr != nil {
-			logger.Warn("failed to expire pending order after acceptance send failure",
-				zap.Uint("order_id", order.ID), zap.Error(expireErr))
-			sh.h.orderService.NotifyPaymentIssue(ctx, service.PaymentIssue{
-				Event:      "stars_acceptance_send_failed_expire_failed",
-				Reason:     sendErr.Error(),
-				Action:     "expire pending order " + fmt.Sprint(order.ID) + " manually",
-				OrderID:    order.ID,
-				TelegramID: telegramID,
-			})
-		}
+		sh.expireStarsPending(ctx, order.ID, telegramID)
 
 		return sh.showBuyError(chatID, messageID, msg(MsgInvoiceSendFailed))
 	}
@@ -147,6 +183,32 @@ func (sh *SubscriptionHandler) handleStarsBuy(ctx context.Context, chatID, teleg
 	return nil
 }
 
+// expireStarsPending истекает pending-заказ Stars, чтобы покупатель мог
+// повторить покупку (in-memory dedupe-set не должен блокировать новый invoice).
+// Best-effort: сбой истечения не роняет бизнес-операцию, но репортится
+// админу через issue-событие.
+func (sh *SubscriptionHandler) expireStarsPending(ctx context.Context, orderID uint, telegramID int64) {
+	_, expireErr := sh.h.db.ExpirePendingOrder(ctx, orderID)
+	if expireErr == nil {
+		return
+	}
+
+	logger.Warn("failed to expire pending stars order",
+		zap.Uint("order_id", orderID), zap.Error(expireErr))
+
+	if sh.h.orderService == nil {
+		return
+	}
+
+	sh.h.orderService.NotifyPaymentIssue(ctx, service.PaymentIssue{
+		Event:      "stars_pending_order_expire_failed",
+		Reason:     expireErr.Error(),
+		Action:     "expire pending order " + fmt.Sprint(orderID) + " manually",
+		OrderID:    orderID,
+		TelegramID: telegramID,
+	})
+}
+
 // handleStarsAccept обрабатывает acceptance-callback stars_accept_<order>_<product>_<card>:
 // загружает pending-заказ напрямую по ID (RequestPayment в callback НЕ вызывается —
 // expired заказ не должен порождать replacement pending), валидирует провайдера,
@@ -158,6 +220,14 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 		return sh.showBuyError(chatID, acceptMsgID, "❌ Платежи временно недоступны")
 	}
 
+	// cardChatID (карточка тарифа) и chatID (чат, где нажата кнопка согласия)
+	// легально различаются: карточка публикуется в группе/канале, а кнопка
+	// согласия приходит в личку покупателя. Строгое равенство сломало бы
+	// покупку из группового чата. Защита от подделки callback-data здесь
+	// избыточна: Telegram разрешает боту редактировать только собственные
+	// сообщения, а покупатель и заказ проверяются ниже по order.ID и
+	// subscription владельца.
+	//
 	// Активный провайдер мог переключиться (Stars→Platega) после создания
 	// pending-заказа: старая кнопка согласия не должна выставлять Stars-invoice.
 	// Defense-in-depth к rollout-чеклисту §8.2 (переключение только после
@@ -184,6 +254,44 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 		logger.Warn("stars acceptance order load failed",
 			zap.Uint("order_id", expectedOrderID),
 			zap.Error(err))
+
+		return sh.showBuyError(chatID, acceptMsgID, msg(MsgSubTempError))
+	}
+
+	// S5: товар и план могли быть деактивированы после создания pending-заказа
+	// (проверки выполняются при создании, но acceptance может прийти к устаревшему
+	// заказу). Перечитываем дерево перед выставлением счёта и отклоняем покупку,
+	// освобождая pending-заказ для повторной попытки.
+	if !product.IsActive {
+		logger.Warn("stars acceptance product inactive",
+			zap.Uint("order_id", order.ID),
+			zap.Uint("product_id", productID))
+
+		sh.expireStarsPending(ctx, order.ID, buyerTelegramID)
+
+		return sh.showBuyError(chatID, acceptMsgID, msg(MsgSubTempError))
+	}
+
+	plan, err := sh.h.db.GetPlanByID(ctx, product.PlanID)
+	if err != nil || plan == nil {
+		logger.Warn("stars acceptance plan load failed",
+			zap.Uint("order_id", order.ID),
+			zap.Uint("product_id", productID),
+			zap.Uint("plan_id", product.PlanID),
+			zap.Error(err))
+
+		sh.expireStarsPending(ctx, order.ID, buyerTelegramID)
+
+		return sh.showBuyError(chatID, acceptMsgID, msg(MsgSubTempError))
+	}
+
+	if !plan.IsActive {
+		logger.Warn("stars acceptance plan inactive",
+			zap.Uint("order_id", order.ID),
+			zap.Uint("product_id", productID),
+			zap.Uint("plan_id", plan.ID))
+
+		sh.expireStarsPending(ctx, order.ID, buyerTelegramID)
 
 		return sh.showBuyError(chatID, acceptMsgID, msg(MsgSubTempError))
 	}
@@ -256,7 +364,7 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 		return sh.showBuyError(chatID, acceptMsgID, msg(MsgSubTempError))
 	}
 
-	sentInvoice, err := sh.h.paymentAPI().Send(invoice)
+	sentInvoice, err := sh.h.sendViaPaymentAPI(invoice)
 	if err != nil {
 		logger.Warn("failed to send stars invoice",
 			zap.Uint("order_id", order.ID),
@@ -265,18 +373,7 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 			zap.Error(err))
 
 		// Заказ остался pending; освобождаем, чтобы повторная покупка создала новый.
-		_, expireErr := sh.h.db.ExpirePendingOrder(ctx, order.ID)
-		if expireErr != nil {
-			logger.Warn("failed to expire pending order after invoice send failure",
-				zap.Uint("order_id", order.ID), zap.Error(expireErr))
-			sh.h.orderService.NotifyPaymentIssue(ctx, service.PaymentIssue{
-				Event:      "stars_invoice_send_failed_expire_failed",
-				Reason:     err.Error(),
-				Action:     "expire pending order " + fmt.Sprint(order.ID) + " manually",
-				OrderID:    order.ID,
-				TelegramID: buyerTelegramID,
-			})
-		}
+		sh.expireStarsPending(ctx, order.ID, buyerTelegramID)
 
 		return sh.showBuyError(chatID, acceptMsgID, msg(MsgInvoiceSendFailed))
 	}
@@ -290,15 +387,16 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 	acceptDone.ParseMode = "Markdown"
 	sh.h.safeSend(acceptDone)
 
-	// Карточка тарифа: «Счёт отправлен ниже», кнопка Back несёт id invoice
-	// в личном чате покупателя (stars_invoice_back удаляет его по telegram_id).
+	// Карточка тарифа: «Счёт отправлен ниже», кнопка Back несёт id invoice в
+	// личном чате покупателя и order_id pending-заказа (stars_invoice_back
+	// истекает заказ и удаляет сообщение по telegram_id покупателя).
 	if cardMsgID > 0 {
 		invoiceText := fmt.Sprintf("Тариф: 💎 *%s*\n\nСтоимость: *%s*\n\nСчёт отправлен в личном чате — нажмите «Pay» в счёте.\nПосле оплаты тариф активируется автоматически.\nЕсли тариф уже активен, новые дни прибавятся к текущему сроку.",
 			utils.EscapeMarkdown(product.Name), utils.FormatStarsAmount(order.AmountCents))
 
 		editMsg := tgbotapi.NewEditMessageText(cardChatID, cardMsgID, invoiceText)
 		editMsg.ParseMode = "Markdown"
-		keyboard := sh.h.keyboards.StarsInvoiceBack(buyerTelegramID, sentInvoice.MessageID, product.ID)
+		keyboard := sh.h.keyboards.StarsInvoiceBack(buyerTelegramID, sentInvoice.MessageID, order.ID)
 		editMsg.ReplyMarkup = &keyboard
 		sh.h.safeSend(editMsg)
 	}
@@ -310,4 +408,331 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 		zap.Int("invoice_message_id", sentInvoice.MessageID))
 
 	return nil
+}
+
+// PreCheckoutTimeout ограничивает бюджет ответа на pre_checkout_query.
+//
+// Суммарный бюджет укладывается в окно Telegram 10 секунд и строго
+// последовательный: 4s — валидация заказа в БД (ValidateStarsPreCheckout, одна
+// операция, никаких параллельных вызовов) + до 4s — HTTP-ответ answerPreCheckout
+// через payment-клиент с таймаутом 4s. Плюс ожидание слота fast-lane
+// (preCheckoutSlotWaitTimeout, 1s) в cmd/bot. Итого worst case ≤9s < 10s.
+//
+// Экспортирован, чтобы cmd/bot мог зафиксировать инвариант «ответ укладывается в
+// окно Telegram» тестом.
+const PreCheckoutTimeout = 4 * time.Second
+
+// isFinancialUpdate сообщает, что апдейт должен пройти вне общего rate limiter:
+// pre_checkout_query обрабатывается отдельной веткой выше, здесь —
+// successful_payment и команды /paysupport, /terms (compliance: платёжные
+// апдейты не отбрасываются лимитом).
+func (h *Handler) isFinancialUpdate(update tgbotapi.Update) bool {
+	if update.Message == nil {
+		return false
+	}
+
+	if update.Message.SuccessfulPayment != nil {
+		return true
+	}
+
+	if !update.Message.IsCommand() {
+		return false
+	}
+
+	switch normalizeCommand(update.Message.Command()) {
+	case "paysupport", "terms":
+		return true
+	default:
+		return false
+	}
+}
+
+// runFinancialUpdate диспетчеризует финансовый апдейт вне общего rate limiter,
+// сохраняя стандартный HandlerTimeout и метрики.
+func (h *Handler) runFinancialUpdate(ctx context.Context, update tgbotapi.Update) {
+	ctx, cancel := h.withTimeout(ctx)
+	defer cancel()
+
+	start := time.Now()
+
+	var (
+		command string
+		err     error
+	)
+
+	switch {
+	case update.Message.SuccessfulPayment != nil:
+		command = "successful_payment"
+		err = h.handleSuccessfulPayment(ctx, update)
+	case normalizeCommand(update.Message.Command()) == "paysupport":
+		command = "paysupport"
+		err = h.HandlePaySupport(ctx, update)
+	default:
+		command = "terms"
+		err = h.HandleTerms(ctx, update)
+	}
+
+	metrics.BotUpdateDuration.WithLabelValues(command).Observe(time.Since(start).Seconds())
+
+	if err != nil {
+		metrics.BotUpdatesTotal.WithLabelValues(command, "error").Inc()
+
+		return
+	}
+
+	metrics.BotUpdatesTotal.WithLabelValues(command, "success").Inc()
+}
+
+// handlePreCheckout отвечает на pre_checkout_query: валидация без побочных
+// эффектов, ответ уходит ВСЕГДА (OK=false при любой ошибке), бюджет §5.2.
+func (h *Handler) handlePreCheckout(ctx context.Context, update tgbotapi.Update) {
+	q := update.PreCheckoutQuery
+
+	if q.From == nil {
+		// Патологический кейс (Telegram всегда присылает From), но ответ — всегда.
+		logger.Warn("pre_checkout_query without From", zap.String("query_id", q.ID))
+		h.answerPreCheckout(q.ID, false)
+
+		return
+	}
+
+	if h.orderService == nil {
+		logger.Warn("pre_checkout_query without order service", zap.String("query_id", q.ID))
+		h.answerPreCheckout(q.ID, false)
+
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, PreCheckoutTimeout)
+	defer cancel()
+
+	err := h.orderService.ValidateStarsPreCheckout(ctx, q.InvoicePayload, q.From.ID, int64(q.TotalAmount), q.Currency)
+
+	h.answerPreCheckout(q.ID, err == nil)
+
+	logger.Info("Stars pre-checkout validated",
+		zap.String("provider", database.PaymentProviderTelegramStars),
+		zap.String("query_id", q.ID),
+		zap.Int64("telegram_id", q.From.ID),
+		zap.String("payload", q.InvoicePayload),
+		zap.Int64("amount", int64(q.TotalAmount)),
+		zap.String("currency", q.Currency),
+		zap.Bool("ok", err == nil),
+		zap.Error(err))
+}
+
+// answerPreCheckout отправляет ответ на pre_checkout_query через payment-инстанс.
+func (h *Handler) answerPreCheckout(queryID string, ok bool) {
+	answer := tgbotapi.PreCheckoutConfig{PreCheckoutQueryID: queryID, OK: ok}
+	if !ok {
+		answer.ErrorMessage = "Платёж не может быть принят. Обратитесь в /paysupport"
+	}
+
+	_, err := h.requestViaPaymentAPI(answer)
+	if err != nil {
+		logger.Warn("failed to answer pre_checkout_query",
+			zap.String("query_id", queryID),
+			zap.Bool("ok", ok),
+			zap.Error(err))
+	}
+}
+
+// handleSuccessfulPayment обрабатывает Stars successful_payment: подтверждение
+// оплаты (источник истины — successful_payment), уведомление пользователю,
+// разбор ошибок после списания (§5.3).
+func (h *Handler) handleSuccessfulPayment(ctx context.Context, update tgbotapi.Update) error {
+	payment := update.Message.SuccessfulPayment
+
+	if update.Message.From == nil {
+		logger.Warn("successful_payment without From",
+			zap.String("payload", payment.InvoicePayload),
+			zap.String("charge_id", payment.TelegramPaymentChargeID))
+
+		return errors.New("successful_payment without From")
+	}
+
+	if h.orderService == nil {
+		return errors.New("order service is not configured")
+	}
+
+	chatID := update.Message.Chat.ID
+
+	confirmation, err := h.orderService.ConfirmStarsPayment(ctx,
+		payment.TelegramPaymentChargeID,
+		payment.InvoicePayload,
+		int64(payment.TotalAmount),
+		payment.Currency,
+		update.Message.From.ID)
+	if err != nil {
+		// Деньги уже списаны: отказ пользователю + правка вручную через /refund.
+		logger.Error("Stars successful_payment confirm failed",
+			zap.String("provider", database.PaymentProviderTelegramStars),
+			zap.String("charge_id", payment.TelegramPaymentChargeID),
+			zap.String("payload", payment.InvoicePayload),
+			zap.Int64("telegram_id", update.Message.From.ID),
+			zap.Error(err))
+
+		h.orderService.NotifyPaymentIssue(ctx, service.PaymentIssue{
+			Event:          "stars_payment_confirm_failed",
+			Reason:         err.Error(),
+			Action:         "reconcile the Stars payment manually; refund via /refund when disputed",
+			TelegramID:     update.Message.From.ID,
+			Currency:       payment.Currency,
+			AmountCents:    int64(payment.TotalAmount),
+			CallbackStatus: "successful_payment",
+			Payload:        payment.InvoicePayload,
+			ProviderID:     payment.TelegramPaymentChargeID,
+		})
+
+		h.sendPaymentSupportNotice(ctx, chatID)
+
+		return fmt.Errorf("confirm stars payment: %w", err)
+	}
+
+	if !confirmation.Activated {
+		if confirmation.AlreadyRefunded {
+			// Заказ отменён после уже выполненного refund: деньги у покупателя,
+			// повторный возврат не требуется. Сообщаем именно об этом, а не о
+			// «списании по отменённому заказу».
+			refundNotice := tgbotapi.NewMessage(chatID,
+				"↩️ Платёж по этому заказу уже возвращён: Stars зачислены обратно на ваш аккаунт. Если остались вопросы, напишите в /paysupport")
+			_, sendErr := h.sendViaPaymentAPI(refundNotice)
+			if sendErr != nil {
+				logger.Warn("failed to notify user about already refunded payment",
+					zap.Int64("chat_id", chatID), zap.Error(sendErr))
+			}
+
+			return nil
+		}
+
+		if confirmation.AutoRefunded {
+			// Сервис уже вернул Stars покупателю: понятное уведомление вместо
+			// canceled-order warning; service issue alert админу уходит отдельно,
+			// если автовозврат не удался (тогда AutoRefunded == false).
+			refundNotice := tgbotapi.NewMessage(chatID,
+				"↩️ Платёж возвращён: Stars зачислены обратно на ваш аккаунт. Если остались вопросы, напишите в /paysupport")
+			_, sendErr := h.sendViaPaymentAPI(refundNotice)
+			if sendErr != nil {
+				logger.Warn("failed to notify user about auto refund",
+					zap.Int64("chat_id", chatID), zap.Error(sendErr))
+			}
+
+			return nil
+		}
+
+		if confirmation.DuplicateCharge && !confirmation.AutoRefunded {
+			// Дубль оплаты, автовозврат не удался (контракт PaymentConfirmation):
+			// деньги списаны дважды, вернуть автоматически не удалось — сообщаем
+			// покупателю и направляем в /paysupport для ручного возврата.
+			dupNotice := tgbotapi.NewMessage(chatID,
+				"⚠️ Оплата задвоилась: автоматический возврат не удался. Обратитесь в /paysupport — вернём Stars вручную")
+			_, sendErr := h.sendViaPaymentAPI(dupNotice)
+			if sendErr != nil {
+				logger.Warn("failed to notify user about duplicate charge refund failure",
+					zap.Int64("chat_id", chatID), zap.Error(sendErr))
+			}
+
+			return nil
+		}
+
+		if confirmation.Order == nil {
+			// Заказ ссылается на удалённый product/subscription: активировать
+			// нечего — ручной разбор. Сообщение в /paysupport, не «отменённый
+			// заказ» (сервис уже сообщил об этом в issue-событии).
+			h.sendPaymentSupportNotice(ctx, chatID)
+
+			return nil
+		}
+
+		if confirmation.Order.Status == database.OrderStatusPaid {
+			// Повторная доставка successful_payment: идемпотентный no-op без
+			// второго продления и без предупреждения об отмене.
+			return nil
+		}
+
+		// Заказ canceled: деньги списаны, доступ отозван — ручная сверка.
+		warning := tgbotapi.NewMessage(chatID,
+			"⚠️ Оплата по отменённому заказу. Деньги списаны, доступ отозван. Обратитесь в /paysupport")
+		_, sendErr := h.sendViaPaymentAPI(warning)
+		if sendErr != nil {
+			logger.Warn("failed to notify user about canceled-order payment",
+				zap.Int64("chat_id", chatID), zap.Error(sendErr))
+		}
+
+		return nil
+	}
+
+	targetID, text, err := h.orderService.BuildPaidUserNotification(ctx, confirmation.Order)
+	if err != nil {
+		logger.Warn("failed to build paid notification",
+			zap.String("provider", database.PaymentProviderTelegramStars),
+			zap.Uint("order_id", confirmation.Order.ID),
+			zap.Error(err))
+
+		h.sendPaidNotificationFallback(ctx, "paid_notification_build_failed", err.Error(),
+			confirmation.Order, chatID, payment.TelegramPaymentChargeID, payment.InvoicePayload)
+
+		return nil
+	}
+
+	if targetID <= 0 {
+		return nil
+	}
+
+	userMessage := tgbotapi.NewMessage(targetID, text)
+	userMessage.ParseMode = tgbotapi.ModeMarkdown
+
+	_, err = h.sendViaPaymentAPI(userMessage)
+	if err != nil {
+		logger.Warn("failed to send paid notification",
+			zap.String("provider", database.PaymentProviderTelegramStars),
+			zap.Uint("order_id", confirmation.Order.ID),
+			zap.Int64("telegram_id", targetID),
+			zap.Error(err))
+
+		h.sendPaidNotificationFallback(ctx, "paid_notification_send_failed", err.Error(),
+			confirmation.Order, targetID, payment.TelegramPaymentChargeID, payment.InvoicePayload)
+	}
+
+	return nil
+}
+
+// sendPaymentSupportNotice сообщает покупателю об оплате, которую не удалось
+// подтвердить: указывает обратиться в /paysupport. Best-effort.
+func (h *Handler) sendPaymentSupportNotice(ctx context.Context, chatID int64) {
+	notice := tgbotapi.NewMessage(chatID,
+		"✅ Оплата получена, но подтвердить заказ не удалось. Напишите в /paysupport")
+	_, sendErr := h.sendViaPaymentAPI(notice)
+	if sendErr != nil {
+		logger.Warn("failed to notify user about confirm failure",
+			zap.Int64("chat_id", chatID), zap.Error(sendErr))
+	}
+}
+
+// sendPaidNotificationFallback сообщает в ops о непрошедшем уведомлении об
+// оплате и отправляет покупателю статичный fallback с подсказкой /paysupport.
+func (h *Handler) sendPaidNotificationFallback(ctx context.Context, event, reason string,
+	order *database.Order, telegramID int64, chargeID, payload string) {
+	h.orderService.NotifyPaymentIssue(ctx, service.PaymentIssue{
+		Event:          event,
+		Reason:         reason,
+		Action:         "send the confirmed payment details to the user manually",
+		OrderID:        order.ID,
+		TelegramID:     telegramID,
+		SubscriptionID: order.SubscriptionID,
+		ProductID:      order.ProductID,
+		AmountCents:    order.AmountCents,
+		Currency:       order.Currency,
+		ProviderID:     chargeID,
+		CallbackStatus: "successful_payment",
+		Payload:        payload,
+	})
+
+	fallback := tgbotapi.NewMessage(telegramID,
+		"Оплата подтверждена. Напишите в /paysupport, если доступ не появился")
+	_, sendErr := h.sendViaPaymentAPI(fallback)
+	if sendErr != nil {
+		logger.Warn("failed to send paid notification fallback",
+			zap.Int64("telegram_id", telegramID), zap.Error(sendErr))
+	}
 }

@@ -769,13 +769,13 @@ func (h *Handler) HandleRefund(ctx context.Context, update tgbotapi.Update) erro
 			zap.Error(err))
 
 		// Split-brain: Telegram уже вернул Stars, но состояние заказа/подписки
-		// не применено (ошибка free-plan/CAS). Повторять refund нельзя — деньги
-		// уже возвращены; нужен reconcile по заказу и подписке.
+		// не применено (ошибка free-plan/CAS). Повторный /refund безопасен:
+		// CHARGE_ALREADY_REFUNDED трактуется как успех, CAS доводится.
 		var stateErr *service.StarsRefundStateError
 		if errors.As(err, &stateErr) {
 			h.SendMessage(ctx, chatID,
-				fmt.Sprintf("⚠️ Stars по заказу #%d УЖЕ возвращены пользователю (charge %s), но применить состояние заказа/подписки не удалось: %v.\n\nПовторный /refund не нужен — проведите reconcile заказа #%d и подписки #%d вручную по charge ID.",
-					orderID, stateErr.ChargeID, stateErr.Err, stateErr.OrderID, stateErr.SubscriptionID))
+				fmt.Sprintf("⚠️ Stars по заказу #%d УЖЕ возвращены пользователю (charge %s), но применить состояние заказа/подписки не удалось: %v.\n\nTelegram-возврат уже выполнен — повторите `/refund <id>`, команда безопасно завершит обновление заказа.",
+					orderID, stateErr.ChargeID, stateErr.Err))
 
 			return nil
 		}
@@ -815,7 +815,7 @@ func (h *Handler) notifyRefundUser(ctx context.Context, result *service.StarsRef
 		result.OrderID, utils.FormatStarsAmount(result.AmountCents))
 
 	notice := tgbotapi.NewMessage(result.TelegramID, text)
-	_, sendErr := h.paymentAPI().Send(notice)
+	_, sendErr := h.sendViaPaymentAPI(notice)
 	if sendErr != nil {
 		logger.Warn("failed to notify user about stars refund",
 			zap.Uint("order_id", result.OrderID),

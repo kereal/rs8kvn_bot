@@ -97,7 +97,7 @@ func TestOrderService_NotifiesAdminForUncertainPayment(t *testing.T) {
 			return order, nil
 		},
 	}
-	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 	o.SetAdminBot(adminBot)
 
 	_, gotOrder, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 7})
@@ -125,7 +125,7 @@ func TestOrderService_NotifiesAdminForLateConfirmedPayment(t *testing.T) {
 			return &database.Subscription{ID: 4, TelegramID: 43}, nil
 		},
 	}
-	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 	o.SetAdminBot(adminBot)
 
 	confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("23.00"), "RUB")
@@ -208,7 +208,7 @@ func TestOrderService_NotifiesAdminForProviderRejection(t *testing.T) {
 	}
 	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{createFunc: func(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
 		return nil, fmt.Errorf("%w: invalid request", platega.ErrBadRequest)
-	}}, "", &config.Config{TelegramAdminID: 999})
+	}}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 	o.SetAdminBot(adminBot)
 
 	_, _, err := o.RequestPayment(context.Background(), 45, "user", &database.Product{ID: 10})
@@ -241,7 +241,7 @@ func TestOrderService_NotifiesAdminWhenProviderOutcomeIsUncertain(t *testing.T) 
 	}
 	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{createFunc: func(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
 		return nil, providerErr
-	}}, "", &config.Config{TelegramAdminID: 999})
+	}}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 	o.SetAdminBot(adminBot)
 
 	_, _, err := o.RequestPayment(context.Background(), 44, "user", &database.Product{ID: 9})
@@ -291,7 +291,7 @@ func TestRequestPayment_SavesRedirectPaymentDetails(t *testing.T) {
 			TransactionID: providerID, Redirect: "https://pay.example/redirect", ExpiresIn: "00:15:00",
 		}, nil
 	}}
-	o := NewOrderService(mock, nil, nil, provider, "@testbot", &config.Config{TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, nil, provider, "@testbot", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 
 	info, gotOrder, err := o.RequestPayment(context.Background(), 46, "user", &database.Product{ID: 11})
 	require.NoError(t, err)
@@ -338,7 +338,7 @@ func TestRequestPayment_InvalidProviderResponsesNotifyAdmin(t *testing.T) {
 			}
 			o := NewOrderService(mock, nil, nil, &funcPaymentProvider{createFunc: func(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
 				return tt.response, nil
-			}}, "", &config.Config{TelegramAdminID: 999})
+			}}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 			o.SetAdminBot(adminBot)
 
 			_, _, err := o.RequestPayment(context.Background(), 47, "user", &database.Product{ID: 12})
@@ -369,7 +369,7 @@ func TestRequestPayment_LatePlanLoadFailureNotifiesAdmin(t *testing.T) {
 			return nil, errors.New("late plan database failure")
 		},
 	}
-	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 	o.SetAdminBot(adminBot)
 
 	_, _, err := o.RequestPayment(context.Background(), 50, "user", &database.Product{ID: 16})
@@ -405,7 +405,7 @@ func TestRequestPayment_SaveDetailsFailureNotifiesAdmin(t *testing.T) {
 	}
 	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{createFunc: func(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
 		return &platega.CreateTransactionResponse{TransactionID: providerID, URL: "https://pay.example", ExpiresIn: "00:15:00"}, nil
-	}}, "", &config.Config{TelegramAdminID: 999})
+	}}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 	o.SetAdminBot(adminBot)
 
 	_, _, err := o.RequestPayment(context.Background(), 48, "user", &database.Product{ID: 13})
@@ -516,7 +516,7 @@ func TestRequestPayment_ReusesLivePaymentLinkWithoutRecreating(t *testing.T) {
 
 		return nil, errors.New("create transaction must not be called")
 	}}
-	o := NewOrderService(mock, nil, nil, provider, "@testbot", &config.Config{TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, nil, provider, "@testbot", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 
 	info, gotOrder, err := o.RequestPayment(context.Background(), 48, "user", &database.Product{ID: 13})
 	require.NoError(t, err)
@@ -658,7 +658,7 @@ func TestConfirmPayment_ValidationAndDatabaseFailuresNotifyAdmin(t *testing.T) {
 					return false, tt.casErr
 				},
 			}
-			o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+			o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 			o.SetAdminBot(adminBot)
 
 			_, err := o.ConfirmPayment(context.Background(), providerID, "", tt.amount, tt.currency)
@@ -696,7 +696,7 @@ func TestConfirmPayment_NotifiesAdminOnActivation(t *testing.T) {
 		},
 	}
 	adminBot := testutil.NewBotAPI()
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 	o.SetAdminBot(adminBot)
 
 	confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("2300.00"), "RUB")
@@ -747,7 +747,7 @@ func TestConfirmPayment_NotifiesAdminOnRenewal(t *testing.T) {
 		},
 	}
 	adminBot := testutil.NewBotAPI()
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 	o.SetAdminBot(adminBot)
 
 	confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("2300.00"), "RUB")
@@ -878,7 +878,7 @@ func TestCancelPaymentByProvider_ChargebackNotifiesAdmin(t *testing.T) {
 					return product, nil
 				},
 			}
-			o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+			o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 			o.SetAdminBot(adminBot)
 
 			_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("6900.00"), "RUB")
@@ -958,7 +958,7 @@ func TestCancelPaymentByProvider_ErrorsNotifyAdmin(t *testing.T) {
 					return false, tt.casErr
 				},
 			}
-			o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+			o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 			o.SetAdminBot(adminBot)
 
 			_, _, err := o.CancelPaymentByProvider(context.Background(), providerID, "CANCELED", tt.amount, tt.currency)
@@ -1122,7 +1122,7 @@ func TestConfirmPayment_DeletedSubscriptionOrProductReturnsNoop(t *testing.T) {
 					return true, nil
 				},
 			}
-			o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+			o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 			o.SetAdminBot(adminBot)
 
 			confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("23.00"), "RUB")
@@ -1162,7 +1162,7 @@ func TestRequestPayment_ConcurrentClaimReturnsAlreadyInProgress(t *testing.T) {
 			return latest, nil
 		},
 	}
-	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 	o.SetAdminBot(adminBot)
 
 	_, gotOrder, err := o.RequestPayment(context.Background(), 55, "user", &database.Product{ID: 65})
@@ -1261,7 +1261,7 @@ func TestCancelPaymentByProvider_ChargebackDowngradeFailureAlertsAdmin(t *testin
 		},
 	}
 	subSvc := NewSubscriptionService(mock, nil, nil, &config.Config{})
-	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999})
+	o := NewOrderService(mock, subSvc, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", &config.Config{TelegramAdminID: 999, PaymentEnabled: true})
 	o.SetAdminBot(adminBot)
 
 	_, wasPaid, err := o.CancelPaymentByProvider(context.Background(), providerID, "CHARGEBACKED", json.Number("23.00"), "RUB")
@@ -1829,7 +1829,7 @@ func TestOrderService_ReconcilePendingOrders_ProviderErrorKeepsOrder(t *testing.
 func TestRequestPayment_StarsCreatesPendingWithTTL(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{PaymentProvider: "telegram_stars", StarsInvoiceTTL: 15 * time.Minute, TelegramAdminID: 999}
+	cfg := &config.Config{PaymentProvider: "telegram_stars", StarsInvoiceTTL: 15 * time.Minute, TelegramAdminID: 999, PaymentEnabled: true}
 	product := &database.Product{ID: 7, PlanID: 2, Name: "Premium", PriceCents: 199, Currency: "XTR", IsActive: true}
 
 	var (
@@ -1893,7 +1893,7 @@ func TestRequestPayment_StarsLivePendingReturnsAlreadyInProgress(t *testing.T) {
 			return pending, false, nil
 		},
 	}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true, TelegramAdminID: 999})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
 	_, gotOrder, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 7})
@@ -1912,7 +1912,7 @@ func TestRequestPayment_StarsRUBProductFailsClosed(t *testing.T) {
 			return &database.Subscription{ID: 3, TelegramID: 42}, nil
 		},
 	}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true, TelegramAdminID: 999})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
 	_, _, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 7})
@@ -1936,7 +1936,7 @@ func TestRequestPayment_StarsExistingSubscriptionRejectsInactiveProduct(t *testi
 			return nil, errors.New("unreachable")
 		},
 	}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars, PaymentEnabled: true})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
 	_, _, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 7})
@@ -1962,7 +1962,7 @@ func TestRequestPayment_StarsExistingSubscriptionRejectsInactivePlan(t *testing.
 			return nil, errors.New("unreachable")
 		},
 	}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars, PaymentEnabled: true})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
 	_, _, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 7})
@@ -1979,7 +1979,7 @@ func TestValidateStarsPreCheckout_ValidPayloadReturnsNil(t *testing.T) {
 		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
 		GetByIDFunc:      func(context.Context, uint) (*database.Subscription, error) { return sub, nil },
 	}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
 	err := o.ValidateStarsPreCheckout(context.Background(), "31", 42, 199, "XTR")
@@ -2026,7 +2026,7 @@ func TestValidateStarsPreCheckout_RejectsInvalidPayload(t *testing.T) {
 					return &database.Subscription{ID: 4, TelegramID: 42}, nil
 				},
 			}
-			o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+			o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 			o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
 			err := o.ValidateStarsPreCheckout(context.Background(), tt.payload, tt.telegramID, tt.amount, tt.currency)
@@ -2056,7 +2056,7 @@ func TestConfirmStarsPayment_FirstConfirmActivatesAndRecordsFeeZero(t *testing.T
 			return true, nil
 		},
 	}
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
 	confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_abc", "31", 199, "XTR", 42)
@@ -2086,7 +2086,7 @@ func TestConfirmStarsPayment_AlreadyPaidIsIdempotent(t *testing.T) {
 			return false, nil
 		},
 	}
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
 	confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_dup", "31", 199, "XTR", 42)
@@ -2114,7 +2114,7 @@ func TestConfirmStarsPayment_ExpiredOrderActivatesWithoutGrace(t *testing.T) {
 			return true, nil
 		},
 	}
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
 	confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_exp", "31", 199, "XTR", 42)
@@ -2142,7 +2142,7 @@ func TestConfirmStarsPayment_DuplicateChargeOnPaidOrderAutoRefundsAndSetsFlag(t 
 		},
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) { return product, nil },
 	}
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 	o.SetStarsClient(stars.New(&testutil.BotAPI{
 		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
 			if endpoint == "refundStarPayment" {
@@ -2182,7 +2182,7 @@ func TestConfirmStarsPayment_DuplicateChargeOnCanceledOrderAutoRefundsAndSetsFla
 			return &database.Subscription{ID: 4, TelegramID: 99}, nil
 		},
 	}
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 	o.SetStarsClient(stars.New(&testutil.BotAPI{
 		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
 			if endpoint == "refundStarPayment" {
@@ -2217,7 +2217,7 @@ func TestConfirmStarsPayment_DuplicateChargeRefundFailsStillSetsFlag(t *testing.
 		},
 	}
 
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 	o.SetStarsClient(stars.New(&testutil.BotAPI{
 		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
 			return nil, errors.New("telegram rate limit")
@@ -2249,7 +2249,7 @@ func TestConfirmStarsPayment_CanceledOrderAlertsAdmin(t *testing.T) {
 			return false, nil
 		},
 	}
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars", TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true, TelegramAdminID: 999})
 	o.SetAdminBot(adminBot)
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
@@ -2268,7 +2268,7 @@ func TestConfirmStarsPayment_ClientDisabledReturnsPaymentDisabled(t *testing.T) 
 	t.Parallel()
 
 	mock := &testutil.ServiceStoreFake{}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 	// intentionally not calling SetStarsClient
 
 	_, err := o.ConfirmStarsPayment(context.Background(), "charge", "31", 199, "XTR", 42)
@@ -2299,7 +2299,7 @@ func TestRefundStarsOrder_AdminActorAndResult(t *testing.T) {
 			auditEvent = auditFn(order, &database.Subscription{ID: 4}, true)
 		}),
 	}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars, PaymentEnabled: true})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
 	ctx := WithAuditAdmin(context.Background(), 999)
@@ -2344,7 +2344,7 @@ func TestRefundStarsOrder_SuccessCancelsDowngradesAndAudits(t *testing.T) {
 			auditEvent = auditFn(order, &database.Subscription{ID: 4}, true)
 		}),
 	}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true, TelegramAdminID: 999})
 	o.SetAdminBot(adminBot)
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
@@ -2383,7 +2383,7 @@ func TestRefundStarsOrder_AlreadyCanceledIsNoOp(t *testing.T) {
 		GetOrderByIDFunc:                   func(context.Context, uint) (*database.Order, error) { return order, nil },
 		CancelPaidOrderAndDowngradeCASFunc: casChargeback(nil, errors.New("unreachable"), func(_, _ string, _ chargebackAuditFn) { casCalled = true }),
 	}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 	o.SetStarsClient(stars.New(starsBot))
 
 	_, err := o.RefundStarsOrder(context.Background(), 31)
@@ -2412,7 +2412,7 @@ func TestRefundStarsOrder_TelegramErrorKeepsDBUntouched(t *testing.T) {
 		},
 		CancelPaidOrderAndDowngradeCASFunc: casChargeback(nil, errors.New("unreachable"), func(_, _ string, _ chargebackAuditFn) { casCalled = true }),
 	}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", TelegramAdminID: 999})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true, TelegramAdminID: 999})
 	o.SetAdminBot(adminBot)
 	o.SetStarsClient(stars.New(starsBot))
 
@@ -2448,12 +2448,64 @@ func TestRefundStarsOrder_ChargeAlreadyRefundedProceedsToCAS(t *testing.T) {
 		},
 		CancelPaidOrderAndDowngradeCASFunc: casChargeback(&database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: false}, nil, func(_, _ string, _ chargebackAuditFn) { casCalled = true }),
 	}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 	o.SetStarsClient(stars.New(starsBot))
 
 	_, err := o.RefundStarsOrder(context.Background(), 31)
 	require.NoError(t, err, "CHARGE_ALREADY_REFUNDED must be treated as success (M2)")
 	assert.True(t, casCalled, "already-refunded charge must still reach the cancel CAS")
+}
+
+// TestRefundStarsOrder_RetryAfterFailedCASCompletesState — split-brain:
+// Telegram-возврат прошёл, а CAS не применился. Повторный /refund должен
+// безопасно завершить состояние заказа: Telegram сообщает
+// CHARGE_ALREADY_REFUNDED, команда трактует это как успех и доводит CAS.
+func TestRefundStarsOrder_RetryAfterFailedCASCompletesState(t *testing.T) {
+	t.Parallel()
+
+	order := starsRefundOrder()
+
+	refundCalls := 0
+	starsBot := testutil.NewBotAPI()
+	starsBot.MakeRequestFunc = func(string, tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+		refundCalls++
+		if refundCalls == 1 {
+			return &tgbotapi.APIResponse{Ok: true}, nil
+		}
+
+		return &tgbotapi.APIResponse{Ok: false, Description: "CHARGE_ALREADY_REFUNDED"}, errors.New("Bad Request: CHARGE_ALREADY_REFUNDED")
+	}
+
+	casCalls := 0
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+		GetPlanByNameFunc: func(_ context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: name}, nil
+		},
+		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, _, _ string, _ time.Time, _ uint, _ database.ChargebackPlanInTxFn, _ chargebackAuditFn) (*database.ChargebackResult, error) {
+			casCalls++
+			if casCalls == 1 {
+				return nil, errors.New("database is down")
+			}
+
+			return &database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: false}, nil
+		},
+	}
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
+	o.SetStarsClient(stars.New(starsBot))
+
+	_, err := o.RefundStarsOrder(context.Background(), 31)
+	require.Error(t, err, "the failed CAS must be reported")
+	require.ErrorIs(t, err, ErrStarsRefundStatePending, "Telegram already refunded the money")
+
+	result, err := o.RefundStarsOrder(context.Background(), 31)
+	require.NoError(t, err, "the retry must complete the order state")
+	require.NotNil(t, result)
+	assert.Equal(t, uint(31), result.OrderID)
+	assert.Equal(t, 2, casCalls, "the retry must reach the cancel CAS again")
 }
 
 func TestRefundStarsOrder_DowngradedRunsPostCommitSync(t *testing.T) {
@@ -2478,7 +2530,7 @@ func TestRefundStarsOrder_DowngradedRunsPostCommitSync(t *testing.T) {
 			return nil, nil
 		},
 	}
-	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
 	_, err := o.RefundStarsOrder(context.Background(), 31)
@@ -2504,7 +2556,7 @@ func TestRefundStarsOrder_NonStarsOrderRejected(t *testing.T) {
 	mock := &testutil.ServiceStoreFake{
 		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
 	}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 	o.SetStarsClient(stars.New(starsBot))
 
 	_, err := o.RefundStarsOrder(context.Background(), 31)
@@ -2516,7 +2568,7 @@ func TestRefundStarsOrder_ClientDisabledReturnsPaymentDisabled(t *testing.T) {
 	t.Parallel()
 
 	mock := &testutil.ServiceStoreFake{}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars"})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
 	// intentionally not calling SetStarsClient
 
 	_, err := o.RefundStarsOrder(context.Background(), 31)
@@ -2537,7 +2589,7 @@ func TestRequestPayment_PlategaRejectsXTRBeforePendingLookup(t *testing.T) {
 			return nil, nil
 		},
 	}
-	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{PaymentProvider: database.PaymentProviderPlatega})
+	o := NewOrderService(mock, nil, nil, &funcPaymentProvider{}, "", &config.Config{PaymentProvider: database.PaymentProviderPlatega, PaymentEnabled: true})
 
 	_, _, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 9})
 	require.ErrorIs(t, err, ErrCurrencyMismatch)
@@ -2566,19 +2618,28 @@ func TestOrderService_ReconcilePendingOrders_SkipsPlategaWhenClientUnavailable(t
 			return false, nil
 		},
 	}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars, PaymentEnabled: true})
 
 	require.NoError(t, o.ReconcilePendingOrders(context.Background(), 10))
 }
 
-func TestRefundStarsOrder_ProviderRefundedStateFailureIsTyped(t *testing.T) {
+// S1-регрессия: free-plan грузится ДО возврата Telegram. Ошибка загрузки плана
+// — обычная ошибка (не split-brain): деньги ещё не возвращены, Telegram не
+// дёргается, БД не трогается.
+func TestRefundStarsOrder_FreePlanLoadFailsBeforeTelegramRefund(t *testing.T) {
 	t.Parallel()
 
 	order := starsRefundOrder()
+	refundCalled := false
 	starsBot := testutil.NewBotAPI()
-	starsBot.MakeRequestFunc = func(string, tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+	starsBot.MakeRequestFunc = func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+		if endpoint == "refundStarPayment" {
+			refundCalled = true
+		}
+
 		return &tgbotapi.APIResponse{Ok: true}, nil
 	}
+	casCalled := false
 	mock := &testutil.ServiceStoreFake{
 		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
@@ -2587,16 +2648,288 @@ func TestRefundStarsOrder_ProviderRefundedStateFailureIsTyped(t *testing.T) {
 		GetPlanByNameFunc: func(context.Context, string) (*database.Plan, error) {
 			return nil, errors.New("database unavailable")
 		},
+		CancelPaidOrderAndDowngradeCASFunc: casChargeback(nil, errors.New("unreachable"), func(_, _ string, _ chargebackAuditFn) { casCalled = true }),
 	}
-	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars})
+	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars, PaymentEnabled: true})
 	o.SetStarsClient(stars.New(starsBot))
 
 	_, err := o.RefundStarsOrder(context.Background(), 31)
 	require.Error(t, err)
-	require.ErrorIs(t, err, ErrStarsRefundStatePending)
+	assert.False(t, refundCalled, "Telegram refund must not run before the free plan is loaded")
+	assert.False(t, casCalled, "CAS must not run when the free plan is unavailable")
+	assert.Equal(t, database.OrderStatusPaid, order.Status, "order must remain paid: money was not refunded")
 
 	var stateErr *StarsRefundStateError
-	require.ErrorAs(t, err, &stateErr)
-	assert.Equal(t, order.ID, stateErr.OrderID)
-	assert.Equal(t, order.ProviderPaymentID, stateErr.ChargeID)
+	assert.NotErrorAs(t, err, &stateErr, "pre-refund plan failure is a plain error, not split-brain")
+	assert.NotErrorIs(t, err, ErrStarsRefundStatePending)
+}
+
+// M3-регрессия: ошибка перечитывания заказа после проигранного CAS не глотается —
+// ConfirmStarsPayment возвращает ошибку (recovery повторит страницу), refund не
+// выполняется, админ получает alert.
+func TestConfirmStarsPayment_CASLoserRereadFailureReturnsError(t *testing.T) {
+	t.Parallel()
+
+	pendingOrder := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusPending, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars}
+
+	refundCalled := false
+	firstRead := true
+	mock := &testutil.ServiceStoreFake{
+		// Первое чтение (валидация) видит pending, перечит после CAS — ошибка.
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) {
+			if firstRead {
+				firstRead = false
+
+				return pendingOrder, nil
+			}
+
+			return nil, errors.New("database is down")
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return &database.Product{ID: 7, PlanID: 2, Name: "Premium", PriceCents: 199, Currency: "XTR"}, nil
+		},
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
+			return false, nil
+		},
+	}
+	o := newStarsReconcileService(mock, &testutil.BotAPI{
+		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			if endpoint == "refundStarPayment" {
+				refundCalled = true
+
+				return &tgbotapi.APIResponse{Ok: true}, nil
+			}
+
+			return &tgbotapi.APIResponse{Ok: true, Result: json.RawMessage(`{}`)}, nil
+		},
+	})
+
+	confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_reread_fail", "31", 199, "XTR", 42)
+	require.Error(t, err, "reread failure after lost CAS race must surface as an error")
+	assert.Nil(t, confirmation)
+	assert.False(t, refundCalled, "reread failure must not refund: the order state is unknown")
+}
+
+// M3-регрессия: заказ перечитан, но его статус не paid/canceled (expired) —
+// конфликт перехода возвращается как ошибка, а не как «успешное» подтверждение.
+func TestConfirmStarsPayment_CASLoserUnexpectedStatusReturnsError(t *testing.T) {
+	t.Parallel()
+
+	pendingOrder := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusPending, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars}
+	expiredOrder := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusExpired, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars}
+
+	refundCalled := false
+	firstRead := true
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) {
+			if firstRead {
+				firstRead = false
+
+				return pendingOrder, nil
+			}
+
+			return expiredOrder, nil
+		},
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return &database.Product{ID: 7, PlanID: 2, Name: "Premium", PriceCents: 199, Currency: "XTR"}, nil
+		},
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
+			return false, nil
+		},
+	}
+	o := newStarsReconcileService(mock, &testutil.BotAPI{
+		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			if endpoint == "refundStarPayment" {
+				refundCalled = true
+
+				return &tgbotapi.APIResponse{Ok: true}, nil
+			}
+
+			return &tgbotapi.APIResponse{Ok: true, Result: json.RawMessage(`{}`)}, nil
+		},
+	})
+
+	confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_unexpected", "31", 199, "XTR", 42)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidPaymentTransition)
+	assert.Nil(t, confirmation)
+	assert.False(t, refundCalled, "an unexpected status must not trigger auto-refund")
+}
+
+// S2-регрессия: canceled-заказ, возвращённый по этому же charge, не возвращается
+// повторно — идемпотентный no-op без refund и без alert.
+func TestConfirmStarsPayment_CanceledOrderSameChargeIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	canceledOrder := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusCanceled, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars, ProviderPaymentID: "charge_same"}
+
+	refundCalled := false
+	makeRequestCalls := 0
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return canceledOrder, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+	}
+	o := newStarsReconcileService(mock, &testutil.BotAPI{
+		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			makeRequestCalls++
+			if endpoint == "refundStarPayment" {
+				refundCalled = true
+			}
+
+			return &tgbotapi.APIResponse{Ok: true, Result: json.RawMessage(`{}`)}, nil
+		},
+	})
+
+	confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_same", "31", 199, "XTR", 42)
+	require.NoError(t, err)
+	require.NotNil(t, confirmation)
+	assert.False(t, confirmation.Activated)
+	assert.False(t, confirmation.AutoRefunded, "the same charge must not be refunded twice")
+	assert.False(t, confirmation.DuplicateCharge)
+	assert.False(t, refundCalled)
+	assert.Zero(t, makeRequestCalls, "Telegram API must not be called for the already-refunded charge")
+}
+
+// S3-регрессия: новый charge на отменённый заказ — дубль с авто-возвратом.
+func TestConfirmStarsPayment_CanceledOrderNewChargeAutoRefunds(t *testing.T) {
+	t.Parallel()
+
+	canceledOrder := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusCanceled, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars, ProviderPaymentID: "charge_original"}
+
+	var refundedCharge string
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return canceledOrder, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+	}
+	o := newStarsReconcileService(mock, &testutil.BotAPI{
+		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			if endpoint == "refundStarPayment" {
+				refundedCharge = params["telegram_payment_charge_id"]
+
+				return &tgbotapi.APIResponse{Ok: true}, nil
+			}
+
+			return &tgbotapi.APIResponse{Ok: true, Result: json.RawMessage(`{}`)}, nil
+		},
+	})
+
+	confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_new", "31", 199, "XTR", 42)
+	require.NoError(t, err)
+	require.NotNil(t, confirmation)
+	assert.False(t, confirmation.Activated)
+	assert.True(t, confirmation.AutoRefunded)
+	assert.True(t, confirmation.DuplicateCharge, "a new charge on a canceled order is a duplicate")
+	assert.Equal(t, "charge_new", refundedCharge)
+}
+
+// S8-регрессия: применённый авто-возврат пишется в audit_log событием
+// payment_auto_refunded с charge ID и причиной.
+func TestConfirmStarsPayment_DeletedProductWritesAutoRefundAudit(t *testing.T) {
+	t.Parallel()
+
+	pendingOrder := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusPending, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars}
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return pendingOrder, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
+			return nil, database.ErrProductNotFound
+		},
+	}
+	o := newStarsReconcileService(mock, &testutil.BotAPI{
+		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			if endpoint == "refundStarPayment" {
+				return &tgbotapi.APIResponse{Ok: true}, nil
+			}
+
+			return &tgbotapi.APIResponse{Ok: true, Result: json.RawMessage(`{}`)}, nil
+		},
+	})
+
+	confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_audited", "31", 199, "XTR", 42)
+	require.NoError(t, err)
+	assert.True(t, confirmation.AutoRefunded)
+
+	var autoRefund *database.AuditLog
+	for _, entry := range mock.AuditLogs {
+		if entry.Event == database.AuditEventPaymentAutoRefunded {
+			autoRefund = &entry
+			break
+		}
+	}
+
+	require.NotNil(t, autoRefund, "applied auto-refund must be recorded in audit_log")
+	assert.Equal(t, database.EntityOrder, autoRefund.EntityType)
+	assert.Equal(t, database.ActorPaymentProvider, autoRefund.ActorType)
+	assert.Contains(t, autoRefund.Details, `"provider_payment_id":"charge_audited"`)
+	assert.Contains(t, autoRefund.Details, `"reason":"product_deleted"`)
+}
+
+// M4-регрессия: PAYMENT_ENABLED=false блокирует выдачу новых платёжных ссылок
+// до создания заказа/интента и до обращения к провайдеру.
+func TestRequestPayment_PaymentDisabledGuard(t *testing.T) {
+	t.Parallel()
+
+	createCalled := false
+	provider := &funcPaymentProvider{createFunc: func(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
+		createCalled = true
+
+		return nil, errors.New("provider must not be called")
+	}}
+	orderCreated := false
+	mock := &testutil.ServiceStoreFake{
+		FindOrCreatePendingPaymentOrderFunc: func(context.Context, uint, uint, string, int64, string, *time.Time, time.Time) (*database.Order, bool, error) {
+			orderCreated = true
+
+			return nil, false, errors.New("order must not be created")
+		},
+	}
+	o := NewOrderService(mock, nil, nil, provider, "@testbot", &config.Config{PaymentEnabled: false})
+
+	_, _, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 9, IsActive: true, PriceCents: 2300, Currency: "RUB"})
+	require.ErrorIs(t, err, ErrPaymentDisabled)
+	assert.False(t, createCalled, "disabled payment must not reach the provider")
+	assert.False(t, orderCreated, "disabled payment must not create an order")
+}
+
+// M5-регрессия: возврат с понижением тарифа инвалидирует кэш подписки — клиенты
+// не должны получать оплаченный формат из кэша после возврата денег.
+func TestRefundStarsOrder_DowngradeInvalidatesSubscriptionCache(t *testing.T) {
+	t.Parallel()
+
+	order := starsRefundOrder()
+	sub := &database.Subscription{ID: 4, SubscriptionID: "sub-uuid-4", TelegramID: 42}
+
+	var invalidated []string
+	subSvc := NewSubscriptionService(testutil.NewServiceStoreFake(), nil, nil, &config.Config{})
+	subSvc.SetInvalidateBySubIDFunc(func(subID string) { invalidated = append(invalidated, subID) })
+
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
+		GetByIDFunc:      func(context.Context, uint) (*database.Subscription, error) { return sub, nil },
+		GetPlanByNameFunc: func(_ context.Context, name string) (*database.Plan, error) {
+			return &database.Plan{ID: 2, Name: name}, nil
+		},
+		CancelPaidOrderAndDowngradeCASFunc: casChargeback(&database.ChargebackResult{Order: order, WasPaid: true, Transitioned: true, Downgraded: true}, nil, func(_, _ string, _ chargebackAuditFn) {}),
+	}
+	o := NewOrderService(mock, subSvc, nil, nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
+	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+
+	result, err := o.RefundStarsOrder(context.Background(), 31)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Downgraded)
+	assert.Equal(t, []string{"sub-uuid-4"}, invalidated, "refund+downgrade must invalidate the subscription cache")
 }

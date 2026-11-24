@@ -644,3 +644,102 @@ func TestCancelPaidOrderAndDowngradeCAS_RollsBackOnAuditError(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, chargebacks, "failed transaction must not leave a chargeback audit event")
 }
+
+// TestHasPaymentConfirmedByProviderPaymentID verifies the audit-guard lookup used
+// by the Stars auto-refund: only charges recorded in a payment_confirmed event
+// count as already executed.
+func TestHasPaymentConfirmedByProviderPaymentID(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	found, err := svc.HasPaymentConfirmedByProviderPaymentID(ctx, PaymentProviderTelegramStars, "charge_absent")
+	require.NoError(t, err)
+	assert.False(t, found)
+
+	confirmed := &Order{ID: 9, SubscriptionID: 3, AmountCents: 500, Currency: "XTR", PaymentProvider: PaymentProviderTelegramStars, ProviderPaymentID: "charge_confirmed"}
+	require.NoError(t, svc.InsertAuditLog(ctx, AuditPaymentConfirmed(confirmed, nil, nil, time.Now())))
+
+	found, err = svc.HasPaymentConfirmedByProviderPaymentID(ctx, PaymentProviderTelegramStars, "charge_confirmed")
+	require.NoError(t, err)
+	assert.True(t, found, "a charge recorded in payment_confirmed must count as confirmed")
+
+	// Один и тот же provider_payment_id у другого провайдера — другой платёж:
+	// совпадение было бы ложным и авто-возврат Stars-платежа был бы пропущен.
+	plategaOrder := &Order{ID: 11, SubscriptionID: 3, AmountCents: 500, Currency: "USD", PaymentProvider: PaymentProviderPlatega, ProviderPaymentID: "charge_confirmed"}
+	require.NoError(t, svc.InsertAuditLog(ctx, AuditPaymentConfirmed(plategaOrder, nil, nil, time.Now())))
+
+	found, err = svc.HasPaymentConfirmedByProviderPaymentID(ctx, PaymentProviderTelegramStars, "charge_confirmed")
+	require.NoError(t, err)
+	assert.True(t, found, "the Stars charge must still be found next to a foreign provider")
+
+	// LIKE-паттерн не должен совпадать с чужими charge-идами, включая спецсимволы.
+	for _, other := range []string{"charge_con", "charge_confirme", "harge_confirmed", "a_b", "100%match", "under_score"} {
+		found, err = svc.HasPaymentConfirmedByProviderPaymentID(ctx, PaymentProviderTelegramStars, other)
+		require.NoError(t, err)
+		assert.False(t, found, "charge %q must not be treated as confirmed", other)
+	}
+
+	// Charge со спецсимволами ищется без ложных совпадений.
+	weird := &Order{ID: 10, SubscriptionID: 3, AmountCents: 700, Currency: "XTR", PaymentProvider: PaymentProviderTelegramStars, ProviderPaymentID: "ch_100%id"}
+	require.NoError(t, svc.InsertAuditLog(ctx, AuditPaymentConfirmed(weird, nil, nil, time.Now())))
+
+	found, err = svc.HasPaymentConfirmedByProviderPaymentID(ctx, PaymentProviderTelegramStars, "ch_100%id")
+	require.NoError(t, err)
+	assert.True(t, found, "charge with LIKE metacharacters must still match itself")
+
+	// Тот же id другого провайдера не считается подтверждённым для Stars.
+	foreignOnly := &Order{ID: 12, SubscriptionID: 3, AmountCents: 500, Currency: "USD", PaymentProvider: PaymentProviderPlatega, ProviderPaymentID: "charge_foreign_only"}
+	require.NoError(t, svc.InsertAuditLog(ctx, AuditPaymentConfirmed(foreignOnly, nil, nil, time.Now())))
+
+	found, err = svc.HasPaymentConfirmedByProviderPaymentID(ctx, PaymentProviderTelegramStars, "charge_foreign_only")
+	require.NoError(t, err)
+	assert.False(t, found, "a foreign provider charge must not block the Stars auto-refund")
+}
+
+// TestAuditPaymentAutoRefunded_Constructor verifies the auto-refund audit event:
+// order context when the order exists, system entity otherwise.
+func TestAuditPaymentAutoRefunded_Constructor(t *testing.T) {
+	t.Parallel()
+
+	order := &Order{ID: 12, SubscriptionID: 4, AmountCents: 900, Currency: "XTR", PaymentProvider: PaymentProviderTelegramStars}
+	e := AuditPaymentAutoRefunded(order, 42, 900, "XTR", "charge_dup", "paid_order_new_charge")
+	require.NotNil(t, e)
+	assert.Equal(t, AuditEventPaymentAutoRefunded, e.Event)
+	assert.Equal(t, EntityOrder, e.EntityType)
+	assert.Equal(t, ActorPaymentProvider, e.ActorType)
+	require.NotNil(t, e.EntityID)
+	assert.Equal(t, "12", *e.EntityID)
+	assert.Contains(t, e.Details, `"provider_payment_id":"charge_dup"`)
+	assert.Contains(t, e.Details, `"reason":"paid_order_new_charge"`)
+	assert.Contains(t, e.Details, `"telegram_id":42`)
+
+	systemEvent := AuditPaymentAutoRefunded(nil, 42, 900, "XTR", "charge_dup", "recovery_semantic_mismatch")
+	require.NotNil(t, systemEvent)
+	assert.Equal(t, EntitySystem, systemEvent.EntityType)
+	assert.Nil(t, systemEvent.EntityID)
+}
+
+// TestAuditPaymentAutoRefunded_Persisted verifies the event survives a real insert.
+func TestAuditPaymentAutoRefunded_Persisted(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	order := &Order{ID: 13, SubscriptionID: 4, AmountCents: 900, Currency: "XTR", PaymentProvider: PaymentProviderTelegramStars}
+	require.NoError(t, svc.InsertAuditLog(ctx, AuditPaymentAutoRefunded(order, 42, 900, "XTR", "charge_dup", "cas_loser")))
+
+	events, err := svc.GetAuditLogByEvent(ctx, AuditEventPaymentAutoRefunded, 10)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, "cas_loser", func() string {
+		var details struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.Unmarshal([]byte(events[0].Details), &details)
+
+		return details.Reason
+	}())
+}

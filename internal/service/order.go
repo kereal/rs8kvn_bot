@@ -19,6 +19,7 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/utils"
 
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // Sentinel errors returned for expected payment states and configuration failures.
@@ -99,6 +100,15 @@ type PaymentConfirmation struct {
 	// уже оплаченного или отменённого Stars-заказа). Bot handler сообщает
 	// покупателю «ошибочная оплата возвращена», а не «деньги списаны».
 	AutoRefunded bool
+	// DuplicateCharge — входящий charge трактуется как дубль и сервис пытался
+	// сделать авто-возврат. AutoRefunded=true означает применённый возврат;
+	// DuplicateCharge && !AutoRefunded — возврат не удался, bot-слой показывает
+	// покупателю подсказку /paysupport.
+	DuplicateCharge bool
+	// AlreadyRefunded — charge уже был возвращён ранее (заказ отменён после
+	// refund), повторный возврат не выполняется и не нужен: деньги у покупателя.
+	// Bot-слой сообщает об уже выполненном возврате, а не о списании.
+	AlreadyRefunded bool
 }
 
 // StarsRefundResult describes a completed Telegram Stars refund. TelegramID
@@ -251,6 +261,50 @@ func truncatePaymentMessage(value string) string {
 	return string(runes[:maxPaymentAlertMessageLength]) + "… [truncated]"
 }
 
+// formatAdminPaymentAlert рендерит админ-уведомление о возврате/чарджбэке:
+// единый набор полей (тариф, сумма, покупатель, charge/order id, статус доступа)
+// для обоих путей. title различает refund и chargeback.
+func formatAdminPaymentAlert(title string, sub *database.Subscription, order *database.Order, product *database.Product, downgraded bool) string {
+	productName := "—"
+	if product != nil && strings.TrimSpace(product.Name) != "" {
+		productName = utils.EscapeMarkdown(product.Name)
+	}
+
+	telegramID, subscriptionID, username := int64(0), uint(0), ""
+	if sub != nil {
+		telegramID, subscriptionID, username = sub.TelegramID, sub.ID, sub.Username
+	}
+
+	orderID, amountCents, currency, providerPaymentID := uint(0), int64(0), "", ""
+	if order != nil {
+		orderID, amountCents, currency, providerPaymentID = order.ID, order.AmountCents, order.Currency, order.ProviderPaymentID
+	}
+
+	access := "⬇️ Доступ: *понижен до бесплатного*"
+	if !downgraded {
+		access = "ℹ️ Доступ: *сохранён* (есть другой оплаченный заказ)"
+	}
+
+	return fmt.Sprintf("%s\n\n"+
+		"💎 Тариф: *%s*\n"+
+		"💵 Сумма: *%s*\n"+
+		"👤 Покупатель: %s\n"+
+		"🆔 Telegram ID: `%d`\n"+
+		"🔖 Платёж: `%s`\n"+
+		"📋 Подписка: #%d\n"+
+		"🧾 Заказ: #%d\n"+
+		"%s",
+		title,
+		productName,
+		formatMoneyCents(amountCents, currency),
+		utils.FormatUserLink(username, telegramID),
+		telegramID,
+		providerPaymentID,
+		subscriptionID,
+		orderID,
+		access)
+}
+
 // NewOrderService wires the order service dependencies explicitly.
 func NewOrderService(db interfaces.OrderStore, subSvc *SubscriptionService, syncSvc *SyncService, payment PlategaClient, botUsername string, cfg *config.Config) *OrderService {
 	return &OrderService{
@@ -337,6 +391,112 @@ func (o *OrderService) dropPaymentWaiter(l *paymentLock, providerPaymentID strin
 		delete(o.paymentLocks, providerPaymentID)
 	}
 	o.paymentLocksMu.Unlock()
+}
+
+func (o *OrderService) chargebackPlanInTx() database.ChargebackPlanInTxFn {
+	if o.syncSvc == nil {
+		return nil
+	}
+
+	return func(ctx context.Context, tx *gorm.DB, subscriptionID, freePlanID uint) error {
+		return o.syncSvc.ApplyPlanToSubscriptionInTx(ctx, tx, subscriptionID, freePlanID)
+	}
+}
+
+// mirrorOrderFromSubscriptionAfterCAS keeps the order snapshot consistent with
+// the subscription state the CAS just wrote. The CAS itself only mutates the
+// caller-supplied subscription pointer; the order snapshot has to be updated
+// separately so downstream notification (admin paid alert, user confirmation,
+// subserver cache invalidation) reads a coherent picture.
+//
+// The nil guard on sub.ExpiresAt keeps the helper safe against fakes or future
+// CAS implementations that activate without setting an expiry (e.g. free plans
+// past paid activation).
+func mirrorOrderFromSubscriptionAfterCAS(order *database.Order, sub *database.Subscription, now time.Time) {
+	if sub != nil && sub.ExpiresAt != nil {
+		newExpiry := *sub.ExpiresAt
+		order.ExpiresAt = &newExpiry
+	}
+
+	order.Status = database.OrderStatusPaid
+	paidAt, activatedAt := now, now
+	order.PaidAt = &paidAt
+	order.ActivatedAt = &activatedAt
+}
+
+// loadChargebackAlertContext loads the subscription and product needed for the
+// admin chargeback alert. Each load is best-effort: a failure is logged via the
+// returned error context but never blocks the chargeback alert. Callers render
+// placeholders for any nil field, so alerts always go out.
+func (o *OrderService) loadChargebackAlertContext(ctx context.Context, order *database.Order) (*database.Subscription, *database.Product) {
+	var (
+		sub     *database.Subscription
+		product *database.Product
+	)
+
+	loaded, subErr := o.db.GetByID(ctx, order.SubscriptionID)
+	if subErr == nil && loaded != nil {
+		sub = loaded
+	} else if subErr != nil {
+		logger.Debug("chargeback admin alert: subscription lookup failed", zap.Uint("order_id", order.ID), zap.Error(subErr))
+	}
+
+	if order.ProductID != 0 {
+		loaded, pErr := o.db.GetProductByID(ctx, order.ProductID)
+		if pErr == nil && loaded != nil {
+			product = loaded
+		} else if pErr != nil {
+			logger.Debug("chargeback admin alert: product lookup failed", zap.Uint("order_id", order.ID), zap.Uint("product_id", order.ProductID), zap.Error(pErr))
+		}
+	}
+
+	return sub, product
+}
+
+func (o *OrderService) syncChargebackAfterCommit(ctx context.Context, subscriptionID uint) {
+	if o.syncSvc == nil {
+		return
+	}
+
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), paymentSyncTimeout)
+	defer cancel()
+
+	err := o.syncSvc.SyncSubscription(dctx, subscriptionID)
+	if err != nil {
+		logger.Warn("chargeback post-commit sync failed", zap.Uint("subscription_id", subscriptionID), zap.Error(err))
+	}
+}
+
+// confirmPaidOrderTail выполняет действия после успешного подтверждения оплаты:
+// освобождает per-order lock, инвалидирует кэш, шлёт админ-алерт и синхронизирует
+// подписку с VPN-нодами. Вызывается обеими ветками подтверждения (Platega, Stars).
+// unlock — разблокировщик per-order lock; передаётся явно, чтобы вызывающая сторона
+// могла удерживать его до последнего момента (Platega: unlock до sync, Stars: тоже).
+func (o *OrderService) confirmPaidOrderTail(
+	ctx context.Context, order *database.Order, sub *database.Subscription, product *database.Product,
+	isRenewal, activated bool, unlock func(),
+) (*PaymentConfirmation, error) {
+	unlock()
+
+	if activated {
+		if o.subSvc != nil && sub.SubscriptionID != "" {
+			o.subSvc.InvalidateBySubID(ctx, sub.SubscriptionID)
+		}
+
+		o.notifyAdminPaid(ctx, sub, order, product, isRenewal)
+	}
+
+	if activated && o.syncSvc != nil {
+		syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), paymentSyncTimeout)
+		defer cancel()
+
+		err := o.syncSvc.SyncSubscription(syncCtx, sub.ID)
+		if err != nil {
+			logger.Warn("payment post-commit sync failed", zap.Uint("subscription_id", sub.ID), zap.Error(err))
+		}
+	}
+
+	return &PaymentConfirmation{Order: order, Activated: activated, IsRenewal: isRenewal}, nil
 }
 
 // SetSyncService wires post-commit VPN synchronization after startup.

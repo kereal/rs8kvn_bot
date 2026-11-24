@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -11,6 +12,10 @@ import (
 
 // maxTitleLen — лимит Telegram на title/description invoice (в runes).
 const maxTitleLen = 32
+
+// defaultTitle — fallback-title, когда название товара пустое (Telegram требует
+// title длиной 1..32 символа).
+const defaultTitle = "Subscription"
 
 // InvoiceParams — параметры для построения Stars-invoice.
 type InvoiceParams struct {
@@ -34,11 +39,7 @@ func BuildInvoice(p InvoiceParams) (tgbotapi.InvoiceConfig, error) {
 		return tgbotapi.InvoiceConfig{}, errors.New("stars: пустой OrderID")
 	}
 
-	title := p.Title
-	if utf8.RuneCountInString(title) > maxTitleLen {
-		runes := []rune(title)
-		title = string(runes[:maxTitleLen])
-	}
+	title := normalizeTitle(p.Title)
 
 	payload := strconv.FormatUint(uint64(p.OrderID), 10)
 
@@ -55,4 +56,21 @@ func BuildInvoice(p InvoiceParams) (tgbotapi.InvoiceConfig, error) {
 		StartParameter: "stars-" + payload,
 		IsFlexible:     false,
 	}, nil
+}
+
+// normalizeTitle приводит title к требованиям Telegram (1..32 рун):
+// пробелы по краям срезаются, пустой title заменяется дефолтом, слишком длинный
+// обрезается до 32 рун (без ellipsis — Telegram сам отклоняет title > 32 символов).
+func normalizeTitle(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return defaultTitle
+	}
+
+	if utf8.RuneCountInString(title) > maxTitleLen {
+		runes := []rune(title)
+		title = string(runes[:maxTitleLen])
+	}
+
+	return title
 }
