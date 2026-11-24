@@ -244,7 +244,12 @@ func (o *OrderService) confirmStarsPayment(ctx context.Context, chargeID string,
 		// Новая транзакция Telegram для уже оплаченного заказа: деньги за ту же
 		// покупку списаны дважды — новый charge автоматически возвращается,
 		// entitlement второй раз не меняется.
-		autoRefunded := o.autoRefundStarsCharge(ctx, order, telegramID, order.AmountCents, order.Currency, chargeID, "paid_order_new_charge")
+		autoRefunded, refundErr := o.autoRefundStarsCharge(ctx, order, telegramID, order.AmountCents, order.Currency, chargeID, "paid_order_new_charge")
+		if refundErr != nil {
+			// Журнал аудита недоступен — решение о возврате не принято.
+			// Ошибка наружу: recovery повторит транзакцию и вернёт charge.
+			return nil, refundErr
+		}
 
 		return &PaymentConfirmation{Order: order, AutoRefunded: autoRefunded, DuplicateCharge: true}, nil
 	}
@@ -267,7 +272,10 @@ func (o *OrderService) confirmStarsPayment(ctx context.Context, chargeID string,
 		// Заказ отменён, но Telegram списал Stars новым charge: деньги
 		// возвращаются автоматически. При сбое возврата — alert для ручного
 		// возврата.
-		autoRefunded := o.autoRefundStarsCharge(ctx, order, canceledTelegramID, order.AmountCents, order.Currency, chargeID, "canceled_order_new_charge")
+		autoRefunded, refundErr := o.autoRefundStarsCharge(ctx, order, canceledTelegramID, order.AmountCents, order.Currency, chargeID, "canceled_order_new_charge")
+		if refundErr != nil {
+			return nil, refundErr
+		}
 
 		return &PaymentConfirmation{Order: order, Activated: false, AutoRefunded: autoRefunded, DuplicateCharge: true}, nil
 	}
@@ -288,7 +296,10 @@ func (o *OrderService) confirmStarsPayment(ctx context.Context, chargeID string,
 			// автоматически (заказ pending без charge ID, /refund его не найдёт).
 			// Это не дубль оплаты: charge единственный. Если возврат не удался —
 			// bot-слой отправляет покупателю в /paysupport (Order == nil).
-			autoRefunded := o.autoRefundStarsCharge(ctx, order, telegramID, order.AmountCents, order.Currency, chargeID, "product_deleted")
+			autoRefunded, refundErr := o.autoRefundStarsCharge(ctx, order, telegramID, order.AmountCents, order.Currency, chargeID, "product_deleted")
+			if refundErr != nil {
+				return nil, refundErr
+			}
 
 			return &PaymentConfirmation{Activated: false, AutoRefunded: autoRefunded}, nil
 		}
@@ -305,7 +316,10 @@ func (o *OrderService) confirmStarsPayment(ctx context.Context, chargeID string,
 			// Подписка удалена (admin /del) — активировать нечего: деньги
 			// возвращаем автоматически (заказ pending без charge ID, /refund
 			// его не найдёт). Это не дубль оплаты: charge единственный.
-			autoRefunded := o.autoRefundStarsCharge(ctx, order, telegramID, order.AmountCents, order.Currency, chargeID, "subscription_deleted")
+			autoRefunded, refundErr := o.autoRefundStarsCharge(ctx, order, telegramID, order.AmountCents, order.Currency, chargeID, "subscription_deleted")
+			if refundErr != nil {
+				return nil, refundErr
+			}
 
 			return &PaymentConfirmation{Activated: false, AutoRefunded: autoRefunded}, nil
 		}
@@ -342,7 +356,10 @@ func (o *OrderService) confirmStarsPayment(ctx context.Context, chargeID string,
 		}
 
 		if current.Status == database.OrderStatusPaid || current.Status == database.OrderStatusCanceled {
-			autoRefunded := o.autoRefundStarsCharge(ctx, current, sub.TelegramID, current.AmountCents, current.Currency, chargeID, "cas_loser")
+			autoRefunded, refundErr := o.autoRefundStarsCharge(ctx, current, sub.TelegramID, current.AmountCents, current.Currency, chargeID, "cas_loser")
+			if refundErr != nil {
+				return nil, refundErr
+			}
 
 			return &PaymentConfirmation{Order: current, Activated: false, AutoRefunded: autoRefunded, DuplicateCharge: true}, nil
 		}
@@ -368,7 +385,12 @@ func (o *OrderService) confirmStarsPayment(ctx context.Context, chargeID string,
 // меняется. Возвращает true если refund применён (успех или ErrAlreadyRefunded).
 // order может быть nil (recovery-сверка по charge ID) — тогда аудит пишется
 // на system-сущность. reason уточняет ветку дубля для админ-алерта и аудита.
-func (o *OrderService) autoRefundStarsCharge(ctx context.Context, order *database.Order, telegramID int64, amountCents int64, currency string, chargeID string, reason string) bool {
+//
+// Второе значение — ошибка инфраструктуры: журнал аудита недоступен, поэтому
+// решение о возврате принять нельзя. Вызывающий обязан вернуть ошибку
+// наружу, иначе recovery посчитает транзакцию обработанной и charge уже
+// исполненного заказа останется без возврата (R8 плана).
+func (o *OrderService) autoRefundStarsCharge(ctx context.Context, order *database.Order, telegramID int64, amountCents int64, currency string, chargeID string, reason string) (bool, error) {
 	orderID := uint(0)
 	if order != nil {
 		orderID = order.ID
@@ -382,13 +404,13 @@ func (o *OrderService) autoRefundStarsCharge(ctx context.Context, order *databas
 		// Fail-closed: при недоступности журнала решение о возврате принять нельзя.
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "stars_charge_audit_check_failed", Reason: auditErr.Error(), Action: "retry the duplicate-charge decision after database recovery", OrderID: orderID, TelegramID: telegramID, AmountCents: amountCents, Currency: currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
 
-		return false
+		return false, fmt.Errorf("check payment confirmed audit for charge %s: %w", chargeID, auditErr)
 	}
 
 	if confirmed {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "stars_charge_already_confirmed", Reason: "charge was already confirmed for an executed order", Action: "do not refund; verify the payment manually if money was taken twice", OrderID: orderID, TelegramID: telegramID, AmountCents: amountCents, Currency: currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
 
-		return false
+		return false, nil
 	}
 
 	refundErr := o.stars.Refund(ctx, telegramID, chargeID)
@@ -399,12 +421,12 @@ func (o *OrderService) autoRefundStarsCharge(ctx context.Context, order *databas
 
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "stars_duplicate_charge_refunded", OrderID: orderID, TelegramID: telegramID, AmountCents: amountCents, Currency: currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
 
-		return true
+		return true, nil
 	}
 
 	o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "stars_duplicate_charge_refund_failed", Reason: refundErr.Error(), Action: "refund this duplicate charge manually via Bot API refundStarPayment using provider_payment_id", OrderID: orderID, TelegramID: telegramID, AmountCents: amountCents, Currency: currency, ProviderID: chargeID, CallbackStatus: "successful_payment"})
 
-	return false
+	return false, nil
 }
 
 // logAuditAutoRefund пишет событие payment_auto_refunded best-effort.

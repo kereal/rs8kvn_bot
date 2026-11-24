@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -72,8 +73,12 @@ func (s *Service) insertAuditLogBestEffort(ctx context.Context, e *AuditLog) err
 // Stars-платежа был бы пропущен.
 //
 // JSON1 в используемом SQLite (mattn/go-sqlite3) не собран, поэтому details
-// ищется LIKE-паттерном с ESCAPE: спецсимволы значения (% _ \) экранируются,
-// иначе charge-ид вида "a_b" совпал бы с чужим.
+// ищется литеральным вхождением через instr (core-функция SQLite, без JSON1):
+// фрагменты `"provider_payment_id":"..."` и `"provider":"..."` строятся через
+// json.Marshal, как и marshalAuditDetails, — кавычки и экранирование совпадают
+// с тем, как details реально записаны. Поиск регистрозависим (в отличие от
+// LIKE): charge-иды, различающиеся только регистром, — разные платежи, и
+// ложное совпадение означало бы пропущенный авто-возврат дубля оплаты.
 func (s *Service) HasPaymentConfirmedByProviderPaymentID(ctx context.Context, provider string, providerPaymentID string) (bool, error) {
 	chargeID := strings.TrimSpace(providerPaymentID)
 	providerName := strings.TrimSpace(provider)
@@ -81,29 +86,32 @@ func (s *Service) HasPaymentConfirmedByProviderPaymentID(ctx context.Context, pr
 		return false, nil
 	}
 
-	pattern := "%\"provider_payment_id\":\"" + escapeAuditDetailsLikeValue(chargeID) + "\"%"
-	providerPattern := "%\"provider\":\"" + escapeAuditDetailsLikeValue(providerName) + "\"%"
+	chargeEncoded, err := json.Marshal(chargeID)
+	if err != nil {
+		return false, fmt.Errorf("has payment confirmed by provider payment id: %w", err)
+	}
+
+	providerEncoded, err := json.Marshal(providerName)
+	if err != nil {
+		return false, fmt.Errorf("has payment confirmed by provider payment id: %w", err)
+	}
+
+	chargeFragment := `"provider_payment_id":` + string(chargeEncoded)
+	providerFragment := `"provider":` + string(providerEncoded)
 
 	var count int64
 
-	err := s.db.WithContext(ctx).
+	err = s.db.WithContext(ctx).
 		Model(&AuditLog{}).
 		Where("event = ?", AuditEventPaymentConfirmed).
-		Where("details LIKE ? ESCAPE '\\'", pattern).
-		Where("details LIKE ? ESCAPE '\\'", providerPattern).
+		Where("instr(details, ?) > 0", chargeFragment).
+		Where("instr(details, ?) > 0", providerFragment).
 		Count(&count).Error
 	if err != nil {
 		return false, fmt.Errorf("has payment confirmed by provider payment id: %w", err)
 	}
 
 	return count > 0, nil
-}
-
-// escapeAuditDetailsLikeValue экранирует спецсимволы LIKE-шаблона.
-func escapeAuditDetailsLikeValue(value string) string {
-	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-
-	return replacer.Replace(value)
 }
 
 // GetAuditLogByEntity возвращает историю событий сущности (новые первыми).

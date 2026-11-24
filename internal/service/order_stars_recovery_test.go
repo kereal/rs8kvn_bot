@@ -299,8 +299,12 @@ func TestReconcileStarsTransactions_ChargeAlreadyConfirmedIsNotRefunded(t *testi
 	assert.Equal(t, int64(1), o.starsOffset, "the page must still be consumed")
 }
 
-// M2-регрессия: ошибка проверки audit — fail-closed, возврат не выполняется.
-func TestReconcileStarsTransactions_AuditCheckFailureFailClosed(t *testing.T) {
+// R8-регрессия: ошибка чтения audit — инфраструктурная ошибка. Решение о
+// возврате принять нельзя, поэтому проход прерывается, offset не двигается:
+// следующий hourly-тик повторит транзакцию и вернёт charge уже исполненного
+// заказа. Раньше ошибка проглатывалась, offset продвигался, а charge
+// оставался без возврата до рестарта процесса.
+func TestReconcileStarsTransactions_AuditCheckFailureHoldsOffset(t *testing.T) {
 	t.Parallel()
 
 	refundCalled := false
@@ -327,9 +331,45 @@ func TestReconcileStarsTransactions_AuditCheckFailureFailClosed(t *testing.T) {
 	}
 	o := newStarsReconcileService(mock, api)
 
-	require.NoError(t, o.ReconcileStarsTransactions(context.Background()))
+	err := o.ReconcileStarsTransactions(context.Background())
+	require.Error(t, err, "an audit read failure must abort the pass so the transaction is retried")
 	assert.False(t, refundCalled, "refund must not run when the audit check fails")
-	assert.Equal(t, int64(1), o.starsOffset, "the page must still be consumed")
+	assert.Equal(t, int64(0), o.starsOffset, "offset must not move on an infrastructure error")
+}
+
+// R8-регрессия: та же ошибка в прямом successful_payment-пути. Решение о
+// возврате дубля не принято → ошибка возвращается наружу, иначе recovery
+// посчитает транзакцию обработанной и никогда не вернёт деньги.
+func TestConfirmStarsPayment_DuplicateChargeAuditFailureReturnsError(t *testing.T) {
+	t.Parallel()
+
+	paidOrder := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusPaid, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars, ProviderPaymentID: "charge_first"}
+
+	refundCalled := false
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return paidOrder, nil },
+		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: 4, TelegramID: 42}, nil
+		},
+		HasPaymentConfirmedByProviderPaymentIDFunc: func(context.Context, string, string) (bool, error) {
+			return false, errors.New("audit log is down")
+		},
+	}
+	o := newStarsReconcileService(mock, &testutil.BotAPI{
+		MakeRequestFunc: func(endpoint string, _ tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			if endpoint == "refundStarPayment" {
+				refundCalled = true
+
+				return &tgbotapi.APIResponse{Ok: true}, nil
+			}
+
+			return &tgbotapi.APIResponse{Ok: true, Result: json.RawMessage(`{}`)}, nil
+		},
+	})
+
+	_, err := o.ConfirmStarsPayment(context.Background(), "charge_second", "31", 199, "XTR", 42)
+	require.Error(t, err, "the refund decision must stay undecided while the audit log is unavailable")
+	assert.False(t, refundCalled, "no refund may run without the audit check")
 }
 
 // S7-регрессия: бюджет прохода ограничивает не только загрузку страниц, но и

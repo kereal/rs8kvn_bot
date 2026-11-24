@@ -124,16 +124,24 @@ func (sh *SubscriptionHandler) requestStarsOrder(ctx context.Context, telegramID
 	return order, created, nil
 }
 
+// starsPendingMessage подбирает текст под фактическое состояние pending-заказа:
+// invoice уже отправлен (acceptance прошёл) — «нажмите на счёт», иначе
+// покупатель ещё не подтвердил условия — «подтвердите условия в личном чате».
+func (sh *SubscriptionHandler) starsPendingMessage(order *database.Order) string {
+	if order != nil && sh.h.starsSentInvoices.Has(order.ID) {
+		return msg(MsgPaymentInProgressStars)
+	}
+
+	return msg(MsgPaymentAwaitingAcceptance)
+}
+
 // handleStarsBuy: первый выбор Stars-тарифа создаёт pending-заказ и отправляет
 // покупателю в личный чат сообщение с условиями и кнопкой согласия (§5.1).
 // Invoice отправляется ТОЛЬКО из acceptance-callback (stars_accept_...).
 func (sh *SubscriptionHandler) handleStarsBuy(ctx context.Context, chatID, telegramID int64, username string, messageID int, product *database.Product) error {
 	order, created, err := sh.requestStarsOrder(ctx, telegramID, username, product)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrPaymentAlreadyInProgress):
-			return sh.showBuyError(chatID, messageID, msg(MsgPaymentInProgressStars))
-		case errors.Is(err, service.ErrPaymentDisabled):
+		if errors.Is(err, service.ErrPaymentDisabled) {
 			return sh.showBuyError(chatID, messageID, "❌ Платежи временно недоступны")
 		}
 
@@ -141,8 +149,10 @@ func (sh *SubscriptionHandler) handleStarsBuy(ctx context.Context, chatID, teleg
 	}
 
 	if !created {
-		// Повторный клик по уже существующему pending — Terms-сообщение уже отправлено.
-		return sh.showBuyError(chatID, messageID, msg(MsgPaymentInProgressStars))
+		// Повторный клик по уже существующему pending: текст зависит от того,
+		// отправлен ли уже invoice (acceptance прошёл) или покупатель ещё не
+		// подтвердил условия.
+		return sh.showBuyError(chatID, messageID, sh.starsPendingMessage(order))
 	}
 
 	// Карточка тарифа: подтверждение уходит в личный чат покупателя.
@@ -308,13 +318,18 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 	}
 
 	if order.Status != database.OrderStatusPending {
-		// Оплачен/отменён/истёк: новый invoice не отправляем, покупатель
-		// выбирает тариф заново после истечения.
+		// Оплачен/отменён/истёк: новый invoice не отправляем. Текст зависит от
+		// фактического статуса: оплата получена — сообщаем об успехе, иначе
+		// предлагаем выбрать тариф заново.
 		logger.Info("stars acceptance on non-pending order ignored",
 			zap.Uint("order_id", order.ID),
 			zap.String("status", string(order.Status)))
 
-		return sh.showBuyError(chatID, acceptMsgID, msg(MsgPaymentInProgressStars))
+		if order.Status == database.OrderStatusPaid {
+			return sh.showBuyError(chatID, acceptMsgID, msg(MsgStarsAlreadyPaid))
+		}
+
+		return sh.showBuyError(chatID, acceptMsgID, msg(MsgStarsOrderNotPending))
 	}
 
 	sub, err := sh.h.db.GetByTelegramID(ctx, buyerTelegramID)

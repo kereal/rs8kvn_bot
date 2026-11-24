@@ -373,9 +373,13 @@ func TestStarsBuy_AcceptanceSendErrorShowsSeparateText(t *testing.T) {
 	assert.Empty(t, starsInvoices(paymentBot), "no invoice must be sent on acceptance failure")
 }
 
-func TestStarsBuy_AlreadyInProgressShowsStarsText(t *testing.T) {
+func TestStarsBuy_ReusePendingBeforeAcceptanceShowsAwaitingText(t *testing.T) {
 	t.Parallel()
 
+	// Повторный клик по существующему pending-заказу до acceptance: invoice ещё
+	// НЕ отправлен (он выставляется только из acceptance-callback), поэтому
+	// «нажмите на счёт» вводит в заблуждение — ждём текст про подтверждение
+	// условий в личном чате.
 	mockDB := testutil.NewBotStoreFake()
 	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
 		return &database.Product{ID: 1, PlanID: 2, Name: "Месяц", PriceCents: 199, Currency: stars.Currency, IsActive: true}, nil
@@ -397,7 +401,70 @@ func TestStarsBuy_AlreadyInProgressShowsStarsText(t *testing.T) {
 	assert.Empty(t, paymentBot.AllChattablesSafe(), "no second invoice must be created")
 	messages := mainBot.GetAllSentMessages()
 	require.Len(t, messages, 1)
+	assert.Equal(t, msg(MsgPaymentAwaitingAcceptance), messages[0].Text)
+}
+
+func TestStarsBuy_ReusePendingAfterAcceptanceShowsInvoiceHint(t *testing.T) {
+	t.Parallel()
+
+	// После успешного acceptance (invoice отправлен, order ID в sent-set)
+	// повторный клик ведёт покупателя к уже выставленному счёту.
+	mockDB := testutil.NewBotStoreFake()
+	mockDB.GetProductByIDFunc = func(context.Context, uint) (*database.Product, error) {
+		return &database.Product{ID: 1, PlanID: 2, Name: "Месяц", PriceCents: 199, Currency: stars.Currency, IsActive: true}, nil
+	}
+	mockDB.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) {
+		return &database.Subscription{ID: 7, TelegramID: 42}, nil
+	}
+	mockDB.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
+		return &database.Plan{ID: 2, IsActive: true}, nil
+	}
+	mockDB.FindOrCreatePendingPaymentOrderFunc = func(context.Context, uint, uint, string, int64, string, *time.Time, time.Time) (*database.Order, bool, error) {
+		return &database.Order{ID: 3, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPending, AmountCents: 199, Currency: stars.Currency}, false, nil
+	}
+	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
+
+	h.starsSentInvoices.Add(3)
+
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
+	require.NoError(t, err)
+
+	assert.Empty(t, paymentBot.AllChattablesSafe(), "no second invoice must be created")
+	messages := mainBot.GetAllSentMessages()
+	require.Len(t, messages, 1)
 	assert.Equal(t, msg(MsgPaymentInProgressStars), messages[0].Text)
+}
+
+func TestStarsAccept_ExpiredOrderShowsNotPendingText(t *testing.T) {
+	t.Parallel()
+
+	// Acceptance по истёкшему заказу: «счёт уже запущен» неверно — заказ мёртв,
+	// нужен текст с предложением выбрать тариф заново.
+	mockDB := testutil.NewBotStoreFake()
+	starsOrderMocks(mockDB, withStarsStatus(database.OrderStatusExpired))
+	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
+
+	require.NoError(t, h.HandleCallback(context.Background(), starsAcceptUpdate("stars_accept_3_1_42_99", 42, 77)))
+
+	assert.Empty(t, starsInvoices(paymentBot), "expired order must not be invoiced")
+	edit := starsEditByMessageID(t, mainBot, 77)
+	assert.Equal(t, msg(MsgStarsOrderNotPending), edit.Text)
+}
+
+func TestStarsAccept_PaidOrderShowsAlreadyPaidText(t *testing.T) {
+	t.Parallel()
+
+	// Acceptance по оплаченному заказу (протухшая кнопка согласия): покупателю
+	// сообщают, что оплата получена и подписка активна.
+	mockDB := testutil.NewBotStoreFake()
+	starsOrderMocks(mockDB, withStarsStatus(database.OrderStatusPaid))
+	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)
+
+	require.NoError(t, h.HandleCallback(context.Background(), starsAcceptUpdate("stars_accept_3_1_42_99", 42, 77)))
+
+	assert.Empty(t, starsInvoices(paymentBot), "paid order must not be invoiced again")
+	edit := starsEditByMessageID(t, mainBot, 77)
+	assert.Equal(t, msg(MsgStarsAlreadyPaid), edit.Text)
 }
 
 func TestStarsBuyPremiumList_FiltersNonXTRProducts(t *testing.T) {

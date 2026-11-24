@@ -556,6 +556,15 @@ func (o *OrderService) confirmPayment(
 	}
 
 	order, cents, unlock, err := resolvePlategaCallbackOrder(ctx, o, providerPaymentID, payload, amount, currency, "CONFIRMED")
+	if unlock != nil {
+		// Per-payment lock освобождается на любом пути, включая ошибки:
+		// утечка токена отравляет provider_payment_id — все повторные
+		// callback'и по нему ждут timeout лока и падают до рестарта.
+		// unlock идемпотентен, поэтому вызов из confirmPaidOrderTail
+		// (до post-commit sync) и этот deferred-вызов не конфликтуют.
+		defer unlock()
+	}
+
 	if err != nil {
 		if errors.Is(err, database.ErrOrderNotFound) {
 			logger.Warn("payment callback for unknown order", zap.String("provider_payment_id", providerPaymentID))
@@ -569,10 +578,9 @@ func (o *OrderService) confirmPayment(
 		return nil, err
 	}
 
-	// Ранние возвраты ниже (paid, gone/transition, sync-not-ready, deleted
-	// entity, CAS-ошибка) обязаны освободить лок; успешный путь отдаёт unlock
-	// в confirmPaidOrderTail. unlock идемпотентен, поэтому двойной вызов — no-op.
-	defer unlock()
+	// Лок уже освобождается отложенным вызовом выше; успешный путь отдаёт
+	// unlock в confirmPaidOrderTail — там он снимается до post-commit sync,
+	// чтобы параллельные callback'и не ждали конца синхронизации.
 
 	if cents > order.AmountCents {
 		logger.Info("payment callback includes provider fee", zap.Uint("order_id", order.ID), zap.Int64("order_amount_cents", order.AmountCents), zap.Int64("callback_amount_cents", cents), zap.Int64("provider_fee_cents", cents-order.AmountCents), zap.String("currency", currency), zap.String("provider_payment_id", providerPaymentID))

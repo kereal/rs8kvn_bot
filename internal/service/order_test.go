@@ -2933,3 +2933,40 @@ func TestRefundStarsOrder_DowngradeInvalidatesSubscriptionCache(t *testing.T) {
 	assert.True(t, result.Downgraded)
 	assert.Equal(t, []string{"sub-uuid-4"}, invalidated, "refund+downgrade must invalidate the subscription cache")
 }
+
+// Регрессия: confirmPayment не освобождал per-payment lock на error-путях
+// resolvePlategaCallbackOrder (несовпадение валюты/суммы, ошибка загрузки
+// заказа). Утечка токена отравляла provider_payment_id: каждый повторный
+// callback по нему ждал timeout лока и падал, пока процесс не перезапущен.
+func TestConfirmPayment_ReleasesLockOnValidationError(t *testing.T) {
+	t.Parallel()
+
+	providerID := "550e8400-e29b-41d4-a716-446655440140"
+	mock := &testutil.ServiceStoreFake{
+		GetOrderByProviderPaymentIDFunc: func(context.Context, string, string) (*database.Order, error) {
+			return &database.Order{ID: 40, SubscriptionID: 50, ProductID: 60, Status: database.OrderStatusPending, AmountCents: 2300, Currency: "RUB"}, nil
+		},
+		GetProductByIDFunc: func(_ context.Context, id uint) (*database.Product, error) {
+			return &database.Product{ID: id, PlanID: 70, DurationDays: 30, PriceCents: 2300, Currency: "RUB", IsActive: true}, nil
+		},
+		GetByIDFunc: func(_ context.Context, id uint) (*database.Subscription, error) {
+			return &database.Subscription{ID: id, TelegramID: 77, PlanID: 70}, nil
+		},
+		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
+			return true, nil
+		},
+		GetPendingBySubscriptionIDFunc: func(context.Context, uint) ([]database.SubscriptionNode, error) {
+			return nil, nil
+		},
+	}
+	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), &funcPaymentProvider{}, "", nil)
+	o.paymentLockTimeout = 200 * time.Millisecond
+
+	_, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("23.00"), "USD")
+	require.ErrorIs(t, err, ErrCurrencyMismatch)
+
+	confirmation, err := o.ConfirmPayment(context.Background(), providerID, "", json.Number("23.00"), "RUB")
+	require.NoError(t, err, "retry after a failed validation must not wait for the leaked lock")
+	require.NotNil(t, confirmation)
+	assert.True(t, confirmation.Activated)
+}

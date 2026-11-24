@@ -289,7 +289,14 @@ func (o *OrderService) reconcileStarsTransactions(ctx context.Context, budget ti
 					// Semantic mismatch ретраем не исправить: charge возвращается
 					// автоматически (сбой возврата — payment issue alert). Заказ по
 					// payload не найден, order=nil — честный маркер отсутствия заказа.
-					o.autoRefundStarsCharge(ctx, nil, telegramID, tx.Amount, stars.Currency, tx.ID, "recovery_semantic_mismatch")
+					//
+					// Ошибка проверки audit — инфраструктурная: решение о возврате
+					// принять нельзя. Прерываем проход и держим offset — следующий
+					// тик повторит транзакцию (R8 плана).
+					_, refundErr := o.autoRefundStarsCharge(ctx, nil, telegramID, tx.Amount, stars.Currency, tx.ID, "recovery_semantic_mismatch")
+					if refundErr != nil {
+						return fmt.Errorf("auto-refund stars charge %s: %w", tx.ID, refundErr)
+					}
 				}
 			}
 

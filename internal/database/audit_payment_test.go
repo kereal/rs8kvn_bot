@@ -696,6 +696,16 @@ func TestHasPaymentConfirmedByProviderPaymentID(t *testing.T) {
 	found, err = svc.HasPaymentConfirmedByProviderPaymentID(ctx, PaymentProviderTelegramStars, "charge_foreign_only")
 	require.NoError(t, err)
 	assert.False(t, found, "a foreign provider charge must not block the Stars auto-refund")
+
+	// Поиск регистрозависим: charge-иды, различающиеся только регистром, —
+	// разные платежи, ложное совпадение пропустило бы авто-возврат дубля.
+	found, err = svc.HasPaymentConfirmedByProviderPaymentID(ctx, PaymentProviderTelegramStars, "CHARGE_CONFIRMED")
+	require.NoError(t, err)
+	assert.False(t, found, "case-differing charge id must not count as confirmed")
+
+	found, err = svc.HasPaymentConfirmedByProviderPaymentID(ctx, PaymentProviderTelegramStars, "charge_confirmed")
+	require.NoError(t, err)
+	assert.True(t, found, "exact charge id must still be found")
 }
 
 // TestAuditPaymentAutoRefunded_Constructor verifies the auto-refund audit event:
@@ -711,6 +721,10 @@ func TestAuditPaymentAutoRefunded_Constructor(t *testing.T) {
 	assert.Equal(t, ActorPaymentProvider, e.ActorType)
 	require.NotNil(t, e.EntityID)
 	assert.Equal(t, "12", *e.EntityID)
+	// По конвенции AGENTS.md actor_id платёжных событий — идентификатор провайдера.
+	require.NotNil(t, e.ActorID)
+	assert.Equal(t, "telegram_stars", *e.ActorID)
+	assert.Contains(t, e.Details, `"provider":"telegram_stars"`)
 	assert.Contains(t, e.Details, `"provider_payment_id":"charge_dup"`)
 	assert.Contains(t, e.Details, `"reason":"paid_order_new_charge"`)
 	assert.Contains(t, e.Details, `"telegram_id":42`)

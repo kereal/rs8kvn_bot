@@ -640,9 +640,12 @@ func AuditPaymentRefunded(order *Order, sub *Subscription, downgraded bool) *Aud
 // AuditPaymentAutoRefunded фиксирует автоматический возврат средств, применённый
 // сервисом (дубль оплаты Stars). order может быть nil — тогда событие
 // адресуется системе. reason описывает причину авто-возврата.
+//
+// По конвенции AGENTS.md actor_id платёжных событий — идентификатор провайдера
+// (см. AuditPaymentConfirmed/AuditPaymentRefunded), а не charge-ид: он остаётся
+// в details["provider_payment_id"].
 func AuditPaymentAutoRefunded(order *Order, telegramID int64, amountCents int64, currency string, providerPaymentID string, reason string) *AuditLog {
 	entityType, entityID := EntitySystem, (*string)(nil)
-	actorID := (*string)(nil)
 
 	if order != nil {
 		entityType = EntityOrder
@@ -651,17 +654,14 @@ func AuditPaymentAutoRefunded(order *Order, telegramID int64, amountCents int64,
 		}
 	}
 
-	if provider := strings.TrimSpace(providerPaymentID); provider != "" {
-		actorID = marshalAuditJSONString(provider)
-	}
-
 	return &AuditLog{
 		EntityType: entityType,
 		EntityID:   entityID,
 		Event:      AuditEventPaymentAutoRefunded,
 		ActorType:  ActorPaymentProvider,
-		ActorID:    actorID,
+		ActorID:    marshalAuditJSONString(PaymentProviderTelegramStars),
 		Details: marshalAuditDetails(map[string]any{
+			"provider":            PaymentProviderTelegramStars,
 			"provider_payment_id": providerPaymentID,
 			"amount_cents":        amountCents,
 			"currency":            currency,
