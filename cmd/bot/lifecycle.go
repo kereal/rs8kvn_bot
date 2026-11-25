@@ -214,68 +214,25 @@ func (m *updateMailbox) pop() (tgbotapi.Update, bool) {
 	return update, true
 }
 
+// financialUpdateContext создаёт контекст для уже принятого финансового
+// апдейта. Он не наследует отмену shutdown-ctx, иначе подтверждение оплаты
+// было бы прервано SIGTERM после того, как Telegram уже отдал апдейт боту.
+// Значения родительского контекста сохраняются; HandlerTimeout в обработчике
+// остаётся верхней границей времени работы.
+func financialUpdateContext(parent context.Context) context.Context {
+	return context.WithoutCancel(parent)
+}
+
 // regularUpdateQueueSize — буфер между чтением апдейтов и ожиданием слота
 // обычного обработчика. Чтение апдейтов никогда не стоит на занятом слоте:
 // иначе лежащий в канале pre_checkout_query (окно ответа Telegram — 10 c)
 // ждёт завершения чужого долгого обработчика.
 const regularUpdateQueueSize = config.MaxConcurrentHandlers * 4
 
-// shutdownFinancialTimeout — общий бюджет обработки финансовых апдейтов,
-// уже извлечённых из очередей на момент штатной остановки. Их нельзя бросить
-// (successful_payment — источник истины об оплате), но и затягивать остановку
-// сверх config.ShutdownTimeout нельзя: 30 c укладываются в 90 c с запасом на
-// завершение уже запущенных обработчиков.
-const shutdownFinancialTimeout = 30 * time.Second
-
-// financialDrainBudget — общий на весь drain бюджет времени для финансовых
-// апдейтов, уже вынутых из очередей на момент остановки. Контекст создаётся
-// лениво при первом таком апдейте: отсчёт с запуска бота означал бы, что к
-// остановке бюджет давно исчерпан. Отмена родительского контекста не
-// наследуется — drain обязан пережить сигнал остановки.
-type financialDrainBudget struct {
-	once   sync.Once
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-// closedDrainContext — результат contextFor после stop(): бюджет закрыт,
-// новые финансовые апдейты не принимаются. Отменённый синглтон вместо nil,
-// чтобы вызывающий код не паниковал на finCtx.Err().
-var closedDrainContext = func() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	return ctx
-}()
-
-// contextFor возвращает общий drain-контекст, создавая его при первом вызове.
-func (b *financialDrainBudget) contextFor(parent context.Context) context.Context {
-	b.once.Do(func() {
-		b.ctx, b.cancel = context.WithTimeout(context.WithoutCancel(parent), shutdownFinancialTimeout)
-	})
-
-	if b.ctx == nil {
-		// stop() успел выполниться раньше (остановка вышла за
-		// ShutdownTimeout, а диспетчер ещё дорабатывал очередь).
-		return closedDrainContext
-	}
-
-	return b.ctx
-}
-
-// stop отменяет drain-контекст, если он был создан. Пустой once.Do
-// синхронизирует чтение cancel с возможной параллельной инициализацией.
-func (b *financialDrainBudget) stop() {
-	b.once.Do(func() {})
-
-	if b.cancel != nil {
-		b.cancel()
-	}
-}
-
 // runEventLoop processes Telegram updates with bounded concurrency until
-// the shutdown context is cancelled. Blocks until all in-flight handlers
-// complete or the shutdown timeout elapses.
+// the shutdown context is cancelled. Regular in-flight handlers are bounded
+// by ShutdownTimeout; accepted financial updates are always drained before
+// return, because a lost successful_payment means money charged but no order.
 func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Handler, updates tgbotapi.UpdatesChannel, answerPreCheckout preCheckoutAnswerer) {
 	updateSem := make(chan struct{}, config.MaxConcurrentHandlers)
 	// pre_checkout_query обслуживается отдельным путём с собственным
@@ -298,30 +255,10 @@ func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Han
 	// апдейтов даже при переполненной regularQueue.
 	financialMailbox := newUpdateMailbox()
 
-	var updatesWg sync.WaitGroup
-
-	// Остановка: апдейт уже вынут из очереди Telegram, поэтому финансовый
-	// апдейт нельзя просто выбросить. Обрабатываем такие подтверждения здесь
-	// же, общим на весь drain бюджетом времени.
-	var finDrain financialDrainBudget
-
-	defer finDrain.stop()
-
-	processAcceptedFinancial := func(ctx context.Context, u tgbotapi.Update) {
-		if !handler.IsFinancialUpdate(u) {
-			return
-		}
-
-		finCtx := finDrain.contextFor(ctx)
-		if finCtx.Err() != nil {
-			logger.Warn("Shutdown: financial update dropped, drain budget exhausted")
-
-			return
-		}
-
-		logger.Info("Shutdown: processing accepted financial update")
-		handleUpdateSafely(finCtx, handler, u)
-	}
+	var (
+		regularWg   sync.WaitGroup
+		financialWg sync.WaitGroup
+	)
 
 	// Диспетчер обычной очереди — единственное место, где ждём слот обработчика.
 	dispatcherDone := make(chan struct{})
@@ -330,29 +267,24 @@ func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Han
 		defer close(dispatcherDone)
 
 		for update := range regularQueue {
-			// Проверяем остановку до ожидания слота: иначе случайный выбор
-			// в select ниже может запустить обработчик с уже отменённым
-			// контекстом и потерять подтверждение оплаты.
+			// После остановки обычные апдейты теряются: финансовые идут
+			// отдельным маршрутом и не должны ждать здесь слот.
 			if ctx.Err() != nil {
-				processAcceptedFinancial(ctx, update)
-
 				continue
 			}
 
 			select {
 			case updateSem <- struct{}{}:
 			case <-ctx.Done():
-				processAcceptedFinancial(ctx, update)
-
 				continue
 			}
 
-			updatesWg.Add(1)
+			regularWg.Add(1)
 
 			go func(u tgbotapi.Update) {
 				defer func() {
 					<-updateSem
-					updatesWg.Done()
+					regularWg.Done()
 				}()
 
 				handleUpdateSafely(ctx, handler, u)
@@ -373,29 +305,32 @@ func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Han
 				return
 			}
 
-			if ctx.Err() != nil {
-				processAcceptedFinancial(ctx, update)
-
-				continue
-			}
+			// Принятый финансовый апдейт не отбрасывается при остановке:
+			// он запускается с детач-контекстом, поэтому SIGTERM не
+			// прерывает подтверждение оплаты. Слот ограничивает число
+			// финансовых горутин в обычном режиме; при остановке ждать его
+			// нельзя — обычные handler'ы могли зависнуть на сетевом ответе.
+			var gotSlot bool
 
 			select {
 			case updateSem <- struct{}{}:
+				gotSlot = true
 			case <-ctx.Done():
-				processAcceptedFinancial(ctx, update)
-
-				continue
 			}
 
-			updatesWg.Add(1)
+			finCtx := financialUpdateContext(ctx)
+
+			financialWg.Add(1)
 
 			go func(u tgbotapi.Update) {
 				defer func() {
-					<-updateSem
-					updatesWg.Done()
+					if gotSlot {
+						<-updateSem
+					}
+					financialWg.Done()
 				}()
 
-				handleUpdateSafely(ctx, handler, u)
+				handleUpdateSafely(finCtx, handler, u)
 			}(update)
 		}
 	}()
@@ -414,12 +349,12 @@ eventLoop:
 				// обработчика не занимается и не ожидается.
 				select {
 				case preCheckoutSem <- struct{}{}:
-					updatesWg.Add(1)
+					regularWg.Add(1)
 
 					go func(u tgbotapi.Update) {
 						defer func() {
 							<-preCheckoutSem
-							updatesWg.Done()
+							regularWg.Done()
 						}()
 
 						handleUpdateSafely(ctx, handler, u)
@@ -465,47 +400,59 @@ eventLoop:
 
 	// Чтение остановлено: диспетчеры доработают очереди и завершатся.
 	close(regularQueue)
-	financialMailbox.close()
 
 	logger.Info("Graceful shutdown initiated")
 	botAPI.StopReceivingUpdates()
 
-	// Drain the updates channel to prevent goroutine leak. StopReceivingUpdates
-	// closes the channel (via the polling goroutine on shutdownChannel), so the
-	// range exits once the buffered updates are exhausted. Хвост нельзя просто
-	// выбросить: offset в Telegram уже сдвинут при отправке в канал, поэтому
-	// оставшийся здесь successful_payment повторно не придёт — финансовые
-	// апдейты обрабатываются тем же drain-бюджетом.
-	updatesWg.Go(func() {
-		drainBufferedUpdates(ctx, updates, processAcceptedFinancial)
-	})
+	// Tail the updates channel: хвост нельзя просто выбросить — offset в
+	// Telegram уже сдвинут при отправке в канал, поэтому оставшийся здесь
+	// successful_payment повторно не придёт. Финансовые апдейты хвоста
+	// маршрутизируются в тот же финансовый mailbox; обычные — теряются.
+	financialTailDone := make(chan struct{})
 
-	// Wait for in-flight update handlers to complete
-	logger.Info("Waiting for update handlers to complete...")
+	go func() {
+		defer close(financialTailDone)
 
-	done := make(chan struct{})
+		drainBufferedUpdates(updates, handler.IsFinancialUpdate, financialMailbox.push)
+	}()
+
+	// Wait for regular update handlers to complete; they observe ctx
+	// cancellation, so a bounded wait is acceptable.
+	regularDone := make(chan struct{})
 
 	go func() {
 		<-dispatcherDone
-		<-financialDispatcherDone
-		updatesWg.Wait()
-		close(done)
+		regularWg.Wait()
+		close(regularDone)
 	}()
 
 	select {
-	case <-done:
-		logger.Info("All update handlers completed successfully")
+	case <-regularDone:
 	case <-time.After(config.ShutdownTimeout):
-		logger.Warn("Timeout waiting for update handlers to complete")
+		logger.Warn("Timeout waiting for regular update handlers to complete")
 	}
+
+	// Accepted financial updates are the source of truth for payments: we do
+	// not cap the drain by ShutdownTimeout. Each handler is bounded by
+	// HandlerTimeout, so the wait terminates as long as the mailbox is not
+	// unbounded.
+	<-financialTailDone
+	financialMailbox.close()
+	<-financialDispatcherDone
+	financialWg.Wait()
+
+	logger.Info("All update handlers completed successfully")
 }
 
 // drainBufferedUpdates разбирает хвост канала апдейтов, оставшийся после
-// StopReceivingUpdates: все апдейты проходят через process, а финансовые
-// внутри него — через общий drain-бюджет. Вынесено ради тестируемости.
-func drainBufferedUpdates(ctx context.Context, updates <-chan tgbotapi.Update, process func(context.Context, tgbotapi.Update)) {
+// StopReceivingUpdates. Терять нельзя только финансовые апдейты: offset в
+// Telegram уже сдвинут, а успешная оплата — источник истины. Обычные апдейты
+// в хвосте остановки не обрабатываются. Вынесено ради тестируемости.
+func drainBufferedUpdates(updates <-chan tgbotapi.Update, isFinancial func(tgbotapi.Update) bool, route func(tgbotapi.Update)) {
 	for update := range updates {
-		process(ctx, update)
+		if isFinancial(update) {
+			route(update)
+		}
 	}
 }
 

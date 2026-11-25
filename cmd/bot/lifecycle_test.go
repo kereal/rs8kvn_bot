@@ -4,81 +4,50 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kereal/rs8kvn_bot/internal/bot"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-type budgetCtxKey struct{}
+type financialCtxKey struct{}
 
-// Бюджет создаётся лениво (отсчёт идёт от первого финансового апдейта, а не
-// от запуска бота) и общий на весь drain. Отмена родительского контекста, уже
-// наступившая к моменту остановки, drain не прерывает.
-func TestFinancialDrainBudget_LazySharedAndDetachedFromParent(t *testing.T) {
-	var budget financialDrainBudget
+// Финансовый апдейт уже принят из Telegram, поэтому отмена shutdown-контекста
+// не должна прерывать его обработку. Значения родительского контекста при этом
+// сохраняются, а HandlerTimeout накладывается внутри финансового обработчика.
+func TestFinancialUpdateContext_DetachedFromShutdown(t *testing.T) {
+	parent, cancel := context.WithCancel(
+		context.WithValue(context.Background(), financialCtxKey{}, "kept"),
+	)
+	t.Cleanup(cancel)
 
-	defer budget.stop()
+	ctx := financialUpdateContext(parent)
+	require.NotNil(t, ctx)
 
-	assert.Nil(t, budget.ctx, "контекст не создаётся до первого финансового апдейта")
+	cancel()
 
-	parent, cancelParent := context.WithCancel(context.WithValue(context.Background(), budgetCtxKey{}, "kept"))
-	t.Cleanup(cancelParent)
-
-	first := budget.contextFor(parent)
-	require.NotNil(t, first)
-
-	_, hasDeadline := first.Deadline()
-	assert.True(t, hasDeadline, "у drain-контекста есть общий бюджет времени")
-
-	// Остановка уже началась: подтверждение оплаты всё равно должно
-	// обработаться, поэтому родительская отмена не наследуется.
-	cancelParent()
-	assert.NoError(t, first.Err())
-
-	assert.Equal(t, first, budget.contextFor(context.Background()), "бюджет общий на весь drain")
-	assert.Equal(t, "kept", first.Value(budgetCtxKey{}), "значения родительского контекста сохраняются")
+	assert.NoError(t, ctx.Err(), "shutdown не должен отменять принятый финансовый апдейт")
+	assert.Equal(t, "kept", ctx.Value(financialCtxKey{}))
 }
 
-// stop отменяет созданный бюджет и безопасен, когда drain так и не начался.
-func TestFinancialDrainBudget_Stop(t *testing.T) {
-	var neverUsed financialDrainBudget
-
-	neverUsed.stop()
-	assert.Nil(t, neverUsed.ctx, "до первого апдейта отменять нечего")
-
-	var budget financialDrainBudget
-
-	ctx := budget.contextFor(context.Background())
-	budget.stop()
-
-	assert.ErrorIs(t, ctx.Err(), context.Canceled)
-
-	// stop() раньше первого contextFor (остановка вышла за ShutdownTimeout,
-	// а диспетчер ещё дорабатывал очередь): контекст не должен стать nil —
-	// вызывающий код проверяет finCtx.Err() и упал бы паникой.
-	var stoppedFirst financialDrainBudget
-
-	stoppedFirst.stop()
-
-	afterStop := stoppedFirst.contextFor(context.Background())
-	require.NotNil(t, afterStop)
-	assert.ErrorIs(t, afterStop.Err(), context.Canceled)
-}
-
-// drainBufferedUpdates не выбрасывает хвост канала на остановке: все
-// буферизованные апдейты доходят до обработчика (раньше канал просто
-// вычитывался в пустоту, а Telegram уже не переотправит их).
-func TestDrainBufferedUpdates_ProcessesWholeBacklog(t *testing.T) {
+// drainBufferedUpdates не выбрасывает буферизованный successful_payment на
+// остановке: financial-апдейт из хвоста канала проходит в финансовый маршрут.
+func TestDrainBufferedUpdates_KeepsBufferedSuccessfulPayment(t *testing.T) {
+	handler := &bot.Handler{}
 	updates := make(chan tgbotapi.Update, 3)
 	updates <- tgbotapi.Update{UpdateID: 1}
 	updates <- tgbotapi.Update{UpdateID: 2, Message: &tgbotapi.Message{SuccessfulPayment: &tgbotapi.SuccessfulPayment{}}}
-	updates <- tgbotapi.Update{UpdateID: 3}
+	updates <- tgbotapi.Update{UpdateID: 3, Message: &tgbotapi.Message{
+		Text:     "/terms",
+		Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: len("/terms")}},
+	}}
 	close(updates)
 
-	var processed []int
-	drainBufferedUpdates(context.Background(), updates, func(_ context.Context, u tgbotapi.Update) {
-		processed = append(processed, u.UpdateID)
+	var routed []int
+	drainBufferedUpdates(updates, handler.IsFinancialUpdate, func(u tgbotapi.Update) {
+		routed = append(routed, u.UpdateID)
 	})
 
-	assert.Equal(t, []int{1, 2, 3}, processed, "буферизованные апдейты не должны теряться")
+	assert.Equal(t, []int{2, 3}, routed, "финансовые апдейты буфера не должны теряться")
 }
