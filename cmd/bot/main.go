@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	cryptorand "crypto/rand"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -45,6 +46,35 @@ var (
 // Telegram — 10 секунд; бюджет — validation 4–5 c (§5.2) + HTTP 4 c,
 // итого < 10 c (плана D1, §5.2).
 const paymentClientTimeout = 4 * time.Second
+
+// paymentAuthTimeout — таймаут HTTP-клиента, которым создаётся payment-инстанс.
+// Аутентификация (getMe) — обычный запрос к Telegram: 4-секундного бюджета
+// платёжных вызовов ей не хватает, и медленный ответ Telegram приводил к
+// фатальному падению старта. После создания клиент заменяется на
+// paymentClientTimeout (см. newPaymentBotAPI).
+const paymentAuthTimeout = 10 * time.Second
+
+// Общие параметры инициализации Telegram-клиентов: основной (long-poll) и
+// payment-инстанс создаются одинаково — с повторами и джиттером.
+const (
+	botInitMaxAttempts = 5
+	botInitDelay       = 3 * time.Second
+)
+
+// botInitBackoff возвращает паузу перед следующей попыткой инициализации:
+// базовая задержка + случайный джиттер (чтобы ретраи не синхронизировались).
+func botInitBackoff(base time.Duration) time.Duration {
+	jitter := time.Duration(0)
+
+	if maxJitter := base / 2; maxJitter > 0 {
+		n, randErr := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(maxJitter)))
+		if randErr == nil {
+			jitter = time.Duration(n.Int64())
+		}
+	}
+
+	return base + jitter
+}
 
 // Option is a functional option for Run.
 type Option func(*runOptions)
@@ -200,10 +230,6 @@ func getRevision() string {
 func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 	logger.Info("Validating Telegram bot token")
 
-	const botInitMaxAttempts = 5
-
-	botInitDelay := 3 * time.Second
-
 	var lastErr error
 
 	for i := range botInitMaxAttempts {
@@ -243,19 +269,63 @@ func initBot(cfg *config.Config) (*tgbotapi.BotAPI, *bot.BotConfig, error) {
 
 		logger.Warn("Telegram bot init failed, retrying...", zap.Int("attempt", i+1), zap.Int("max_attempts", botInitMaxAttempts), zap.Error(err))
 
-		jitter := time.Duration(0)
-
-		if maxJitter := botInitDelay / 2; maxJitter > 0 {
-			n, randErr := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(maxJitter)))
-			if randErr == nil {
-				jitter = time.Duration(n.Int64())
-			}
-		}
-
-		time.Sleep(botInitDelay + jitter)
+		time.Sleep(botInitBackoff(botInitDelay))
 	}
 
 	return nil, nil, fmt.Errorf("failed to initialize Telegram bot after %d attempts: %w", botInitMaxAttempts, lastErr)
+}
+
+// newPaymentBotAPIFactory создаёт Telegram-клиент для платёжных вызовов.
+// Переменная — точка подмены в тестах.
+var newPaymentBotAPIFactory = func(token string, client tgbotapi.HTTPClient) (*tgbotapi.BotAPI, error) {
+	return tgbotapi.NewBotAPIWithClient(token, tgbotapi.APIEndpoint, client)
+}
+
+// newPaymentBotAPI создаёт отдельный Telegram-инстанс для платёжных вызовов.
+//
+// Создание инстанса выполняет getMe — сетевой запрос к Telegram. Поэтому:
+//   - для аутентификации используется отдельный клиент с paymentAuthTimeout:
+//     4-секундного бюджета платёжных вызовов медленному ответу Telegram не
+//     хватает, и его таймаут приводил к фатальному падению старта бота;
+//   - запрос повторяется с тем же backoff, что и у основного long-poll клиента:
+//     транзиентная ошибка Telegram не должна ронять весь бот (в т.ч. основной
+//     платёж Platega);
+//
+// После успешной аутентификации HTTP-клиент заменяется на paymentClientTimeout:
+// платёжные вызовы должны укладываться в 10-секундное окно Telegram.
+func newPaymentBotAPI(token string) (*tgbotapi.BotAPI, error) {
+	return newPaymentBotAPIWithDelay(token, botInitDelay)
+}
+
+// newPaymentBotAPIWithDelay — newPaymentBotAPI с явной задержкой между
+// попытками (в тестах — 0).
+func newPaymentBotAPIWithDelay(token string, delay time.Duration) (*tgbotapi.BotAPI, error) {
+	var lastErr error
+
+	for i := range botInitMaxAttempts {
+		api, err := newPaymentBotAPIFactory(token, &http.Client{Timeout: paymentAuthTimeout})
+		if err == nil && api != nil {
+			api.Client = &http.Client{Timeout: paymentClientTimeout}
+			logger.Info("Telegram payment client authorized")
+			return api, nil
+		}
+
+		if err == nil {
+			err = errors.New("telegram payment client is nil")
+		}
+
+		lastErr = err
+
+		if i == botInitMaxAttempts-1 {
+			break
+		}
+
+		logger.Warn("Telegram payment client init failed, retrying...", zap.Int("attempt", i+1), zap.Int("max_attempts", botInitMaxAttempts), zap.Error(err))
+
+		time.Sleep(botInitBackoff(delay))
+	}
+
+	return nil, fmt.Errorf("failed to initialize Telegram payment client after %d attempts: %w", botInitMaxAttempts, lastErr)
 }
 
 // nodeHealthSource сообщает доступность нод по последнему проходу синка.
@@ -621,7 +691,9 @@ func main() {
 	// D1: отдельный payment-инстанс с таймаутом HTTP — invoice,
 	// answerPreCheckoutQuery и refund идут через него; polling-инстанс
 	// не трогаем: его long-poll не должен упираться в общий таймаут.
-	paymentAPI, err := tgbotapi.NewBotAPIWithClient(cfg.TelegramBotToken, tgbotapi.APIEndpoint, &http.Client{Timeout: paymentClientTimeout})
+	// Создание инстанса повторяется: транзиентная ошибка Telegram не должна
+	// ронять старт бота вместе с основным платежом Platega.
+	paymentAPI, err := newPaymentBotAPI(cfg.TelegramBotToken)
 	if err != nil {
 		logger.Fatal("Telegram payment client initialization failed", zap.Error(err))
 	}

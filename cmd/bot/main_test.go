@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -352,11 +353,63 @@ func TestNewPreCheckoutAnswerer_AnswersEveryQuery(t *testing.T) {
 }
 
 // TestPreCheckoutAnswerBudgetFitsTelegramWindow — инвариант: ответ на
-// pre_checkout_query обязан уложиться в 10-секундное окно Telegram.
+// pre-checkout_query обязан уложиться в 10-секундное окно Telegram.
 func TestPreCheckoutAnswerBudgetFitsTelegramWindow(t *testing.T) {
 	t.Parallel()
 
 	total := preCheckoutSlotWaitTimeout + bot.PreCheckoutTimeout + paymentClientTimeout
 	require.LessOrEqual(t, total, 10*time.Second,
 		"the pre-checkout answer must fit the Telegram 10s window")
+}
+
+// TestNewPaymentBotAPI_RetriesTransientFailure — транзиентная ошибка Telegram
+// при создании payment-инстанса не должна ронять старт бота: основной платёж
+// Platega работает через webhook и от Telegram-инстанса не зависит.
+func TestNewPaymentBotAPI_RetriesTransientFailure(t *testing.T) {
+	original := newPaymentBotAPIFactory
+	t.Cleanup(func() { newPaymentBotAPIFactory = original })
+
+	var attempts int
+
+	newPaymentBotAPIFactory = func(token string, client tgbotapi.HTTPClient) (*tgbotapi.BotAPI, error) {
+		attempts++
+		if attempts < 3 {
+			return nil, errors.New("temporary telegram failure")
+		}
+
+		return &tgbotapi.BotAPI{Token: token, Client: client}, nil
+	}
+
+	api, err := newPaymentBotAPIWithDelay("test-token", 0)
+	require.NoError(t, err)
+	require.NotNil(t, api)
+	assert.Equal(t, 3, attempts, "payment client creation must be retried")
+}
+
+// TestNewPaymentBotAPI_UsesPaymentTimeout — после аутентификации инстанс
+// работает с коротким бюджетом платёжных вызовов (окно Telegram 10 c).
+func TestNewPaymentBotAPI_UsesPaymentTimeout(t *testing.T) {
+	original := newPaymentBotAPIFactory
+	t.Cleanup(func() { newPaymentBotAPIFactory = original })
+
+	var authTimeout time.Duration
+
+	newPaymentBotAPIFactory = func(token string, client tgbotapi.HTTPClient) (*tgbotapi.BotAPI, error) {
+		if httpClient, ok := client.(*http.Client); ok {
+			authTimeout = httpClient.Timeout
+		}
+
+		return &tgbotapi.BotAPI{Token: token, Client: client}, nil
+	}
+
+	api, err := newPaymentBotAPIWithDelay("test-token", 0)
+	require.NoError(t, err)
+	require.NotNil(t, api)
+
+	assert.Equal(t, paymentAuthTimeout, authTimeout,
+		"getMe must not be bound by the 4s payment budget")
+
+	httpClient, ok := api.Client.(*http.Client)
+	require.True(t, ok, "payment client must use an *http.Client")
+	assert.Equal(t, paymentClientTimeout, httpClient.Timeout)
 }
