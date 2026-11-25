@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -51,4 +52,29 @@ func TestFinancialDrainBudget_Stop(t *testing.T) {
 	budget.stop()
 
 	assert.ErrorIs(t, ctx.Err(), context.Canceled)
+
+	// contextFor после stop() не должен возвращать nil-контекст: вызывающий
+	// код проверяет finCtx.Err() и упал бы паникой, если бы stop() успел
+	// первым (остановка вышла за ShutdownTimeout, диспетчер ещё работал).
+	afterStop := budget.contextFor(context.Background())
+	require.NotNil(t, afterStop)
+	assert.ErrorIs(t, afterStop.Err(), context.Canceled)
+}
+
+// drainBufferedUpdates не выбрасывает хвост канала на остановке: все
+// буферизованные апдейты доходят до обработчика (раньше канал просто
+// вычитывался в пустоту, а Telegram уже не переотправит их).
+func TestDrainBufferedUpdates_ProcessesWholeBacklog(t *testing.T) {
+	updates := make(chan tgbotapi.Update, 3)
+	updates <- tgbotapi.Update{UpdateID: 1}
+	updates <- tgbotapi.Update{UpdateID: 2, Message: &tgbotapi.Message{SuccessfulPayment: &tgbotapi.SuccessfulPayment{}}}
+	updates <- tgbotapi.Update{UpdateID: 3}
+	close(updates)
+
+	var processed []int
+	drainBufferedUpdates(context.Background(), updates, func(_ context.Context, u tgbotapi.Update) {
+		processed = append(processed, u.UpdateID)
+	})
+
+	assert.Equal(t, []int{1, 2, 3}, processed, "буферизованные апдейты не должны теряться")
 }

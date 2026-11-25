@@ -338,12 +338,12 @@ func TestStarsInvoiceBack(t *testing.T) {
 		{
 			// «Назад» относится к Stars-счёту: pending-заказ другого провайдера
 			// (подделанный payload) не истекаем, но возврат по кнопке выполняем.
-			name:           "non-stars order is not expired",
-			data:           "stars_invoice_back_42_55_3",
-			pressedBy:      42,
-			callbackChat:   42,
-			cardMsgID:      99,
-			orderOwner:     42,
+			name:         "non-stars order is not expired",
+			data:         "stars_invoice_back_42_55_3",
+			pressedBy:    42,
+			callbackChat: 42,
+			cardMsgID:    99,
+			orderOwner:   42,
 			setup: func(db *testutil.BotStoreFake) {
 				db.GetOrderByIDFunc = func(_ context.Context, id uint) (*database.Order, error) {
 					return &database.Order{
@@ -359,12 +359,12 @@ func TestStarsInvoiceBack(t *testing.T) {
 		{
 			// Сбой чтения заказа повторяем: invoice не удаляем, чтобы нажатие
 			// «Назад» можно было повторить, статус не меняем.
-			name:           "order read error keeps invoice for retry",
-			data:           "stars_invoice_back_42_55_3",
-			pressedBy:      42,
-			callbackChat:   42,
-			cardMsgID:      99,
-			orderOwner:     42,
+			name:         "order read error keeps invoice for retry",
+			data:         "stars_invoice_back_42_55_3",
+			pressedBy:    42,
+			callbackChat: 42,
+			cardMsgID:    99,
+			orderOwner:   42,
 			setup: func(db *testutil.BotStoreFake) {
 				db.GetOrderByIDFunc = func(context.Context, uint) (*database.Order, error) {
 					return nil, errors.New("db down")

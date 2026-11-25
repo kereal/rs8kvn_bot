@@ -238,11 +238,27 @@ type financialDrainBudget struct {
 	cancel context.CancelFunc
 }
 
+// closedDrainContext — результат contextFor после stop(): бюджет закрыт,
+// новые финансовые апдейты не принимаются. Отменённый синглтон вместо nil,
+// чтобы вызывающий код не паниковал на finCtx.Err().
+var closedDrainContext = func() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	return ctx
+}()
+
 // contextFor возвращает общий drain-контекст, создавая его при первом вызове.
 func (b *financialDrainBudget) contextFor(parent context.Context) context.Context {
 	b.once.Do(func() {
 		b.ctx, b.cancel = context.WithTimeout(context.WithoutCancel(parent), shutdownFinancialTimeout)
 	})
+
+	if b.ctx == nil {
+		// stop() успел выполниться раньше (остановка вышла за
+		// ShutdownTimeout, а диспетчер ещё дорабатывал очередь).
+		return closedDrainContext
+	}
 
 	return b.ctx
 }
@@ -455,12 +471,14 @@ eventLoop:
 	botAPI.StopReceivingUpdates()
 
 	// Drain the updates channel to prevent goroutine leak. StopReceivingUpdates
-	// closes the channel (via the polling goroutine on shutdownChannel), so a
-	// plain range exits once the buffered updates are exhausted.
-	go func() {
-		for range updates {
-		}
-	}()
+	// closes the channel (via the polling goroutine on shutdownChannel), so the
+	// range exits once the buffered updates are exhausted. Хвост нельзя просто
+	// выбросить: offset в Telegram уже сдвинут при отправке в канал, поэтому
+	// оставшийся здесь successful_payment повторно не придёт — финансовые
+	// апдейты обрабатываются тем же drain-бюджетом.
+	updatesWg.Go(func() {
+		drainBufferedUpdates(ctx, updates, processAcceptedFinancial)
+	})
 
 	// Wait for in-flight update handlers to complete
 	logger.Info("Waiting for update handlers to complete...")
@@ -479,6 +497,15 @@ eventLoop:
 		logger.Info("All update handlers completed successfully")
 	case <-time.After(config.ShutdownTimeout):
 		logger.Warn("Timeout waiting for update handlers to complete")
+	}
+}
+
+// drainBufferedUpdates разбирает хвост канала апдейтов, оставшийся после
+// StopReceivingUpdates: все апдейты проходят через process, а финансовые
+// внутри него — через общий drain-бюджет. Вынесено ради тестируемости.
+func drainBufferedUpdates(ctx context.Context, updates <-chan tgbotapi.Update, process func(context.Context, tgbotapi.Update)) {
+	for update := range updates {
+		process(ctx, update)
 	}
 }
 
