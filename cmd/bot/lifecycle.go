@@ -156,6 +156,12 @@ const preCheckoutSlotWaitTimeout = 1 * time.Second
 // polling-инстанс с long-poll без таймаута для этого не используется.
 type preCheckoutAnswerer func(queryID string)
 
+// regularUpdateQueueSize — буфер между чтением апдейтов и ожиданием слота
+// обычного обработчика. Чтение апдейтов никогда не стоит на занятом слоте:
+// иначе лежащий в канале pre_checkout_query (окно ответа Telegram — 10 c)
+// ждёт завершения чужого долгого обработчика.
+const regularUpdateQueueSize = config.MaxConcurrentHandlers * 4
+
 // runEventLoop processes Telegram updates with bounded concurrency until
 // the shutdown context is cancelled. Blocks until all in-flight handlers
 // complete or the shutdown timeout elapses.
@@ -170,7 +176,39 @@ func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Han
 	// заказ висит до TTL).
 	preCheckoutSem := make(chan struct{}, preCheckoutMaxConcurrent)
 
+	// regularQueue развязывает чтение и маршрутизацию апдейтов с ожиданием
+	// слота обычного обработчика: цикл чтения не блокируется, пока все слоты
+	// заняты. Лимит параллелизма сохраняется — слот всё так же один на
+	// обработчик, но ожидание живёт в диспетчере, а не в цикле чтения.
+	regularQueue := make(chan tgbotapi.Update, regularUpdateQueueSize)
+
 	var updatesWg sync.WaitGroup
+
+	// Диспетчер обычной очереди — единственное место, где ждём слот обработчика.
+	dispatcherDone := make(chan struct{})
+
+	go func() {
+		defer close(dispatcherDone)
+
+		for update := range regularQueue {
+			select {
+			case updateSem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+
+			updatesWg.Add(1)
+
+			go func(u tgbotapi.Update) {
+				defer func() {
+					<-updateSem
+					updatesWg.Done()
+				}()
+
+				handleUpdateSafely(ctx, handler, u)
+			}(update)
+		}
+	}()
 
 eventLoop:
 	for {
@@ -182,6 +220,8 @@ eventLoop:
 			}
 
 			if update.PreCheckoutQuery != nil {
+				// Fast-lane: собственный небольшой семафор, слот обычного
+				// обработчика не занимается и не ожидается.
 				select {
 				case preCheckoutSem <- struct{}{}:
 					updatesWg.Add(1)
@@ -208,27 +248,37 @@ eventLoop:
 				continue
 			}
 
+			// Обычный апдейт маршрутизируется без ожидания свободного слота.
 			select {
-			case updateSem <- struct{}{}:
-				updatesWg.Add(1)
+			case regularQueue <- update:
+			default:
+				// Очередь переполнена. Финансовые апдейты терять нельзя
+				// (successful_payment — источник истины об оплате), поэтому для
+				// них ждём места; остальные сбрасываем, чтобы не блокировать
+				// чтение pre_checkout_query.
+				if !handler.IsFinancialUpdate(update) {
+					logger.Warn("regular update queue full, dropping update",
+						zap.Bool("has_message", update.Message != nil),
+						zap.Bool("has_callback", update.CallbackQuery != nil))
 
-				go func(u tgbotapi.Update) {
-					defer func() {
-						<-updateSem
-						updatesWg.Done()
-					}()
+					continue
+				}
 
-					handleUpdateSafely(ctx, handler, u)
-				}(update)
-			case <-ctx.Done():
-				logger.Info("Graceful shutdown initiated, draining updates...")
-				break eventLoop
+				select {
+				case regularQueue <- update:
+				case <-ctx.Done():
+					logger.Info("Graceful shutdown initiated, draining updates...")
+					break eventLoop
+				}
 			}
 
 		case <-ctx.Done():
 			break eventLoop
 		}
 	}
+
+	// Чтение остановлено: диспетчер доработает очередь и завершится.
+	close(regularQueue)
 
 	logger.Info("Graceful shutdown initiated")
 	botAPI.StopReceivingUpdates()
@@ -248,6 +298,7 @@ eventLoop:
 
 	go func() {
 		updatesWg.Wait()
+		<-dispatcherDone
 		close(done)
 	}()
 

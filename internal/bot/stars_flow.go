@@ -437,11 +437,12 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 // окно Telegram» тестом.
 const PreCheckoutTimeout = 4 * time.Second
 
-// isFinancialUpdate сообщает, что апдейт должен пройти вне общего rate limiter:
+// IsFinancialUpdate сообщает, что апдейт должен пройти вне общего rate limiter:
 // pre_checkout_query обрабатывается отдельной веткой выше, здесь —
 // successful_payment и команды /paysupport, /terms (compliance: платёжные
-// апдейты не отбрасываются лимитом).
-func (h *Handler) isFinancialUpdate(update tgbotapi.Update) bool {
+// апдейты не отбрасываются лимитом). Экспортирован, чтобы event loop
+// (cmd/bot) не сбрасывал финансовые апдейты при переполнении обычной очереди.
+func (h *Handler) IsFinancialUpdate(update tgbotapi.Update) bool {
 	if update.Message == nil {
 		return false
 	}

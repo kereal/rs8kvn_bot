@@ -730,7 +730,7 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 
 	// Финансовые ветки вне общего rate limiter (compliance: платёжные апдейты
 	// не отбрасываются лимитом), но с обычным handler timeout и метриками.
-	if h.isFinancialUpdate(update) {
+	if h.IsFinancialUpdate(update) {
 		h.runFinancialUpdate(ctx, update)
 
 		return
