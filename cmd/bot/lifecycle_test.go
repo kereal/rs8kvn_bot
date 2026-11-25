@@ -53,10 +53,14 @@ func TestFinancialDrainBudget_Stop(t *testing.T) {
 
 	assert.ErrorIs(t, ctx.Err(), context.Canceled)
 
-	// contextFor после stop() не должен возвращать nil-контекст: вызывающий
-	// код проверяет finCtx.Err() и упал бы паникой, если бы stop() успел
-	// первым (остановка вышла за ShutdownTimeout, диспетчер ещё работал).
-	afterStop := budget.contextFor(context.Background())
+	// stop() раньше первого contextFor (остановка вышла за ShutdownTimeout,
+	// а диспетчер ещё дорабатывал очередь): контекст не должен стать nil —
+	// вызывающий код проверяет finCtx.Err() и упал бы паникой.
+	var stoppedFirst financialDrainBudget
+
+	stoppedFirst.stop()
+
+	afterStop := stoppedFirst.contextFor(context.Background())
 	require.NotNil(t, afterStop)
 	assert.ErrorIs(t, afterStop.Err(), context.Canceled)
 }
