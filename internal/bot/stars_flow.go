@@ -352,15 +352,6 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 		return sh.showBuyError(chatID, acceptMsgID, msg(MsgSubTempError))
 	}
 
-	// Sent-set: invoice по этому заказу уже отправлен успешно.
-	if sh.h.starsSentInvoices.Has(order.ID) {
-		logger.Warn("duplicate stars acceptance suppressed (already invoiced)",
-			zap.Uint("order_id", order.ID),
-			zap.Int64("telegram_id", buyerTelegramID))
-
-		return nil
-	}
-
 	// In-flight guard: параллельный double-tap acceptance — второй уходит.
 	if _, loaded := sh.h.starsInvoiceInFlight.LoadOrStore(order.ID, struct{}{}); loaded {
 		logger.Warn("concurrent stars acceptance suppressed",
@@ -370,6 +361,17 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 		return nil
 	}
 	defer sh.h.starsInvoiceInFlight.Delete(order.ID)
+
+	// Sent-set проверяется ВНУТРИ слота: между проверкой и захватом параллельный
+	// callback мог успеть отправить invoice. Метка ставится только после успешной
+	// отправки, поэтому неудачная отправка слот освобождает и не блокирует retry.
+	if sh.h.starsSentInvoices.Has(order.ID) {
+		logger.Warn("duplicate stars acceptance suppressed (already invoiced)",
+			zap.Uint("order_id", order.ID),
+			zap.Int64("telegram_id", buyerTelegramID))
+
+		return nil
+	}
 
 	invoice, err := stars.BuildInvoice(stars.InvoiceParams{
 		OrderID:  order.ID,
