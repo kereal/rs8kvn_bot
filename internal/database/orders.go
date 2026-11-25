@@ -396,6 +396,9 @@ type ApplyPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint,
 // ErrSubscriptionNotFound or ErrOrderNotFound; database, audit, and applyPlan
 // errors roll back the transaction and reach the caller. The supplied sub is
 // updated in place before applyPlan and may remain changed after a rollback.
+// Callers MUST NOT share that Subscription object between concurrent calls:
+// the whole struct is written at the end of the transaction while another call
+// may be reading its fields (ID, expiry) from the start.
 func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, p ConfirmPaidOrderParams) (bool, error) {
 	var activated bool
 
