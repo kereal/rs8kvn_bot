@@ -368,22 +368,35 @@ func TestNewPreCheckoutAnswerer_UsesCurrentClientAfterRecovery(t *testing.T) {
 		current interfaces.BotAPI
 	)
 
+	// degradedResolved сигналит, когда fallback уже увидел current == nil:
+	// порядок «деградация -> восстановление» задаётся резолвером, а не таймером.
+	degradedResolved := make(chan struct{}, 1)
+
 	answer := newPreCheckoutAnswerer(func() (interfaces.BotAPI, error) {
 		mu.Lock()
-		defer mu.Unlock()
+		resolved := current
+		mu.Unlock()
 
-		if current == nil {
+		if resolved == nil {
+			degradedResolved <- struct{}{}
+
 			return nil, errors.New("bot: payment API is not configured")
 		}
 
-		return current, nil
+		return resolved, nil
 	})
 
 	answer("query-before-recovery")
 
-	require.Never(t, func() bool {
-		return stub.countPath("answerPreCheckoutQuery") > 0
-	}, 200*time.Millisecond, 10*time.Millisecond, "degraded payment API must stay fail-closed")
+	select {
+	case <-degradedResolved:
+	case <-time.After(3 * time.Second):
+		t.Fatal("payment API resolver was not called for the degraded answer")
+	}
+
+	// Деградированный вызов уже прочитал nil и не мог отправить запрос.
+	require.Zero(t, stub.countPath("answerPreCheckoutQuery"),
+		"degraded payment API must stay fail-closed")
 
 	mu.Lock()
 	current = api
@@ -393,7 +406,7 @@ func TestNewPreCheckoutAnswerer_UsesCurrentClientAfterRecovery(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		return stub.countPath("answerPreCheckoutQuery") == 1
-	}, 3*time.Second, 10*time.Millisecond, "recovered client must receive the answer")
+	}, 3*time.Second, 10*time.Millisecond, "recovered client must receive the answer, and only it")
 }
 
 // TestPreCheckoutAnswerBudgetFitsTelegramWindow — инвариант: ответ на

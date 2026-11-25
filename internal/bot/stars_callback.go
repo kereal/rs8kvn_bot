@@ -2,12 +2,14 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 
+	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 )
 
@@ -94,20 +96,32 @@ func (c *CallbackHandler) handleStarsInvoiceBack(ctx context.Context, chatID, pr
 	// прислать произвольный payload), а ExpirePendingOrder владельца не проверяет.
 	// Без проверки нажатие «Назад» истекало бы чужой pending-заказ — отказ в
 	// покупке другому пользователю. Нечитаемый или чужой заказ не изменяем.
-	if orderID != 0 && c.starsOrderOwnedBy(ctx, orderID, pressedBy) {
-		expired, expireErr := c.h.db.ExpirePendingOrder(ctx, orderID)
-		switch {
-		case expireErr != nil:
-			// Сбой истечения: pending-заказ остаётся, повторная покупка покажет
-			// «счёт отправлен ранее» — invoice НЕ удаляем, чтобы это оставалось
-			// правдой. TTL (STARS_INVOICE_TTL) истечёт заказ фоново.
-			logger.Warn("failed to expire pending order on stars invoice back; keeping invoice message",
-				zap.Uint("order_id", orderID), zap.Error(expireErr))
+	if orderID != 0 {
+		expirable, loadErr := c.starsOrderExpirable(ctx, orderID, pressedBy)
+		if loadErr != nil {
+			// Сбой чтения заказа: статус не меняем и invoice НЕ удаляем — повторное
+			// нажатие «Назад» повторит попытку (как при сбое истечения).
+			logger.Warn("stars invoice back: order load failed; keeping invoice message",
+				zap.Uint("order_id", orderID), zap.Error(loadErr))
 
 			return c.h.subHandler.handleBuyPremiumList(ctx, chatID, username, cardMsgID)
-		case !expired:
-			logger.Info("stars invoice back: pending order not in expirable state",
-				zap.Uint("order_id", orderID))
+		}
+
+		if expirable {
+			expired, expireErr := c.h.db.ExpirePendingOrder(ctx, orderID)
+			switch {
+			case expireErr != nil:
+				// Сбой истечения: pending-заказ остаётся, повторная покупка покажет
+				// «счёт отправлен ранее» — invoice НЕ удаляем, чтобы это оставалось
+				// правдой. TTL (STARS_INVOICE_TTL) истечёт заказ фоново.
+				logger.Warn("failed to expire pending order on stars invoice back; keeping invoice message",
+					zap.Uint("order_id", orderID), zap.Error(expireErr))
+
+				return c.h.subHandler.handleBuyPremiumList(ctx, chatID, username, cardMsgID)
+			case !expired:
+				logger.Info("stars invoice back: pending order not in expirable state",
+					zap.Uint("order_id", orderID))
+			}
 		}
 	}
 
@@ -133,27 +147,48 @@ func (c *CallbackHandler) handleStarsInvoiceBack(ctx context.Context, chatID, pr
 	return c.h.subHandler.handleBuyPremiumList(ctx, chatID, username, cardMsgID)
 }
 
-// starsOrderOwnedBy сообщает, принадлежит ли заказ orderID пользователю telegramID.
-// Владелец вычисляется по хранилищу: заказ → его подписка → telegram_id подписки.
-// Любая ошибка загрузки и несовпадение трактуются как «владение не подтверждено»
-// (fail-closed): чужой или нечитаемый заказ не изменяем.
-func (c *CallbackHandler) starsOrderOwnedBy(ctx context.Context, orderID uint, telegramID int64) bool {
+// starsOrderExpirable сообщает, можно ли истечь заказ orderID по нажатию «Назад»
+// пользователем telegramID: заказ выставлен на Telegram Stars и принадлежит
+// этому пользователю. Владелец вычисляется по хранилищу: заказ → его подписка →
+// telegram_id подписки.
+// Ошибка возвращается только когда заказ/подписку не удалось прочитать — такое
+// нажатие повторяемо, поэтому вызывающий не меняет статус и не удаляет invoice.
+// Ненайденный, чужой или не-Stars заказ — это false без ошибки: изменять нечего,
+// обработка «Назад» продолжается.
+func (c *CallbackHandler) starsOrderExpirable(ctx context.Context, orderID uint, telegramID int64) (bool, error) {
 	order, err := c.h.db.GetOrderByID(ctx, orderID)
-	if err != nil || order == nil {
-		logger.Warn("stars invoice back: order load failed",
-			zap.Uint("order_id", orderID), zap.Error(err))
+	if err != nil {
+		return false, fmt.Errorf("load order %d: %w", orderID, err)
+	}
 
-		return false
+	if order == nil {
+		logger.Warn("stars invoice back: order not found; expire skipped",
+			zap.Uint("order_id", orderID))
+
+		return false, nil
+	}
+
+	// Истекать можно только собственный pending-заказ Stars: «Назад» относится к
+	// Stars-счёту, чужой провайдер (например, Platega) — подделанный payload.
+	if order.PaymentProvider != database.PaymentProviderTelegramStars {
+		logger.Warn("stars invoice back: order provider mismatch; expire skipped",
+			zap.Uint("order_id", orderID),
+			zap.String("provider", order.PaymentProvider))
+
+		return false, nil
 	}
 
 	sub, err := c.h.db.GetByID(ctx, order.SubscriptionID)
-	if err != nil || sub == nil {
-		logger.Warn("stars invoice back: order subscription load failed",
-			zap.Uint("order_id", orderID),
-			zap.Uint("subscription_id", order.SubscriptionID),
-			zap.Error(err))
+	if err != nil {
+		return false, fmt.Errorf("load subscription %d of order %d: %w", order.SubscriptionID, orderID, err)
+	}
 
-		return false
+	if sub == nil {
+		logger.Warn("stars invoice back: order subscription not found; expire skipped",
+			zap.Uint("order_id", orderID),
+			zap.Uint("subscription_id", order.SubscriptionID))
+
+		return false, nil
 	}
 
 	if sub.TelegramID != telegramID {
@@ -163,8 +198,8 @@ func (c *CallbackHandler) starsOrderOwnedBy(ctx context.Context, orderID uint, t
 			zap.Int64("owner_telegram_id", sub.TelegramID),
 			zap.Int64("pressed_by", telegramID))
 
-		return false
+		return false, nil
 	}
 
-	return true
+	return true, nil
 }

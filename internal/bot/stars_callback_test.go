@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -283,6 +284,7 @@ func TestStarsInvoiceBack(t *testing.T) {
 		callbackChat   int64
 		cardMsgID      int
 		orderOwner     int64
+		setup          func(*testutil.BotStoreFake)
 		wantExpired    bool
 		wantDeleted    []int
 		wantCardRender bool
@@ -334,6 +336,45 @@ func TestStarsInvoiceBack(t *testing.T) {
 			wantCardRender: true,
 		},
 		{
+			// «Назад» относится к Stars-счёту: pending-заказ другого провайдера
+			// (подделанный payload) не истекаем, но возврат по кнопке выполняем.
+			name:           "non-stars order is not expired",
+			data:           "stars_invoice_back_42_55_3",
+			pressedBy:      42,
+			callbackChat:   42,
+			cardMsgID:      99,
+			orderOwner:     42,
+			setup: func(db *testutil.BotStoreFake) {
+				db.GetOrderByIDFunc = func(_ context.Context, id uint) (*database.Order, error) {
+					return &database.Order{
+						ID: id, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPending,
+						PaymentProvider: database.PaymentProviderPlatega,
+					}, nil
+				}
+			},
+			wantExpired:    false,
+			wantDeleted:    []int{55},
+			wantCardRender: true,
+		},
+		{
+			// Сбой чтения заказа повторяем: invoice не удаляем, чтобы нажатие
+			// «Назад» можно было повторить, статус не меняем.
+			name:           "order read error keeps invoice for retry",
+			data:           "stars_invoice_back_42_55_3",
+			pressedBy:      42,
+			callbackChat:   42,
+			cardMsgID:      99,
+			orderOwner:     42,
+			setup: func(db *testutil.BotStoreFake) {
+				db.GetOrderByIDFunc = func(context.Context, uint) (*database.Order, error) {
+					return nil, errors.New("db down")
+				}
+			},
+			wantExpired:    false,
+			wantDeleted:    nil,
+			wantCardRender: true,
+		},
+		{
 			name:           "invalid payload is ignored",
 			data:           "stars_invoice_back_garbage",
 			pressedBy:      42,
@@ -352,6 +393,9 @@ func TestStarsInvoiceBack(t *testing.T) {
 
 			mockDB := testutil.NewBotStoreFake()
 			starsOrderMocks(mockDB)
+			if tt.setup != nil {
+				tt.setup(mockDB)
+			}
 			// Владелец заказа 3 (подписка 7) задаётся вариантом кейса: payload
 			// buyerTelegramID владения не доказывает, проверка идёт по подписке.
 			mockDB.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
