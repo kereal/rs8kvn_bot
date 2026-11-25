@@ -222,7 +222,9 @@ func (sh *SubscriptionHandler) expireStarsPending(ctx context.Context, orderID u
 // handleStarsAccept обрабатывает acceptance-callback stars_accept_<order>_<product>_<card>:
 // загружает pending-заказ напрямую по ID (RequestPayment в callback НЕ вызывается —
 // expired заказ не должен порождать replacement pending), валидирует провайдера,
-// статус, продукт и покупателя, и только теперь отправляет invoice по telegram_id.
+// принадлежность заказа (товар, владелец) и статус, затем товар/план, и только
+// теперь отправляет invoice по telegram_id. Побочные эффекты (expireStarsPending)
+// возможны лишь после подтверждения принадлежности заказа.
 // Дубликат не создаёт: sent-set после успеха + in-flight guard на параллельные
 // callback'и; кнопка согласия снимается редактированием сообщения.
 func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, cardChatID, buyerTelegramID int64, username string, acceptMsgID, cardMsgID int, expectedOrderID uint, productID uint) error {
@@ -250,19 +252,63 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 		return sh.showBuyError(chatID, acceptMsgID, "❌ Платежи временно недоступны")
 	}
 
-	product, err := sh.h.db.GetProductByID(ctx, productID)
-	if err != nil || product == nil {
-		logger.Warn("stars acceptance product load failed",
-			zap.Uint("product_id", productID),
+	// Order-first: загружаем заказ и подтверждаем принадлежность (провайдер,
+	// товар, владелец) ДО любых побочных эффектов. Иначе подделанный callback
+	// с чужим order_id истёк бы чужой pending-заказ через expireStarsPending
+	// в ветках проверки товара/плана ниже.
+	order, err := sh.h.db.GetOrderByID(ctx, expectedOrderID)
+	if err != nil || order == nil {
+		logger.Warn("stars acceptance order load failed",
+			zap.Uint("order_id", expectedOrderID),
 			zap.Error(err))
 
 		return sh.showBuyError(chatID, acceptMsgID, msg(MsgSubTempError))
 	}
 
-	order, err := sh.h.db.GetOrderByID(ctx, expectedOrderID)
-	if err != nil || order == nil {
-		logger.Warn("stars acceptance order load failed",
-			zap.Uint("order_id", expectedOrderID),
+	// Валидация заказа: Stars, тот же продукт.
+	if order.PaymentProvider != database.PaymentProviderTelegramStars ||
+		order.ProductID != productID {
+		logger.Warn("stars acceptance order mismatch",
+			zap.Uint("order_id", order.ID),
+			zap.Uint("expected_product_id", productID),
+			zap.String("provider", order.PaymentProvider))
+
+		return sh.showBuyError(chatID, acceptMsgID, msg(MsgSubTempError))
+	}
+
+	// Владелец заказа — покупатель, нажавший кнопку согласия. Проверяется до
+	// любых изменений заказа и до раскрытия его статуса.
+	sub, err := sh.h.db.GetByTelegramID(ctx, buyerTelegramID)
+	if err != nil || sub == nil || sub.ID != order.SubscriptionID {
+		logger.Warn("stars acceptance buyer mismatch",
+			zap.Uint("order_id", order.ID),
+			zap.Uint("order_subscription_id", order.SubscriptionID),
+			zap.Int64("telegram_id", buyerTelegramID),
+			zap.Error(err))
+
+		return sh.showBuyError(chatID, acceptMsgID, msg(MsgSubTempError))
+	}
+
+	if order.Status != database.OrderStatusPending {
+		// Оплачен/отменён/истёк: новый invoice не отправляем. Текст зависит от
+		// фактического статуса: оплата получена — сообщаем об успехе, иначе
+		// предлагаем выбрать тариф заново.
+		logger.Info("stars acceptance on non-pending order ignored",
+			zap.Uint("order_id", order.ID),
+			zap.String("status", string(order.Status)))
+
+		if order.Status == database.OrderStatusPaid {
+			return sh.showBuyError(chatID, acceptMsgID, msg(MsgStarsAlreadyPaid))
+		}
+
+		return sh.showBuyError(chatID, acceptMsgID, msg(MsgStarsOrderNotPending))
+	}
+
+	product, err := sh.h.db.GetProductByID(ctx, productID)
+	if err != nil || product == nil {
+		logger.Warn("stars acceptance product load failed",
+			zap.Uint("order_id", order.ID),
+			zap.Uint("product_id", productID),
 			zap.Error(err))
 
 		return sh.showBuyError(chatID, acceptMsgID, msg(MsgSubTempError))
@@ -302,43 +348,6 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 			zap.Uint("plan_id", plan.ID))
 
 		sh.expireStarsPending(ctx, order.ID, buyerTelegramID)
-
-		return sh.showBuyError(chatID, acceptMsgID, msg(MsgSubTempError))
-	}
-
-	// Валидация заказа: Stars, pending, тот же продукт, тот же покупатель.
-	if order.PaymentProvider != database.PaymentProviderTelegramStars ||
-		order.ProductID != productID {
-		logger.Warn("stars acceptance order mismatch",
-			zap.Uint("order_id", order.ID),
-			zap.Uint("expected_product_id", productID),
-			zap.String("provider", order.PaymentProvider))
-
-		return sh.showBuyError(chatID, acceptMsgID, msg(MsgSubTempError))
-	}
-
-	if order.Status != database.OrderStatusPending {
-		// Оплачен/отменён/истёк: новый invoice не отправляем. Текст зависит от
-		// фактического статуса: оплата получена — сообщаем об успехе, иначе
-		// предлагаем выбрать тариф заново.
-		logger.Info("stars acceptance on non-pending order ignored",
-			zap.Uint("order_id", order.ID),
-			zap.String("status", string(order.Status)))
-
-		if order.Status == database.OrderStatusPaid {
-			return sh.showBuyError(chatID, acceptMsgID, msg(MsgStarsAlreadyPaid))
-		}
-
-		return sh.showBuyError(chatID, acceptMsgID, msg(MsgStarsOrderNotPending))
-	}
-
-	sub, err := sh.h.db.GetByTelegramID(ctx, buyerTelegramID)
-	if err != nil || sub == nil || sub.ID != order.SubscriptionID {
-		logger.Warn("stars acceptance buyer mismatch",
-			zap.Uint("order_id", order.ID),
-			zap.Uint("order_subscription_id", order.SubscriptionID),
-			zap.Int64("telegram_id", buyerTelegramID),
-			zap.Error(err))
 
 		return sh.showBuyError(chatID, acceptMsgID, msg(MsgSubTempError))
 	}

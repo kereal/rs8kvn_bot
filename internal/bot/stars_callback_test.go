@@ -162,6 +162,61 @@ func TestStarsAccept_InactiveProductOrPlanRejected(t *testing.T) {
 	}
 }
 
+// TestStarsAccept_MismatchedOrderDoesNotExpireOrder — подделанный callback с
+// чужим order_id/product_id или от чужого покупателя НЕ должен истекать
+// pending-заказ: проверка принадлежности идёт до expireStarsPending.
+func TestStarsAccept_MismatchedOrderDoesNotExpireOrder(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		data   string
+		mutate func(*testutil.BotStoreFake)
+	}{
+		{
+			name: "other buyer",
+			data: "stars_accept_3_1_42_99",
+			mutate: func(db *testutil.BotStoreFake) {
+				db.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) {
+					return nil, nil
+				}
+			},
+		},
+		{
+			name: "product mismatch",
+			data: "stars_accept_3_2_42_99",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mockDB := testutil.NewBotStoreFake()
+			// Неактивный товар: до фикса эта ветка истекла бы заказ до проверки
+			// принадлежности.
+			starsOrderMocks(mockDB, withStarsProductActive(false))
+			if tt.mutate != nil {
+				tt.mutate(mockDB)
+			}
+
+			expired := false
+			mockDB.ExpirePendingOrderFunc = func(context.Context, uint) (bool, error) {
+				expired = true
+
+				return true, nil
+			}
+
+			h, _, paymentBot := newStarsTestHandler(t, mockDB)
+
+			require.NoError(t, h.HandleCallback(context.Background(), starsAcceptUpdate(tt.data, 42, 99)))
+
+			assert.False(t, expired, "mismatched acceptance must not expire the order")
+			assert.Empty(t, starsInvoices(paymentBot), "mismatched acceptance must not invoice")
+		})
+	}
+}
+
 // TestStarsBuy_CallbackChatDiffersFromTelegramID — callback-чат (5000) и
 // Telegram user ID покупателя (42) различны: Terms-сообщение уходит в private
 // chat по telegram_id, карточка редактируется в callback chat.
