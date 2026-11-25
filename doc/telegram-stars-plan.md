@@ -484,3 +484,14 @@ go test -race ./...
 | refundStarPayment (полный возврат по charge ID) | https://core.telegram.org/bots/api/methods/refundstarpayment |
 | Валюты и единицы XTR | https://core.telegram.org/bots/payments/currencies.json |
 
+
+## Верификация 2026-11-25
+
+- CI (`Run Tests`) упал на гонке данных в тесте: `ConfirmOrderPaidCAS` пишет
+  обновлённую подписку в переданный объект, а `TestConfirmOrderPaidCAS_ConcurrentOnlyOneActivates`
+  делил один `*Subscription` между двумя горутинами. Исправлено: каждая
+  горутина получает свою копию (`671e282`); контракт задокументирован в
+  `internal/database/orders.go` (`74a828c`).
+- Локально: `go test -race ./internal/database -run 'TestConfirmOrderPaidCAS_ConcurrentOnlyOneActivates|TestNodeRepository' -count=3` — ok,
+  `go test -race ./internal/database -count=1` — ok, `go test ./... -count=1` — 23 пакета ok,
+  `gofmt` чисто, `golangci-lint` 0 issues.
