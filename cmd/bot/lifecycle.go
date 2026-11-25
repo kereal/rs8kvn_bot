@@ -227,6 +227,36 @@ const regularUpdateQueueSize = config.MaxConcurrentHandlers * 4
 // завершение уже запущенных обработчиков.
 const shutdownFinancialTimeout = 30 * time.Second
 
+// financialDrainBudget — общий на весь drain бюджет времени для финансовых
+// апдейтов, уже вынутых из очередей на момент остановки. Контекст создаётся
+// лениво при первом таком апдейте: отсчёт с запуска бота означал бы, что к
+// остановке бюджет давно исчерпан. Отмена родительского контекста не
+// наследуется — drain обязан пережить сигнал остановки.
+type financialDrainBudget struct {
+	once   sync.Once
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+// contextFor возвращает общий drain-контекст, создавая его при первом вызове.
+func (b *financialDrainBudget) contextFor(parent context.Context) context.Context {
+	b.once.Do(func() {
+		b.ctx, b.cancel = context.WithTimeout(context.WithoutCancel(parent), shutdownFinancialTimeout)
+	})
+
+	return b.ctx
+}
+
+// stop отменяет drain-контекст, если он был создан. Пустой once.Do
+// синхронизирует чтение cancel с возможной параллельной инициализацией.
+func (b *financialDrainBudget) stop() {
+	b.once.Do(func() {})
+
+	if b.cancel != nil {
+		b.cancel()
+	}
+}
+
 // runEventLoop processes Telegram updates with bounded concurrency until
 // the shutdown context is cancelled. Blocks until all in-flight handlers
 // complete or the shutdown timeout elapses.
@@ -256,32 +286,17 @@ func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Han
 
 	// Остановка: апдейт уже вынут из очереди Telegram, поэтому финансовый
 	// апдейт нельзя просто выбросить. Обрабатываем такие подтверждения здесь
-	// же, отдельным контекстом с общим на весь drain бюджетом.
-	var (
-		finShutdownMu     sync.Mutex
-		finShutdownCtx    context.Context
-		finShutdownCancel context.CancelFunc
-	)
+	// же, общим на весь drain бюджетом времени.
+	var finDrain financialDrainBudget
 
-	// shutdownFinancialCtx возвращает общий на весь drain контекст,
-	// создаваемый лениво при первом же финансовом апдейте.
-	shutdownFinancialCtx := func() context.Context {
-		finShutdownMu.Lock()
-		defer finShutdownMu.Unlock()
+	defer finDrain.stop()
 
-		if finShutdownCtx == nil {
-			finShutdownCtx, finShutdownCancel = context.WithTimeout(context.Background(), shutdownFinancialTimeout)
-		}
-
-		return finShutdownCtx
-	}
-
-	processAcceptedFinancial := func(u tgbotapi.Update) {
+	processAcceptedFinancial := func(ctx context.Context, u tgbotapi.Update) {
 		if !handler.IsFinancialUpdate(u) {
 			return
 		}
 
-		finCtx := shutdownFinancialCtx()
+		finCtx := finDrain.contextFor(ctx)
 		if finCtx.Err() != nil {
 			logger.Warn("Shutdown: financial update dropped, drain budget exhausted")
 
@@ -303,7 +318,7 @@ func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Han
 			// в select ниже может запустить обработчик с уже отменённым
 			// контекстом и потерять подтверждение оплаты.
 			if ctx.Err() != nil {
-				processAcceptedFinancial(update)
+				processAcceptedFinancial(ctx, update)
 
 				continue
 			}
@@ -311,7 +326,7 @@ func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Han
 			select {
 			case updateSem <- struct{}{}:
 			case <-ctx.Done():
-				processAcceptedFinancial(update)
+				processAcceptedFinancial(ctx, update)
 
 				continue
 			}
@@ -343,7 +358,7 @@ func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Han
 			}
 
 			if ctx.Err() != nil {
-				processAcceptedFinancial(update)
+				processAcceptedFinancial(ctx, update)
 
 				continue
 			}
@@ -351,7 +366,7 @@ func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Han
 			select {
 			case updateSem <- struct{}{}:
 			case <-ctx.Done():
-				processAcceptedFinancial(update)
+				processAcceptedFinancial(ctx, update)
 
 				continue
 			}
@@ -465,12 +480,6 @@ eventLoop:
 	case <-time.After(config.ShutdownTimeout):
 		logger.Warn("Timeout waiting for update handlers to complete")
 	}
-
-	finShutdownMu.Lock()
-	if finShutdownCancel != nil {
-		finShutdownCancel()
-	}
-	finShutdownMu.Unlock()
 }
 
 // gracefulShutdown stops background workers and handler goroutines with timeouts.
