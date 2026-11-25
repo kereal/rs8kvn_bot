@@ -156,6 +156,64 @@ const preCheckoutSlotWaitTimeout = 1 * time.Second
 // polling-инстанс с long-poll без таймаута для этого не используется.
 type preCheckoutAnswerer func(queryID string)
 
+// updateMailbox — неограниченная очередь без блокировки отправителя.
+// Нужна финансовым апдейтам: отправка в канал конечной ёмкости может
+// заблокировать цикл чтения, а очередь читателя при этом ещё и ждёт слот
+// обработчика — так успешная оплата тормозила бы чтение следующих
+// pre_checkout_query. Здесь push не ждёт никогда, ожидание живёт в
+// горутине-диспетчере.
+type updateMailbox struct {
+	mu     sync.Mutex
+	cond   *sync.Cond
+	items  []tgbotapi.Update
+	closed bool
+}
+
+func newUpdateMailbox() *updateMailbox {
+	m := &updateMailbox{}
+	m.cond = sync.NewCond(&m.mu)
+
+	return m
+}
+
+func (m *updateMailbox) push(update tgbotapi.Update) {
+	m.mu.Lock()
+	m.items = append(m.items, update)
+	m.mu.Unlock()
+
+	m.cond.Signal()
+}
+
+// close запрещает дальнейшие push: pop вернёт false, когда очередь опустеет.
+func (m *updateMailbox) close() {
+	m.mu.Lock()
+	m.closed = true
+	m.mu.Unlock()
+
+	m.cond.Broadcast()
+}
+
+// pop блокирует вызывающего, пока не появится элемент или очередь не будет
+// закрыта. false — очередь закрыта и пуста.
+func (m *updateMailbox) pop() (tgbotapi.Update, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for len(m.items) == 0 && !m.closed {
+		m.cond.Wait()
+	}
+
+	if len(m.items) == 0 {
+		return tgbotapi.Update{}, false
+	}
+
+	update := m.items[0]
+	m.items[0] = tgbotapi.Update{}
+	m.items = m.items[1:]
+
+	return update, true
+}
+
 // regularUpdateQueueSize — буфер между чтением апдейтов и ожиданием слота
 // обычного обработчика. Чтение апдейтов никогда не стоит на занятом слоте:
 // иначе лежащий в канале pre_checkout_query (окно ответа Telegram — 10 c)
@@ -188,6 +246,11 @@ func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Han
 	// заняты. Лимит параллелизма сохраняется — слот всё так же один на
 	// обработчик, но ожидание живёт в диспетчере, а не в цикле чтения.
 	regularQueue := make(chan tgbotapi.Update, regularUpdateQueueSize)
+
+	// financialMailbox — отдельный путь для successful_payment и платёжных
+	// команд: неограниченная очередь, отправка в которую не блокирует чтение
+	// апдейтов даже при переполненной regularQueue.
+	financialMailbox := newUpdateMailbox()
 
 	var updatesWg sync.WaitGroup
 
@@ -266,6 +329,46 @@ func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Han
 		}
 	}()
 
+	// Диспетчер финансовых апдейтов: ждёт слот здесь, а не в цикле чтения,
+	// поэтому заполненная обычная очередь не задерживает приём оплаты.
+	financialDispatcherDone := make(chan struct{})
+
+	go func() {
+		defer close(financialDispatcherDone)
+
+		for {
+			update, ok := financialMailbox.pop()
+			if !ok {
+				return
+			}
+
+			if ctx.Err() != nil {
+				processAcceptedFinancial(update)
+
+				continue
+			}
+
+			select {
+			case updateSem <- struct{}{}:
+			case <-ctx.Done():
+				processAcceptedFinancial(update)
+
+				continue
+			}
+
+			updatesWg.Add(1)
+
+			go func(u tgbotapi.Update) {
+				defer func() {
+					<-updateSem
+					updatesWg.Done()
+				}()
+
+				handleUpdateSafely(ctx, handler, u)
+			}(update)
+		}
+	}()
+
 eventLoop:
 	for {
 		select {
@@ -304,32 +407,24 @@ eventLoop:
 				continue
 			}
 
+			// Финансовый апдейт уходит в неограниченную очередь: чтение не
+			// ждёт ни места, ни слота обработчика (successful_payment —
+			// источник истины об оплате, терять его нельзя).
+			if handler.IsFinancialUpdate(update) {
+				financialMailbox.push(update)
+
+				continue
+			}
+
 			// Обычный апдейт маршрутизируется без ожидания свободного слота.
 			select {
 			case regularQueue <- update:
 			default:
-				// Очередь переполнена. Финансовые апдейты терять нельзя
-				// (successful_payment — источник истины об оплате), поэтому для
-				// них ждём места; остальные сбрасываем, чтобы не блокировать
-				// чтение pre_checkout_query.
-				if !handler.IsFinancialUpdate(update) {
-					logger.Warn("regular update queue full, dropping update",
-						zap.Bool("has_message", update.Message != nil),
-						zap.Bool("has_callback", update.CallbackQuery != nil))
-
-					continue
-				}
-
-				select {
-				case regularQueue <- update:
-				case <-ctx.Done():
-					// Апдейт уже прочитан из Telegram и в очередь не попал:
-					// финансовый обрабатываем сразу, остальное теряем.
-					logger.Info("Graceful shutdown initiated, draining updates...")
-					processAcceptedFinancial(update)
-
-					break eventLoop
-				}
+				// Очередь переполнена: сбрасываем апдейт, чтобы не
+				// блокировать чтение pre_checkout_query и платежей.
+				logger.Warn("regular update queue full, dropping update",
+					zap.Bool("has_message", update.Message != nil),
+					zap.Bool("has_callback", update.CallbackQuery != nil))
 			}
 
 		case <-ctx.Done():
@@ -337,8 +432,9 @@ eventLoop:
 		}
 	}
 
-	// Чтение остановлено: диспетчер доработает очередь и завершится.
+	// Чтение остановлено: диспетчеры доработают очереди и завершатся.
 	close(regularQueue)
+	financialMailbox.close()
 
 	logger.Info("Graceful shutdown initiated")
 	botAPI.StopReceivingUpdates()
@@ -357,8 +453,9 @@ eventLoop:
 	done := make(chan struct{})
 
 	go func() {
-		updatesWg.Wait()
 		<-dispatcherDone
+		<-financialDispatcherDone
+		updatesWg.Wait()
 		close(done)
 	}()
 
