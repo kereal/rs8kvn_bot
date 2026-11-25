@@ -71,10 +71,14 @@ type Handler struct {
 	sender              *MessageSender
 	keyboards           *KeyboardBuilder
 	orderService        *service.OrderService
-	paymentBot          interfaces.BotAPI // отдельный инстанс с таймаутом HTTP (D1); nil → платёжные вызовы fail-closed
-	paymentEnabled      bool
-	version             string
-	referral            *ReferralHandler
+	// paymentBot — отдельный инстанс с таймаутом HTTP (D1); nil → платёжные
+	// вызовы fail-closed. Мьютекс: фоновый ретрай восстановления переключает
+	// paymentBot на живой инстанс, пока обработчики его читают.
+	paymentBot     interfaces.BotAPI
+	paymentBotMu   sync.RWMutex
+	paymentEnabled bool
+	version        string
+	referral       *ReferralHandler
 
 	// starsInvoiceInFlight — in-flight guard текущей отправки invoice (ключ order.ID,
 	// записи удаляются по завершении); starsSentInvoices — bounded set успешно
@@ -194,6 +198,9 @@ func (h *Handler) SetOrderService(orderService *service.OrderService) {
 // nil — платёжные вызовы завершаются ошибкой (fail-closed), long-poll клиент
 // для них не используется.
 func (h *Handler) SetPaymentBot(bot interfaces.BotAPI) {
+	h.paymentBotMu.Lock()
+	defer h.paymentBotMu.Unlock()
+
 	h.paymentBot = bot
 }
 
@@ -201,6 +208,9 @@ func (h *Handler) SetPaymentBot(bot interfaces.BotAPI) {
 // payment-бот не настроен — ошибка вместо fallback на long-poll клиент,
 // чтобы платёжные вызовы не теряли гарантию таймаута.
 func (h *Handler) paymentAPI() (interfaces.BotAPI, error) {
+	h.paymentBotMu.RLock()
+	defer h.paymentBotMu.RUnlock()
+
 	if h.paymentBot == nil {
 		return nil, errors.New("bot: payment API is not configured")
 	}

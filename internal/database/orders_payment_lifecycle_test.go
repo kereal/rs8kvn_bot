@@ -173,7 +173,7 @@ func TestCancelPaidOrderAndDowngradeCAS_IgnoresExpiredPaidOrders(t *testing.T) {
 	require.NoError(t, svc.db.WithContext(ctx).Create(chargebackOrder).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(historical).Error)
 
-	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, "platega", providerID, now, freePlan.ID, nil, AuditChargebackReceived)
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, CancelPaidOrderParams{Provider: "platega", ProviderPaymentID: providerID, Now: now, FreePlanID: freePlan.ID, ApplyPlan: nil, Audit: AuditChargebackReceived})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.WasPaid)
@@ -208,9 +208,9 @@ func TestCancelPaidOrderAndDowngradeCAS_RollsBackOnPlanApplyFailure(t *testing.T
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	wantErr := errors.New("sync setup failed")
-	_, err = svc.CancelPaidOrderAndDowngradeCAS(ctx, "platega", providerID, now, freePlan.ID, func(context.Context, *gorm.DB, uint, uint) error {
+	_, err = svc.CancelPaidOrderAndDowngradeCAS(ctx, CancelPaidOrderParams{Provider: "platega", ProviderPaymentID: providerID, Now: now, FreePlanID: freePlan.ID, ApplyPlan: func(context.Context, *gorm.DB, uint, uint) error {
 		return wantErr
-	}, AuditChargebackReceived)
+	}, Audit: AuditChargebackReceived})
 	require.ErrorIs(t, err, wantErr)
 
 	storedOrder, err := svc.GetOrderByID(ctx, order.ID)
@@ -244,7 +244,7 @@ func TestCancelPaidOrderAndDowngradeCAS_DoesNotReactivateRevokedSubscription(t *
 	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 100, Currency: "RUB", PaymentProvider: "platega", ProviderPaymentID: providerID, ExpiresAt: ptrTime(now.Add(time.Hour)), CreatedAt: now}
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
-	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, "platega", providerID, now, freePlan.ID, nil, AuditChargebackReceived)
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, CancelPaidOrderParams{Provider: "platega", ProviderPaymentID: providerID, Now: now, FreePlanID: freePlan.ID, ApplyPlan: nil, Audit: AuditChargebackReceived})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.WasPaid)
@@ -281,7 +281,7 @@ func TestCancelPaidOrderAndDowngradeCAS_PreservesActivePaidCoverage(t *testing.T
 	require.NoError(t, svc.db.WithContext(ctx).Create(chargebackOrder).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(activeOther).Error)
 
-	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, "platega", chargebackID, now, freePlan.ID, nil, AuditChargebackReceived)
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, CancelPaidOrderParams{Provider: "platega", ProviderPaymentID: chargebackID, Now: now, FreePlanID: freePlan.ID, ApplyPlan: nil, Audit: AuditChargebackReceived})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Transitioned)

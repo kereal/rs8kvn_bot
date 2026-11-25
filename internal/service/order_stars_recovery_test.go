@@ -174,7 +174,7 @@ func TestConfirmStarsPayment_CASRaceLoserChargeAutoRefunds(t *testing.T) {
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) {
 			return &database.Product{ID: 7, PlanID: 2, Name: "Premium", PriceCents: 199, Currency: "XTR"}, nil
 		},
-		ConfirmOrderPaidCASFunc: func(_ context.Context, _ uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64, _ string, _ *int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, _ database.ConfirmPaidOrderParams) (bool, error) {
 			return false, nil
 		},
 	}
@@ -375,22 +375,30 @@ func TestConfirmStarsPayment_DuplicateChargeAuditFailureReturnsError(t *testing.
 // S7-регрессия: бюджет прохода ограничивает не только загрузку страниц, но и
 // обработку транзакций. Проход останавливается без ошибки, а offset двигается
 // ровно на число обработанных транзакций — непрочитанные не пропускаются.
+// Детерминированно: «бюджет» истекает отменой контекста при обработке
+// budgetStopAt-й транзакции (без sleep-таймингов — под нагрузкой они флакуют).
 func TestReconcileStarsTransactions_BudgetStopsPassWithoutSkipping(t *testing.T) {
 	t.Parallel()
+
+	const budgetStopAt = 7
 
 	fullPage := make([]stars.StarTransaction, 0, starsReconcileLimit)
 	for i := range starsReconcileLimit {
 		fullPage = append(fullPage, starsInvoiceTx("tx_"+strconv.Itoa(i), "31", 199, 42))
 	}
 
-	processed := 0
+	var processed int
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	mock := &testutil.ServiceStoreFake{
-		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) {
-			// Каждая транзакция обрабатывается заметное время — бюджет
-			// истечёт посреди страницы.
-			time.Sleep(5 * time.Millisecond)
-			processed++
+		GetOrderByIDFunc: func(ctx context.Context, _ uint) (*database.Order, error) {
+			// Бюджет истекает посреди обработки budgetStopAt-й транзакции:
+			// её возврат не должен засчитаться, offset не двигается мимо.
+			if processed == budgetStopAt-1 {
+				cancel()
+			}
 
 			return nil, database.ErrOrderNotFound
 		},
@@ -398,6 +406,11 @@ func TestReconcileStarsTransactions_BudgetStopsPassWithoutSkipping(t *testing.T)
 	api := &testutil.BotAPI{
 		MakeRequestFunc: func(endpoint string, _ tgbotapi.Params) (*tgbotapi.APIResponse, error) {
 			if endpoint == "refundStarPayment" {
+				// processed — только завершённые (возвращённые) транзакции:
+				// транзакция, чей возврат упёрся в бюджет, обработанной не
+				// считается и переобрабатывается следующим проходом.
+				processed++
+
 				return &tgbotapi.APIResponse{Ok: true}, nil
 			}
 
@@ -408,10 +421,13 @@ func TestReconcileStarsTransactions_BudgetStopsPassWithoutSkipping(t *testing.T)
 	}
 	o := newStarsReconcileService(mock, api)
 
-	require.NoError(t, o.reconcileStarsTransactions(context.Background(), 30*time.Millisecond))
-	assert.Positive(t, processed, "the pass must process transactions before the budget runs out")
+	require.NoError(t, o.reconcileStarsTransactions(ctx, time.Hour))
+	// Client.Refund проверяет ctx до запроса: отменённый контекст — возврат
+	// budgetStopAt-й транзакции не выполняется (processed не растёт), транзакция
+	// переобрабатывается следующим проходом. Offset = число завершённых.
+	assert.Equal(t, budgetStopAt-1, processed, "refund of the transaction racing the cancel must not complete")
 	assert.Less(t, processed, starsReconcileLimit, "the budget must stop the pass inside the page")
-	assert.Equal(t, int64(processed), o.starsOffset,
+	assert.Equal(t, int64(budgetStopAt-1), o.starsOffset,
 		"the offset must cover exactly the processed transactions")
 }
 

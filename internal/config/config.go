@@ -81,8 +81,23 @@ type Config struct {
 	PlategaSecret     string
 }
 
+// starsInvoiceTTLDefaultRaw — строковый дефолт STARS_INVOICE_TTL, единственный
+// источник: из него выводятся и регистрация флага, и DefaultStarsInvoiceTTL.
+const starsInvoiceTTLDefaultRaw = "15m"
+
 // DefaultStarsInvoiceTTL — срок жизни Stars-invoice, когда STARS_INVOICE_TTL не задан.
-const DefaultStarsInvoiceTTL = 15 * time.Minute
+var DefaultStarsInvoiceTTL = mustDuration(starsInvoiceTTLDefaultRaw)
+
+// mustDuration парсит встроенный дефолт длительности. Panic допустим только
+// здесь: ошибка — программный инвариант встроенной константы, не данные.
+func mustDuration(raw string) time.Duration {
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		panic(fmt.Sprintf("config: built-in default duration %q is invalid: %v", raw, err))
+	}
+
+	return d
+}
 
 // paymentProviders — допустимые значения PAYMENT_PROVIDER при PAYMENT_ENABLED=true.
 var paymentProviders = map[string]bool{"platega": true, "telegram_stars": true}
@@ -273,8 +288,7 @@ func (c *Config) validate() error {
 	// legacy-callback (в т.ч. для расчёта старых заказов при провайдере Stars).
 	// Выключенные оплаты с дефолтным провайдером и пустыми кредами — валидный
 	// конфиг (.env.example без оплат).
-	plategaInUse := (c.PaymentEnabled && c.PaymentProvider == "platega") || c.PlategaCallbackEnabled
-	if plategaInUse {
+	if c.plategaInUse() {
 		if strings.TrimSpace(c.PlategaMerchantID) == "" || strings.TrimSpace(c.PlategaSecret) == "" {
 			return fmt.Errorf("PLATEGA_MERCHANT_ID and PLATEGA_SECRET are required when Platega is in use (PAYMENT_ENABLED=true with PAYMENT_PROVIDER=platega, or PLATEGA_CALLBACK_ENABLED=true)")
 		}
@@ -381,11 +395,16 @@ func (c *Config) String() string {
 	)
 }
 
-// ShouldEnablePlategaCallback — итоговый гейт legacy HTTP-callback Platega:
-// callback нужен, если Platega — активный провайдер при включённых оплатах,
-// либо явно включён через PLATEGA_CALLBACK_ENABLED (расчёт старых заказов).
-func (c *Config) ShouldEnablePlategaCallback() bool {
+// plategaInUse — Platega реально используется: активный провайдер platega
+// при включённых оплатах, либо явно включённый legacy-callback (расчёт
+// старых заказов). Единственный источник формулы для валидации кредов и гейта.
+func (c *Config) plategaInUse() bool {
 	return (c.PaymentEnabled && c.PaymentProvider == "platega") || c.PlategaCallbackEnabled
+}
+
+// ShouldEnablePlategaCallback — итоговый гейт legacy HTTP-callback Platega.
+func (c *Config) ShouldEnablePlategaCallback() bool {
+	return c.plategaInUse()
 }
 
 // SubURL builds a full subscription URL from a subscription ID.

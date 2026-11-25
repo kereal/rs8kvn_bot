@@ -583,9 +583,9 @@ func AuditOrderCanceled(order *Order, actorType ActorType) *AuditLog {
 	}
 }
 
-// AuditChargebackReceived фиксирует чарджбэк от платёжного провайдера.
-// downgraded — была ли подписка понижена до free в той же транзакции.
-func AuditChargebackReceived(order *Order, sub *Subscription, downgraded bool) *AuditLog {
+// auditOrderRefundEvent — общий каркас ChargebackReceived/PaymentRefunded:
+// заказ paid→canceled от лица платёжного провайдера, details идентичны.
+func auditOrderRefundEvent(event string, order *Order, downgraded bool) *AuditLog {
 	details := map[string]any{
 		"order_id":        order.ID,
 		"subscription_id": order.SubscriptionID,
@@ -601,7 +601,7 @@ func AuditChargebackReceived(order *Order, sub *Subscription, downgraded bool) *
 	return &AuditLog{
 		EntityType: EntityOrder,
 		EntityID:   marshalAuditJSONString(fmt.Sprintf("%d", order.ID)),
-		Event:      AuditEventChargebackReceived,
+		Event:      event,
 		ActorType:  ActorPaymentProvider,
 		ActorID:    marshalAuditJSONString(order.PaymentProvider),
 		OldState:   marshalAuditJSON(map[string]any{"order_status": string(OrderStatusPaid)}),
@@ -610,31 +610,16 @@ func AuditChargebackReceived(order *Order, sub *Subscription, downgraded bool) *
 	}
 }
 
+// AuditChargebackReceived фиксирует чарджбэк от платёжного провайдера.
+// downgraded — была ли подписка понижена до free в той же транзакции.
+func AuditChargebackReceived(order *Order, sub *Subscription, downgraded bool) *AuditLog {
+	return auditOrderRefundEvent(AuditEventChargebackReceived, order, downgraded)
+}
+
 // AuditPaymentRefunded фиксирует полный возврат средств от платёжного провайдера.
 // downgraded — была ли подписка понижена до free в той же транзакции.
 func AuditPaymentRefunded(order *Order, sub *Subscription, downgraded bool) *AuditLog {
-	details := map[string]any{
-		"order_id":        order.ID,
-		"subscription_id": order.SubscriptionID,
-		"amount_cents":    order.AmountCents,
-		"currency":        order.Currency,
-		"provider":        order.PaymentProvider,
-		"downgraded":      downgraded,
-	}
-	if strings.TrimSpace(order.ProviderPaymentID) != "" {
-		details["provider_payment_id"] = order.ProviderPaymentID
-	}
-
-	return &AuditLog{
-		EntityType: EntityOrder,
-		EntityID:   marshalAuditJSONString(fmt.Sprintf("%d", order.ID)),
-		Event:      AuditEventPaymentRefunded,
-		ActorType:  ActorPaymentProvider,
-		ActorID:    marshalAuditJSONString(order.PaymentProvider),
-		OldState:   marshalAuditJSON(map[string]any{"order_status": string(OrderStatusPaid)}),
-		NewState:   marshalAuditJSON(map[string]any{"order_status": string(OrderStatusCanceled)}),
-		Details:    marshalAuditDetails(details),
-	}
+	return auditOrderRefundEvent(AuditEventPaymentRefunded, order, downgraded)
 }
 
 // AuditPaymentAutoRefunded фиксирует автоматический возврат средств, применённый

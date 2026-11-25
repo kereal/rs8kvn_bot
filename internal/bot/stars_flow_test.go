@@ -623,12 +623,12 @@ func TestHandleUpdate_SuccessfulPaymentConfirmsAndNotifies(t *testing.T) {
 
 	mockDB := testutil.NewBotStoreFake()
 	starsOrderMocks(mockDB)
-	mockDB.ConfirmOrderPaidCASFunc = func(_ context.Context, orderID uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, callbackAmountCents int64, providerPaymentID string, providerFeeCents *int64) (bool, error) {
-		assert.Equal(t, uint(3), orderID)
-		assert.Equal(t, int64(199), callbackAmountCents, "XTR amount must not be scaled ×100")
-		assert.Equal(t, "charge-1", providerPaymentID)
-		require.NotNil(t, providerFeeCents)
-		assert.Equal(t, int64(0), *providerFeeCents, "Stars fee must be 0")
+	mockDB.ConfirmOrderPaidCASFunc = func(_ context.Context, p database.ConfirmPaidOrderParams) (bool, error) {
+		assert.Equal(t, uint(3), p.OrderID)
+		assert.Equal(t, int64(199), p.CallbackAmountCents, "XTR amount must not be scaled ×100")
+		assert.Equal(t, "charge-1", p.ProviderPaymentID)
+		require.NotNil(t, p.ProviderFeeCents)
+		assert.Equal(t, int64(0), *p.ProviderFeeCents, "Stars fee must be 0")
 
 		return true, nil
 	}
@@ -719,10 +719,10 @@ func TestHandleUpdate_SuccessfulPaymentDifferentChargeAutoRefunds(t *testing.T) 
 	assert.Empty(t, mainBot.GetAllSentMessages())
 }
 
-// TestHandleUpdate_SuccessfulPaymentDuplicateChargeRefundFailed — авто-возврат
-// дубля не удался: покупатель получает явное сообщение «оплата задвоилась» с
-// подсказкой /paysupport (контракт DuplicateCharge && !AutoRefunded).
-func TestHandleUpdate_SuccessfulPaymentDuplicateChargeRefundFailed(t *testing.T) {
+// TestHandleUpdate_SuccessfulPaymentRefundFailedAsksForSupport — авто-возврат
+// дубля не удался: ConfirmStarsPayment возвращает ошибку (R8), покупателю
+// уходит подсказка /paysupport; recovery повторит транзакцию и вернёт charge.
+func TestHandleUpdate_SuccessfulPaymentRefundFailedAsksForSupport(t *testing.T) {
 	t.Parallel()
 
 	mockDB := testutil.NewBotStoreFake()
@@ -735,9 +735,9 @@ func TestHandleUpdate_SuccessfulPaymentDuplicateChargeRefundFailed(t *testing.T)
 
 	sent := paymentBot.GetAllSentMessages()
 	require.Len(t, sent, 1)
-	assert.Contains(t, sent[0].Text, "задвоилась")
 	assert.Contains(t, sent[0].Text, "/paysupport")
 	assert.NotContains(t, sent[0].Text, "Платёж возвращён", "refund failed: user must not be told it was refunded")
+	assert.NotContains(t, sent[0].Text, "задвоилась", "refund failure returns an error: duplicate-charge notice is unreachable from the webhook path")
 }
 
 func TestHandleUpdate_SuccessfulPaymentSameChargeIsSilentNoop(t *testing.T) {
@@ -897,7 +897,7 @@ func TestHandleUpdate_SuccessfulPaymentBypassesRateLimiter(t *testing.T) {
 	// successful_payment всё равно доходит до подтверждения.
 	mockDB := testutil.NewBotStoreFake()
 	starsOrderMocks(mockDB)
-	mockDB.ConfirmOrderPaidCASFunc = func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
+	mockDB.ConfirmOrderPaidCASFunc = func(context.Context, database.ConfirmPaidOrderParams) (bool, error) {
 		return true, nil
 	}
 	h, mainBot, paymentBot := newStarsTestHandler(t, mockDB)

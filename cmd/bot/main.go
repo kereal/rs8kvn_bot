@@ -531,6 +531,9 @@ func startBackgroundWorkers(ctx context.Context, handler *bot.Handler, subServic
 		runSupervised(ctx, "Subscription sync worker", func(ctx context.Context) {
 			syncWorker := scheduler.NewSubscriptionSyncWorker(syncSvc, orderSvc)
 			syncWorker.SetSubscriptionService(subService)
+			// sync_run_degraded в audit_log: без wiring событие деградации
+			// воркера не попадает в журнал вообще.
+			syncWorker.SetAuditDB(dbService)
 			syncWorker.Run(ctx)
 		})
 	}()
@@ -691,11 +694,11 @@ func main() {
 	// D1: отдельный payment-инстанс с таймаутом HTTP — invoice,
 	// answerPreCheckoutQuery и refund идут через него; polling-инстанс
 	// не трогаем: его long-poll не должен упираться в общий таймаут.
-	// Создание инстанса повторяется: транзиентная ошибка Telegram не должна
-	// ронять старт бота вместе с основным платежом Platega.
+	// Создание инстанса повторяется; полная неудача — деградация вместо Fatal:
+	// бот продолжает работать, платежи восстановит фоновый ретрай.
 	paymentAPI, err := newPaymentBotAPI(cfg.TelegramBotToken)
 	if err != nil {
-		logger.Fatal("Telegram payment client initialization failed", zap.Error(err))
+		logger.Error("Telegram payment client unavailable; payments degraded, retrying in background", zap.Error(err))
 	}
 
 	svc.handler.SetBot(api)
@@ -707,7 +710,11 @@ func main() {
 		// Stars-клиент подключён всегда независимо от активного PAYMENT_PROVIDER:
 		// старые Stars-invoices и возвраты должны работать и после переключения
 		// на platega. Активный провайдер влияет только на новые продажи (§4.4).
-		svc.orderService.SetStarsClient(stars.New(paymentAPI))
+		// paymentAPI == nil (деградация): SetStarsClient не вызывается —
+		// nil-клиент fail-closed, фоновый ретрай подключит его позже.
+		if paymentAPI != nil {
+			svc.orderService.SetStarsClient(stars.New(paymentAPI))
+		}
 
 		svc.orderService.SetBotUsername(bc.Username)
 		svc.orderService.SetAdminBot(api)
@@ -720,6 +727,8 @@ func main() {
 	} else {
 		logger.Warn("web server not running; share/invite page username not updated")
 	}
+
+	paymentRetryNeeded := paymentAPI == nil
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = config.BotUpdateTimeout
@@ -737,7 +746,15 @@ func main() {
 	svc.handler.StartBroadcastWorker(ctx)
 	bgWg := startBackgroundWorkers(ctx, svc.handler, svc.subService, svc.syncService, svc.orderService, dbService, cfg)
 
-	if webServer != nil {
+	if paymentRetryNeeded {
+		// Payment-инстанс не поднялся на старте: фоновый ретрай подключит его
+		// позже (fail-closed до успеха).
+		bgWg.Go(func() {
+			retryPaymentClient(ctx, cfg, svc.handler, svc.orderService, webServer)
+		})
+	}
+
+	if webServer != nil && !paymentRetryNeeded {
 		webServer.SetPaymentReady(true)
 	}
 
@@ -758,6 +775,44 @@ func main() {
 // отправлять одновременно, когда fast-lane pre-checkout переполнен.
 const preCheckoutAnswerMaxConcurrent = 4
 
+// paymentClientRetryInterval — пауза между раундами фонового ретрая
+// payment-инстанса после деградации на старте.
+const paymentClientRetryInterval = 5 * time.Minute
+
+// retryPaymentClient восстанавливает деградировавший payment-инстанс:
+// повторяет newPaymentBotAPI (с внутренними ретраями) до успеха или отмены
+// ctx и подключает wiring (handler payment bot + Stars client) по готовности.
+func retryPaymentClient(ctx context.Context, cfg *config.Config, handler *bot.Handler, orderSvc *service.OrderService, webServer *web.Server) {
+	for {
+		api, err := newPaymentBotAPI(cfg.TelegramBotToken)
+		if err == nil {
+			handler.SetPaymentBot(api)
+
+			if orderSvc != nil {
+				orderSvc.SetStarsClient(stars.New(api))
+			}
+
+			if webServer != nil {
+				webServer.SetPaymentReady(true)
+			}
+
+			logger.Info("Telegram payment client recovered")
+
+			return
+		}
+
+		logger.Warn("Telegram payment client retry failed",
+			zap.Error(err),
+			zap.Duration("next_retry", paymentClientRetryInterval))
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(paymentClientRetryInterval):
+		}
+	}
+}
+
 // newPreCheckoutAnswerer возвращает обработчик отказа по pre_checkout_query.
 // Ответ уходит через payment-инстанс с HTTP-таймаутом 4 c (D1), в отдельной
 // горутине, чтобы не блокировать event loop, и с ограниченным параллелизмом.
@@ -769,6 +824,15 @@ func newPreCheckoutAnswerer(paymentAPI *tgbotapi.BotAPI) func(string) {
 	sem := make(chan struct{}, preCheckoutAnswerMaxConcurrent)
 
 	answer := func(queryID string) {
+		if paymentAPI == nil {
+			// Деградация: payment-инстанс не поднят. Не отвечаем — Telegram
+			// отклонит платёж по таймауту (fail-closed), бот продолжил работу.
+			logger.Warn("pre_checkout_query dropped: payment API is not configured",
+				zap.String("query_id", queryID))
+
+			return
+		}
+
 		_, err := paymentAPI.Request(tgbotapi.PreCheckoutConfig{
 			PreCheckoutQueryID: queryID,
 			OK:                 false,

@@ -43,7 +43,7 @@ func TestConfirmPayment_SameOrderParallelCallbacksActivateOnlyOnce(t *testing.T)
 		},
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) { return product, nil },
 		GetByIDFunc:        func(context.Context, uint) (*database.Subscription, error) { return sub, nil },
-		ConfirmOrderPaidCASFunc: func(_ context.Context, orderID uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64, _ string, _ *int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, p database.ConfirmPaidOrderParams) (bool, error) {
 			count := casCalls.Add(1)
 			if count == 1 {
 				firstStartedOnce.Do(func() { close(firstStarted) })
@@ -176,10 +176,10 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 
 			return sub, nil
 		},
-		ConfirmOrderPaidCASFunc: func(_ context.Context, orderID uint, _, _ time.Time, _ *database.Subscription, _ *database.Product, _ database.ApplyPlanInTxFn, _ int64, _ string, _ *int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(_ context.Context, p database.ConfirmPaidOrderParams) (bool, error) {
 			casCalls.Add(1)
 
-			if orderID == order1.ID {
+			if p.OrderID == order1.ID {
 				startOnce1.Do(func() { close(started1) })
 				<-release1
 
@@ -188,7 +188,7 @@ func TestConfirmPayment_DifferentOrdersRunInParallel(t *testing.T) {
 				return true, nil
 			}
 
-			if orderID == order2.ID {
+			if p.OrderID == order2.ID {
 				startOnce2.Do(func() { close(started2) })
 				<-release2
 
@@ -276,9 +276,9 @@ func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 
 			return o, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, _ string, id string, _ time.Time, _ uint, _ database.ChargebackPlanInTxFn, _ func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
-			o := orders[id]
-			if id == firstID {
+		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, p database.CancelPaidOrderParams) (*database.ChargebackResult, error) {
+			o := orders[p.ProviderPaymentID]
+			if p.ProviderPaymentID == firstID {
 				startOnce1.Do(func() { close(started1) })
 				<-release1
 
@@ -287,7 +287,7 @@ func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 				return &database.ChargebackResult{Order: o, WasPaid: true, Transitioned: true, Downgraded: true}, nil
 			}
 
-			if id == secondID {
+			if p.ProviderPaymentID == secondID {
 				startOnce2.Do(func() { close(started2) })
 				<-release2
 
@@ -296,7 +296,7 @@ func TestCancelPaymentByProvider_DifferentOrdersRunInParallel(t *testing.T) {
 				return &database.ChargebackResult{Order: o, WasPaid: true, Transitioned: true, Downgraded: true}, nil
 			}
 
-			t.Fatalf("unexpected provider id %s", id)
+			t.Fatalf("unexpected provider payment id %s", p.ProviderPaymentID)
 
 			return nil, nil
 		},
@@ -507,7 +507,7 @@ func TestCancelPaymentByProvider_SameOrderParallelChargebacksTransitionOnce(t *t
 		GetByIDFunc: func(context.Context, uint) (*database.Subscription, error) {
 			return sub, nil
 		},
-		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, _ string, _ string, _ time.Time, freePlanID uint, _ database.ChargebackPlanInTxFn, _ func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
+		CancelPaidOrderAndDowngradeCASFunc: func(_ context.Context, p database.CancelPaidOrderParams) (*database.ChargebackResult, error) {
 			n := lockCASCalls.Add(1)
 			if n == 1 {
 				close(started)
@@ -515,7 +515,7 @@ func TestCancelPaymentByProvider_SameOrderParallelChargebacksTransitionOnce(t *t
 				// Realistic post-transition state: order is canceled and the
 				// subscription reset to the free plan.
 				order.Status = database.OrderStatusCanceled
-				sub.PlanID = freePlanID
+				sub.PlanID = p.FreePlanID
 				sub.ExpiresAt = nil
 				sub.ProductID = nil
 				sub.PricePaidCents = 0
@@ -714,7 +714,7 @@ func TestConfirmStarsPayment_SameChargeParallelConfirmationsActivateOnlyOnce(t *
 		},
 		GetProductByIDFunc: func(context.Context, uint) (*database.Product, error) { return product, nil },
 		GetByIDFunc:        func(context.Context, uint) (*database.Subscription, error) { return sub, nil },
-		ConfirmOrderPaidCASFunc: func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
+		ConfirmOrderPaidCASFunc: func(context.Context, database.ConfirmPaidOrderParams) (bool, error) {
 			count := casCalls.Add(1)
 			if count == 1 {
 				firstStartedOnce.Do(func() { close(firstStarted) })

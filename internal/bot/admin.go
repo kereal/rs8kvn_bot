@@ -780,6 +780,15 @@ func (h *Handler) HandleRefund(ctx context.Context, update tgbotapi.Update) erro
 			return nil
 		}
 
+		// Заказ уже отменён и возврат применён ранее: честный ответ вместо
+		// ложного «✅ Возврат выполнен» — админ не запускает ручную сверку.
+		if errors.Is(err, service.ErrStarsOrderAlreadyRefunded) {
+			h.SendMessage(ctx, chatID,
+				fmt.Sprintf("↩️ Возврат по заказу #%d уже выполнен ранее: заказ отменён, Stars возвращены пользователю. Повторный возврат не требуется.", orderID))
+
+			return nil
+		}
+
 		h.SendMessage(ctx, chatID,
 			fmt.Sprintf("⚠️ Возврат по заказу #%d не выполнен: %v\n\nПроверьте статус заказа и баланс Stars бота.", orderID, err))
 

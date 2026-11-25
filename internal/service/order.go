@@ -44,9 +44,11 @@ type OrderService struct {
 	botUsername string
 	cfg         *config.Config
 	adminBot    interfaces.BotAPI
-	// stars — клиент Telegram Stars. nil (по умолчанию): Stars недоступен
-	// даже при activeProvider()==telegram_stars (fail-closed).
-	stars *stars.Client
+	// stars — клиент Telegram Stars. Нулевой Pointer: Stars недоступен
+	// даже при activeProvider()==telegram_stars (fail-closed). Atomic:
+	// фоновый ретрай восстановления переключает клиента на живой инстанс,
+	// пока обработчики его читают.
+	stars atomic.Pointer[stars.Client]
 
 	// paymentLocksMu guards paymentLocks. paymentLocks and the per-lock
 	// channels together give each in-flight order (provider payment UUID)
@@ -63,6 +65,14 @@ type OrderService struct {
 	// ConfirmStarsPayment CAS) обрабатывает историю.
 	starsReconcileMu sync.Mutex
 	starsOffset      int64
+
+	// starsChargeLedgerMu guards confirmed/refunded maps. Ledger —
+	// in-memory реестр charge ID, для которых услуга оказана (confirmed)
+	// или применён авто-возврат (refunded). При рестарте очищается; потеря
+	// accepted — пользователь принял риск (§12).
+	starsChargeLedgerMu   sync.Mutex
+	starsConfirmedCharges map[string]struct{} // charge подтверждён (услуга оказана)
+	starsRefundedCharges  map[string]struct{} // charge возвращён
 }
 
 // paymentLock is a capacity-1 token channel reused by every concurrent
@@ -308,14 +318,16 @@ func formatAdminPaymentAlert(title string, sub *database.Subscription, order *da
 // NewOrderService wires the order service dependencies explicitly.
 func NewOrderService(db interfaces.OrderStore, subSvc *SubscriptionService, syncSvc *SyncService, payment PlategaClient, botUsername string, cfg *config.Config) *OrderService {
 	return &OrderService{
-		db:                 db,
-		subSvc:             subSvc,
-		syncSvc:            syncSvc,
-		payment:            payment,
-		botUsername:        botUsername,
-		cfg:                cfg,
-		paymentLocks:       make(map[string]*paymentLock),
-		paymentLockTimeout: paymentLockTimeoutDefault,
+		db:                    db,
+		subSvc:                subSvc,
+		syncSvc:               syncSvc,
+		payment:               payment,
+		botUsername:           botUsername,
+		cfg:                   cfg,
+		paymentLocks:          make(map[string]*paymentLock),
+		paymentLockTimeout:    paymentLockTimeoutDefault,
+		starsConfirmedCharges: make(map[string]struct{}),
+		starsRefundedCharges:  make(map[string]struct{}),
 	}
 }
 
@@ -393,7 +405,7 @@ func (o *OrderService) dropPaymentWaiter(l *paymentLock, providerPaymentID strin
 	o.paymentLocksMu.Unlock()
 }
 
-func (o *OrderService) chargebackPlanInTx() database.ChargebackPlanInTxFn {
+func (o *OrderService) applyFreePlanInTx() database.DowngradePlanInTxFn {
 	if o.syncSvc == nil {
 		return nil
 	}
@@ -424,11 +436,11 @@ func mirrorOrderFromSubscriptionAfterCAS(order *database.Order, sub *database.Su
 	order.ActivatedAt = &activatedAt
 }
 
-// loadChargebackAlertContext loads the subscription and product needed for the
+// loadPaymentAlertContext loads the subscription and product needed for the
 // admin chargeback alert. Each load is best-effort: a failure is logged via the
 // returned error context but never blocks the chargeback alert. Callers render
 // placeholders for any nil field, so alerts always go out.
-func (o *OrderService) loadChargebackAlertContext(ctx context.Context, order *database.Order) (*database.Subscription, *database.Product) {
+func (o *OrderService) loadPaymentAlertContext(ctx context.Context, order *database.Order) (*database.Subscription, *database.Product) {
 	var (
 		sub     *database.Subscription
 		product *database.Product
@@ -453,7 +465,7 @@ func (o *OrderService) loadChargebackAlertContext(ctx context.Context, order *da
 	return sub, product
 }
 
-func (o *OrderService) syncChargebackAfterCommit(ctx context.Context, subscriptionID uint) {
+func (o *OrderService) syncDowngradeAfterCommit(ctx context.Context, subscriptionID uint) {
 	if o.syncSvc == nil {
 		return
 	}
@@ -509,7 +521,7 @@ func (o *OrderService) SetBotUsername(username string) { o.botUsername = strings
 func (o *OrderService) SetAdminBot(bot interfaces.BotAPI) { o.adminBot = bot }
 
 // SetStarsClient подключает клиент Telegram Stars. nil — Stars недоступен.
-func (o *OrderService) SetStarsClient(c *stars.Client) { o.stars = c }
+func (o *OrderService) SetStarsClient(c *stars.Client) { o.stars.Store(c) }
 
 // activeProvider возвращает активного платёжного провайдера из конфига.
 // Пустое значение означает Platega (обратная совместимость дефолта).
@@ -563,25 +575,30 @@ func (o *OrderService) notifyAdmin(ctx context.Context, text string) {
 	}
 }
 
+// notifyAdminMarkdown отправляет админу Markdown-алерт best-effort: guard тот
+// же, что у notifyAdmin; доставка никогда не влияет на платёжный флоу.
+func (o *OrderService) notifyAdminMarkdown(ctx context.Context, text string, orderID uint) {
+	if o.adminBot == nil || o.cfg == nil || o.cfg.TelegramAdminID <= 0 {
+		return
+	}
+
+	msg := tgbotapi.NewMessage(o.cfg.TelegramAdminID, text)
+	msg.ParseMode = "Markdown"
+
+	_, err := o.adminBot.Send(msg)
+	if err != nil {
+		logger.Warn("failed to notify admin about payment event",
+			zap.Uint("order_id", orderID),
+			zap.Error(err))
+	}
+}
+
 // notifyAdminPaid sends a best-effort Markdown notification about a confirmed
 // payment to the configured administrator: purchase/renewal marker, tariff,
 // amount, buyer link and order context. A delivery failure never fails the
 // payment flow and is only logged.
 func (o *OrderService) notifyAdminPaid(ctx context.Context, sub *database.Subscription, order *database.Order, product *database.Product, isRenewal bool) {
-	if o.adminBot == nil || o.cfg == nil || o.cfg.TelegramAdminID <= 0 {
-		return
-	}
-
-	msg := tgbotapi.NewMessage(o.cfg.TelegramAdminID, formatAdminPaidAlert(sub, order, product, isRenewal))
-
-	msg.ParseMode = "Markdown"
-
-	_, err := o.adminBot.Send(msg)
-	if err != nil {
-		logger.Warn("failed to notify admin about confirmed payment",
-			zap.Uint("order_id", order.ID),
-			zap.Error(err))
-	}
+	o.notifyAdminMarkdown(ctx, formatAdminPaidAlert(sub, order, product, isRenewal), order.ID)
 }
 
 // formatAdminPaidAlert renders the admin notification for a confirmed payment.

@@ -97,7 +97,7 @@ func confirmWithBusyRetry(ctx context.Context, svc *Service, order *Order, sub *
 	)
 
 	for range 5 {
-		activated, err = svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, nil, 5000, "charge-concurrent", nil)
+		activated, err = svc.ConfirmOrderPaidCAS(ctx, ConfirmPaidOrderParams{OrderID: order.ID, PaidAt: now, ActivatedAt: now, Subscription: sub, Product: product, ApplyPlan: nil, CallbackAmountCents: 5000, ProviderPaymentID: "charge-concurrent", ProviderFeeCents: nil})
 		if err == nil || !strings.Contains(err.Error(), "database is locked") {
 			return activated, err
 		}

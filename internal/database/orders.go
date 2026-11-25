@@ -381,7 +381,7 @@ type ApplyPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint,
 // ErrSubscriptionNotFound or ErrOrderNotFound; database, audit, and applyPlan
 // errors roll back the transaction and reach the caller. The supplied sub is
 // updated in place before applyPlan and may remain changed after a rollback.
-func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *Subscription, product *Product, applyPlan ApplyPlanInTxFn, callbackAmountCents int64, providerPaymentID string, providerFeeCents *int64) (bool, error) {
+func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, p ConfirmPaidOrderParams) (bool, error) {
 	var activated bool
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -391,7 +391,7 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 		// snapshot that races a concurrent confirmation.
 		var currentSub Subscription
 
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&currentSub, sub.ID).Error
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&currentSub, p.Subscription.ID).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("load subscription for payment: %w", ErrSubscriptionNotFound)
@@ -400,7 +400,7 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 			return fmt.Errorf("load subscription for payment: %w", err)
 		}
 
-		newExpiry := CalculatePaymentExpiry(activatedAt, &currentSub, product)
+		newExpiry := CalculatePaymentExpiry(p.ActivatedAt, &currentSub, p.Product)
 
 		// An expired order is accepted here only for the provider callback grace
 		// path documented above. The service layer checks the grace deadline;
@@ -408,7 +408,7 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 		// pending/expired -> paid transition as one atomic compare-and-swap.
 		var order Order
 
-		err = tx.First(&order, orderID).Error
+		err = tx.First(&order, p.OrderID).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("load order for payment: %w", ErrOrderNotFound)
@@ -420,7 +420,7 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 		// Фактический id транзакции, который ляжет в БД: переданный charge ID
 		// (Stars) либо уже сохранённый (Platega сохраняет его заранее).
 		// Аудит и снапшот заказа должны содержать именно его.
-		effectiveProviderPaymentID := providerPaymentID
+		effectiveProviderPaymentID := p.ProviderPaymentID
 		if strings.TrimSpace(effectiveProviderPaymentID) == "" {
 			effectiveProviderPaymentID = order.ProviderPaymentID
 		}
@@ -428,19 +428,19 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 
 		updates := map[string]any{
 			"status":                OrderStatusPaid,
-			"paid_at":               paidAt,
-			"activated_at":          activatedAt,
+			"paid_at":               p.PaidAt,
+			"activated_at":          p.ActivatedAt,
 			"expires_at":            newExpiry,
-			"callback_amount_cents": callbackAmountCents,
+			"callback_amount_cents": p.CallbackAmountCents,
 			// Пустая строка не трогает сохранённое значение (Platega сохраняет
 			// provider_payment_id через SavePaymentDetails заранее).
-			"provider_payment_id": gorm.Expr("COALESCE(NULLIF(?, ''), provider_payment_id)", providerPaymentID),
+			"provider_payment_id": gorm.Expr("COALESCE(NULLIF(?, ''), provider_payment_id)", p.ProviderPaymentID),
 		}
-		if providerFeeCents != nil {
-			updates["provider_fee_cents"] = *providerFeeCents
+		if p.ProviderFeeCents != nil {
+			updates["provider_fee_cents"] = *p.ProviderFeeCents
 		}
 
-		result := tx.Model(&Order{}).Where("id = ? AND status IN ?", orderID, []OrderStatus{OrderStatusPending, OrderStatusExpired}).Updates(updates)
+		result := tx.Model(&Order{}).Where("id = ? AND status IN ?", p.OrderID, []OrderStatus{OrderStatusPending, OrderStatusExpired}).Updates(updates)
 		if result.Error != nil {
 			return fmt.Errorf("confirm order: %w", result.Error)
 		}
@@ -449,10 +449,10 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 			return nil
 		}
 
-		result = tx.Model(&Subscription{}).Where("id = ?", sub.ID).Updates(map[string]any{
-			"plan_id": product.PlanID, "status": string(SubscriptionStatusActive),
-			"expires_at": newExpiry, "product_id": product.ID, "started_at": activatedAt,
-			"price_paid_cents": product.PriceCents, "currency": product.Currency, "reminders_sent": 0,
+		result = tx.Model(&Subscription{}).Where("id = ?", p.Subscription.ID).Updates(map[string]any{
+			"plan_id": p.Product.PlanID, "status": string(SubscriptionStatusActive),
+			"expires_at": newExpiry, "product_id": p.Product.ID, "started_at": p.ActivatedAt,
+			"price_paid_cents": p.Product.PriceCents, "currency": p.Product.Currency, "reminders_sent": 0,
 		})
 		if result.Error != nil {
 			return fmt.Errorf("update subscription after payment: %w", result.Error)
@@ -464,37 +464,37 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 
 		// Состояние, фактически сохранённое апдейтом выше: единственный
 		// достоверный источник new_state для аудита. currentSub — состояние ДО.
-		productID := product.ID
-		startedAt := activatedAt
+		productID := p.Product.ID
+		startedAt := p.ActivatedAt
 		expiryCopy := newExpiry
-		currency := product.Currency
+		currency := p.Product.Currency
 		renewedSub := currentSub
-		renewedSub.PlanID = product.PlanID
+		renewedSub.PlanID = p.Product.PlanID
 		renewedSub.Status = string(SubscriptionStatusActive)
 		renewedSub.ProductID = &productID
 		renewedSub.ExpiresAt = &expiryCopy
 		renewedSub.StartedAt = &startedAt
-		renewedSub.PricePaidCents = product.PriceCents
+		renewedSub.PricePaidCents = p.Product.PriceCents
 		renewedSub.Currency = &currency
 		renewedSub.RemindersSent = 0
 
 		// Аудит пишется в той же транзакции: событие не может потеряться при
 		// сбое между изменением подписки и записью журнала. Откат транзакции
 		// откатывает и событие — журнал отражает только зафиксированные факты.
-		err = InsertAuditLogInTx(tx, AuditPaymentConfirmed(&order, &renewedSub, product, newExpiry))
+		err = InsertAuditLogInTx(tx, AuditPaymentConfirmed(&order, &renewedSub, p.Product, newExpiry))
 		if err != nil {
 			return fmt.Errorf("audit payment confirmation: %w", err)
 		}
 
 		// Событие в таймлайне самой подписки: payment_confirmed адресован заказу,
 		// а subscription_renewed показывает продление/активацию в истории подписки.
-		err = InsertAuditLogInTx(tx, AuditSubscriptionRenewed(&currentSub, &renewedSub, product, order.PaymentProvider))
+		err = InsertAuditLogInTx(tx, AuditSubscriptionRenewed(&currentSub, &renewedSub, p.Product, order.PaymentProvider))
 		if err != nil {
 			return fmt.Errorf("audit subscription renewal: %w", err)
 		}
 
 		// Caller получает то же состояние, что зафиксировано в БД.
-		*sub = renewedSub
+		*p.Subscription = renewedSub
 
 		// Plan reconciliation runs only when the purchased plan actually differs
 		// from the subscription's current one. A same-plan renewal extends the
@@ -502,8 +502,8 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt,
 		// the VPN client and resets its traffic counter, which would wipe the
 		// user's remaining quota mid-period. Renewals only touch the DB; the
 		// panel keeps serving the client (its own 30-day auto-renew continues).
-		if applyPlan != nil && currentSub.PlanID != product.PlanID {
-			err := applyPlan(ctx, tx, sub.ID, product.PlanID)
+		if p.ApplyPlan != nil && currentSub.PlanID != p.Product.PlanID {
+			err := p.ApplyPlan(ctx, tx, p.Subscription.ID, p.Product.PlanID)
 			if err != nil {
 				return fmt.Errorf("apply plan after payment: %w", err)
 			}
@@ -538,9 +538,34 @@ func CalculatePaymentExpiry(now time.Time, sub *Subscription, product *Product) 
 	return base.AddDate(0, 0, product.DurationDays)
 }
 
-// ChargebackPlanInTxFn materializes the DB-side VPN sync prerequisites while the
-// chargeback transaction is open. It must not perform external network calls.
-type ChargebackPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint, freePlanID uint) error
+// ConfirmPaidOrderParams — параметры CAS-подтверждения оплаты (один tx:
+// paid + charge id + fee + продление). Пустые строковые/nil-поля означают
+// «не перезаписывать» (см. документацию метода).
+type ConfirmPaidOrderParams struct {
+	OrderID             uint
+	PaidAt              time.Time
+	ActivatedAt         time.Time
+	Subscription        *Subscription
+	Product             *Product
+	ApplyPlan           ApplyPlanInTxFn
+	CallbackAmountCents int64
+	ProviderPaymentID   string // пусто = не перезаписывать
+	ProviderFeeCents    *int64 // nil = не перезаписывать
+}
+
+// CancelPaidOrderParams — параметры CAS-отмены оплаченного заказа с downgrade.
+type CancelPaidOrderParams struct {
+	Provider          string
+	ProviderPaymentID string
+	Now               time.Time
+	FreePlanID        uint
+	ApplyPlan         DowngradePlanInTxFn // бывший ChargebackPlanInTxFn
+	Audit             func(*Order, *Subscription, bool) *AuditLog
+}
+
+// DowngradePlanInTxFn materializes the DB-side VPN sync prerequisites while the
+// downgrade transaction is open. It must not perform external network calls.
+type DowngradePlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID uint, freePlanID uint) error
 
 // CancelPaidOrderAndDowngradeCAS atomically records a paid-order chargeback (or
 // refund, per auditFn) and, when no other currently-valid paid order covers the
@@ -557,12 +582,12 @@ type ChargebackPlanInTxFn func(ctx context.Context, tx *gorm.DB, subscriptionID 
 // after this chargeback's decision without first observing the serialized DB
 // state. An auditFn error rolls back the whole transaction. External VPN calls
 // must happen after this method returns successfully.
-func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID string, now time.Time, freePlanID uint, applyPlan ChargebackPlanInTxFn, auditFn func(*Order, *Subscription, bool) *AuditLog) (*ChargebackResult, error) {
+func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, p CancelPaidOrderParams) (*ChargebackResult, error) {
 	var result ChargebackResult
 
 	// nil → прежнее чарджбэк-событие: событие по умолчанию не должно зависеть
 	// от того, передал ли caller явный конструктор.
-	auditEvent := auditFn
+	auditEvent := p.Audit
 	if auditEvent == nil {
 		auditEvent = AuditChargebackReceived
 	}
@@ -570,7 +595,7 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var order Order
 
-		query := tx.Where("payment_provider = ? AND provider_payment_id = ?", provider, providerPaymentID).First(&order)
+		query := tx.Where("payment_provider = ? AND provider_payment_id = ?", p.Provider, p.ProviderPaymentID).First(&order)
 		if errors.Is(query.Error, gorm.ErrRecordNotFound) {
 			return nil
 		}
@@ -593,7 +618,7 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 			return fmt.Errorf("load subscription for chargeback: %w", err)
 		}
 
-		// Re-read the provider order after the subscription lock. A concurrent
+		// Re-read the p.Provider order after the subscription lock. A concurrent
 		// confirmation may have changed it after the initial lookup.
 		err = tx.First(&order, order.ID).Error
 		if err != nil {
@@ -661,7 +686,7 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 			// plan; if another active paid order exists, activePaid > 0 and
 			// access is preserved.
 			err = tx.Model(&Order{}).
-				Where("subscription_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)", order.SubscriptionID, OrderStatusPaid, now).
+				Where("subscription_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)", order.SubscriptionID, OrderStatusPaid, p.Now).
 				Count(&activePaid).Error
 			if err != nil {
 				return fmt.Errorf("check active paid coverage: %w", err)
@@ -671,7 +696,7 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 				updated = tx.Model(&Subscription{}).Where("id = ?", order.SubscriptionID).Updates(map[string]any{
 					"status":           string(SubscriptionStatusActive),
 					"expires_at":       nil,
-					"plan_id":          freePlanID,
+					"plan_id":          p.FreePlanID,
 					"product_id":       nil,
 					"started_at":       nil,
 					"price_paid_cents": 0,
@@ -685,8 +710,8 @@ func (s *Service) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider s
 					return fmt.Errorf("downgrade subscription after chargeback: %w", ErrSubscriptionNotFound)
 				}
 
-				if applyPlan != nil {
-					err := applyPlan(ctx, tx, order.SubscriptionID, freePlanID)
+				if p.ApplyPlan != nil {
+					err := p.ApplyPlan(ctx, tx, order.SubscriptionID, p.FreePlanID)
 					if err != nil {
 						return fmt.Errorf("apply free plan after chargeback: %w", err)
 					}

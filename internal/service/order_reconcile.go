@@ -228,7 +228,7 @@ func (o *OrderService) ReconcileStarsTransactions(ctx context.Context) error {
 // тесты могут передать маленький бюджет и проверить, что проход останавливается
 // без ошибки и сохраняет позицию для следующего тика.
 func (o *OrderService) reconcileStarsTransactions(ctx context.Context, budget time.Duration) error {
-	if o.stars == nil {
+	if o.stars.Load() == nil {
 		return nil
 	}
 
@@ -245,7 +245,7 @@ func (o *OrderService) reconcileStarsTransactions(ctx context.Context, budget ti
 	processed := int64(0)
 
 	for budgetCtx.Err() == nil {
-		transactions, err := o.stars.GetTransactions(budgetCtx, offset+processed, starsReconcileLimit)
+		transactions, err := o.stars.Load().GetTransactions(budgetCtx, offset+processed, starsReconcileLimit)
 		if err != nil {
 			if budgetCtx.Err() != nil {
 				break
@@ -274,7 +274,9 @@ func (o *OrderService) reconcileStarsTransactions(ctx context.Context, budget ti
 				payload := tx.Source.InvoicePayload
 
 				// Идемпотентность: CAS по charge ID, повторная обработка — no-op.
-				_, confirmErr := o.ConfirmStarsPayment(ctx, tx.ID, payload, tx.Amount, stars.Currency, telegramID)
+				// budgetCtx: транзакция Telegram/БД не должна висеть на
+				// scheduler-контексте без дедлайна и ломать весь проход.
+				_, confirmErr := o.ConfirmStarsPayment(budgetCtx, tx.ID, payload, tx.Amount, stars.Currency, telegramID)
 				if confirmErr != nil {
 					var mismatch *StarsSemanticMismatchError
 
@@ -282,7 +284,13 @@ func (o *OrderService) reconcileStarsTransactions(ctx context.Context, budget ti
 						// DB/infrastructure ошибка: состояние не применено,
 						// транзакцию нужно повторить. Прерываем проход, offset не
 						// двигается — следующий hourly-тик повторит страницу
-						// (CAS идемпотентен).
+						// (CAS идемпотентен). Исключение — исчерпание бюджета
+						// посреди транзакции: это нормальный стоп, позиция
+						// сохраняется без ошибки.
+						if budgetCtx.Err() != nil {
+							break
+						}
+
 						return fmt.Errorf("confirm reconciled stars transaction %s: %w", tx.ID, confirmErr)
 					}
 
@@ -293,8 +301,12 @@ func (o *OrderService) reconcileStarsTransactions(ctx context.Context, budget ti
 					// Ошибка проверки audit — инфраструктурная: решение о возврате
 					// принять нельзя. Прерываем проход и держим offset — следующий
 					// тик повторит транзакцию (R8 плана).
-					_, refundErr := o.autoRefundStarsCharge(ctx, nil, telegramID, tx.Amount, stars.Currency, tx.ID, "recovery_semantic_mismatch")
+					_, refundErr := o.autoRefundStarsCharge(budgetCtx, nil, telegramID, tx.Amount, stars.Currency, tx.ID, "recovery_semantic_mismatch")
 					if refundErr != nil {
+						if budgetCtx.Err() != nil {
+							break
+						}
+
 						return fmt.Errorf("auto-refund stars charge %s: %w", tx.ID, refundErr)
 					}
 				}

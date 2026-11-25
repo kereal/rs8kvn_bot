@@ -10,6 +10,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 )
@@ -346,8 +347,12 @@ func (c *CommandHandler) HandleTerms(ctx context.Context, update tgbotapi.Update
 
 	chatID := update.Message.Chat.ID
 
-	msg := tgbotapi.NewMessage(chatID, TermsText())
-	c.h.send(ctx, msg)
+	// TermsText длиннее лимита Telegram (4096 символов): режем тем же
+	// splitMessage, что и menu-путь (sendLegalText), иначе Telegram
+	// отклоняет сообщение с «message is too long».
+	for _, chunk := range splitMessage(TermsText(), config.MaxTelegramMessageLen) {
+		c.h.send(ctx, tgbotapi.NewMessage(chatID, chunk))
+	}
 
 	return nil
 }

@@ -56,7 +56,7 @@ func TestConfirmOrderPaidCAS_WritesAuditEventInTx(t *testing.T) {
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	activatedAt := time.Now().UTC()
-	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, activatedAt, activatedAt, sub, product, nil, 500, "", nil)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, ConfirmPaidOrderParams{OrderID: order.ID, PaidAt: activatedAt, ActivatedAt: activatedAt, Subscription: sub, Product: product, ApplyPlan: nil, CallbackAmountCents: 500, ProviderPaymentID: "", ProviderFeeCents: nil})
 	require.NoError(t, err)
 	assert.True(t, activated)
 
@@ -102,9 +102,9 @@ func TestConfirmOrderPaidCAS_RollsBackAuditWithTransaction(t *testing.T) {
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	activatedAt := time.Now().UTC()
-	_, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, activatedAt, activatedAt, sub, product, func(_ context.Context, _ *gorm.DB, _, _ uint) error {
+	_, err := svc.ConfirmOrderPaidCAS(ctx, ConfirmPaidOrderParams{OrderID: order.ID, PaidAt: activatedAt, ActivatedAt: activatedAt, Subscription: sub, Product: product, ApplyPlan: func(_ context.Context, _ *gorm.DB, _, _ uint) error {
 		return assert.AnError
-	}, 500, "", nil)
+	}, CallbackAmountCents: 500, ProviderPaymentID: "", ProviderFeeCents: nil})
 	require.Error(t, err)
 
 	events, err := svc.GetAuditLogByEvent(ctx, AuditEventPaymentConfirmed, 10)
@@ -138,7 +138,7 @@ func TestCancelPaidOrderAndDowngradeCAS_WritesChargebackAudit(t *testing.T) {
 	providerPaymentID := "550e8400-e29b-41d4-a716-446655440307"
 	require.NoError(t, svc.db.WithContext(ctx).Model(order).Update("provider_payment_id", providerPaymentID).Error)
 
-	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, "platega", providerPaymentID, now, freePlan.ID, nil, AuditChargebackReceived)
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, CancelPaidOrderParams{Provider: "platega", ProviderPaymentID: providerPaymentID, Now: now, FreePlanID: freePlan.ID, ApplyPlan: nil, Audit: AuditChargebackReceived})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.Transitioned)
@@ -182,7 +182,7 @@ func TestConfirmOrderPaidCAS_WritesSubscriptionRenewed(t *testing.T) {
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	activatedAt := time.Now().UTC()
-	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, activatedAt, activatedAt, sub, product, nil, 700, "", nil)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, ConfirmPaidOrderParams{OrderID: order.ID, PaidAt: activatedAt, ActivatedAt: activatedAt, Subscription: sub, Product: product, ApplyPlan: nil, CallbackAmountCents: 700, ProviderPaymentID: "", ProviderFeeCents: nil})
 	require.NoError(t, err)
 	assert.True(t, activated)
 
@@ -371,7 +371,7 @@ func TestCancelPaidOrderAndDowngradeCAS_WritesPaymentRefundedAudit(t *testing.T)
 	providerPaymentID := "tg-charge-refund-1"
 	require.NoError(t, svc.db.WithContext(ctx).Model(order).Update("provider_payment_id", providerPaymentID).Error)
 
-	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, PaymentProviderTelegramStars, providerPaymentID, now, freePlan.ID, nil, AuditPaymentRefunded)
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, CancelPaidOrderParams{Provider: PaymentProviderTelegramStars, ProviderPaymentID: providerPaymentID, Now: now, FreePlanID: freePlan.ID, ApplyPlan: nil, Audit: AuditPaymentRefunded})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.True(t, result.Transitioned)
@@ -418,7 +418,7 @@ func TestCancelPaidOrderAndDowngradeCAS_NilAuditFnDefaultsToChargeback(t *testin
 	providerPaymentID := "550e8400-e29b-41d4-a716-446655440304"
 	require.NoError(t, svc.db.WithContext(ctx).Model(order).Update("provider_payment_id", providerPaymentID).Error)
 
-	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, PaymentProviderPlatega, providerPaymentID, now, freePlan.ID, nil, nil)
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, CancelPaidOrderParams{Provider: PaymentProviderPlatega, ProviderPaymentID: providerPaymentID, Now: now, FreePlanID: freePlan.ID, ApplyPlan: nil, Audit: nil})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.True(t, result.Downgraded)
@@ -454,7 +454,7 @@ func TestCancelPaidOrderAndDowngradeCAS_AuditsPaidCancelWhenSubscriptionNotActiv
 	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 700, Currency: "RUB", PaymentProvider: PaymentProviderPlatega, ProviderPaymentID: providerPaymentID, ExpiresAt: ptrTime(now.Add(time.Hour)), CreatedAt: now}
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
-	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, PaymentProviderPlatega, providerPaymentID, now, freePlan.ID, nil, AuditChargebackReceived)
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, CancelPaidOrderParams{Provider: PaymentProviderPlatega, ProviderPaymentID: providerPaymentID, Now: now, FreePlanID: freePlan.ID, ApplyPlan: nil, Audit: AuditChargebackReceived})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.True(t, result.Transitioned)
@@ -515,7 +515,7 @@ func TestCancelPaidOrderAndDowngradeCAS_AuditsPaidCancelWhenOtherPaidOrderActive
 	require.NoError(t, svc.db.WithContext(ctx).Create(refundOrder).Error)
 	require.NoError(t, svc.db.WithContext(ctx).Create(otherOrder).Error)
 
-	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, PaymentProviderTelegramStars, refundID, now, freePlan.ID, nil, AuditPaymentRefunded)
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, CancelPaidOrderParams{Provider: PaymentProviderTelegramStars, ProviderPaymentID: refundID, Now: now, FreePlanID: freePlan.ID, ApplyPlan: nil, Audit: AuditPaymentRefunded})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.True(t, result.Transitioned)
@@ -575,7 +575,7 @@ func TestCancelPaidOrderAndDowngradeCAS_PendingCancelWritesNoChargebackAudit(t *
 	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending, AmountCents: 600, Currency: "RUB", PaymentProvider: PaymentProviderPlatega, ProviderPaymentID: providerPaymentID, CreatedAt: now}
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
-	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, PaymentProviderPlatega, providerPaymentID, now, freePlan.ID, nil, AuditChargebackReceived)
+	result, err := svc.CancelPaidOrderAndDowngradeCAS(ctx, CancelPaidOrderParams{Provider: PaymentProviderPlatega, ProviderPaymentID: providerPaymentID, Now: now, FreePlanID: freePlan.ID, ApplyPlan: nil, Audit: AuditChargebackReceived})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.True(t, result.Transitioned)
@@ -620,9 +620,9 @@ func TestCancelPaidOrderAndDowngradeCAS_RollsBackOnAuditError(t *testing.T) {
 	order := &Order{SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid, AmountCents: 800, Currency: "RUB", PaymentProvider: PaymentProviderPlatega, ProviderPaymentID: providerPaymentID, ExpiresAt: ptrTime(now.Add(time.Hour)), CreatedAt: now}
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
-	_, err = svc.CancelPaidOrderAndDowngradeCAS(ctx, PaymentProviderPlatega, providerPaymentID, now, freePlan.ID, nil, func(*Order, *Subscription, bool) *AuditLog {
+	_, err = svc.CancelPaidOrderAndDowngradeCAS(ctx, CancelPaidOrderParams{Provider: PaymentProviderPlatega, ProviderPaymentID: providerPaymentID, Now: now, FreePlanID: freePlan.ID, ApplyPlan: nil, Audit: func(*Order, *Subscription, bool) *AuditLog {
 		return nil
-	})
+	}})
 	require.Error(t, err)
 
 	// Заказ остался paid — отмена откатилась вместе с аудитом.

@@ -541,10 +541,16 @@ func (c *CallbackHandler) handleStarsInvoiceBack(ctx context.Context, chatID, pr
 	// S4: истекаем pending-заказ, чтобы повторная покупка сразу создала новый.
 	if orderID != 0 {
 		expired, expireErr := c.h.db.ExpirePendingOrder(ctx, orderID)
-		if expireErr != nil {
-			logger.Warn("failed to expire pending order on stars invoice back",
+		switch {
+		case expireErr != nil:
+			// Сбой истечения: pending-заказ остаётся, повторная покупка покажет
+			// «счёт отправлен ранее» — invoice НЕ удаляем, чтобы это оставалось
+			// правдой. TTL (STARS_INVOICE_TTL) истечёт заказ фоново.
+			logger.Warn("failed to expire pending order on stars invoice back; keeping invoice message",
 				zap.Uint("order_id", orderID), zap.Error(expireErr))
-		} else if !expired {
+
+			return c.h.subHandler.handleBuyPremiumList(ctx, chatID, username, cardMsgID)
+		case !expired:
 			logger.Info("stars invoice back: pending order not in expirable state",
 				zap.Uint("order_id", orderID))
 		}

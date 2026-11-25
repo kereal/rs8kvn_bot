@@ -243,10 +243,6 @@ type BotAPI struct {
 	AllRequests []tgbotapi.Chattable
 	// DeletedMessageIDs captures the message ids passed to DeleteMessage.
 	DeletedMessageIDs []int
-	// MakeRequestEndpoints captures the endpoints passed to MakeRequest (Stars refunds).
-	MakeRequestEndpoints []string
-	// MakeRequestParams captures the last params passed to MakeRequest.
-	MakeRequestParams tgbotapi.Params
 	// MakeRequestError, if set, is returned by MakeRequest.
 	MakeRequestError error
 	// MakeRequestFunc, if set, replaces the default recording behaviour of MakeRequest.
@@ -362,9 +358,6 @@ func (m *BotAPI) MakeRequest(endpoint string, params tgbotapi.Params) (*tgbotapi
 	if m.MakeRequestFunc != nil {
 		return m.MakeRequestFunc(endpoint, params)
 	}
-
-	m.MakeRequestEndpoints = append(m.MakeRequestEndpoints, endpoint)
-	m.MakeRequestParams = params
 
 	if m.MakeRequestError != nil {
 		return nil, m.MakeRequestError
@@ -496,12 +489,12 @@ type ServiceStoreFake struct {
 	AuditLogs                                   []database.AuditLog
 	BindTrialSubscriptionFunc                   func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
 	CancelOrderCASFunc                          func(ctx context.Context, provider string, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error)
-	CancelPaidOrderAndDowngradeCASFunc          func(ctx context.Context, provider string, providerPaymentID string, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn, auditFn func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error)
+	CancelPaidOrderAndDowngradeCASFunc          func(ctx context.Context, p database.CancelPaidOrderParams) (*database.ChargebackResult, error)
 	ClaimExpiredTrialsFunc                      func(ctx context.Context, hours int) ([]database.Subscription, error)
 	ClaimReminderFunc                           func(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
 	ClaimTrafficReminderFunc                    func(ctx context.Context, id uint, bit int) (bool, error)
 	CleanupExpiredTrialsFunc                    func(ctx context.Context, hours int) ([]database.Subscription, error)
-	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64, providerPaymentID string, providerFeeCents *int64) (bool, error)
+	ConfirmOrderPaidCASFunc                     func(ctx context.Context, p database.ConfirmPaidOrderParams) (bool, error)
 	CountActiveSubscriptionsFunc                func(ctx context.Context) (int64, error)
 	CountFreeSubscriptionsFunc                  func(ctx context.Context) (int64, error)
 	CountPremiumSubscriptionsFunc               func(ctx context.Context) (int64, error)
@@ -529,7 +522,6 @@ type ServiceStoreFake struct {
 	GetOrderByProviderPaymentIDFunc             func(ctx context.Context, provider string, providerPaymentID string) (*database.Order, error)
 	GetPaidOrdersWithoutProviderFeeAfterIDFunc  func(ctx context.Context, afterID uint, limit int) ([]database.Order, error)
 	HasPaymentConfirmedByProviderPaymentIDFunc  func(ctx context.Context, provider string, providerPaymentID string) (bool, error)
-	GetPaidOrdersWithoutProviderFeeFunc         func(ctx context.Context, limit int) ([]database.Order, error)
 	GetPendingBySubscriptionIDFunc              func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
 	GetPendingSyncFunc                          func(ctx context.Context) ([]database.SubscriptionNode, error)
 	GetNodesWithParkedSyncFunc                  func(ctx context.Context, parkedAfter time.Time) ([]uint, error)
@@ -613,9 +605,9 @@ func (m *ServiceStoreFake) CancelOrderCAS(ctx context.Context, provider string, 
 	return false, nil
 }
 
-func (m *ServiceStoreFake) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID string, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn, auditFn func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
+func (m *ServiceStoreFake) CancelPaidOrderAndDowngradeCAS(ctx context.Context, p database.CancelPaidOrderParams) (*database.ChargebackResult, error) {
 	if m.CancelPaidOrderAndDowngradeCASFunc != nil {
-		return m.CancelPaidOrderAndDowngradeCASFunc(ctx, provider, providerPaymentID, now, freePlanID, applyPlan, auditFn)
+		return m.CancelPaidOrderAndDowngradeCASFunc(ctx, p)
 	}
 
 	return nil, errors.New("mock atomic chargeback requires CancelPaidOrderAndDowngradeCASFunc")
@@ -661,9 +653,9 @@ func (m *ServiceStoreFake) CleanupExpiredTrials(ctx context.Context, hours int) 
 	return nil, nil
 }
 
-func (m *ServiceStoreFake) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64, providerPaymentID string, providerFeeCents *int64) (bool, error) {
+func (m *ServiceStoreFake) ConfirmOrderPaidCAS(ctx context.Context, p database.ConfirmPaidOrderParams) (bool, error) {
 	if m.ConfirmOrderPaidCASFunc != nil {
-		return m.ConfirmOrderPaidCASFunc(ctx, orderID, paidAt, activatedAt, sub, product, applyPlan, callbackAmountCents, providerPaymentID, providerFeeCents)
+		return m.ConfirmOrderPaidCASFunc(ctx, p)
 	}
 
 	// The real implementation is a transactional CAS computing the new expiry
@@ -1043,22 +1035,6 @@ func (m *ServiceStoreFake) GetOrderByProviderPaymentID(ctx context.Context, prov
 func (m *ServiceStoreFake) GetPaidOrdersWithoutProviderFeeAfterID(ctx context.Context, afterID uint, limit int) ([]database.Order, error) {
 	if m.GetPaidOrdersWithoutProviderFeeAfterIDFunc != nil {
 		return m.GetPaidOrdersWithoutProviderFeeAfterIDFunc(ctx, afterID, limit)
-	}
-
-	if m.GetPaidOrdersWithoutProviderFeeFunc != nil {
-		orders, err := m.GetPaidOrdersWithoutProviderFeeFunc(ctx, limit)
-		if err != nil {
-			return nil, err
-		}
-
-		filtered := orders[:0]
-		for _, order := range orders {
-			if order.ID > afterID {
-				filtered = append(filtered, order)
-			}
-		}
-
-		return filtered, nil
 	}
 
 	m.mu.RLock()

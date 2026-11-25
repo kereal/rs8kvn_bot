@@ -3,9 +3,10 @@ package bot
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
-	"time"
 
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/service/payment/stars"
 	"github.com/kereal/rs8kvn_bot/internal/testutil"
@@ -52,10 +53,10 @@ func TestHandleRefund_AdminUsageAndSuccess(t *testing.T) {
 	mockDB.GetPlanByNameFunc = func(context.Context, string) (*database.Plan, error) {
 		return &database.Plan{ID: 1, Name: "free", IsActive: true}, nil
 	}
-	mockDB.ConfirmOrderPaidCASFunc = func(context.Context, uint, time.Time, time.Time, *database.Subscription, *database.Product, database.ApplyPlanInTxFn, int64, string, *int64) (bool, error) {
+	mockDB.ConfirmOrderPaidCASFunc = func(context.Context, database.ConfirmPaidOrderParams) (bool, error) {
 		return true, nil
 	}
-	mockDB.CancelPaidOrderAndDowngradeCASFunc = func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
+	mockDB.CancelPaidOrderAndDowngradeCASFunc = func(context.Context, database.CancelPaidOrderParams) (*database.ChargebackResult, error) {
 		refunded = true
 
 		return &database.ChargebackResult{Order: &database.Order{ID: 3}, WasPaid: true, Transitioned: true, Downgraded: false}, nil
@@ -134,9 +135,10 @@ func TestHandleRefund_AdminUsageAndSuccess(t *testing.T) {
 
 		assert.Empty(t, noopPayment.GetAllSentMessages(), "no-op refund must not re-notify the buyer")
 
+		// Уже отменённый заказ: честный ответ вместо ложного «✅».
 		messages := noopMain.GetAllSentMessages()
 		require.NotEmpty(t, messages)
-		assert.Contains(t, messages[len(messages)-1].Text, "✅ Возврат по заказу #3")
+		assert.Contains(t, messages[len(messages)-1].Text, "↩️ Возврат по заказу #3 уже выполнен ранее")
 	})
 
 	t.Run("user notification error keeps admin success", func(t *testing.T) {
@@ -154,7 +156,7 @@ func TestHandleRefund_AdminUsageAndSuccess(t *testing.T) {
 		failedDB.GetPlanByNameFunc = func(context.Context, string) (*database.Plan, error) {
 			return &database.Plan{ID: 1, Name: "free", IsActive: true}, nil
 		}
-		failedDB.CancelPaidOrderAndDowngradeCASFunc = func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
+		failedDB.CancelPaidOrderAndDowngradeCASFunc = func(context.Context, database.CancelPaidOrderParams) (*database.ChargebackResult, error) {
 			return &database.ChargebackResult{Order: &database.Order{ID: 3}, WasPaid: true, Transitioned: true, Downgraded: false}, nil
 		}
 		failedH, failedMain, failedPayment := newStarsTestHandler(t, failedDB)
@@ -195,7 +197,7 @@ func TestHandleRefund_SplitBrainStateError(t *testing.T) {
 	mockDB.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
 		return &database.Subscription{ID: 7, TelegramID: 42}, nil
 	}
-	mockDB.CancelPaidOrderAndDowngradeCASFunc = func(context.Context, string, string, time.Time, uint, database.ChargebackPlanInTxFn, func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error) {
+	mockDB.CancelPaidOrderAndDowngradeCASFunc = func(context.Context, database.CancelPaidOrderParams) (*database.ChargebackResult, error) {
 		return nil, errors.New("cas conflict")
 	}
 	h, mainBot, _ := newStarsTestHandler(t, mockDB)
@@ -257,9 +259,41 @@ func TestHandlePaySupportAndTerms_Commands(t *testing.T) {
 	})
 
 	messages := mainBot.GetAllSentMessages()
-	require.Len(t, messages, 2)
+	// /paysupport — одно сообщение; /terms длиннее лимита Telegram (4096):
+	// отправляется кусками через splitMessage. Telegram считает лимит
+	// «after entities parsing», поэтому кусок с открытым Markdown-энтити
+	// может быть длиннее 4096 сырых символов — проверяем распарсенную длину.
+	require.GreaterOrEqual(t, len(messages), 3, "terms text exceeds the Telegram limit and must be split")
 	assert.Equal(t, SupportText(), messages[0].Text)
-	assert.Equal(t, TermsText(), messages[1].Text)
+
+	termsChunks := chunkTexts(messages[1:])
+	for i, chunk := range termsChunks {
+		assert.LessOrEqual(t, parsedLen(chunk), config.MaxTelegramMessageLen,
+			"terms chunk %d must fit the Telegram message limit after entity parsing", i)
+	}
+
+	// Границы кусков могут приходиться на пробел: сверяем содержимое
+	// с нормализованными пробелами — ни слово не потеряно и не задвоено.
+	normalize := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	assert.Equal(t, normalize(TermsText()), normalize(strings.Join(termsChunks, " ")),
+		"terms chunks must preserve the full text")
+}
+
+// parsedLen — верхняя оценка длины текста после разбора Telegram-энтити:
+// убирает маркеры разметки (`*`, `_`, “ ` “, `~`, `[`, `]`).
+func parsedLen(text string) int {
+	replacer := strings.NewReplacer("*", "", "_", "", "`", "", "~", "", "[", "", "]", "")
+
+	return len([]rune(replacer.Replace(text)))
+}
+
+func chunkTexts(messages []testutil.SentMessage) []string {
+	texts := make([]string, 0, len(messages))
+	for _, m := range messages {
+		texts = append(texts, m.Text)
+	}
+
+	return texts
 }
 
 func TestHandleUpdate_PaySupportTermsBypassRateLimiter(t *testing.T) {
@@ -291,7 +325,9 @@ func TestHandleUpdate_PaySupportTermsBypassRateLimiter(t *testing.T) {
 	h.HandleUpdate(context.Background(), terms)
 
 	messages := mainBot.GetAllSentMessages()
-	require.Len(t, messages, 2, "both commands must be answered despite exhausted rate limit")
+	// /terms шлётся кусками (текст длиннее лимита Telegram): проверяем
+	// paysupport-сообщение и полный terms-текст по всем кускам.
+	require.GreaterOrEqual(t, len(messages), 3, "both commands must be answered despite exhausted rate limit")
 	assert.Contains(t, messages[0].Text, "Поддержка Telegram не решает вопросы оплаты")
-	assert.Contains(t, messages[1].Text, "7.7.")
+	assert.Contains(t, strings.Join(chunkTexts(messages[1:]), " "), "7.7.")
 }

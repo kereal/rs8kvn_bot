@@ -11,7 +11,14 @@
 
 **Уже реализовано (коммит `899af44`):** uuid→string во всех 5 сигнатурах `OrderRepository` + `database` + `testutil` + тесты (0 вхождений `uuid.`), `paymentLocks` строковый, `GetTransactionStatus(string)`, `AuditSubscriptionRenewed` параметризован по provider, Stars-ветка `reconcilePendingOrder` (order.go:1244-1247, с тестом), fee-skip в `SyncProviderFees`.
 
-**Осталось из прежнего этапа 2:** provider-параметр в `FindPendingPaymentOrder`/`FindOrCreatePendingPaymentOrder` (orders.go:114,174,206,229), атомарный Stars-TTL в find-or-create, in-process mutex вокруг find-or-create, `ConfirmOrderPaidCAS` += `providerPaymentID` + `provider_fee_cents`, `CancelPaidOrderAndDowngradeCAS` += `auditFn` (параметр `provider` там уже есть).
+**Из прежнего этапа 2 реализовано полностью** (сверено с кодом 2026-11-25): provider-параметр в `FindPendingPaymentOrder`/`FindOrCreatePendingPaymentOrder`, атомарный Stars-TTL в find-or-create, in-process mutex вокруг find-or-create, `ConfirmOrderPaidCAS` с `providerPaymentID` + `provider_fee_cents`, `CancelPaidOrderAndDowngradeCAS` с `auditFn`.
+
+**Правки 2026-11-25 (production-review fixes):**
+- **P1-1.** Сбой авто-возврата больше не «поглощается»: `autoRefundStarsCharge` возвращает ошибку, recovery удерживает offset и повторяет транзакцию (R8).
+- **P1-2.** Guard авто-возврата усилен in-memory ledger'ом charge ID (`starsConfirmedCharges`/`starsRefundedCharges` в `OrderService`): confirmed (услуга оказана) не возвращается, refunded — no-op. Audit-проверка осталась secondary. Потеря ledger'а при рестарте принята (решение владельца: без новых миграций).
+- **P1-3.** Semantic mismatch в прямом webhook-пути (`successful_payment`) — немедленный авто-возврат charge (R4); сбой не блокирует ответ Telegram, recovery доведёт.
+- **P2.** `/terms` шлёт текст кусками через `splitMessage` (было >4096 — Telegram отклонял команду); транзакции recovery под `budgetCtx`; `/refund` на уже отменённый заказ отвечает «возврат уже выполнен ранее» (sentinel `ErrStarsOrderAlreadyRefunded`) вместо ложного «✅»; «Назад» на invoice при сбое `ExpirePendingOrder` не удаляет счёт; `SetAuditDB` подключён в composition root (событие `sync_run_degraded` пишется в проде); отказ payment-клиента при старте — деградация с фоновым ретраем вместо Fatal.
+- **Упрощения:** общий валидатор `validatePurchasableProduct` (Platega + Stars), `notifyAdminMarkdown` (3 дублирующих отправителя → 1), каркас `auditOrderRefundEvent` для `AuditChargebackReceived`/`AuditPaymentRefunded`, единый источник дефолта `STARS_INVOICE_TTL` и формулы `plategaInUse`, CAS-параметры сгруппированы в структуры `ConfirmPaidOrderParams`/`CancelPaidOrderParams`, `ChargebackPlanInTxFn` → `DowngradePlanInTxFn`, fake-шим `GetPaidOrdersWithoutProviderFeeFunc` и неиспользуемые `MakeRequestEndpoints`/`MakeRequestParams` удалены.
 
 ## 1. Решение
 
@@ -323,10 +330,10 @@ func BuildInvoice(p InvoiceParams) (tgbotapi.InvoiceConfig, error)
 | `internal/service/payment/stars/` | **новый пакет**: `invoice.go`, `refund.go`, тесты |
 | `internal/service/order.go` | `stars`-клиент + `SetStarsClient`, 3 новых метода, Stars-ветки, общий хвост `confirmPayment`, guard reconcile |
 | `internal/utils/format.go` | `FormatPriceCents(amount, currency)`, `FormatStarsAmount` |
-| `internal/bot/handler.go` | `paymentBot` + `SetPaymentBot`, dispatch `pre_checkout_query` и `message.successful_payment`, команды `paysupport`/`terms`/`refund` |
-| `internal/bot/subscription_handler.go` | Stars buy-flow, отправка invoice, карточка «Счёт отправлен ниже», фильтр списка тарифов по `currency='XTR'` при provider=stars (M1), текст ошибки отправки invoice (M5) |
+| `internal/bot/handler.go` | `paymentBot` + `SetPaymentBot` (под мьютексом: фоновый ретрай восстановления переключает payment-инстанс на живой), dispatch `pre_checkout_query` и `message.successful_payment`, команды `paysupport`/`terms`/`refund` |
+| `internal/bot/stars_flow.go` | Stars buy-flow (вынесен из subscription_handler.go), отправка invoice, карточка «Счёт отправлен ниже», фильтр списка тарифов по `currency='XTR'` при provider=stars (M1), текст ошибки отправки invoice (M5), bounded set отправленных invoice |
 | `internal/bot/keyboard_builder.go` | Currency-aware цена, клавиатура Stars-карточки |
-| `internal/bot/callback.go` | `stars_invoice_back_<msg_id>_<product_id>` |
+| `internal/bot/callback.go` | `stars_accept_<order_id>_<product_id>_<card_chat_id>_<card_msg_id>`, `stars_invoice_back_<buyer_telegram_id>_<invoice_msg_id>_<order_id>` |
 | `internal/bot/admin.go` | `HandleRefund` (`/refund <order_id>`) |
 | `internal/bot/command.go` | `HandlePaySupport`, `HandleTerms` (тексты уже есть в `legal_docs.go`) |
 | `internal/bot/messages.go` | Текст `MsgPaymentInProgress` для Stars (новый ключ, чтобы не ломать Platega) + ключ ошибки отправки invoice (M5) |

@@ -221,9 +221,9 @@ type OrderRepository interface {
 	ExpirePendingOrder(ctx context.Context, orderID uint) (bool, error)
 	SaveOrderPaymentAmounts(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error
 	GetPaidOrdersWithoutProviderFeeAfterID(ctx context.Context, afterID uint, limit int) ([]database.Order, error)
-	ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64, providerPaymentID string, providerFeeCents *int64) (bool, error)
+	ConfirmOrderPaidCAS(ctx context.Context, p database.ConfirmPaidOrderParams) (bool, error)
 	CancelOrderCAS(ctx context.Context, provider string, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error)
-	CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID string, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn, auditFn func(*database.Order, *database.Subscription, bool) *database.AuditLog) (*database.ChargebackResult, error)
+	CancelPaidOrderAndDowngradeCAS(ctx context.Context, p database.CancelPaidOrderParams) (*database.ChargebackResult, error)
 }
 
 // BroadcastRepository provides CRUD for broadcast cards

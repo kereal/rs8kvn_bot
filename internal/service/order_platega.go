@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
@@ -43,20 +42,7 @@ const feeSyncBudget = 60 * time.Second
 // the subscription was downgraded to the free plan. Delivery failure is logged
 // and never affects the callback result.
 func (o *OrderService) notifyAdminChargeback(ctx context.Context, sub *database.Subscription, order *database.Order, product *database.Product, downgraded bool) {
-	if o.adminBot == nil || o.cfg == nil || o.cfg.TelegramAdminID <= 0 {
-		return
-	}
-
-	msg := tgbotapi.NewMessage(o.cfg.TelegramAdminID, formatAdminChargebackAlert(sub, order, product, downgraded))
-
-	msg.ParseMode = "Markdown"
-
-	_, err := o.adminBot.Send(msg)
-	if err != nil {
-		logger.Warn("failed to notify admin about chargeback",
-			zap.Uint("order_id", order.ID),
-			zap.Error(err))
-	}
+	o.notifyAdminMarkdown(ctx, formatAdminChargebackAlert(sub, order, product, downgraded), order.ID)
 }
 
 // formatAdminChargebackAlert renders the admin notification for a chargeback on
@@ -99,7 +85,7 @@ func (o *OrderService) resolvePaymentSubscription(ctx context.Context, telegramI
 		return nil, fmt.Errorf("load payment subscription: %w", err)
 	}
 
-	err = o.validatePurchasableProduct(ctx, telegramID, canonical, nil)
+	_, err = o.validatePurchasableProduct(ctx, telegramID, canonical, nil, "load_plan_failed")
 	if err != nil {
 		return nil, err
 	}
@@ -124,24 +110,25 @@ func (o *OrderService) resolvePaymentSubscription(ctx context.Context, telegramI
 // validatePurchasableProduct проверяет, что товар активен, цена положительна и
 // план товара активен: оператор мог деактивировать товар после создания
 // pending-заказа. Уже сохранённая и действующая платёжная ссылка возвращается
-// до этой проверки.
-func (o *OrderService) validatePurchasableProduct(ctx context.Context, telegramID int64, canonical *database.Product, order *database.Order) error {
+// до этой проверки. Общий гейт покупки для Platega и Stars (issueEvent
+// различает ветки в алертах); возвращает загруженный план.
+func (o *OrderService) validatePurchasableProduct(ctx context.Context, telegramID int64, canonical *database.Product, order *database.Order, issueEvent string) (*database.Plan, error) {
 	if !canonical.IsActive || canonical.PriceCents <= 0 {
-		return errors.New("invalid paid product request")
+		return nil, errors.New("invalid paid product request")
 	}
 
 	plan, err := o.db.GetPlanByID(ctx, canonical.PlanID)
 	if err != nil {
-		o.notifyRequestIssue(ctx, "load_plan_failed", err.Error(), "retry after database recovery", telegramID, canonical, order)
+		o.notifyRequestIssue(ctx, issueEvent, err.Error(), "retry after database recovery", telegramID, canonical, nil)
 
-		return fmt.Errorf("load product plan: %w", err)
+		return nil, fmt.Errorf("load product plan: %w", err)
 	}
 
 	if plan == nil || !plan.IsActive {
-		return errors.New("product plan is inactive")
+		return nil, errors.New("product plan is inactive")
 	}
 
-	return nil
+	return plan, nil
 }
 
 func (o *OrderService) requestPayment(ctx context.Context, telegramID int64, username string, product *database.Product) (*PaymentInfo, *database.Order, error) {
@@ -224,7 +211,7 @@ func (o *OrderService) requestPlategaPayment(ctx context.Context, telegramID int
 	var created bool
 
 	if order == nil {
-		err = o.validatePurchasableProduct(ctx, telegramID, canonical, nil)
+		_, err = o.validatePurchasableProduct(ctx, telegramID, canonical, nil, "load_plan_failed")
 		if err != nil {
 			return nil, nil, err
 		}
@@ -279,7 +266,7 @@ func (o *OrderService) requestPlategaPayment(ctx context.Context, telegramID int
 	// Creating a new provider transaction is a new purchase attempt. Do not
 	// start it for a product/plan that was deactivated after the pending intent
 	// was created; only an already-saved, still-valid link may be returned above.
-	err = o.validatePurchasableProduct(ctx, telegramID, canonical, order)
+	_, err = o.validatePurchasableProduct(ctx, telegramID, canonical, order, "load_plan_failed")
 	if err != nil {
 		return nil, order, err
 	}
@@ -674,7 +661,7 @@ func (o *OrderService) confirmPayment(
 		applyPlan = o.syncSvc.ApplyPlanToSubscriptionInTx
 	}
 
-	activated, err := o.db.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan, cents, "", nil)
+	activated, err := o.db.ConfirmOrderPaidCAS(ctx, database.ConfirmPaidOrderParams{OrderID: order.ID, PaidAt: now, ActivatedAt: now, Subscription: sub, Product: product, ApplyPlan: applyPlan, CallbackAmountCents: cents})
 	if err != nil {
 		o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "confirm_payment_failed", Reason: err.Error(), Action: "retry callback; order must remain pending if DB setup rolled back", OrderID: order.ID, TelegramID: sub.TelegramID, ProductID: order.ProductID, ProductName: product.Name, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID, CallbackStatus: "CONFIRMED"})
 		return nil, err
@@ -884,7 +871,7 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 			return nil, false, fmt.Errorf("resolve free plan for chargeback: %w", planErr)
 		}
 
-		result, txErr := o.db.CancelPaidOrderAndDowngradeCAS(ctx, database.PaymentProviderPlatega, providerPaymentID, time.Now().UTC(), freePlan.ID, o.chargebackPlanInTx(), database.AuditChargebackReceived)
+		result, txErr := o.db.CancelPaidOrderAndDowngradeCAS(ctx, database.CancelPaidOrderParams{Provider: database.PaymentProviderPlatega, ProviderPaymentID: providerPaymentID, Now: time.Now().UTC(), FreePlanID: freePlan.ID, ApplyPlan: o.applyFreePlanInTx(), Audit: database.AuditChargebackReceived})
 		if txErr != nil {
 			o.NotifyPaymentIssue(ctx, PaymentIssue{Event: "cancel_payment_failed", Reason: txErr.Error(), Action: "retry callback after database recovery", OrderID: order.ID, ProductID: order.ProductID, SubscriptionID: order.SubscriptionID, AmountCents: order.AmountCents, Currency: order.Currency, ProviderID: providerPaymentID, CallbackStatus: status})
 			return nil, false, fmt.Errorf("cancel payment: %w", txErr)
@@ -905,7 +892,7 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 
 		if wasPaid {
 			recordPaymentAmount("chargeback", order.AmountCents, order.Currency)
-			chargebackSub, chargebackProduct = o.loadChargebackAlertContext(ctx, order)
+			chargebackSub, chargebackProduct = o.loadPaymentAlertContext(ctx, order)
 		}
 
 		unlock()
@@ -915,7 +902,7 @@ func (o *OrderService) CancelPaymentByProvider(ctx context.Context, providerPaym
 		}
 
 		if result.Downgraded {
-			o.syncChargebackAfterCommit(ctx, order.SubscriptionID)
+			o.syncDowngradeAfterCommit(ctx, order.SubscriptionID)
 		}
 
 		return order, wasPaid, nil

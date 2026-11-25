@@ -197,7 +197,7 @@ func TestConfirmOrderPaidCAS_ProviderPaymentIDAndFee(t *testing.T) {
 			require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 			now := time.Now().UTC().Truncate(time.Second)
-			activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, nil, 5000, tt.providerID, tt.fee)
+			activated, err := svc.ConfirmOrderPaidCAS(ctx, ConfirmPaidOrderParams{OrderID: order.ID, PaidAt: now, ActivatedAt: now, Subscription: sub, Product: product, ApplyPlan: nil, CallbackAmountCents: 5000, ProviderPaymentID: tt.providerID, ProviderFeeCents: tt.fee})
 			require.NoError(t, err)
 			require.True(t, activated)
 
@@ -233,7 +233,7 @@ func TestConfirmOrderPaidCAS_PersistsCallbackAmount(t *testing.T) {
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	now := time.Now().UTC().Truncate(time.Second)
-	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, nil, 5250, "", nil)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, ConfirmPaidOrderParams{OrderID: order.ID, PaidAt: now, ActivatedAt: now, Subscription: sub, Product: product, ApplyPlan: nil, CallbackAmountCents: 5250, ProviderPaymentID: "", ProviderFeeCents: nil})
 	require.NoError(t, err)
 	require.True(t, activated)
 
@@ -306,7 +306,7 @@ func TestConfirmOrderPaidCAS_RecalculatesFromCurrentSubscription(t *testing.T) {
 
 	// The CAS must recompute expiry from the current subscription, not from any
 	// stale caller snapshot: the expired-at value passed in is irrelevant.
-	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, &Subscription{ID: sub.ID, PlanID: plan.ID}, product, nil, order.AmountCents, "", nil)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, ConfirmPaidOrderParams{OrderID: order.ID, PaidAt: now, ActivatedAt: now, Subscription: &Subscription{ID: sub.ID, PlanID: plan.ID}, Product: product, ApplyPlan: nil, CallbackAmountCents: order.AmountCents, ProviderPaymentID: "", ProviderFeeCents: nil})
 	require.NoError(t, err)
 	assert.True(t, activated)
 
@@ -341,7 +341,7 @@ func TestConfirmOrderPaidCAS_AcceptsExpiredOrderForSettlementCallback(t *testing
 	require.NoError(t, svc.db.WithContext(ctx).Create(order).Error)
 
 	now := time.Now().UTC().Truncate(time.Second)
-	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, nil, order.AmountCents, "", nil)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, ConfirmPaidOrderParams{OrderID: order.ID, PaidAt: now, ActivatedAt: now, Subscription: sub, Product: product, ApplyPlan: nil, CallbackAmountCents: order.AmountCents, ProviderPaymentID: "", ProviderFeeCents: nil})
 	require.NoError(t, err)
 	require.True(t, activated, "the service grace-period check allows an expired order to enter the atomic paid transition")
 
@@ -390,7 +390,7 @@ func TestConfirmOrderPaidCAS_SwitchesPlanAndStatus(t *testing.T) {
 		return nil
 	}
 
-	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan, order.AmountCents, "", nil)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, ConfirmPaidOrderParams{OrderID: order.ID, PaidAt: now, ActivatedAt: now, Subscription: sub, Product: product, ApplyPlan: applyPlan, CallbackAmountCents: order.AmountCents, ProviderPaymentID: "", ProviderFeeCents: nil})
 	require.NoError(t, err)
 	assert.True(t, activated)
 	// applyPlan must receive the PRODUCT plan, not the stale sub.PlanID.
@@ -403,7 +403,7 @@ func TestConfirmOrderPaidCAS_SwitchesPlanAndStatus(t *testing.T) {
 	assert.Equal(t, product.ID, *got.ProductID)
 
 	// Idempotent retry: order already paid, no second activation.
-	activated, err = svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan, order.AmountCents, "", nil)
+	activated, err = svc.ConfirmOrderPaidCAS(ctx, ConfirmPaidOrderParams{OrderID: order.ID, PaidAt: now, ActivatedAt: now, Subscription: sub, Product: product, ApplyPlan: applyPlan, CallbackAmountCents: order.AmountCents, ProviderPaymentID: "", ProviderFeeCents: nil})
 	require.NoError(t, err)
 	assert.False(t, activated)
 }
@@ -447,7 +447,7 @@ func TestConfirmOrderPaidCAS_SamePlanRenewalSkipsApplyPlan(t *testing.T) {
 		return nil
 	}
 
-	activated, err := svc.ConfirmOrderPaidCAS(ctx, order.ID, now, now, sub, product, applyPlan, order.AmountCents, "", nil)
+	activated, err := svc.ConfirmOrderPaidCAS(ctx, ConfirmPaidOrderParams{OrderID: order.ID, PaidAt: now, ActivatedAt: now, Subscription: sub, Product: product, ApplyPlan: applyPlan, CallbackAmountCents: order.AmountCents, ProviderPaymentID: "", ProviderFeeCents: nil})
 	require.NoError(t, err)
 	assert.True(t, activated)
 	// Same-plan renewal: the CAS must not schedule a VPN re-sync.
