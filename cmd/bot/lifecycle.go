@@ -162,6 +162,13 @@ type preCheckoutAnswerer func(queryID string)
 // ждёт завершения чужого долгого обработчика.
 const regularUpdateQueueSize = config.MaxConcurrentHandlers * 4
 
+// shutdownFinancialTimeout — общий бюджет обработки финансовых апдейтов,
+// уже извлечённых из очередей на момент штатной остановки. Их нельзя бросить
+// (successful_payment — источник истины об оплате), но и затягивать остановку
+// сверх config.ShutdownTimeout нельзя: 30 c укладываются в 90 c с запасом на
+// завершение уже запущенных обработчиков.
+const shutdownFinancialTimeout = 30 * time.Second
+
 // runEventLoop processes Telegram updates with bounded concurrency until
 // the shutdown context is cancelled. Blocks until all in-flight handlers
 // complete or the shutdown timeout elapses.
@@ -184,6 +191,44 @@ func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Han
 
 	var updatesWg sync.WaitGroup
 
+	// Остановка: апдейт уже вынут из очереди Telegram, поэтому финансовый
+	// апдейт нельзя просто выбросить. Обрабатываем такие подтверждения здесь
+	// же, отдельным контекстом с общим на весь drain бюджетом.
+	var (
+		finShutdownMu     sync.Mutex
+		finShutdownCtx    context.Context
+		finShutdownCancel context.CancelFunc
+	)
+
+	// shutdownFinancialCtx возвращает общий на весь drain контекст,
+	// создаваемый лениво при первом же финансовом апдейте.
+	shutdownFinancialCtx := func() context.Context {
+		finShutdownMu.Lock()
+		defer finShutdownMu.Unlock()
+
+		if finShutdownCtx == nil {
+			finShutdownCtx, finShutdownCancel = context.WithTimeout(context.Background(), shutdownFinancialTimeout)
+		}
+
+		return finShutdownCtx
+	}
+
+	processAcceptedFinancial := func(u tgbotapi.Update) {
+		if !handler.IsFinancialUpdate(u) {
+			return
+		}
+
+		finCtx := shutdownFinancialCtx()
+		if finCtx.Err() != nil {
+			logger.Warn("Shutdown: financial update dropped, drain budget exhausted")
+
+			return
+		}
+
+		logger.Info("Shutdown: processing accepted financial update")
+		handleUpdateSafely(finCtx, handler, u)
+	}
+
 	// Диспетчер обычной очереди — единственное место, где ждём слот обработчика.
 	dispatcherDone := make(chan struct{})
 
@@ -191,10 +236,21 @@ func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Han
 		defer close(dispatcherDone)
 
 		for update := range regularQueue {
+			// Проверяем остановку до ожидания слота: иначе случайный выбор
+			// в select ниже может запустить обработчик с уже отменённым
+			// контекстом и потерять подтверждение оплаты.
+			if ctx.Err() != nil {
+				processAcceptedFinancial(update)
+
+				continue
+			}
+
 			select {
 			case updateSem <- struct{}{}:
 			case <-ctx.Done():
-				return
+				processAcceptedFinancial(update)
+
+				continue
 			}
 
 			updatesWg.Add(1)
@@ -267,7 +323,11 @@ eventLoop:
 				select {
 				case regularQueue <- update:
 				case <-ctx.Done():
+					// Апдейт уже прочитан из Telegram и в очередь не попал:
+					// финансовый обрабатываем сразу, остальное теряем.
 					logger.Info("Graceful shutdown initiated, draining updates...")
+					processAcceptedFinancial(update)
+
 					break eventLoop
 				}
 			}
@@ -308,6 +368,12 @@ eventLoop:
 	case <-time.After(config.ShutdownTimeout):
 		logger.Warn("Timeout waiting for update handlers to complete")
 	}
+
+	finShutdownMu.Lock()
+	if finShutdownCancel != nil {
+		finShutdownCancel()
+	}
+	finShutdownMu.Unlock()
 }
 
 // gracefulShutdown stops background workers and handler goroutines with timeouts.
