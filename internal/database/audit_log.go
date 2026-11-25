@@ -786,9 +786,22 @@ func auditActorTelegram(sub *Subscription) *string {
 	return marshalAuditJSONString(fmt.Sprintf("%d", sub.TelegramID))
 }
 
+// auditRetentionExemptEvents — события, которые обрезка журнала не удаляет.
+// `payment_confirmed` — единственный след оплаты, переживающий рестарт и
+// каскадное удаление заказа (/del): по нему авто-возврат отличает дубль charge
+// от денег за уже оказанную услугу (см. autoRefundStarsCharge). Вместе с ним
+// хранится `payment_auto_refunded` — иначе повторная доставка старого webhook'а
+// попыталась бы вернуть деньги второй раз.
+var auditRetentionExemptEvents = []string{
+	AuditEventPaymentConfirmed,
+	AuditEventPaymentAutoRefunded,
+}
+
 // DeleteAuditLogBefore удаляет не более batch записей старше before и
 // возвращает число удалённых. Пачками — чтобы DELETE не держал write-lock на
-// всю таблицу и не блокировал платежи/синк.
+// всю таблицу и не блокировал платежи/синк. Платёжные события
+// (auditRetentionExemptEvents) не удаляются никогда: журнал для них — рабочее
+// состояние, а не история.
 func (s *Service) DeleteAuditLogBefore(ctx context.Context, before time.Time, batch int) (int64, error) {
 	if batch <= 0 {
 		batch = 1000
@@ -796,8 +809,8 @@ func (s *Service) DeleteAuditLogBefore(ctx context.Context, before time.Time, ba
 
 	result := s.db.WithContext(ctx).
 		Exec(`DELETE FROM audit_log WHERE id IN (
-			SELECT id FROM audit_log WHERE created_at < ? ORDER BY id LIMIT ?
-		)`, before, batch)
+			SELECT id FROM audit_log WHERE created_at < ? AND event NOT IN ? ORDER BY id LIMIT ?
+		)`, before, auditRetentionExemptEvents, batch)
 	if result.Error != nil {
 		return 0, fmt.Errorf("delete audit log before %s: %w", before.Format(time.RFC3339), result.Error)
 	}

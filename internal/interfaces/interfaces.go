@@ -209,6 +209,9 @@ type ProductRepository interface {
 type OrderRepository interface {
 	GetOrderByID(ctx context.Context, id uint) (*database.Order, error)
 	GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID string) (*database.Order, error)
+	// HasOrdersByProvider — стартовая проверка: нужен ли платёжный Telegram-инстанс
+	// (Stars) для возвратов по заказам провайдера.
+	HasOrdersByProvider(ctx context.Context, provider string) (bool, error)
 	FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, now time.Time) (*database.Order, error)
 	FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, bool, error)
 	MarkPaymentCreationUncertain(ctx context.Context, orderID uint, uncertain bool) (bool, error)

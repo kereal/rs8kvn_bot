@@ -118,13 +118,6 @@ func (w *SubscriptionSyncWorker) process(ctx context.Context) {
 			if reconcileErr != nil {
 				logger.Warn("Pending order reconciliation failed", zap.Error(reconcileErr))
 			}
-
-			// Восстановление потерянных successful_payment из истории
-			// getStarTransactions. Идемпотентно (CAS по charge ID).
-			starsErr := w.orderSvc.ReconcileStarsTransactions(ctx)
-			if starsErr != nil {
-				logger.Warn("Stars transaction reconciliation failed", zap.Error(starsErr))
-			}
 		}
 	}
 

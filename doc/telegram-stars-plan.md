@@ -3,21 +3,20 @@
 Дата: 2026-11-18; ревью-правки 2026-11-19 (верификация против кода на `899af44`, внесены замечания B1/B2/H1/H2). Ветка: `feature/telegram-stars`. Статус: **реализовано 2026-11-19** (этапы 2–8; все гейты зелёные: build/vet/lint 0 issues, 2227 тестов, -race чисто). План переработан после ревью (сверка кода на `899af44` + 4 независимых ревью).
 
 **Правки 2026-11-20 (safeguards):** код реализован, но **production-ready не заявляется до закрытия rollout-чеклиста §10.1** (включая закрытие legacy Platega settlement-окна). Новые гарантии:
-- Stars-клиент (`stars.New(paymentAPI)` → `orderService.SetStarsClient`) подключается в composition root **всегда**, независимо от активного `PAYMENT_PROVIDER`: старые Stars-invoices и возвраты работают и после переключения на Platega.
+- Stars-клиент (`stars.New(paymentAPI)` → `orderService.SetStarsClient`) поднимается в composition root, только когда Stars нужен: активный `PAYMENT_PROVIDER=telegram_stars` **или** в БД есть Stars-заказы (возвраты `/refund` по старым заказам). В Platega-only деплойменте второй Telegram-инстанс не создаётся и Stars-код не исполняется.
 - payment-клиент уменьшен до **4 c** (было 5 c); polling-инстанс по-прежнему без таймаута (D1).
 - XTR-товары создаются `is_active=false` и активируются только после переключения провайдера — активный XTR-товар не может продаваться через Platega (§10.1).
 - Rollout закрывает legacy Platega settlement/refund window до отключения callback (§10.1 шаги 2 и 8).
-- Recovery потерянных `successful_payment` через `getStarTransactions` — реализован в payment core этой же правки: `stars.Client.GetTransactions` (internal/service/payment/stars/transaction.go); транзакция Stars со спиченным payload доводит заказ до `paid` автоматически; ручная сверка по charge ID остаётся fallback для unmatched/manual случаев.
+- **Автоматической сверки `getStarTransactions` нет** (решение 2026-11-25): она могла автоматически вернуть деньги за уже оказанную услугу. Потерянный `successful_payment` разбирается вручную по `/paysupport` (doc/operations.md §8.1).
 
 **Уже реализовано (коммит `899af44`):** uuid→string во всех 5 сигнатурах `OrderRepository` + `database` + `testutil` + тесты (0 вхождений `uuid.`), `paymentLocks` строковый, `GetTransactionStatus(string)`, `AuditSubscriptionRenewed` параметризован по provider, Stars-ветка `reconcilePendingOrder` (order.go:1244-1247, с тестом), fee-skip в `SyncProviderFees`.
 
 **Из прежнего этапа 2 реализовано полностью** (сверено с кодом 2026-11-25): provider-параметр в `FindPendingPaymentOrder`/`FindOrCreatePendingPaymentOrder`, атомарный Stars-TTL в find-or-create, in-process mutex вокруг find-or-create, `ConfirmOrderPaidCAS` с `providerPaymentID` + `provider_fee_cents`, `CancelPaidOrderAndDowngradeCAS` с `auditFn`.
 
 **Правки 2026-11-25 (production-review fixes):**
-- **P1-1.** Сбой авто-возврата больше не «поглощается»: `autoRefundStarsCharge` возвращает ошибку, recovery удерживает offset и повторяет транзакцию (R8).
-- **P1-2.** Guard авто-возврата усилен in-memory ledger'ом charge ID (`starsConfirmedCharges`/`starsRefundedCharges` в `OrderService`): confirmed (услуга оказана) не возвращается, refunded — no-op. Audit-проверка осталась secondary. Потеря ledger'а при рестарте принята (решение владельца: без новых миграций).
-- **P1-3.** Semantic mismatch в прямом webhook-пути (`successful_payment`) — немедленный авто-возврат charge (R4); сбой не блокирует ответ Telegram, recovery доведёт.
-- **P2.** `/terms` шлёт текст кусками через `splitMessage` (было >4096 — Telegram отклонял команду); транзакции recovery под `budgetCtx`; `/refund` на уже отменённый заказ отвечает «возврат уже выполнен ранее» (sentinel `ErrStarsOrderAlreadyRefunded`) вместо ложного «✅»; «Назад» на invoice при сбое `ExpirePendingOrder` не удаляет счёт; `SetAuditDB` подключён в composition root (событие `sync_run_degraded` пишется в проде); отказ payment-клиента при старте — деградация с фоновым ретраем вместо Fatal.
+- **Авто-возврат дублей.** Единственный путь авто-возврата — `autoRefundStarsCharge`; защита от возврата денег за уже оказанную услугу — audit-guard `payment_confirmed` по charge ID (переживает рестарт и каскадное удаление заказа `/del`). In-memory ledger (`starsConfirmedCharges`/`starsRefundedCharges`) удалён: после рестарта он ничего не знал. Автоматическая recovery-сверка `getStarTransactions` удалена вместе с `stars.Client.GetTransactions`, offset/мутексом и hourly-хуком — она возвращала деньги за уже оказанную услугу. Retention журнала больше не удаляет `payment_confirmed`/`payment_auto_refunded` (`auditRetentionExemptEvents`), иначе guard терял бы след оплаты через 180 дней.
+- **Semantic mismatch.** Несентинельные ошибки валидации payload в прямом webhook-пути — немедленный авто-возврат charge (`StarsSemanticMismatchError`, R4); ошибка возврата возвращается наружу (повторная доставка повторит его).
+- **P2.** `/terms` шлёт текст кусками через `splitMessage` (было >4096 — Telegram отклонял команду); `/refund` на уже отменённый заказ отвечает «возврат уже выполнен ранее» (sentinel `ErrStarsOrderAlreadyRefunded`) вместо ложного «✅»; «Назад» на invoice при сбое `ExpirePendingOrder` не удаляет счёт; `SetAuditDB` подключён в composition root (событие `sync_run_degraded` пишется в проде); отказ payment-клиента при старте — деградация с фоновым ретраем вместо Fatal; `paymentReady` Platega-вебхука больше не зависит от здоровья Stars-клиента.
 - **Упрощения:** общий валидатор `validatePurchasableProduct` (Platega + Stars), `notifyAdminMarkdown` (3 дублирующих отправителя → 1), каркас `auditOrderRefundEvent` для `AuditChargebackReceived`/`AuditPaymentRefunded`, единый источник дефолта `STARS_INVOICE_TTL` и формулы `plategaInUse`, CAS-параметры сгруппированы в структуры `ConfirmPaidOrderParams`/`CancelPaidOrderParams`, `ChargebackPlanInTxFn` → `DowngradePlanInTxFn`, fake-шим `GetPaidOrdersWithoutProviderFeeFunc` и неиспользуемые `MakeRequestEndpoints`/`MakeRequestParams` удалены.
 
 ## 1. Решение
@@ -82,10 +81,10 @@
 | R2 | **Гвард активного провайдера в acceptance.** `handleStarsAccept` дополнительно проверяет `isStarsProvider()`: старая кнопка согласия не выставляет Stars-invoice после переключения на Platega (defense-in-depth к rollout-шагу 2) | §8.2 шаг 2 (операторская дисциплина) | `subscription_handler.go` |
 | R3 | **Авто-возврат дублирующего charge.** §5.3 для `paid`/`canceled` с новым charge ID предписывал только alert. Реализация возвращает charge автоматически (`autoRefundStarsCharge`): деньги списаны, entitlement второй раз не меняется; при сбое возврата — alert с charge ID | §5.3 | `confirmStarsPayment` |
 | R4 | **Авто-возврат при удалённом product/subscription.** После списания, если товар/подписка удалены, charge возвращается автоматически: заказ остаётся pending без charge ID — `/refund` его не найдёт, ручной возврат был бы только по alert'у | §5.3 шаг 5 (ручной) | `confirmStarsPayment` |
-| R5 | **Авто-возврат проигравшего CAS-гонку charge.** Lock keyed по charge ID — два разных charge одного заказа обрабатываются параллельно; после CAS `activated=false` заказ перечитывается, проигравший charge возвращается сразу, без ожидания recovery | §5.3 (не описано) | `confirmStarsPayment` |
+| R5 | **Авто-возврат проигравшего CAS-гонку charge.** Lock keyed по charge ID — два разных charge одного заказа обрабатываются параллельно; после CAS `activated=false` заказ перечитывается, проигравший charge возвращается сразу, без отложенной сверки | §5.3 (не описано) | `confirmStarsPayment` |
 | R6 | **Немедленное истечение pending при сбое отправки invoice/acceptance.** §5.1 шаг 8 оставлял заказ pending до TTL (повторный клик — «счёт уже отправлен» по несуществующему счёту). Реализация expire'ит заказ сразу: retry создаёт новый заказ без ожидания TTL | §5.1 шаг 8 | `handleStarsBuy`, `handleStarsAccept` |
 | R7 | **Rate-limiter bypass шире плана.** §5.2 требовал обход лимита только для pre-checkout; `isFinancialUpdate` пропускает вне лимита также `successful_payment`, `/paysupport`, `/terms` — финансовые и комплаенс-апдейты не должны теряться при флуде | §5.2 | `handler.go` |
-| R8 | **Recovery-сверка: классификация ошибок валидации.** Несентинельные ошибки данных («не-Stars заказ», удалённая подписка, чужой пользователь) классифицируются как semantic mismatch → авто-возврат charge и продолжение страницы; прерывают проход и держат offset только DB/infrastructure ошибки. Иначе одна битая транзакция навсегда залипала бы страницу `getStarTransactions` | §8.1 (recovery описан упрощённо) | `validateStarsPayload`, `ReconcileStarsTransactions` |
+| R8 | **Классификация ошибок валидации payload.** Несентинельные ошибки данных («не-Stars заказ», удалённая подписка, чужой пользователь) классифицируются как semantic mismatch → немедленный авто-возврат charge (`StarsSemanticMismatchError`); ошибки инфраструктуры (БД) наружу — повторная доставка webhook'а повторяет разбор. Сверки по `getStarTransactions` больше нет | §8.1 | `validateStarsPayload`, `confirmStarsPayment`, `autoRefundStarsCharge` |
 
 ## 4. Контракты изменений
 
@@ -338,7 +337,7 @@ func BuildInvoice(p InvoiceParams) (tgbotapi.InvoiceConfig, error)
 | `internal/bot/command.go` | `HandlePaySupport`, `HandleTerms` (тексты уже есть в `legal_docs.go`) |
 | `internal/bot/messages.go` | Текст `MsgPaymentInProgress` для Stars (новый ключ, чтобы не ломать Platega) + ключ ошибки отправки invoice (M5) |
 | `internal/testutil/` | Fake `OrderRepository` под новые сигнатуры + fake payment API (`Send`/`Request`/`MakeRequest`) |
-| `cmd/bot/main.go` | `initBot` возвращает payment-инстанс (`http.Client{Timeout: 4s}`), `AllowedUpdates += pre_checkout_query` (main.go:624-627), `SetPaymentConfig` — по итоговому гейту §4.1: `(PAYMENT_ENABLED && PAYMENT_PROVIDER=platega) || PLATEGA_CALLBACK_ENABLED` (main.go:286-292); Stars-клиент (`stars.New(paymentAPI)` → `SetStarsClient`) создаётся **всегда**, независимо от активного провайдера — активный провайдер влияет только на новые продажи |
+| `cmd/bot/main.go` | `initBot` возвращает payment-инстанс (`http.Client{Timeout: 4s}`), `AllowedUpdates += pre_checkout_query` (main.go:624-627), `SetPaymentConfig` — по итоговому гейту §4.1: `(PAYMENT_ENABLED && PAYMENT_PROVIDER=platega) || PLATEGA_CALLBACK_ENABLED` (main.go:286-292); Stars-клиент (`stars.New(paymentAPI)` → `SetStarsClient`) создаётся, если активен провайдер `telegram_stars` или в БД есть Stars-заказы (возвраты `/refund`); иначе второй Telegram-инстанс не поднимается — активный провайдер влияет только на новые продажи |
 | `cmd/bot/lifecycle.go` | Не содержит payment/Stars wiring (оставил импорт `platega` для типов runtimeDeps; весь платёжный wiring — в `cmd/bot/main.go`). |
 | `README.md`, `doc/operations.md`, `.env.example` | Новые env, порядок переключения, процедура возврата |
 
@@ -354,7 +353,7 @@ func BuildInvoice(p InvoiceParams) (tgbotapi.InvoiceConfig, error)
 | 4 | **Выполнен**: `OrderService`: Stars-ветки, `ConfirmStarsPayment`, `ValidateStarsPreCheckout`, `RefundStarsOrder`, общий хвост `confirmPaidOrderTail`, guard reconcile | `go test ./internal/service` |
 | 5 | **Выполнен**: Бот: payment-клиент, dispatch pre-checkout/successful_payment, buy-flow, back-callback, `/paysupport`, `/terms`, `/refund` | `go test ./internal/bot` |
 | 6 | **Выполнен**: UI и форматтеры (§6): `FormatStarsAmount`, `formatMoneyCents` XTR без деления на 100, XTR-фильтр списка, тексты M5/Stars | `go test ./internal/utils ./internal/bot` |
-| 7 | **Выполнен**: Wiring (`cmd/bot/main.go`: отдельный payment-инстанс D1, `AllowedUpdates += pre_checkout_query`, гейт `ShouldEnablePlategaCallback`, Platega-клиент по флагам §4.1, `SetStarsClient(stars.New(paymentAPI))` безусловно, `SetPaymentBot(paymentAPI)` — всё после `initBot`, т.к. paymentAPI не существует на шаге `initServices` (шаг 5). Payment-инстанс один — и для invoice/pre-checkout, и для refund. Stars-клиент подключён всегда, независимо от активного `PAYMENT_PROVIDER` (возвраты и recovery работают после переключения на Platega). `cmd/bot/lifecycle.go` не содержит payment/Stars wiring. | `go build ./... && go test ./cmd/...` |
+| 7 | **Выполнен**: Wiring (`cmd/bot/main.go`: отдельный payment-инстанс D1, `AllowedUpdates += pre_checkout_query`, гейт `ShouldEnablePlategaCallback`, Platega-клиент по флагам §4.1, `SetStarsClient(stars.New(paymentAPI))` — при активном Stars-провайдере или наличии Stars-заказов, `SetPaymentBot(paymentAPI)` — всё после `initBot`, т.к. paymentAPI не существует на шаге `initServices` (шаг 5). Payment-инстанс один — и для invoice/pre-checkout, и для refund. Stars-клиент поднимается при `PAYMENT_PROVIDER=telegram_stars` или при наличии Stars-заказов в БД (возвраты работают после переключения на Platega). `cmd/bot/lifecycle.go` не содержит payment/Stars wiring. | `go build ./... && go test ./cmd/...` |
 | 8 | **Выполнен**: Документация: README, doc/operations.md (§8 Stars: rollout/rollback/compliance//refund), doc/installation.md, .env.example | — |
 
 Финальные гейты:
@@ -426,7 +425,7 @@ go test -race ./...
 
 ### 10.1 Переключение на Stars
 
-1. Развернуть код с `PAYMENT_PROVIDER=platega` — поведение продаж не меняется. Stars-клиент подключается при старте всегда: возвраты `/refund` по уже оплаченным Stars-заказам работают при любом активном провайдере.
+1. Развернуть код с `PAYMENT_PROVIDER=platega` — поведение продаж не меняется. Stars-клиент поднимается при наличии Stars-заказов в БД: возвраты `/refund` по уже оплаченным Stars-заказам работают при любом активном провайдере.
 2. **Закрыть/settle legacy pending Platega.** Если есть незавершённые Platega-заказы — дождаться их расчёта (оплата/возврат/отмена) при `PLATEGA_CALLBACK_ENABLED=true` и оставленных Platega-кредах. Не переключать провайдера, пока окно settlement не закрыто (шаг 8).
 3. Создать **отдельные** XTR-товары (`INSERT`, `currency='XTR'`, `price_cents` = цена в Stars) в состоянии **`is_active=false`**: до переключения провайдера Platega их не видит — активный XTR-товар не может быть продан через Platega. RUB-товары и их цены не трогать: `UpdateProductGuarded` запрещает менять цену после первого заказа (M1).
 4. **Переключить провайдера:** `PAYMENT_PROVIDER=telegram_stars`, `PAYMENT_ENABLED=true`, перезапуск.
@@ -466,7 +465,7 @@ go test -race ./...
 | 11 | Конфиг: allowlist provider, креды только под активным платежом/callback-режимом, `PLATEGA_CALLBACK_ENABLED`, `STARS_INVOICE_TTL` | §4.1 |
 | 12 | Форматтеры: XTR целым числом, RUB-вывод не изменён | §6.1 |
 | 13 | `/paysupport` + `/terms`; Terms-текст уже есть, дубли не создаём | D10, §10.3 |
-| 14 | Rollback = остановка продаж + рабочий возврат (Stars-клиент подключён всегда) | §10.2 |
+| 14 | Rollback = остановка продаж + рабочий возврат (Stars-клиент поднимается при наличии Stars-заказов) | §10.2 |
 | 15 | Список файлов, интерфейсов, fake-ов и тестов полный | §7, §9 |
 | 16 | Единственный источник XTR-форматирования, обрезка title в пределах лимита | §6.1, §4.3 |
 

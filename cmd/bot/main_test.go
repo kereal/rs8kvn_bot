@@ -362,6 +362,36 @@ func TestPreCheckoutAnswerBudgetFitsTelegramWindow(t *testing.T) {
 		"the pre-checkout answer must fit the Telegram 10s window")
 }
 
+// Тест поведения: платёжный Telegram-инстанс (Stars) поднимается только когда
+// Stars реально нужен — активный провайдер или старые Stars-заказы (возвраты
+// `/refund` после переключения на Platega). Иначе второй инстанс не создаётся.
+func TestStarsClientNeeded(t *testing.T) {
+	tests := []struct {
+		name      string
+		provider  string
+		hasOrders bool
+		ordersErr error
+		want      bool
+	}{
+		{name: "stars provider without orders", provider: database.PaymentProviderTelegramStars, want: true},
+		{name: "platega with stars orders", provider: database.PaymentProviderPlatega, hasOrders: true, want: true},
+		{name: "platega without stars orders", provider: database.PaymentProviderPlatega, want: false},
+		{name: "db error keeps stars client", provider: database.PaymentProviderPlatega, ordersErr: errors.New("db down"), want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := &testutil.ServiceStoreFake{
+				HasOrdersByProviderFunc: func(context.Context, string) (bool, error) {
+					return tt.hasOrders, tt.ordersErr
+				},
+			}
+
+			assert.Equal(t, tt.want, starsClientNeeded(&config.Config{PaymentProvider: tt.provider}, db))
+		})
+	}
+}
+
 // TestNewPaymentBotAPI_RetriesTransientFailure — транзиентная ошибка Telegram
 // при создании payment-инстанса не должна ронять старт бота: основной платёж
 // Platega работает через webhook и от Telegram-инстанса не зависит.

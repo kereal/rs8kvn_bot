@@ -45,6 +45,38 @@ func TestGetOrderByProviderPaymentID_FindsAndNormalizesNotFound(t *testing.T) {
 	require.ErrorIs(t, err, ErrOrderNotFound)
 }
 
+// Тест поведения: стартовая проверка «есть ли заказы провайдера» решает, нужен
+// ли платёжный Telegram-инстанс: видит только запрошенного провайдера.
+func TestHasOrdersByProvider_SeesOnlyRequestedProvider(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	sub := createTestSubscription(t, svc, 993005, "has-orders", "has-orders-client")
+	plan := &Plan{Name: "has-orders-plan", IsActive: true}
+	require.NoError(t, svc.db.Create(plan).Error)
+	product := &Product{PlanID: plan.ID, Name: "Has orders", DurationDays: 30, PriceCents: 100, Currency: "RUB", IsActive: true}
+	require.NoError(t, svc.db.Create(product).Error)
+
+	empty, err := svc.HasOrdersByProvider(ctx, PaymentProviderTelegramStars)
+	require.NoError(t, err)
+	assert.False(t, empty, "без заказов Stars-клиент не нужен")
+
+	require.NoError(t, svc.db.WithContext(ctx).Create(&Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPending,
+		AmountCents: 100, Currency: "RUB", PaymentProvider: PaymentProviderTelegramStars,
+		CreatedAt: time.Now().UTC(),
+	}).Error)
+
+	has, err := svc.HasOrdersByProvider(ctx, PaymentProviderTelegramStars)
+	require.NoError(t, err)
+	assert.True(t, has, "наличие Stars-заказа включает Stars-клиент")
+
+	other, err := svc.HasOrdersByProvider(ctx, "platega")
+	require.NoError(t, err)
+	assert.False(t, other, "заказ другого провайдера не считается")
+}
+
 func TestPaymentCreationUncertainty_IsClaimedAndClearedOnce(t *testing.T) {
 	t.Parallel()
 

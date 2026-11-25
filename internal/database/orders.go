@@ -45,6 +45,21 @@ func (s *Service) GetOrderByProviderPaymentID(ctx context.Context, provider stri
 	return &order, nil
 }
 
+// HasOrdersByProvider сообщает, есть ли в базе хотя бы один заказ указанного
+// провайдера. Стартовая проверка решает, нужен ли платёжный Telegram-инстанс
+// Telegram Stars: без активного Stars-провайдера и без старых Stars-заказов
+// (возвраты `/refund`) он не поднимается вовсе.
+func (s *Service) HasOrdersByProvider(ctx context.Context, provider string) (bool, error) {
+	var order Order
+
+	result := s.db.WithContext(ctx).Select("id").Where("payment_provider = ?", provider).Limit(1).Find(&order)
+	if result.Error != nil {
+		return false, fmt.Errorf("failed to check orders by provider %s: %w", provider, result.Error)
+	}
+
+	return result.RowsAffected > 0, nil
+}
+
 const stalePendingOrderLookback = 30 * 24 * time.Hour
 
 // GetStalePendingOrdersAfterID возвращает pending-заказы с истёкшим сроком

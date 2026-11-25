@@ -149,7 +149,7 @@ func registerFlags() (*flag.Registry, *configFlags) {
 		donateURL: flag.NewString(DonateURL), donateEnabled: flag.NewBool(DefaultDonateEnabled),
 		globalSubURL: flag.NewString(""), subServerAccessLogPath: flag.NewString(""),
 		paymentEnabled: flag.NewBool(false), paymentProvider: flag.NewString("platega"), plategaMerchantID: flag.NewString(""), plategaSecret: flag.NewString(""),
-		plategaCallbackEnabled: flag.NewBool(false), starsInvoiceTTL: flag.NewString("15m"),
+		plategaCallbackEnabled: flag.NewBool(false), starsInvoiceTTL: flag.NewString(starsInvoiceTTLDefaultRaw),
 		notificationsEnabled: flag.NewBool(DefaultNotificationsEnabled), metricsToken: flag.NewString(""),
 		auditRetentionDays: flag.NewInt(DefaultAuditLogRetentionDays),
 	}

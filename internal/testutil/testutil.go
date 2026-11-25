@@ -521,6 +521,7 @@ type ServiceStoreFake struct {
 	GetOrderByIDFunc                            func(ctx context.Context, id uint) (*database.Order, error)
 	GetOrderByProviderPaymentIDFunc             func(ctx context.Context, provider string, providerPaymentID string) (*database.Order, error)
 	GetPaidOrdersWithoutProviderFeeAfterIDFunc  func(ctx context.Context, afterID uint, limit int) ([]database.Order, error)
+	HasOrdersByProviderFunc                     func(ctx context.Context, provider string) (bool, error)
 	HasPaymentConfirmedByProviderPaymentIDFunc  func(ctx context.Context, provider string, providerPaymentID string) (bool, error)
 	GetPendingBySubscriptionIDFunc              func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
 	GetPendingSyncFunc                          func(ctx context.Context) ([]database.SubscriptionNode, error)
@@ -1013,6 +1014,23 @@ func (m *ServiceStoreFake) GetOrderByID(ctx context.Context, id uint) (*database
 	}
 
 	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *ServiceStoreFake) HasOrdersByProvider(ctx context.Context, provider string) (bool, error) {
+	if m.HasOrdersByProviderFunc != nil {
+		return m.HasOrdersByProviderFunc(ctx, provider)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, order := range m.Orders {
+		if order.PaymentProvider == provider {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (m *ServiceStoreFake) GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID string) (*database.Order, error) {

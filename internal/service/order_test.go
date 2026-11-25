@@ -2710,7 +2710,7 @@ func TestConfirmStarsPayment_CASLoserRereadFailureReturnsError(t *testing.T) {
 			return false, nil
 		},
 	}
-	o := newStarsReconcileService(mock, &testutil.BotAPI{
+	o := newStarsTestService(mock, &testutil.BotAPI{
 		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
 			if endpoint == "refundStarPayment" {
 				refundCalled = true
@@ -2758,7 +2758,7 @@ func TestConfirmStarsPayment_CASLoserUnexpectedStatusReturnsError(t *testing.T) 
 			return false, nil
 		},
 	}
-	o := newStarsReconcileService(mock, &testutil.BotAPI{
+	o := newStarsTestService(mock, &testutil.BotAPI{
 		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
 			if endpoint == "refundStarPayment" {
 				refundCalled = true
@@ -2792,7 +2792,7 @@ func TestConfirmStarsPayment_CanceledOrderSameChargeIsNoOp(t *testing.T) {
 			return &database.Subscription{ID: 4, TelegramID: 42}, nil
 		},
 	}
-	o := newStarsReconcileService(mock, &testutil.BotAPI{
+	o := newStarsTestService(mock, &testutil.BotAPI{
 		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
 			makeRequestCalls++
 			if endpoint == "refundStarPayment" {
@@ -2826,7 +2826,7 @@ func TestConfirmStarsPayment_CanceledOrderNewChargeAutoRefunds(t *testing.T) {
 			return &database.Subscription{ID: 4, TelegramID: 42}, nil
 		},
 	}
-	o := newStarsReconcileService(mock, &testutil.BotAPI{
+	o := newStarsTestService(mock, &testutil.BotAPI{
 		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
 			if endpoint == "refundStarPayment" {
 				refundedCharge = params["telegram_payment_charge_id"]
@@ -2863,7 +2863,7 @@ func TestConfirmStarsPayment_DeletedProductWritesAutoRefundAudit(t *testing.T) {
 			return nil, database.ErrProductNotFound
 		},
 	}
-	o := newStarsReconcileService(mock, &testutil.BotAPI{
+	o := newStarsTestService(mock, &testutil.BotAPI{
 		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
 			if endpoint == "refundStarPayment" {
 				return &tgbotapi.APIResponse{Ok: true}, nil

@@ -59,20 +59,6 @@ type OrderService struct {
 	// paymentLockTimeout caps how long a single goroutine may wait to acquire
 	// a per-order lock. It uses the caller's context deadline if shorter.
 	paymentLockTimeout time.Duration
-
-	// starsReconcileMu guards starsOffset. Offset хранится в памяти: после
-	// рестарта reconciliation начинается с 0 и повторно (идемпотентно через
-	// ConfirmStarsPayment CAS) обрабатывает историю.
-	starsReconcileMu sync.Mutex
-	starsOffset      int64
-
-	// starsChargeLedgerMu guards confirmed/refunded maps. Ledger —
-	// in-memory реестр charge ID, для которых услуга оказана (confirmed)
-	// или применён авто-возврат (refunded). При рестарте очищается; потеря
-	// accepted — пользователь принял риск (§12).
-	starsChargeLedgerMu   sync.Mutex
-	starsConfirmedCharges map[string]struct{} // charge подтверждён (услуга оказана)
-	starsRefundedCharges  map[string]struct{} // charge возвращён
 }
 
 // paymentLock is a capacity-1 token channel reused by every concurrent
@@ -318,16 +304,14 @@ func formatAdminPaymentAlert(title string, sub *database.Subscription, order *da
 // NewOrderService wires the order service dependencies explicitly.
 func NewOrderService(db interfaces.OrderStore, subSvc *SubscriptionService, syncSvc *SyncService, payment PlategaClient, botUsername string, cfg *config.Config) *OrderService {
 	return &OrderService{
-		db:                    db,
-		subSvc:                subSvc,
-		syncSvc:               syncSvc,
-		payment:               payment,
-		botUsername:           botUsername,
-		cfg:                   cfg,
-		paymentLocks:          make(map[string]*paymentLock),
-		paymentLockTimeout:    paymentLockTimeoutDefault,
-		starsConfirmedCharges: make(map[string]struct{}),
-		starsRefundedCharges:  make(map[string]struct{}),
+		db:                 db,
+		subSvc:             subSvc,
+		syncSvc:            syncSvc,
+		payment:            payment,
+		botUsername:        botUsername,
+		cfg:                cfg,
+		paymentLocks:       make(map[string]*paymentLock),
+		paymentLockTimeout: paymentLockTimeoutDefault,
 	}
 }
 
