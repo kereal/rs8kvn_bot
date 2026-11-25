@@ -358,6 +358,9 @@ type OrderStore interface {
 type BotStore interface {
 	BroadcastRepository
 	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	// GetByID загружает подписку по её id: подтверждение владельца заказа в
+	// Stars-потоке идёт через связанную подписку, а не через callback-payload.
+	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
 	GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error)
 	CountAllSubscriptions(ctx context.Context) (int64, error)
 	CountActiveSubscriptions(ctx context.Context) (int64, error)

@@ -218,6 +218,14 @@ func (h *Handler) paymentAPI() (interfaces.BotAPI, error) {
 	return h.paymentBot, nil
 }
 
+// PaymentAPI возвращает актуальный payment-инстанс под тем же мьютексом, что и
+// внутренние платёжные вызовы. Composition root берёт его для fallback-ответа на
+// pre_checkout_query: фоновый ретрай может поднять инстанс уже после старта, и
+// ответ обязан уйти через текущий клиент, а не через снимок момента создания.
+func (h *Handler) PaymentAPI() (interfaces.BotAPI, error) {
+	return h.paymentAPI()
+}
+
 // sendViaPaymentAPI отправляет сообщение через payment-инстанс (fail-closed:
 // без payment-бота отправка невозможна — возвращается ошибка, а не отправка
 // через long-poll клиент).

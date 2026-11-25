@@ -340,7 +340,7 @@ func TestNewPreCheckoutAnswerer_AnswersEveryQuery(t *testing.T) {
 	api, err := tgbotapi.NewBotAPIWithClient("test-token", tgbotapi.APIEndpoint, stub)
 	require.NoError(t, err)
 
-	answer := newPreCheckoutAnswerer(api)
+	answer := newPreCheckoutAnswerer(func() (interfaces.BotAPI, error) { return api, nil })
 
 	const queries = preCheckoutAnswerMaxConcurrent * 3
 	for i := range queries {
@@ -350,6 +350,50 @@ func TestNewPreCheckoutAnswerer_AnswersEveryQuery(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return stub.countPath("answerPreCheckoutQuery") == queries
 	}, 3*time.Second, 10*time.Millisecond, "every pre_checkout query must get an answer")
+}
+
+// TestNewPreCheckoutAnswerer_UsesCurrentClientAfterRecovery — fallback обязан
+// резолвить payment-клиент при каждом ответе: если инстанс поднялся после старта
+// (фоновый ретрай через handler.SetPaymentBot), pre_checkout_query всё равно
+// получает ответ; до восстановления — fail-closed без сетевого обращения.
+func TestNewPreCheckoutAnswerer_UsesCurrentClientAfterRecovery(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubTelegramHTTP{}
+	api, err := tgbotapi.NewBotAPIWithClient("test-token", tgbotapi.APIEndpoint, stub)
+	require.NoError(t, err)
+
+	var (
+		mu      sync.Mutex
+		current interfaces.BotAPI
+	)
+
+	answer := newPreCheckoutAnswerer(func() (interfaces.BotAPI, error) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		if current == nil {
+			return nil, errors.New("bot: payment API is not configured")
+		}
+
+		return current, nil
+	})
+
+	answer("query-before-recovery")
+
+	require.Never(t, func() bool {
+		return stub.countPath("answerPreCheckoutQuery") > 0
+	}, 200*time.Millisecond, 10*time.Millisecond, "degraded payment API must stay fail-closed")
+
+	mu.Lock()
+	current = api
+	mu.Unlock()
+
+	answer("query-after-recovery")
+
+	require.Eventually(t, func() bool {
+		return stub.countPath("answerPreCheckoutQuery") == 1
+	}, 3*time.Second, 10*time.Millisecond, "recovered client must receive the answer")
 }
 
 // TestPreCheckoutAnswerBudgetFitsTelegramWindow — инвариант: ответ на

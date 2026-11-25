@@ -801,7 +801,7 @@ func main() {
 	}
 
 	// 11. Run the main event loop (blocks until shutdown)
-	runEventLoop(ctx, botAPI, svc.handler, updates, newPreCheckoutAnswerer(paymentAPI))
+	runEventLoop(ctx, botAPI, svc.handler, updates, newPreCheckoutAnswerer(svc.handler.PaymentAPI))
 
 	// 12. Graceful shutdown of background workers
 	gracefulShutdown(bgWg, svc.handler, svc.subServer)
@@ -846,17 +846,22 @@ func retryPaymentClient(ctx context.Context, cfg *config.Config, handler *bot.Ha
 }
 
 // newPreCheckoutAnswerer возвращает обработчик отказа по pre_checkout_query.
-// Ответ уходит через payment-инстанс с HTTP-таймаутом 4 c (D1), в отдельной
-// горутине, чтобы не блокировать event loop, и с ограниченным параллелизмом.
+// Клиент резолвится заново при каждом ответе через переданный доступ (тот же
+// синхронизированный путь, что и Handler): фоновый ретрай может поднять
+// payment-инстанс уже после старта, и fallback обязан использовать актуальный,
+// а не снимок момента создания. Ответ уходит через payment-инстанс с HTTP-таймаутом
+// 4 c (D1), в отдельной горутине, чтобы не блокировать event loop, и с ограниченным
+// параллелизмом.
 // Если слот ответа занят, ответ всё равно отправляется (вне семафора): ответ на
 // pre_checkout_query обязателен (§5.2) — без него запрос висит до истечения
 // 10-секундного окна Telegram. Число таких ответов ограничено скоростью
 // pre_checkout-апдейтов, поэтому дополнительные горутины не растут без границ.
-func newPreCheckoutAnswerer(paymentAPI *tgbotapi.BotAPI) func(string) {
+func newPreCheckoutAnswerer(getPaymentAPI func() (interfaces.BotAPI, error)) func(string) {
 	sem := make(chan struct{}, preCheckoutAnswerMaxConcurrent)
 
 	answer := func(queryID string) {
-		if paymentAPI == nil {
+		api, err := getPaymentAPI()
+		if err != nil {
 			// Деградация: payment-инстанс не поднят. Не отвечаем — Telegram
 			// отклонит платёж по таймауту (fail-closed), бот продолжил работу.
 			logger.Warn("pre_checkout_query dropped: payment API is not configured",
@@ -865,7 +870,7 @@ func newPreCheckoutAnswerer(paymentAPI *tgbotapi.BotAPI) func(string) {
 			return
 		}
 
-		_, err := paymentAPI.Request(tgbotapi.PreCheckoutConfig{
+		_, err = api.Request(tgbotapi.PreCheckoutConfig{
 			PreCheckoutQueryID: queryID,
 			OK:                 false,
 			ErrorMessage:       "Платёж не может быть принят. Обратитесь в /paysupport",

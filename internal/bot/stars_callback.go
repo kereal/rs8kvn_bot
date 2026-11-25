@@ -89,7 +89,12 @@ func (c *CallbackHandler) handleStarsInvoiceBack(ctx context.Context, chatID, pr
 	}
 
 	// S4: истекаем pending-заказ, чтобы повторная покупка сразу создала новый.
-	if orderID != 0 {
+	// Владение подтверждаем по хранилищу, а не по buyerTelegramID из
+	// callback-данных: callback_data не доказывает владение заказом (клиент может
+	// прислать произвольный payload), а ExpirePendingOrder владельца не проверяет.
+	// Без проверки нажатие «Назад» истекало бы чужой pending-заказ — отказ в
+	// покупке другому пользователю. Нечитаемый или чужой заказ не изменяем.
+	if orderID != 0 && c.starsOrderOwnedBy(ctx, orderID, pressedBy) {
 		expired, expireErr := c.h.db.ExpirePendingOrder(ctx, orderID)
 		switch {
 		case expireErr != nil:
@@ -126,4 +131,40 @@ func (c *CallbackHandler) handleStarsInvoiceBack(ctx context.Context, chatID, pr
 	}
 
 	return c.h.subHandler.handleBuyPremiumList(ctx, chatID, username, cardMsgID)
+}
+
+// starsOrderOwnedBy сообщает, принадлежит ли заказ orderID пользователю telegramID.
+// Владелец вычисляется по хранилищу: заказ → его подписка → telegram_id подписки.
+// Любая ошибка загрузки и несовпадение трактуются как «владение не подтверждено»
+// (fail-closed): чужой или нечитаемый заказ не изменяем.
+func (c *CallbackHandler) starsOrderOwnedBy(ctx context.Context, orderID uint, telegramID int64) bool {
+	order, err := c.h.db.GetOrderByID(ctx, orderID)
+	if err != nil || order == nil {
+		logger.Warn("stars invoice back: order load failed",
+			zap.Uint("order_id", orderID), zap.Error(err))
+
+		return false
+	}
+
+	sub, err := c.h.db.GetByID(ctx, order.SubscriptionID)
+	if err != nil || sub == nil {
+		logger.Warn("stars invoice back: order subscription load failed",
+			zap.Uint("order_id", orderID),
+			zap.Uint("subscription_id", order.SubscriptionID),
+			zap.Error(err))
+
+		return false
+	}
+
+	if sub.TelegramID != telegramID {
+		logger.Warn("stars invoice back: order ownership mismatch; expire skipped",
+			zap.Uint("order_id", orderID),
+			zap.Uint("subscription_id", sub.ID),
+			zap.Int64("owner_telegram_id", sub.TelegramID),
+			zap.Int64("pressed_by", telegramID))
+
+		return false
+	}
+
+	return true
 }

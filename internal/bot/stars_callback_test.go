@@ -219,6 +219,7 @@ func TestStarsInvoiceBack(t *testing.T) {
 		pressedBy      int64
 		callbackChat   int64
 		cardMsgID      int
+		orderOwner     int64
 		wantExpired    bool
 		wantDeleted    []int
 		wantCardRender bool
@@ -229,6 +230,7 @@ func TestStarsInvoiceBack(t *testing.T) {
 			pressedBy:      42,
 			callbackChat:   42,
 			cardMsgID:      99,
+			orderOwner:     42,
 			wantExpired:    true,
 			wantDeleted:    []int{55},
 			wantCardRender: true,
@@ -239,6 +241,7 @@ func TestStarsInvoiceBack(t *testing.T) {
 			pressedBy:      42,
 			callbackChat:   5000,
 			cardMsgID:      99,
+			orderOwner:     42,
 			wantExpired:    true,
 			wantDeleted:    []int{55},
 			wantCardRender: true,
@@ -249,9 +252,23 @@ func TestStarsInvoiceBack(t *testing.T) {
 			pressedBy:      43,
 			callbackChat:   5000,
 			cardMsgID:      99,
+			orderOwner:     42,
 			wantExpired:    false,
 			wantDeleted:    nil,
 			wantCardRender: false,
+		},
+		{
+			// Payload владения не доказывает: нажавший подставил свой telegram_id,
+			// но заказ принадлежит другому пользователю — истекать его нельзя.
+			name:           "foreign order is not expired",
+			data:           "stars_invoice_back_42_55_3",
+			pressedBy:      42,
+			callbackChat:   42,
+			cardMsgID:      99,
+			orderOwner:     99,
+			wantExpired:    false,
+			wantDeleted:    []int{55},
+			wantCardRender: true,
 		},
 		{
 			name:           "invalid payload is ignored",
@@ -259,6 +276,7 @@ func TestStarsInvoiceBack(t *testing.T) {
 			pressedBy:      42,
 			callbackChat:   42,
 			cardMsgID:      99,
+			orderOwner:     42,
 			wantExpired:    false,
 			wantDeleted:    nil,
 			wantCardRender: false,
@@ -270,6 +288,12 @@ func TestStarsInvoiceBack(t *testing.T) {
 			t.Parallel()
 
 			mockDB := testutil.NewBotStoreFake()
+			starsOrderMocks(mockDB)
+			// Владелец заказа 3 (подписка 7) задаётся вариантом кейса: payload
+			// buyerTelegramID владения не доказывает, проверка идёт по подписке.
+			mockDB.GetByIDFunc = func(context.Context, uint) (*database.Subscription, error) {
+				return &database.Subscription{ID: 7, TelegramID: tt.orderOwner}, nil
+			}
 			mockDB.ListActiveProductsFunc = func(context.Context) ([]database.Product, error) {
 				return []database.Product{
 					{ID: 1, PlanID: 2, Name: "Месяц", PriceCents: 199, Currency: stars.Currency, IsActive: true},
