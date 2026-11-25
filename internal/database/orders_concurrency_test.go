@@ -51,7 +51,13 @@ func TestConfirmOrderPaidCAS_ConcurrentOnlyOneActivates(t *testing.T) {
 
 	for range 2 {
 		wg.Go(func() {
-			ok, err := confirmWithBusyRetry(ctx, svc, order, sub, product, now)
+			// CAS пишет обновлённое состояние подписки в переданный объект
+			// (caller-owned state, см. doc ConfirmOrderPaidCAS). Двум горутинам
+			// нужны собственные копии: общий объект — гонка «write in place» с
+			// «read p.Subscription.ID».
+			subCopy := *sub
+
+			ok, err := confirmWithBusyRetry(ctx, svc, order, &subCopy, product, now)
 
 			mu.Lock()
 			defer mu.Unlock()
