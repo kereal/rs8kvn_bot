@@ -335,17 +335,19 @@ func TestStarsBuy_AcceptanceCallbackSendsInvoiceOnce(t *testing.T) {
 	assert.Equal(t, int64(42), invoices[0].ChatID)
 	assert.Equal(t, "3", invoices[0].Payload)
 
-	// Кнопка согласия снята: сообщение перезаписано без ReplyMarkup.
+	// Кнопка согласия снята, Back привязан к личному сообщению покупателя
+	// (формат несёт order_id pending-заказа вместо неиспользуемого product_id).
 	acceptDone := starsEditByMessageID(t, mainBot, 77)
 	assert.Contains(t, acceptDone.Text, "счёт отправлен ниже")
+	acceptKeyboard := starsInlineKeyboard(t, acceptDone.ReplyMarkup)
+	require.NotNil(t, acceptKeyboard.InlineKeyboard[0][0].CallbackData)
+	assert.Equal(t, "stars_invoice_back_42_1_3", *acceptKeyboard.InlineKeyboard[0][0].CallbackData)
 
-	// Карточка переведена в «Счёт отправлен» с Back на invoice (формат несёт
-	// order_id pending-заказа вместо неиспользуемого product_id).
+	// Общая карточка переведена в «Счёт отправлен» без персональной клавиатуры:
+	// кнопка на ней ссылалась бы на чужой invoice/заказ.
 	cardEdit := starsEditByMessageID(t, mainBot, 99)
 	assert.Contains(t, cardEdit.Text, "Счёт отправлен в личном чате")
-	cardKeyboard := starsInlineKeyboard(t, cardEdit.ReplyMarkup)
-	require.NotNil(t, cardKeyboard.InlineKeyboard[0][0].CallbackData)
-	assert.Equal(t, "stars_invoice_back_42_1_3", *cardKeyboard.InlineKeyboard[0][0].CallbackData)
+	assert.Nil(t, cardEdit.ReplyMarkup, "shared card must not carry a personal back keyboard")
 
 	// Повторный (протухший) acceptance-callback: второй invoice не создаётся.
 	require.NoError(t, h.HandleCallback(context.Background(), acceptCallback("cb2")))

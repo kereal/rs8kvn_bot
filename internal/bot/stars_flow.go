@@ -405,23 +405,26 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 	sh.h.starsSentInvoices.Add(order.ID)
 
 	// Успех: снимаем кнопку согласия — повторный callback больше не приходит.
+	// Кнопка Back привязана к личному сообщению покупателя: cardChatID/cardMsgID
+	// могут быть общей групповой карточкой, на которой персональная клавиатура
+	// ссылалась бы на чужой invoice и чужой pending-заказ. Личное сообщение
+	// гарантирует, что кнопка видна только владельцу счёта и ведёт на его заказ.
 	acceptDone := tgbotapi.NewEditMessageText(buyerTelegramID, acceptMsgID,
 		fmt.Sprintf("Тариф: 💎 *%s* — счёт отправлен ниже, нажмите «Pay».\nОплачивая счёт, вы принимаете Пользовательское соглашение (/terms).",
 			utils.EscapeMarkdown(product.Name)))
 	acceptDone.ParseMode = "Markdown"
+	backKeyboard := sh.h.keyboards.StarsInvoiceBack(buyerTelegramID, sentInvoice.MessageID, order.ID)
+	acceptDone.ReplyMarkup = &backKeyboard
 	sh.h.safeSend(acceptDone)
 
-	// Карточка тарифа: «Счёт отправлен ниже», кнопка Back несёт id invoice в
-	// личном чате покупателя и order_id pending-заказа (stars_invoice_back
-	// истекает заказ и удаляет сообщение по telegram_id покупателя).
+	// Карточка тарифа остаётся общей: только текст «Счёт отправлен ниже»,
+	// без персональной клавиатуры (кнопка живёт в личном чате покупателя).
 	if cardMsgID > 0 {
 		invoiceText := fmt.Sprintf("Тариф: 💎 *%s*\n\nСтоимость: *%s*\n\nСчёт отправлен в личном чате — нажмите «Pay» в счёте.\nПосле оплаты тариф активируется автоматически.\nЕсли тариф уже активен, новые дни прибавятся к текущему сроку.",
 			utils.EscapeMarkdown(product.Name), utils.FormatStarsAmount(order.AmountCents))
 
 		editMsg := tgbotapi.NewEditMessageText(cardChatID, cardMsgID, invoiceText)
 		editMsg.ParseMode = "Markdown"
-		keyboard := sh.h.keyboards.StarsInvoiceBack(buyerTelegramID, sentInvoice.MessageID, order.ID)
-		editMsg.ReplyMarkup = &keyboard
 		sh.h.safeSend(editMsg)
 	}
 

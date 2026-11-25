@@ -18,12 +18,12 @@ func (kb *KeyboardBuilder) StarsTermsAccept(orderID, productID uint, cardChatID 
 	)
 }
 
-// StarsInvoiceBack builds the keyboard of the «Счёт отправлен ниже» card: the
-// back button is attached to the card itself and carries the buyer's Telegram
-// id plus the invoice message id so the back callback deletes the invoice in
-// the buyer's private chat only when the presser IS the buyer (§5.1), and the
-// pending order id so «Назад» expires the order instead of leaving it alive
-// until TTL (S4). The former product id field was unused and removed (N3).
+// StarsInvoiceBack builds the back keyboard of the buyer's private «счёт
+// отправлен» message (never the shared tariff card): it carries the buyer's
+// Telegram id plus the invoice message id so the back callback deletes the
+// invoice in the buyer's private chat only when the presser IS the buyer (§5.1),
+// and the pending order id so «Назад» expires the order instead of leaving it
+// alive until TTL (S4). The former product id field was unused and removed (N3).
 func (kb *KeyboardBuilder) StarsInvoiceBack(buyerTelegramID int64, invoiceMessageID int, orderID uint) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(

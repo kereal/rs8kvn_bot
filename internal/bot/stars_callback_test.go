@@ -90,6 +90,14 @@ func TestStarsAccept_CardInAnotherChatAccepted(t *testing.T) {
 	cardEdit := starsEditByMessageID(t, mainBot, 99)
 	assert.Equal(t, int64(5000), cardEdit.ChatID, "card must be edited in the chat it was posted in")
 	assert.Equal(t, 99, cardEdit.MessageID)
+	assert.Nil(t, cardEdit.ReplyMarkup, "shared group card must not carry a personal back keyboard")
+
+	// Back-кнопка привязана к личному сообщению покупателя и ведёт на его счёт.
+	acceptDone := starsEditByMessageID(t, mainBot, 77)
+	assert.Equal(t, int64(42), acceptDone.ChatID, "back keyboard must live in the buyer's private chat")
+	acceptKeyboard := starsInlineKeyboard(t, acceptDone.ReplyMarkup)
+	require.NotNil(t, acceptKeyboard.InlineKeyboard[0][0].CallbackData)
+	assert.Equal(t, "stars_invoice_back_42_1_3", *acceptKeyboard.InlineKeyboard[0][0].CallbackData)
 }
 
 // TestStarsAccept_CardChatMatchesCallbackChat — валидный acceptance: чат
