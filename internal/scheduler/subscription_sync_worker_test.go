@@ -107,6 +107,8 @@ func TestSubscriptionSyncWorker_ReconcileRunsHourly(t *testing.T) {
 	ordersFake := testutil.NewServiceStoreFake()
 	calls := 0
 
+	// Одна сверка — два прохода выборки: сначала Stars (локальное истечение),
+	// затем провайдерские заказы. Пустой проход — это ровно один запрос.
 	ordersFake.GetStalePendingOrdersAfterIDFunc = func(context.Context, time.Time, uint, int) ([]database.Order, error) {
 		calls++
 
@@ -117,14 +119,14 @@ func TestSubscriptionSyncWorker_ReconcileRunsHourly(t *testing.T) {
 	worker := NewSubscriptionSyncWorker(svc, orderSvc)
 
 	worker.process(context.Background())
-	require.Equal(t, 1, calls, "первый проход обязан сверять зависшие заказы")
+	require.Equal(t, 2, calls, "первый проход обязан сверять зависшие заказы (Stars + провайдерские)")
 
 	worker.process(context.Background())
-	assert.Equal(t, 1, calls, "второй проход внутри часа сверку не повторяет")
+	assert.Equal(t, 2, calls, "второй проход внутри часа сверку не повторяет")
 
 	worker.lastReconcile = time.Now().Add(-2 * time.Hour)
 	worker.process(context.Background())
-	assert.Equal(t, 2, calls, "после часового интервала сверка возобновляется")
+	assert.Equal(t, 4, calls, "после часового интервала сверка возобновляется")
 }
 
 // Поведение: гейджи подписок обновляются прогоном воркера, а не только
