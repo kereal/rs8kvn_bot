@@ -1947,12 +1947,20 @@ func TestRequestPayment_StarsExistingSubscriptionRejectsInactiveProduct(t *testi
 
 			return nil, errors.New("unreachable")
 		},
+		// Stars-ветка создаёт заказ через FindOrCreatePendingPaymentOrder — этот
+		// путь тоже не должен достигаться при неактивном товаре.
+		FindOrCreatePendingPaymentOrderFunc: func(context.Context, uint, uint, string, int64, string, *time.Time, time.Time) (*database.Order, bool, error) {
+			t.Fatal("inactive product must not create a pending Stars order")
+
+			return nil, false, errors.New("unreachable")
+		},
 	}
 	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars, PaymentEnabled: true})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
 	_, _, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 7})
 	require.Error(t, err, "inactive Stars product must be rejected even when a subscription exists")
+	assert.Contains(t, err.Error(), "invalid paid product request", "отказ должен быть из-за неактивного товара")
 }
 
 func TestRequestPayment_StarsExistingSubscriptionRejectsInactivePlan(t *testing.T) {
@@ -1973,12 +1981,18 @@ func TestRequestPayment_StarsExistingSubscriptionRejectsInactivePlan(t *testing.
 
 			return nil, errors.New("unreachable")
 		},
+		FindOrCreatePendingPaymentOrderFunc: func(context.Context, uint, uint, string, int64, string, *time.Time, time.Time) (*database.Order, bool, error) {
+			t.Fatal("inactive plan must not create a pending Stars order")
+
+			return nil, false, errors.New("unreachable")
+		},
 	}
 	o := NewOrderService(mock, nil, nil, nil, "", &config.Config{PaymentProvider: database.PaymentProviderTelegramStars, PaymentEnabled: true})
 	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
 
 	_, _, err := o.RequestPayment(context.Background(), 42, "user", &database.Product{ID: 7})
 	require.Error(t, err, "inactive Stars plan must be rejected even when a subscription exists")
+	assert.Contains(t, err.Error(), "product plan is inactive", "отказ должен быть из-за неактивного плана")
 }
 
 func TestValidateStarsPreCheckout_ValidPayloadReturnsNil(t *testing.T) {
@@ -2083,9 +2097,15 @@ func TestConfirmStarsPayment_FirstConfirmActivatesAndRecordsFeeZero(t *testing.T
 func TestConfirmStarsPayment_AlreadyPaidIsIdempotent(t *testing.T) {
 	t.Parallel()
 
-	order := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusPaid, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars}
+	// charge_dup — тот же charge, что придёт в webhook: повторная доставка того
+	// же successful_payment должна распознаваться как идемпотентный replay, а не
+	// как новая (дублирующая) транзакция.
+	order := &database.Order{ID: 31, SubscriptionID: 4, ProductID: 7, Status: database.OrderStatusPaid, AmountCents: 199, Currency: "XTR", PaymentProvider: database.PaymentProviderTelegramStars, ProviderPaymentID: "charge_dup"}
 
-	var casCalled bool
+	var (
+		casCalled    bool
+		refundCalled bool
+	)
 
 	mock := &testutil.ServiceStoreFake{
 		GetOrderByIDFunc: func(context.Context, uint) (*database.Order, error) { return order, nil },
@@ -2099,12 +2119,21 @@ func TestConfirmStarsPayment_AlreadyPaidIsIdempotent(t *testing.T) {
 		},
 	}
 	o := NewOrderService(mock, nil, NewSyncService(mock, nil, nil), nil, "", &config.Config{PaymentProvider: "telegram_stars", PaymentEnabled: true})
-	o.SetStarsClient(stars.New(testutil.NewBotAPI()))
+	o.SetStarsClient(stars.New(&testutil.BotAPI{
+		MakeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			if endpoint == "refundStarPayment" {
+				refundCalled = true
+			}
+
+			return &tgbotapi.APIResponse{Ok: true}, nil
+		},
+	}))
 
 	confirmation, err := o.ConfirmStarsPayment(context.Background(), "charge_dup", "31", 199, "XTR", 42)
 	require.NoError(t, err)
 	assert.False(t, confirmation.Activated, "duplicate confirm must not re-activate")
 	assert.False(t, casCalled, "CAS must not run for already-paid orders")
+	assert.False(t, refundCalled, "replay of the same charge must not call refundStarPayment")
 }
 
 func TestConfirmStarsPayment_ExpiredOrderActivatesWithoutGrace(t *testing.T) {

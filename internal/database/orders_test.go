@@ -156,6 +156,14 @@ func TestConfirmOrderPaidCAS_ProviderPaymentIDAndFee(t *testing.T) {
 			wantFee:         nil,
 		},
 		{
+			name:            "whitespace provider id preserves stored value",
+			initialProvider: "550e8400-e29b-41d4-a716-446655440303",
+			providerID:      "   ",
+			fee:             nil,
+			wantProvider:    "550e8400-e29b-41d4-a716-446655440303",
+			wantFee:         nil,
+		},
+		{
 			name:            "non-empty provider id is written with fee",
 			initialProvider: "",
 			providerID:      "tg-charge-42",

@@ -437,7 +437,8 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, p ConfirmPaidOrderPar
 
 		// Фактический id транзакции, который ляжет в БД: переданный charge ID
 		// (Stars) либо уже сохранённый (Platega сохраняет его заранее).
-		// Аудит и снапшот заказа должны содержать именно его.
+		// Обрабатываем один раз: и снапшот заказа для аудита, и SQL-обновление
+		// должны получить одно и то же значение.
 		effectiveProviderPaymentID := p.ProviderPaymentID
 		if strings.TrimSpace(effectiveProviderPaymentID) == "" {
 			effectiveProviderPaymentID = order.ProviderPaymentID
@@ -450,9 +451,11 @@ func (s *Service) ConfirmOrderPaidCAS(ctx context.Context, p ConfirmPaidOrderPar
 			"activated_at":          p.ActivatedAt,
 			"expires_at":            newExpiry,
 			"callback_amount_cents": p.CallbackAmountCents,
-			// Пустая строка не трогает сохранённое значение (Platega сохраняет
-			// provider_payment_id через SavePaymentDetails заранее).
-			"provider_payment_id": gorm.Expr("COALESCE(NULLIF(?, ''), provider_payment_id)", p.ProviderPaymentID),
+			// Пустое/пробельное значение не трогает сохранённое (Platega сохраняет
+			// provider_payment_id через SavePaymentDetails заранее); непустой id
+			// заменяет прежний. Значение уже нормализовано выше и совпадает со
+			// снапшотом аудита.
+			"provider_payment_id": gorm.Expr("COALESCE(NULLIF(?, ''), provider_payment_id)", effectiveProviderPaymentID),
 		}
 		if p.ProviderFeeCents != nil {
 			updates["provider_fee_cents"] = *p.ProviderFeeCents

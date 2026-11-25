@@ -223,7 +223,10 @@ func NewXUIClient() *XUIClient {
 
 // BotAPI is a mock implementation of the Telegram Bot API for testing.
 type BotAPI struct {
-	mu              sync.RWMutex
+	mu sync.RWMutex
+	// hookMu сериализует вызовы MakeRequestFunc, не удерживая mu: hook может
+	// безопасно вызывать другие методы этого же BotAPI (например, *Safe).
+	hookMu          sync.Mutex
 	sendCalled      bool
 	requestCalled   bool
 	LastSentText    string
@@ -352,10 +355,12 @@ func (m *BotAPI) SendCountSafe() int {
 // MakeRequest mirrors BotAPI.MakeRequest (tgbotapi v5.5.1): the endpoint and
 // params are recorded so tests can assert on them.
 func (m *BotAPI) MakeRequest(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	// The hook runs under its own mutex, never under m.mu: a hook is free to
+	// call SendCountSafe and friends without deadlocking the whole mock.
 	if m.MakeRequestFunc != nil {
+		m.hookMu.Lock()
+		defer m.hookMu.Unlock()
+
 		return m.MakeRequestFunc(endpoint, params)
 	}
 

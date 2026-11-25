@@ -304,6 +304,19 @@ func (sh *SubscriptionHandler) handleStarsAccept(ctx context.Context, chatID, ca
 		return sh.showBuyError(chatID, acceptMsgID, msg(MsgStarsOrderNotPending))
 	}
 
+	// Срок invoice мог истечь до того, как свип успел его истечь: не выставляем
+	// счёт по просроченному pending-заказу, иначе оплата придёт на мёртвый
+	// заказ. Локальное истечение освобождает заказ для новой попытки.
+	if order.PaymentExpiresAt != nil && !time.Now().UTC().Before(*order.PaymentExpiresAt) {
+		logger.Info("stars acceptance on expired pending order",
+			zap.Uint("order_id", order.ID),
+			zap.Time("payment_expires_at", *order.PaymentExpiresAt))
+
+		sh.expireStarsPending(ctx, order.ID, buyerTelegramID)
+
+		return sh.showBuyError(chatID, acceptMsgID, msg(MsgStarsOrderNotPending))
+	}
+
 	product, err := sh.h.db.GetProductByID(ctx, productID)
 	if err != nil || product == nil {
 		logger.Warn("stars acceptance product load failed",

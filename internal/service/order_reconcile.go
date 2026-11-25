@@ -41,28 +41,48 @@ func (o *OrderService) ReconcilePendingOrders(ctx context.Context, limit int) er
 
 	before := time.Now().UTC().Add(-pendingOrderGrace)
 
+	// Два отдельных прохода. Stars истекает локально, без обращения к
+	// провайдеру, поэтому его обработка не должна ждать Platega-запросов
+	// (зависший провайдер и таймауты не откладывают истечение Stars-инвойсов).
+	// Platega-заказы и их ошибки остаются в своей очереди и бюджете.
+	errs := o.reconcilePendingOrdersPass(budgetCtx, before, pageSize, true)
+	errs = append(errs, o.reconcilePendingOrdersPass(budgetCtx, before, pageSize, false)...)
+
+	return errors.Join(errs...)
+}
+
+// reconcilePendingOrdersPass обходит pending-заказы страницами и сверяет только
+// заказы выбранного вида: Stars (starsOnly=true) либо провайдерские.
+func (o *OrderService) reconcilePendingOrdersPass(
+	ctx context.Context, before time.Time, pageSize int, starsOnly bool,
+) []error {
 	var (
 		afterID uint
 		errs    []error
 	)
 
 	for {
-		orders, err := o.db.GetStalePendingOrdersAfterID(budgetCtx, before, afterID, pageSize)
+		orders, err := o.db.GetStalePendingOrdersAfterID(ctx, before, afterID, pageSize)
 		if err != nil {
-			return fmt.Errorf("load stale pending orders after id %d: %w", afterID, err)
+			return append(errs, fmt.Errorf("load stale pending orders after id %d: %w", afterID, err))
 		}
 
 		if len(orders) == 0 {
-			return errors.Join(errs...)
+			return errs
 		}
 
 		for i := range orders {
-			err = budgetCtx.Err()
+			err = ctx.Err()
 			if err != nil {
-				return errors.Join(append(errs, err)...)
+				return append(errs, err)
 			}
 
-			reconcileErr := o.reconcilePendingOrder(budgetCtx, &orders[i])
+			isStars := orders[i].PaymentProvider == database.PaymentProviderTelegramStars
+			if isStars != starsOnly {
+				continue
+			}
+
+			reconcileErr := o.reconcilePendingOrder(ctx, &orders[i])
 			if reconcileErr != nil {
 				errs = append(errs, reconcileErr)
 			}
@@ -72,7 +92,7 @@ func (o *OrderService) ReconcilePendingOrders(ctx context.Context, limit int) er
 		if lastID <= afterID {
 			// Страница не продвинулась: без этого guard'а цикл вечен (баг
 			// выдачи или заглушка репозитория вернули те же строки).
-			return errors.Join(append(errs, fmt.Errorf("pending order page did not advance past id %d", afterID))...)
+			return append(errs, fmt.Errorf("pending order page did not advance past id %d", afterID))
 		}
 
 		afterID = lastID
@@ -142,15 +162,31 @@ func (o *OrderService) reconcilePendingOrder(ctx context.Context, order *databas
 			return fmt.Errorf("confirm reconciled order %d: %w", order.ID, confirmErr)
 		}
 
-		result := "confirmed_pending"
-		if confirmation != nil && confirmation.Activated {
-			result = "confirmed_activated"
+		if confirmation != nil && confirmation.Order != nil {
+			// Локальное состояние заказа подтверждено: либо pending→paid
+			// переход только что применён (Activated), либо заказ уже был
+			// оплачен ранее (легитимный идемпотентный no-op).
+			result := "confirmed_pending"
+			if confirmation.Activated {
+				result = "confirmed_activated"
+			}
+
+			metrics.PaymentReconcileTotal.WithLabelValues(result).Inc()
+			logger.Info("pending order reconciled as paid",
+				zap.Uint("order_id", order.ID),
+				zap.String("result", result),
+				zap.String("provider_payment_id", providerPaymentID.String()))
+
+			return nil
 		}
 
-		metrics.PaymentReconcileTotal.WithLabelValues(result).Inc()
-		logger.Info("pending order reconciled as paid",
+		// Провайдер подтвердил оплату, но локально заказ не подтверждён
+		// (например, подписка удалена — ConfirmPayment возвращает снимок без
+		// Order). Это не успешная сверка: журналируем отсутствие результата,
+		// не превращая его в ошибку (повторный проход проверит снова).
+		metrics.PaymentReconcileTotal.WithLabelValues("confirmed_unapplied").Inc()
+		logger.Warn("pending order confirmed by provider but local order state was not confirmed",
 			zap.Uint("order_id", order.ID),
-			zap.String("result", result),
 			zap.String("provider_payment_id", providerPaymentID.String()))
 
 		return nil
