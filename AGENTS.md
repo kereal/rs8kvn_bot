@@ -101,6 +101,11 @@ Don't read and don't write
 - **Не логировать**: touches при /sub-запросах (devices/ips/last_request),
   per-item Warn-ретраи воркеров, трафик-сканы без исхода. Технические события —
   только сводки за прогон (`sync_run_degraded`, `orphaned_clients_revoked`).
+- **Retention не удаляет платёжные события** (`payment_confirmed`,
+  `payment_auto_refunded` — `auditRetentionExemptEvents`): по ним
+  `autoRefundStarsCharge` отличает дубль charge от денег за уже оказанную
+  услугу. Добавляя событие в этот список, помни: журнал для него — рабочее
+  состояние, а не история.
 - **FK нет**: история сущности переживает физическое удаление (admin /del).
 - actor_id админа передаётся через context: `service.WithAuditAdmin(ctx, chatID)`
   в HandleDel/HandleSetPlan, читается `adminTelegramIDFromCtx(ctx)`.

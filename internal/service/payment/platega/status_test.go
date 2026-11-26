@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,7 +38,7 @@ func TestGetTransactionStatusContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	got, err := New(Config{MerchantID: "merchant", Secret: "secret", BaseURL: server.URL}).GetTransactionStatus(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440101"))
+	got, err := New(Config{MerchantID: "merchant", Secret: "secret", BaseURL: server.URL}).GetTransactionStatus(context.Background(), "550e8400-e29b-41d4-a716-446655440101")
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, "CONFIRMED", got.Status)
@@ -60,7 +59,7 @@ func TestGetTransactionStatusRejectsErrors(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "failure", status) }))
 			defer server.Close()
 
-			_, err := New(Config{BaseURL: server.URL}).GetTransactionStatus(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440102"))
+			_, err := New(Config{BaseURL: server.URL}).GetTransactionStatus(context.Background(), "550e8400-e29b-41d4-a716-446655440102")
 			require.Error(t, err)
 		})
 	}
@@ -80,7 +79,7 @@ func TestGetTransactionStatusRejectsRedirects(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := New(Config{MerchantID: "merchant", Secret: "secret", BaseURL: server.URL}).GetTransactionStatus(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440103"))
+	_, err := New(Config{MerchantID: "merchant", Secret: "secret", BaseURL: server.URL}).GetTransactionStatus(context.Background(), "550e8400-e29b-41d4-a716-446655440103")
 	require.Error(t, err, "a redirect must surface as an error instead of forwarding the authenticated request")
 	require.False(t, redirected, "the redirect target must never receive a request carrying X-Secret")
 }
@@ -93,7 +92,7 @@ func TestGetTransactionStatusNotFoundIsTerminalSentinel(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := New(Config{BaseURL: server.URL}).GetTransactionStatus(context.Background(), uuid.MustParse("550e8400-e29b-41d4-a716-446655440104"))
+	_, err := New(Config{BaseURL: server.URL}).GetTransactionStatus(context.Background(), "550e8400-e29b-41d4-a716-446655440104")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrTransactionNotFound), "404 must map to the terminal sentinel so fee sync can stop retrying")
 }
@@ -101,7 +100,7 @@ func TestGetTransactionStatusNotFoundIsTerminalSentinel(t *testing.T) {
 func TestGetTransactionStatusRejectsNilID(t *testing.T) {
 	t.Parallel()
 
-	_, err := New(Config{}).GetTransactionStatus(context.Background(), uuid.Nil)
+	_, err := New(Config{}).GetTransactionStatus(context.Background(), "")
 	require.Error(t, err)
 }
 

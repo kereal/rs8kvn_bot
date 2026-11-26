@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/service"
@@ -18,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakePaymentProvider satisfies service.PaymentProvider for bot-level tests.
+// fakePaymentProvider satisfies service.PlategaClient for bot-level tests.
 type fakePaymentProvider struct{}
 
 func (fakePaymentProvider) CreateTransaction(context.Context, platega.CreateTransactionRequest) (*platega.CreateTransactionResponse, error) {
@@ -29,14 +28,14 @@ func (fakePaymentProvider) CreateTransaction(context.Context, platega.CreateTran
 	}, nil
 }
 
-func (fakePaymentProvider) GetTransactionStatus(context.Context, uuid.UUID) (*platega.TransactionStatusResponse, error) {
+func (fakePaymentProvider) GetTransactionStatus(context.Context, string) (*platega.TransactionStatusResponse, error) {
 	return nil, errors.New("status not configured")
 }
 
 // newPaymentTestHandler builds a Handler with payment enabled and an OrderService
 // backed by the provided DB mock and provider. Passing a nil provider yields an
 // OrderService with disabled payments (ErrPaymentDisabled from RequestPayment).
-func newPaymentTestHandler(t *testing.T, mockDB *testutil.BotStoreFake, provider service.PaymentProvider) (*Handler, *testutil.BotAPI) {
+func newPaymentTestHandler(t *testing.T, mockDB *testutil.BotStoreFake, provider service.PlategaClient) (*Handler, *testutil.BotAPI) {
 	t.Helper()
 
 	cfg := &config.Config{TelegramAdminID: 123, PaymentEnabled: true}
@@ -139,7 +138,7 @@ func TestHandleBuyProduct_NotConfigured(t *testing.T) {
 	bot := testutil.NewBotAPI()
 	h := NewHandler(bot, cfg, mockDB, NewTestBotConfig(), nil, "")
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	messages := bot.GetAllSentMessages()
@@ -156,7 +155,7 @@ func TestHandleBuyProduct_ProductLoadErrorShowsTempError(t *testing.T) {
 	}
 	h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	messages := bot.GetAllSentMessages()
@@ -185,7 +184,7 @@ func TestHandleBuyProduct_TariffUnavailable(t *testing.T) {
 			}
 			h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
-			err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+			err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 			require.NoError(t, err)
 
 			messages := bot.GetAllSentMessages()
@@ -205,7 +204,7 @@ func TestHandleBuyProduct_PaymentDisabled(t *testing.T) {
 	// orderService with a nil provider → RequestPayment returns ErrPaymentDisabled.
 	h, bot := newPaymentTestHandler(t, mockDB, nil)
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	messages := bot.GetAllSentMessages()
@@ -223,7 +222,7 @@ func TestHandleBuyProduct_PaymentAlreadyInProgress(t *testing.T) {
 	mockDB.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) {
 		return &database.Subscription{ID: 7, TelegramID: 42}, nil
 	}
-	mockDB.FindPendingPaymentOrderFunc = func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+	mockDB.FindPendingPaymentOrderFunc = func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 		// Pending intent already claimed by a provider transaction without a
 		// usable link → RequestPayment must report ErrPaymentAlreadyInProgress.
 		return &database.Order{
@@ -232,7 +231,7 @@ func TestHandleBuyProduct_PaymentAlreadyInProgress(t *testing.T) {
 	}
 	h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	messages := bot.GetAllSentMessages()
@@ -250,12 +249,12 @@ func TestHandleBuyProduct_PaymentNeedsReview(t *testing.T) {
 	mockDB.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) {
 		return &database.Subscription{ID: 7, TelegramID: 42}, nil
 	}
-	mockDB.FindPendingPaymentOrderFunc = func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+	mockDB.FindPendingPaymentOrderFunc = func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 		return &database.Order{ID: 3, Status: database.OrderStatusPending, PaymentCreationUncertain: true}, nil
 	}
 	h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	messages := bot.GetAllSentMessages()
@@ -273,12 +272,12 @@ func TestHandleBuyProduct_GenericRequestErrorShowsTempError(t *testing.T) {
 	mockDB.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) {
 		return &database.Subscription{ID: 7, TelegramID: 42}, nil
 	}
-	mockDB.FindPendingPaymentOrderFunc = func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+	mockDB.FindPendingPaymentOrderFunc = func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 		return nil, assert.AnError
 	}
 	h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
-	err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+	err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 	require.NoError(t, err)
 
 	messages := bot.GetAllSentMessages()
@@ -309,20 +308,20 @@ func TestHandleBuyProduct_SuccessShowsPaymentButton(t *testing.T) {
 			mockDB.GetByTelegramIDFunc = func(context.Context, int64) (*database.Subscription, error) {
 				return &database.Subscription{ID: 7, TelegramID: 42}, nil
 			}
-			mockDB.FindPendingPaymentOrderFunc = func(context.Context, uint, uint, time.Time) (*database.Order, error) {
+			mockDB.FindPendingPaymentOrderFunc = func(context.Context, uint, uint, string, time.Time) (*database.Order, error) {
 				return nil, nil
 			}
 			mockDB.GetPlanByIDFunc = func(context.Context, uint) (*database.Plan, error) {
 				return &database.Plan{ID: 2, IsActive: true}, nil
 			}
-			mockDB.FindOrCreatePendingPaymentOrderFunc = func(context.Context, uint, uint, int64, string, time.Time) (*database.Order, error) {
-				return &database.Order{ID: 3, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPending, AmountCents: tt.priceCents, Currency: "RUB"}, nil
+			mockDB.FindOrCreatePendingPaymentOrderFunc = func(context.Context, uint, uint, string, int64, string, *time.Time, time.Time) (*database.Order, bool, error) {
+				return &database.Order{ID: 3, SubscriptionID: 7, ProductID: 1, Status: database.OrderStatusPending, AmountCents: tt.priceCents, Currency: "RUB"}, true, nil
 			}
 			mockDB.MarkPaymentCreationUncertainFunc = func(context.Context, uint, bool) (bool, error) { return true, nil }
-			mockDB.SavePaymentDetailsFunc = func(context.Context, uint, uuid.UUID, string, time.Time) error { return nil }
+			mockDB.SavePaymentDetailsFunc = func(context.Context, uint, string, string, time.Time) error { return nil }
 			h, bot := newPaymentTestHandler(t, mockDB, fakePaymentProvider{})
 
-			err := h.handleBuyProduct(context.Background(), 42, "user", 99, 1)
+			err := h.handleBuyProduct(context.Background(), 42, 42, "user", 99, 1)
 			require.NoError(t, err)
 
 			messages := bot.GetAllSentMessages()

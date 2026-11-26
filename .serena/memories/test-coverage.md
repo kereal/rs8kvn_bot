@@ -1,8 +1,8 @@
 # Test Coverage Analysis — rs8kvn_bot
 
-**Последняя проверка:** 2026-11-02
+**Последняя проверка:** 2026-11-20
 **Метод:** `go test -coverprofile=/tmp/coverage.out ./...` и `go tool cover -func=/tmp/coverage.out`
-**Общее покрытие:** 70.2% (2026-11-02, после чистки набора — см. секцию ниже)
+**Общее покрытие:** 72.0% (2026-11-20, ветка feature/telegram-stars; 2227+ тестов, race/lint чисто). Прирост с 70.2% (2026-11-02) — в основном платежи Stars: stars-пакет 92-100%, order.go 76.8%, database/orders.go 75.1%. Непокрытые хвосты Stars — отдельные ветки alert'ов и `BuildPaidUserNotification` (41%).
 
 ## Чистка тестового набора (2026-11-02, dev, 8 коммитов d5d162c..754d052)
 

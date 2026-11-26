@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/bot"
 	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -70,7 +69,7 @@ func e2eNodes(host string) []database.Node {
 	return []database.Node{{ID: 1, Name: "main", IsActive: true, Host: host, APIToken: "test-api-token", Type: database.NodeType3xUI, InboundIDs: "[1]"}}
 }
 
-// fixedPaymentProvider is a shared PaymentProvider stub returning a
+// fixedPaymentProvider is a shared PlategaClient stub returning a
 // deterministic transaction id and payment link. The transaction id is supplied
 // per test so the webhook callback can reference the same id
 // (see platega.ParseTransactionID).
@@ -86,7 +85,7 @@ func (p fixedPaymentProvider) CreateTransaction(_ context.Context, _ platega.Cre
 	}, nil
 }
 
-func (fixedPaymentProvider) GetTransactionStatus(_ context.Context, _ uuid.UUID) (*platega.TransactionStatusResponse, error) {
+func (fixedPaymentProvider) GetTransactionStatus(_ context.Context, _ string) (*platega.TransactionStatusResponse, error) {
 	return nil, errors.New("status not configured")
 }
 

@@ -2,10 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/kereal/rs8kvn_bot/internal/bot"
@@ -285,3 +291,212 @@ func TestHandleUpdate_NilMessageAndNilCallback(t *testing.T) {
 // _InvalidPort удалены: дубли покрытия internal/config (config_test.go:
 // TestConfig_Validate_*, TestValidateURL) — та же конфигурация и те же
 // ветки validate(), только через os.Setenv.
+
+// stubTelegramHTTP — заглушка HTTP-клиента Telegram: считает запросы и
+// отвечает canned-ответом (getMe — валидный бот, остальное — ok).
+type stubTelegramHTTP struct {
+	mu       sync.Mutex
+	requests []string
+}
+
+func (s *stubTelegramHTTP) Do(req *http.Request) (*http.Response, error) {
+	body := `{"ok":true,"result":true}`
+	if strings.Contains(req.URL.Path, "getMe") {
+		body = `{"ok":true,"result":{"id":1,"is_bot":true,"first_name":"t","username":"tbot"}}`
+	}
+
+	s.mu.Lock()
+	s.requests = append(s.requests, req.URL.Path)
+	s.mu.Unlock()
+
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     make(http.Header),
+	}, nil
+}
+
+func (s *stubTelegramHTTP) countPath(fragment string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	count := 0
+	for _, path := range s.requests {
+		if strings.Contains(path, fragment) {
+			count++
+		}
+	}
+
+	return count
+}
+
+// TestNewPreCheckoutAnswerer_AnswersEveryQuery — ответ на pre_checkout_query
+// обязателен: переполнение очереди ответов не должно приводить к пропуску
+// ответа (иначе запрос висит до истечения 10-секундного окна Telegram).
+func TestNewPreCheckoutAnswerer_AnswersEveryQuery(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubTelegramHTTP{}
+	api, err := tgbotapi.NewBotAPIWithClient("test-token", tgbotapi.APIEndpoint, stub)
+	require.NoError(t, err)
+
+	answer := newPreCheckoutAnswerer(func() (interfaces.BotAPI, error) { return api, nil })
+
+	const queries = preCheckoutAnswerMaxConcurrent * 3
+	for i := range queries {
+		answer(fmt.Sprintf("query-%d", i))
+	}
+
+	require.Eventually(t, func() bool {
+		return stub.countPath("answerPreCheckoutQuery") == queries
+	}, 3*time.Second, 10*time.Millisecond, "every pre_checkout query must get an answer")
+}
+
+// TestNewPreCheckoutAnswerer_UsesCurrentClientAfterRecovery — fallback обязан
+// резолвить payment-клиент при каждом ответе: если инстанс поднялся после старта
+// (фоновый ретрай через handler.SetPaymentBot), pre_checkout_query всё равно
+// получает ответ; до восстановления — fail-closed без сетевого обращения.
+func TestNewPreCheckoutAnswerer_UsesCurrentClientAfterRecovery(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubTelegramHTTP{}
+	api, err := tgbotapi.NewBotAPIWithClient("test-token", tgbotapi.APIEndpoint, stub)
+	require.NoError(t, err)
+
+	var (
+		mu      sync.Mutex
+		current interfaces.BotAPI
+	)
+
+	// degradedResolved сигналит, когда fallback уже увидел current == nil:
+	// порядок «деградация -> восстановление» задаётся резолвером, а не таймером.
+	degradedResolved := make(chan struct{}, 1)
+
+	answer := newPreCheckoutAnswerer(func() (interfaces.BotAPI, error) {
+		mu.Lock()
+		resolved := current
+		mu.Unlock()
+
+		if resolved == nil {
+			degradedResolved <- struct{}{}
+
+			return nil, errors.New("bot: payment API is not configured")
+		}
+
+		return resolved, nil
+	})
+
+	answer("query-before-recovery")
+
+	select {
+	case <-degradedResolved:
+	case <-time.After(3 * time.Second):
+		t.Fatal("payment API resolver was not called for the degraded answer")
+	}
+
+	// Деградированный вызов уже прочитал nil и не мог отправить запрос.
+	require.Zero(t, stub.countPath("answerPreCheckoutQuery"),
+		"degraded payment API must stay fail-closed")
+
+	mu.Lock()
+	current = api
+	mu.Unlock()
+
+	answer("query-after-recovery")
+
+	require.Eventually(t, func() bool {
+		return stub.countPath("answerPreCheckoutQuery") == 1
+	}, 3*time.Second, 10*time.Millisecond, "recovered client must receive the answer, and only it")
+}
+
+// TestPreCheckoutAnswerBudgetFitsTelegramWindow — инвариант: ответ на
+// pre-checkout_query обязан уложиться в 10-секундное окно Telegram.
+func TestPreCheckoutAnswerBudgetFitsTelegramWindow(t *testing.T) {
+	t.Parallel()
+
+	total := preCheckoutSlotWaitTimeout + bot.PreCheckoutTimeout + paymentClientTimeout
+	require.LessOrEqual(t, total, 10*time.Second,
+		"the pre-checkout answer must fit the Telegram 10s window")
+}
+
+// Тест поведения: платёжный Telegram-инстанс (Stars) поднимается только когда
+// Stars реально нужен — активный провайдер или старые Stars-заказы (возвраты
+// `/refund` после переключения на Platega). Иначе второй инстанс не создаётся.
+func TestStarsClientNeeded(t *testing.T) {
+	tests := []struct {
+		name      string
+		provider  string
+		hasOrders bool
+		ordersErr error
+		want      bool
+	}{
+		{name: "stars provider without orders", provider: database.PaymentProviderTelegramStars, want: true},
+		{name: "platega with stars orders", provider: database.PaymentProviderPlatega, hasOrders: true, want: true},
+		{name: "platega without stars orders", provider: database.PaymentProviderPlatega, want: false},
+		{name: "db error keeps stars client", provider: database.PaymentProviderPlatega, ordersErr: errors.New("db down"), want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := &testutil.ServiceStoreFake{
+				HasOrdersByProviderFunc: func(context.Context, string) (bool, error) {
+					return tt.hasOrders, tt.ordersErr
+				},
+			}
+
+			assert.Equal(t, tt.want, starsClientNeeded(&config.Config{PaymentProvider: tt.provider}, db))
+		})
+	}
+}
+
+// TestNewPaymentBotAPI_RetriesTransientFailure — транзиентная ошибка Telegram
+// при создании payment-инстанса не должна ронять старт бота: основной платёж
+// Platega работает через webhook и от Telegram-инстанса не зависит.
+func TestNewPaymentBotAPI_RetriesTransientFailure(t *testing.T) {
+	original := newPaymentBotAPIFactory
+	t.Cleanup(func() { newPaymentBotAPIFactory = original })
+
+	var attempts int
+
+	newPaymentBotAPIFactory = func(token string, client tgbotapi.HTTPClient) (*tgbotapi.BotAPI, error) {
+		attempts++
+		if attempts < 3 {
+			return nil, errors.New("temporary telegram failure")
+		}
+
+		return &tgbotapi.BotAPI{Token: token, Client: client}, nil
+	}
+
+	api, err := newPaymentBotAPIWithDelay("test-token", 0)
+	require.NoError(t, err)
+	require.NotNil(t, api)
+	assert.Equal(t, 3, attempts, "payment client creation must be retried")
+}
+
+// TestNewPaymentBotAPI_UsesPaymentTimeout — после аутентификации инстанс
+// работает с коротким бюджетом платёжных вызовов (окно Telegram 10 c).
+func TestNewPaymentBotAPI_UsesPaymentTimeout(t *testing.T) {
+	original := newPaymentBotAPIFactory
+	t.Cleanup(func() { newPaymentBotAPIFactory = original })
+
+	var authTimeout time.Duration
+
+	newPaymentBotAPIFactory = func(token string, client tgbotapi.HTTPClient) (*tgbotapi.BotAPI, error) {
+		if httpClient, ok := client.(*http.Client); ok {
+			authTimeout = httpClient.Timeout
+		}
+
+		return &tgbotapi.BotAPI{Token: token, Client: client}, nil
+	}
+
+	api, err := newPaymentBotAPIWithDelay("test-token", 0)
+	require.NoError(t, err)
+	require.NotNil(t, api)
+
+	assert.Equal(t, paymentAuthTimeout, authTimeout,
+		"getMe must not be bound by the 4s payment budget")
+
+	httpClient, ok := api.Client.(*http.Client)
+	require.True(t, ok, "payment client must use an *http.Client")
+	assert.Equal(t, paymentClientTimeout, httpClient.Timeout)
+}
