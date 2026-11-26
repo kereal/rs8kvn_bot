@@ -1,7 +1,7 @@
 # Handover Summary — rs8kvn_bot
 
 **Repo:** https://github.com/kereal/rs8kvn_bot
-**Module:** `rs8kvn_bot` (Go 1.26+)
+**Module:** `rs8kvn_bot` (Go 1.27+)
 **Branch:** `dev` (GitFlow: `main` = production, `dev` = integration, feature branches from dev or `plans_and_pricing`)
 
 ---
@@ -195,17 +195,17 @@ first outbound — a single-object response would show the user one node out of 
 
 | Component | Library/DB | Version |
 |-----------|------------|---------|
-| Go | `go` | 1.26+ |
+| Go | `go` | 1.27+ |
 | Telegram API | `go-telegram-bot-api/telegram-bot-api/v5` | v5.5.1 |
 | ORM | `gorm.io/gorm` + `gorm.io/driver/sqlite` | v1.31.2 |
 | DB engine | SQLite (mattn/go-sqlite3, CGO) | `./data/rs8kvn.db` |
-| Migrations | `golang-migrate/migrate/v4` | v4.19.1 |
+| Migrations | `golang-migrate/migrate/v4` | v4.20.1 |
 | QR Code | `piglig/go-qr` | v1.1.0 |
 | Logging | `go.uber.org/zap` + `lumberjack.v2` | v2.2.1 |
-| Error tracking | `getsentry/sentry-go` | v0.48.0 |
-| Metrics | `prometheus/client_golang` | v1.23.2 |
+| Error tracking | `getsentry/sentry-go` | v0.50.0 |
+| Metrics | `prometheus/client_golang` | v1.25.0 |
 | Concurrency | `golang.org/x/sync/singleflight` | — |
-| Testing | `stretchr/testify` | v1.11.1 |
+| Testing | `stretchr/testify` | v1.12.1 |
 | CI/CD | GitHub Actions → golangci-lint, gosec, test, Docker → GHCR | — |
 
 ## Current State
@@ -449,7 +449,7 @@ All tests pass with `-race` detector. Fuzzing enabled for critical functions.
 - **`/readyz`:** Simple flag — set to true only after all services initialized → 200 or 503
 
 ### Docker
-- **Base:** Alpine 3.21 (runtime, with procps), golang:1.26-alpine (builder)
+- **Base:** Alpine 3.24 (runtime, with procps), golang:1.27-alpine (builder)
 - **Binary:** UPX compressed (-9) — ~30–40% smaller
 - **Migrations:** Embedded via `COPY internal/database/migrations`
 - **Data volume:** `./data:/app/data` (persistent)
