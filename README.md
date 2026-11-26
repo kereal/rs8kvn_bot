@@ -1,223 +1,247 @@
-# Telegram Bot for 3x-ui VLESS Subscription Distribution
+# rs8kvn_bot — биллинговая платформа VPN-подписок в Telegram
 
 [![GitHub release](https://img.shields.io/github/v/release/kereal/rs8kvn_bot?logo=github)](https://github.com/kereal/rs8kvn_bot/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/kereal/rs8kvn_bot/docker.yml?branch=main)](https://github.com/kereal/rs8kvn_bot/actions)
-[![Go](https://img.shields.io/badge/Go-1.27%2B-00ADD8?logo=go)](https://go.dev/)
-[![Coverage](https://img.shields.io/badge/coverage-66.2%25-green)](https://github.com/kereal/rs8kvn_bot/actions)
+[![Go](https://img.shields.io/badge/Go-1.27.4-00ADD8?logo=go)](https://go.dev/)
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io%2Fkereal%2Frs8kvn_bot-blue?logo=docker)](https://github.com/kereal/rs8kvn_bot/actions)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 
-Нужен VPN? » telegram: [@kereal](https://t.me/kereal)  
-По всем вопросам пишите в telegram: [@kereal](https://t.me/kereal)  
-Ставьте звездочки! =)
+> **Self-hosted платформа для продажи, выдачи и сопровождения VPN-подписок прямо в Telegram.**
 
-## Features
+Это уже не просто бот. `rs8kvn_bot` объединяет витрину тарифов, заказы, оплату, управление доступом, контроль трафика, коммуникации и аудит в одном Go-приложении. Пользователь проходит путь от получения подписки до продления в привычном интерфейсе Telegram, а владелец сервиса сохраняет контроль над данными, платежами и VPN-инфраструктурой.
 
-- 📥 Get subscription on demand with QR code import
-- 🔗 Invite/trial landing page (`/i/{code}`) with one-click Happ setup
-- 👥 Referral system — users generate invite codes with in-memory cache + periodic sync
-- 📊 Plans & pricing — plan-based traffic/device limits, products, orders, multi-node via `nodes`/`plan_nodes` schema
-- 💳 **Platega payments** — in-bot purchase flow (💎 Купить Premium), provider payment links, authenticated webhook (`X-MerchantId`/`X-Secret`) with atomic confirmation, renewals, and chargeback auto-downgrade to the free plan
-- ⭐ **Telegram Stars payments** — alternative provider selected by `PAYMENT_PROVIDER=telegram_stars`: the bot issues the invoice itself (`pre_checkout_query` + `successful_payment`), renewals and full refunds via `/refund <order_id>`
-- 🔗 Subscription server endpoint (`/sub/{subID}`) with multi-source aggregation, devices/IPs tracking, and profile headers, node-state synchronization via subscription_nodes table
-- 🌐 Multi-node VPN abstraction — `internal/vpn/` with `Client` interface, 3x-ui, proxman, and fetch support, per-node client provisioning
-- 📈 Prometheus metrics — `/metrics` endpoint with HTTP, bot, XUI, DB, cache, subscription metrics
-- 🗄️ Daily database backups with rotation, embedded SQLite migrations
-- 🐛 Sentry error tracking (+ performance traces)
-- 🐳 Docker support with health checks, non-root user, UPX compression
-- 🧪 Unit + E2E tests (66.2% aggregate coverage, race-safe, fuzzing)
-- 🔒 Security hardening — X-Forwarded-For rightmost IP (S2), URL scheme allowlist http/https (S3), web↔bot dependency isolation (A1)
+Telegram здесь — не только чат поддержки, а полноценный канал продаж и обслуживания. Ваша VPN-панель остаётся источником фактического доступа, а бот берёт на себя биллинг и ежедневную операционную работу вокруг него.
 
-## Quick Start
+Нужен VPN? » [@kereal](https://t.me/kereal) · [Задать вопрос](https://t.me/kereal)
 
-```bash
-docker pull ghcr.io/kereal/rs8kvn_bot:2.4.0
+## Что получает владелец сервиса
 
-docker run -d \
-  --name rs8kvn_bot \
-  --restart unless-stopped \
-  -v $(pwd)/.env:/app/.env:ro \
-  -v $(pwd)/data:/app/data \
-  -p 127.0.0.1:8880:8880 \
-  ghcr.io/kereal/rs8kvn_bot:2.4.0
+| Контур | Что закрывает проект |
+|---|---|
+| **Продажи** | Тарифы, товары, заказы и выбор платёжного сценария без отдельного сайта. |
+| **Биллинг** | Platega или Telegram Stars, подтверждение платежа и продление; оспаривание платежа для Platega и возврат Stars. |
+| **Выдача доступа** | Создание подписки, синхронизация VPN-клиентов и единая ссылка для подключения. |
+| **Клиентский опыт** | Карточка подписки, QR-код, trial по приглашению, реферальные ссылки и понятные уведомления. |
+| **Удержание** | Напоминания о сроке и трафике, предложение продления, восстановление доступа после сброса квоты. |
+| **Операции** | Рассылки с фильтрами, повтор ошибок доставки, статистика, аудит и контроль состояния сервиса. |
+
+Итог — компактный self-hosted контур **«продажа → оплата → доступ → сопровождение»**, а не набор разрозненных скриптов.
+
+## Возможности
+
+### Для подписчика
+
+- **Получение подписки без лишних шагов.** Бот создаёт или открывает существующую подписку и показывает тариф, срок, трафик и ссылку.
+- **Удобное подключение.** Ссылка и QR-код импортируются в Happ; сервер подписок также формирует профили Xray, sing-box и Clash/Mihomo.
+- **Пробный доступ.** Инвайт-страница `/i/{code}` создаёт trial и предлагает открыть ссылку в Happ или привязать подписку к Telegram-аккаунту.
+- **Покупка прямо из бота.** Пользователь выбирает товар; для Telegram Stars принимает условия и оплачивает встроенным счётом, для Platega переходит по платёжной ссылке. Отдельный личный кабинет сервиса не нужен.
+- **Прозрачный контроль.** В боте видны состояние подписки, расход трафика, дата окончания и следующий сброс.
+- **Напоминания вместо внезапного отключения.** Сервис заранее сообщает о приближении окончания срока и расходовании квоты.
+
+### Для оператора
+
+- **Настоящий каталог и биллинг.** Планы, товары и заказы связаны в единую систему; повторное уведомление об оплате не продлевает доступ второй раз.
+- **Два платёжных сценария.** Platega работает через ссылку и защищённый callback; Telegram Stars — через встроенный invoice, проверку pre-checkout и автоматическую обработку успешной оплаты.
+- **Продуманная работа с исключениями.** Дубли и несовпадения в платеже Telegram Stars автоматически возвращаются; повтор команды `/refund` не создаёт второй возврат. При оспаривании платежа доступ учитывает наличие других оплаченных заказов.
+- **Многоузловая доставка.** Подписка может объединять несколько активных источников, а синхронизация клиентов переживает временную недоступность панели.
+- **Рассылки как рабочий инструмент.** Кампании можно отправить сразу или запланировать по московскому времени, отфильтровать аудиторию, отменить и повторить именно ошибки доставки. Состояние сохраняется в базе и восстанавливается после перезапуска.
+- **Контроль доступа и история изменений.** В базе сохраняется история событий по заказам, подпискам, рассылкам и действиям администратора.
+
+### Для владельца инфраструктуры
+
+- **Один процесс вместо сложного стека.** Бот, HTTP-сервер, сервер подписок и фоновые задачи запускаются вместе.
+- **Данные под вашим контролем.** Вы сами размещаете приложение, базу, секреты и VPN-панели; Telegram служит пользовательским интерфейсом, а оплату принимают выбранные внешние провайдеры.
+- **Инструменты для повседневной эксплуатации.** Встроенные миграции, проверяемые резервные копии, проверки состояния, метрики Prometheus, Sentry и корректное завершение работы.
+- **Более безопасный запуск в Docker.** Контейнер работает от непривилегированного пользователя, конфигурация подключается только для чтения, включены проверка состояния и защита от повышения привилегий.
+
+## Как выглядит путь пользователя
+
+1. Пользователь открывает бота через `/start` или получает trial по инвайт-ссылке.
+2. Бот создаёт подписку и выдаёт ссылку, инструкцию и QR-код для импорта; trial можно привязать к Telegram-аккаунту.
+3. В карточке подписки пользователь видит тариф, трафик, срок и доступные действия.
+4. При необходимости выбирает Premium-товар и оплачивает его через Platega или Telegram Stars.
+5. Бот подтверждает заказ, продлевает подписку и синхронизирует доступ на нужных VPN-узлах.
+6. В дальнейшем сервис сам напоминает о сроке и квоте, а оператор может связаться с аудиторией через рассылку.
+
+## Архитектура в одном взгляде
+
+```mermaid
+flowchart LR
+    U["Пользователь"] --> T["Telegram-бот"]
+    T --> B["Тарифы и заказы"]
+    B --> P["Platega / Telegram Stars"]
+    B --> S["Подписка и доступ"]
+    S --> N["3x-ui / proxman"]
+    T --> D["Сервер подписок"]
+    D --> C["Xray / sing-box / Clash/Mihomo"]
+    W["Фоновые задачи"] --> B
+    W --> S
+    B --> DB[("SQLite")]
+    S --> DB
 ```
 
-> The registry provides a `latest` tag as well as SemVer (`2.4.0`, `2.4`) and commit SHA tags. Pin a concrete SemVer or SHA tag when reproducible deployments are required.
+Поддерживаемые источники VPN:
 
-See **[Installation Guide](doc/installation.md)** for:
-- All 4 installation methods (Docker, Docker Compose, Build from Source, Air hot reload)
-- Full configuration table (all env vars)
-- 3x-ui panel setup instructions
-- Database migrations and backups
+| Источник | Роль |
+|---|---|
+| **3x-ui** | Управление клиентами, трафиком и профилями панели. |
+| **proxman** | Поддерживаемый тип управляемого узла; доступные операции зависят от реализации API. |
+| **fetch** | Read-only источник внешней подписки без управления клиентами. |
 
-## Usage
+Подписки выдаются в форматах **Xray JSON**, **sing-box JSON** и **Clash/Mihomo YAML**. sing-box и Clash/Mihomo можно запросить через `?format=`; иначе формат подбирается по приложению-клиенту, а для неизвестного клиента используется Xray.
 
-1. Start the bot with `/start`
-2. Use the inline buttons:
-   - **For users with subscription:**
-     - **🚀 Подписка** — View subscription info (traffic usage, subscription link)
-       - **📱 QR-код** — Generate QR code for Happ app import
-       - **🏠 В начало** — Return to main menu
-     - **💎 Купить Premium** — Buy or renew a paid plan (shown when `PAYMENT_ENABLED=true`)
-     - **☕ Донат** — View donation info
-     - **📖 Помощь** — View VPN setup instructions
-     - **📑 Документы** — Documents / legal menu
-   - **For users without subscription:**
-     - **📥 Получить подписку** — Create a new subscription
-3. Admin users also see **📊 Стат** — View bot statistics
+## Быстрый старт
 
-> All menu buttons are inline (shown under the message). Each submenu has a "🏠 В начало" button to return.
-
-## User Commands
-
-| Command | Description |
-|---------|-------------|
-| `/start` | Start working with the bot / main menu |
-| `/mysub` | Show your subscription info (traffic usage, subscription link) |
-| `/help` | Show bot help |
-| `/invite` | Get your referral link |
-| `/paysupport` | Payment support FAQ (required for Telegram Stars) |
-| `/terms` | Show the user agreement |
-
-## Admin Commands
-
-| Command | Description |
-|---------|-------------|
-| `/lastreg` | Show the last 10 registered users |
-| `/del <id>` | Delete a subscription by database ID |
-| `/setplan <subscription_id> <plan_id> [days]` | Change a subscription's plan through the service layer (reconciles VPN nodes, extends expiry; defaults to 30 days when none given) |
-| `/broadcast` | Start an asynchronous broadcast: name → message → filters → preview → confirm |
-| `/broadcasts` | Show recent broadcasts; open details, cancel active campaigns, or retry failed recipients |
-| `/send <id or @username> <message>` | Send a message to a specific user |
-| `/refstats` | Show referral statistics (count per user from cache) |
-| `/refund <order_id>` | Refund a Telegram Stars order (full refund; idempotent) |
-
-**Examples:**
-
-```text
-/del 5                                    # Delete subscription with DB ID 5
-/setplan 5 3 30                            # Change subscription 5 to plan 3 for 30 days
-/broadcast                                 # Start a broadcast (name → message → preview → confirm)
-/send 123456789 Привет!                   # Private message by Telegram ID
-/send @username Привет!                   # Private message by username
-```
-
-**Broadcast flow:** `/broadcast` collects a name, message, filters, and confirmation.
-The campaign sends immediately or can be scheduled in Moscow time. Its audience and
-per-recipient state are persisted, so delivery is resumable after restarts without
-duplicates. MarkdownV2 is preserved; transient failures retry with backoff, and
-results are classified as `blocked`, `unreachable`, or other errors. Use `/broadcasts`
-to view details, cancel active campaigns, or retry failed recipients.
-
-## Health Check & Web Endpoints
-
-The bot exposes HTTP endpoints on port 8880:
-
-| Endpoint | Description | Status Codes |
-|----------|-------------|--------------|
-| `GET /healthz` | Basic health (process alive, DB status) | 200/503 |
-| `GET /readyz` | Ready state (accepting requests after init) | 200/503 |
-| `GET /i/{code}` | Trial invites landing page | 200/404/429/500 |
-| `GET /metrics` | Prometheus metrics endpoint | 200 |
-| `GET /sub/{subID}` | Subscription server | 200/404/502/405 |
-| `GET /static/logo.png` | Logo image (mobile-optimized PNG) | 200/404 |
-| `POST /payment/callback` | Platega payment webhook (X-MerchantId / X-Secret) | 200/400/401/405/503 |
-
-### Invite/Trial Landing Page (`/i/{code}`)
-
-Referral-based trial flow: validates the invite code, applies IP rate limiting, creates a trial subscription, and renders a mobile-friendly landing page with Happ download links, one-click deep-link import, copy-to-clipboard URL, and Telegram activation.
-
-### Subscription Server (`/sub/{subID}`)
-
-Serves merged subscriptions from all active nodes (3x-ui, proxman, fetch) with a 240s singleflight cache. Optional access logging is enabled via `SUBSERVER_ACCESS_LOG`.
-
-The response body is a JSON **array** of complete Xray-core client configs (`application/json; charset=utf-8`), one element per node, following the XTLS Subscription Standards body shape. Each element carries `remarks` (the node name clients display), local socks/http inbounds, one proxy outbound plus `direct`/`block`, DNS settings, and routing whose catch-all rule targets that element's own outbound. Validated with `xray -test -config`.
-
-## Traffic and Expiry
-
-- Free subscriptions on 3x-ui use the v3.7.0-compatible rolling configuration: `reset=30`, `resetDay=0`, `resetMax=0`, `trafficReset=monthly`, `trafficResetDay=1`.
-- `reset=30` extends the expiry by 30 days; `resetDay=0` deliberately keeps rolling renewal rather than calendar-day renewal.
-- `resetMax=0` means unlimited renewals. `trafficReset=monthly` with `trafficResetDay=1` resets the traffic counter on the first day of each month.
-- Trials explicitly use `reset=0` and do not auto-renew.
-- The bot also repairs an already expired free-client expiry during synchronization; this is a recovery fallback, not a replacement for the panel's scheduled renewal.
-- Existing clients do not need to be recreated. Save the above values once for legacy clients, then let the bot preserve them on subsequent add/update requests.
-- **Source**: [3x-ui inbound_traffic.go - autoRenewClients()](https://github.com/mhsanaei/3x-ui/blob/main/internal/web/service/inbound_traffic.go)
-
-### Payment Providers
-
-In-bot payments support two providers, selected by `PAYMENT_PROVIDER` when `PAYMENT_ENABLED=true`:
-
-| Variable | Values | Default | Purpose |
-|----------|--------|---------|---------|
-| `PAYMENT_ENABLED` | `true` / `false` | `false` | Enable in-bot payments |
-| `PAYMENT_PROVIDER` | `platega`, `telegram_stars` | `platega` | Active payment provider |
-| `PLATEGA_CALLBACK_ENABLED` | `true` / `false` | `false` | Keep the legacy Platega webhook enabled to settle old orders after switching to Stars |
-| `STARS_INVOICE_TTL` | Go duration (`15m`, `30m`, `1h`) | `15m` | Local lifetime of a Stars invoice |
-
-- `platega` — payment links plus the authenticated HTTP callback described below.
-- `telegram_stars` — the bot issues the invoice itself (`pre_checkout_query` + `successful_payment`); tariffs come from products with `currency='XTR'` (price in Stars), refunds are issued with `/refund <order_id>`.
-
-Switchover, rollback and the pre-launch checklist are described in **[doc/operations.md — Telegram Stars](doc/operations.md#8-telegram-stars)**.
-
-### Payment Callback (`/payment/callback`)
-
-Receives Platega payment notifications on port 8880. Guard chain: POST-only → readiness (503) → `X-MerchantId`/`X-Secret` constant-time auth (401) → body ≤ 256 KiB, single JSON object → UUID `id` and amount/currency/status validation (400).
-
-- `CONFIRMED` → atomic `pending → paid` (or `expired → paid` within 5 minutes after `PaymentExpiresAt`); plan sync is prepared in the same DB transaction. Duplicate callbacks are idempotent no-ops.
-- `CANCELED|CHARGEBACKED` → order cancellation; a chargeback on a paid order auto-downgrades the subscription to the free plan unless another paid order exists.
-- Mismatches, unknown statuses and other issues alert the admin (`NotifyPaymentIssue`).
-
-Expose it at `https://<domain>/payment/callback`: locally via `ngrok http 8880`, in production via nginx (see [doc/operations.md](doc/operations.md)). Enabled when Platega is in use: `PAYMENT_ENABLED=true` with `PAYMENT_PROVIDER=platega`, or `PLATEGA_CALLBACK_ENABLED=true` (settling old orders after a switch to Stars); requires `PLATEGA_MERCHANT_ID` and `PLATEGA_SECRET`.
-
-## Releases
-
-Current release: **[v2.4.0](https://github.com/kereal/rs8kvn_bot/releases/tag/v2.4.0)**
-
-Releases are fully automated:
-
-1. Tag `main` with a SemVer tag and push it (e.g. `git tag -a v2.4.1 -m "Release v2.4.1" && git push origin v2.4.1`).
-2. CI/CD Pipeline runs tests, `go vet`, `go build`, golangci-lint and the **gosec** security scan.
-3. The Docker image is built and pushed to `ghcr.io/kereal/rs8kvn_bot` (tags: `latest`, SemVer, and commit SHA).
-4. A GitHub Release is created with an auto-generated changelog.
-
-## Development
-
-### Test & Lint
+Нужны Docker, токен Telegram-бота, Telegram ID администратора и хотя бы один настроенный источник VPN. Для публичных ссылок подписки используйте HTTPS-адрес.
 
 ```bash
-# Run all tests
+cp .env.example .env
+# Заполните TELEGRAM_BOT_TOKEN, TELEGRAM_ADMIN_ID и GLOBAL_SUB_URL
+
+mkdir -p data
+sudo chown -R 1000:1000 data
+chmod 600 .env
+
+docker compose pull
+docker compose up -d
+```
+
+Проверьте состояние приложения:
+
+```bash
+curl -fsS http://127.0.0.1:8880/healthz
+curl -fsS http://127.0.0.1:8880/readyz
+docker compose logs -f rs8kvn_bot
+```
+
+После запуска добавьте VPN-узел в базу и свяжите его с нужным планом — подробный сценарий есть в **[руководстве по установке](doc/installation.md)**. Там же описаны все переменные окружения, настройка 3x-ui, миграции и резервные копии.
+
+> По умолчанию HTTP-сервер слушает `8880` (`WEB_SERVER_PORT`) и в production Compose публикуется только на localhost. Для внешнего доступа используйте reverse proxy с HTTPS.
+>
+> Рабочий каталог `data/` должен быть доступен UID `1000`; рядом с SQLite создаются файлы `-wal` и `-shm`.
+>
+> Штатная модель — один экземпляр приложения, одна SQLite-база и один Telegram-токен. Не запускайте два процесса с одной базой.
+>
+> Для воспроизводимых развёртываний замените `latest` в Compose на конкретный SemVer- или SHA-тег.
+
+Для локальной сборки используйте **[docker-compose.local.yml](docker-compose.local.yml)**. Запуск без Docker и ручная настройка перечислены в [руководстве по установке](doc/installation.md).
+
+## Конфигурация
+
+Минимально необходимые параметры:
+
+| Переменная | Назначение |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | Токен бота от @BotFather. |
+| `TELEGRAM_ADMIN_ID` | Telegram ID администратора для команд и уведомлений. |
+| `GLOBAL_SUB_URL` | Публичная базовая ссылка для URL подписок, например `https://vpn.example.com/sub/`. |
+
+Основные опции:
+
+| Переменная | Назначение |
+|---|---|
+| `PAYMENT_ENABLED` | Включает витрину и оплату в боте. |
+| `PAYMENT_PROVIDER` | Выбирает `platega` или `telegram_stars`. |
+| `SITE_URL` | Базовый адрес web-инвайтов `/i/{code}`. |
+| `NOTIFICATIONS_ENABLED` | Включает уведомления о сроке и трафике. Восстановление после сброса квоты продолжает работать и без них. |
+| `METRICS_TOKEN` | Bearer-токен для защиты `/metrics`; задайте его на публичном порту. |
+| `SENTRY_DSN` | Необязательный сбор ошибок и паник в Sentry. |
+
+Полный список переменных и их значения по умолчанию — в **[`.env.example`](.env.example)** и [руководстве по установке](doc/installation.md).
+
+## Команды и управление
+
+### Пользовательские команды
+
+| Команда | Назначение |
+|---|---|
+| `/start` | Главное меню; deep link `trial_...` привязывает trial к аккаунту и переводит его на free-план, `share_...` учитывает приглашение. |
+| `/mysub` | Карточка текущей подписки, трафик, срок и ссылка. |
+| `/help` | Справка по боту и подключению. |
+| `/invite` | Постоянные Telegram- и web-ссылки для приглашения. |
+| `/terms` | Пользовательское соглашение. |
+| `/paysupport` | Поддержка по оплате и возвратам. |
+
+### Административные команды
+
+| Команда | Назначение |
+|---|---|
+| `/lastreg` | Последние активные регистрации. |
+| `/del <subscription_id>` | Отозвать VPN-доступ и удалить подписку. |
+| `/setplan <subscription_id> <plan_id> [days]` | Изменить план и срок, затем синхронизировать узлы. |
+| `/broadcast` / `/broadcasts` | Создать и управлять рассылками. |
+| `/send <telegram_id\|@username> <message>` | Отправить личное сообщение. |
+| `/refstats` | Статистика приглашений и рефереров. |
+| `/refund <order_id>` | Полный возврат Telegram Stars-заказа. |
+| `/v` | Версия бота. |
+
+Оператор также получает кнопки статистики и последних регистраций прямо в главном меню. Полные инструкции по рассылкам и эксплуатации — в [документации проекта](#документация).
+
+## Публичные HTTP-интерфейсы
+
+| Эндпоинт | Назначение |
+|---|---|
+| `GET, HEAD /healthz` | Сводная проверка состояния приложения, базы и последнего состояния доступных 3x-ui-узлов. |
+| `GET, HEAD /readyz` | Проверка готовности после запуска. |
+| `GET /i/{code}` | Web-страница trial по инвайт-коду. |
+| `GET /sub/{subID}` | Агрегированная подписка в формате клиента. |
+| `GET /metrics` | Prometheus-метрики; Bearer-защита включается через `METRICS_TOKEN`. |
+| `POST /payment/callback` | Защищённый callback Platega. |
+| `GET, HEAD /static/logo.png` | Встроенный логотип для web-страниц. |
+
+Сервер подписок собирает доступные конфигурации узлов в единый ответ в формате выбранного клиента. Отозванная или истёкшая подписка не выдаётся даже при наличии ранее сохранённого ответа.
+
+## Эксплуатация и надёжность
+
+- **Платежи и доступ согласованы в базе.** Подтверждение заказа, продление подписки, аудит и подготовка синхронизации проходят одной транзакцией; внешняя синхронизация VPN-клиентов повторяется фоновым воркером при сбоях.
+- **Истечение срока не требует ручной уборки.** Платный доступ переводится на free-план, а изменения узлов догоняются автоматически.
+- **Квоты работают как часть продукта.** Сервис предупреждает о приближении лимита, фиксирует исчерпание и возвращает доступ после сброса трафика, если панель доступна.
+- **Бэкапы выполняются автоматически.** Перед сохранением резервная копия SQLite проходит проверку целостности; миграции применяются при старте.
+- **Состояние видно снаружи.** Доступны health/readiness-проверки, Prometheus-метрики, журналы приложения с ротацией и необязательный Sentry.
+- **Безопасность начинается с развёртывания.** Используйте HTTPS, закрытый reverse proxy, `METRICS_TOKEN`, права `600` для `.env` и отдельные резервные копии вне хоста.
+
+Ограничения текущей модели: веб-панели администратора нет; тарифы, товары и VPN-узлы настраиваются через базу данных по руководству. Продление требует новой покупки — автоматических повторных списаний нет. Приложение рассчитано на один экземпляр с SQLite; запуск нескольких экземпляров, автоматическое копирование резервных копий за пределы сервера и обновление без краткого перерыва не входят в проект.
+
+## Релизы
+
+GitHub Actions автоматически проверяет код. При публикации релизного тега создаются Docker-образ и GitHub Release.
+
+```bash
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+Опубликованные образы находятся в [GitHub Container Registry](https://github.com/kereal/rs8kvn_bot/pkgs/container/rs8kvn_bot), а исходный код и релизы — на [GitHub](https://github.com/kereal/rs8kvn_bot).
+
+## Разработка
+
+Требуется Go **1.27.4+**.
+
+```bash
 go test ./...
-
-# Run with coverage
-go test -coverprofile=coverage.out ./...
-go tool cover -func=coverage.out
-
-# Run specific package
-go test ./internal/database/... -v
-
-# Lint
+go test -race ./...
+go vet ./...
+go build -o rs8kvn_bot ./cmd/bot
 golangci-lint run ./...
-gosec ./...
 ```
 
-Test suite: 66.2% aggregate coverage in the latest documented run (generated with `go test -coverprofile`), race-safe, fuzzing, table-driven tests, integration tests with mock HTTP server.
+В проекте есть unit-, интеграционные, E2E-, smoke- и fuzz-тесты. Команды CI и локальной разработки также собраны в [Makefile](Makefile).
 
-### Build
+## Документация
 
-```bash
-go build -ldflags="-s -w" -o rs8kvn_bot ./cmd/bot
-```
+| Документ | Для чего нужен |
+|---|---|
+| **[Установка и настройка](doc/installation.md)** | Docker, локальный запуск, переменные окружения, VPN-узлы, миграции и бэкапы. |
+| **[Архитектура](doc/architecture.md)** | Слои приложения, модель данных, синхронизация и фоновые процессы. |
+| **[HTTP API](doc/api.md)** | Эндпоинты, форматы ответов, коды ошибок и rate limits. |
+| **[Эксплуатация](doc/operations.md)** | Мониторинг, обновление, откат, восстановление и Telegram Stars. |
+| **[Рассылки](doc/broadcast.md)** | Фильтры, планирование, доставка и повтор ошибок. |
+| **[Журнал аудита](doc/audit-log.md)** | События, история сущностей и правила записи. |
+| **[Политика безопасности](doc/security.md)** | Hardening, секреты, webhook и эксплуатационные ограничения. |
+| **[Диаграммы](doc/diagrams/README.md)** | Визуальная карта компонентов и пользовательских потоков. |
 
-### Project Documentation
+## Лицензия
 
-- **[Diagrams](doc/diagrams/README.md)** — Interactive HTML diagrams: project map, sequences, state machines, CI/release workflows, data flows
-- **[Installation & Configuration](doc/installation.md)** — All setup methods, env vars, and 3x-ui instructions
-- **[Architecture](doc/architecture.md)** — System architecture, data model, component deep dives, sync pipeline
-- **[Handover](doc/handover.md)** — Architecture overview, stack, current state, nuances
-- **[Security Policy](doc/security.md)** — Security measures, hardening checklist, incident response
-- **[API Reference](doc/api.md)** — HTTP endpoints, error codes, rate limits
-- **[Operations Guide](doc/operations.md)** — Monitoring, troubleshooting, scaling, backup/restore
-- **[Broadcast](doc/broadcast.md)** — Admin broadcast flow, filters, delivery worker
-- **[Audit log](doc/audit-log.md)** — Universal append-only audit journal: schema, event catalog, write/read contracts
-- **[Traffic notifications](doc/architecture.md)** — `SubscriptionTrafficWorker`: 90%/exhausted warnings with Premium CTA and auto-re-enable after traffic reset
-- **[.serena/instructions.md](.serena/instructions.md)** — AI assistant workflow and memory structure
+Проект распространяется по лицензии **[GNU AGPL-3.0](LICENSE)**.
+
+Если проект оказался полезен — поставьте ⭐ репозиторию. Это лучший способ показать, что такой формат VPN-биллинга нужен.
