@@ -52,8 +52,7 @@ func isUserUnreachableError(err error) bool {
 // "Too Many Requests"). Flood errors are transient: delivery waits out the
 // retry_after hint instead of recording the recipient as permanently failed.
 func isFloodError(err error) bool {
-	var apiErr *tgbotapi.Error
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*tgbotapi.Error](err); ok {
 		return apiErr.Code == 429 || strings.Contains(strings.ToLower(apiErr.Message), "too many requests")
 	}
 
@@ -66,8 +65,8 @@ func isFloodError(err error) bool {
 func floodRetryDelay(err error) time.Duration {
 	delay := broadcastFloodDefaultDelay
 
-	var apiErr *tgbotapi.Error
-	if errors.As(err, &apiErr) && apiErr.RetryAfter > 0 {
+	apiErr, ok := errors.AsType[*tgbotapi.Error](err)
+	if ok && apiErr.RetryAfter > 0 {
 		if hinted := time.Duration(apiErr.RetryAfter) * time.Second; hinted < broadcastFloodMaxDelay {
 			delay = hinted
 		} else {

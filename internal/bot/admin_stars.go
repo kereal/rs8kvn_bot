@@ -68,8 +68,7 @@ func (h *Handler) HandleRefund(ctx context.Context, update tgbotapi.Update) erro
 		// Split-brain: Telegram уже вернул Stars, но состояние заказа/подписки
 		// не применено (ошибка free-plan/CAS). Повторный /refund безопасен:
 		// CHARGE_ALREADY_REFUNDED трактуется как успех, CAS доводится.
-		var stateErr *service.StarsRefundStateError
-		if errors.As(err, &stateErr) {
+		if stateErr, ok := errors.AsType[*service.StarsRefundStateError](err); ok {
 			h.SendMessage(ctx, chatID,
 				fmt.Sprintf("⚠️ Stars по заказу #%d УЖЕ возвращены пользователю (charge %s), но применить состояние заказа/подписки не удалось: %v.\n\nTelegram-возврат уже выполнен — повторите `/refund <id>`, команда безопасно завершит обновление заказа.",
 					orderID, stateErr.ChargeID, stateErr.Err))

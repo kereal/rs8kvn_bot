@@ -911,8 +911,7 @@ func isTransientDBError(err error) bool {
 		return false
 	}
 
-	var serr sqlite3.Error
-	if errors.As(err, &serr) {
+	if serr, ok := errors.AsType[sqlite3.Error](err); ok {
 		return serr.Code == sqlite3.ErrBusy || serr.Code == sqlite3.ErrLocked
 	}
 
