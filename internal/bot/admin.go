@@ -716,3 +716,5 @@ func (h *Handler) HandleRefstats(ctx context.Context, update tgbotapi.Update) er
 
 	return nil
 }
+
+// Stars-команды (/refund) — в admin_stars.go.

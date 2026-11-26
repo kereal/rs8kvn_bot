@@ -117,17 +117,21 @@ func TestSubscriptionCache_MaxSize(t *testing.T) {
 func TestSubscriptionCache_Cleanup(t *testing.T) {
 	t.Parallel()
 
+	// Управляемые часы: истечение TTL задаётся сдвигом времени, а не гонкой
+	// с реальными часами (реальный TTL 10 мс истекал между Set и Cleanup под
+	// нагрузкой — тест был флакающим).
+	now := time.Now()
 	cache := NewSubscriptionCache(10, 10*time.Millisecond)
+	cache.now = func() time.Time { return now }
 
 	// Add entries
 	for i := int64(1); i <= 3; i++ {
 		cache.Set(i, &database.Subscription{TelegramID: i})
 	}
 
-	// Wait for entries to expire
-	assert.Eventually(t, func() bool {
-		return cache.Get(1) == nil
-	}, 2*time.Second, 5*time.Millisecond, "entries should expire")
+	// TTL истёк для всех трёх записей.
+	now = now.Add(time.Second)
+	assert.Nil(t, cache.Get(1), "entry should be expired")
 
 	// Add one more entry (not expired)
 	cache.Set(4, &database.Subscription{TelegramID: 4})

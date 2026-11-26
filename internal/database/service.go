@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
@@ -21,6 +22,11 @@ import (
 // Service provides database operations with proper dependency injection.
 type Service struct {
 	db *gorm.DB
+
+	// pendingMu защищает создание pending-платежа для провайдеров, которых не
+	// покрывает частичный уникальный индекс 034 (только payment_provider='platega').
+	// Один процесс, один SQLite-файл — мьютекса достаточно.
+	pendingMu sync.Mutex
 }
 
 // GetDB returns the underlying *gorm.DB instance.

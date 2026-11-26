@@ -37,7 +37,7 @@ const (
 // label values. Known commands are returned as-is; anything else becomes "unknown".
 func normalizeCommand(cmd string) string {
 	switch cmd {
-	case "start", "help", "invite", "mysub", "del", "setplan", "broadcast", "broadcasts", "send", "refstats", "v", "lastreg":
+	case "start", "help", "invite", "mysub", "del", "setplan", "broadcast", "broadcasts", "send", "refstats", "v", "lastreg", "paysupport", "terms", "refund":
 		return cmd
 	default:
 		return "unknown"
@@ -71,9 +71,20 @@ type Handler struct {
 	sender              *MessageSender
 	keyboards           *KeyboardBuilder
 	orderService        *service.OrderService
-	paymentEnabled      bool
-	version             string
-	referral            *ReferralHandler
+	// paymentBot — отдельный инстанс с таймаутом HTTP (D1); nil → платёжные
+	// вызовы fail-closed. Мьютекс: фоновый ретрай восстановления переключает
+	// paymentBot на живой инстанс, пока обработчики его читают.
+	paymentBot     interfaces.BotAPI
+	paymentBotMu   sync.RWMutex
+	paymentEnabled bool
+	version        string
+	referral       *ReferralHandler
+
+	// starsInvoiceInFlight — in-flight guard текущей отправки invoice (ключ order.ID,
+	// записи удаляются по завершении); starsSentInvoices — bounded set успешно
+	// отправленных invoice: «протухший» replay acceptance-кнопки не создаёт дубль.
+	starsInvoiceInFlight sync.Map
+	starsSentInvoices    *starsSentInvoiceSet
 
 	// Admin rate limiting (separate from user rate limit)
 	adminRateLimiters map[int64]*ratelimiter.TokenBucket
@@ -115,6 +126,7 @@ func NewHandler(bot interfaces.BotAPI, cfg *config.Config, db interfaces.BotStor
 		cache:               NewSubscriptionCache(CacheMaxSize, CacheTTL),
 		inProgressSyncMap:   sync.Map{},
 		pendingInvites:      make(map[int64]pendingInvite),
+		starsSentInvoices:   newStarsSentInvoiceSet(starsSentInvoicesMax),
 		pendingMu:           sync.RWMutex{},
 		documentMessages:    make(map[int][]int),
 		botConfig:           botConfig,
@@ -173,12 +185,67 @@ func (h *Handler) handleBuyPremiumList(ctx context.Context, chatID int64, userna
 	return h.getSubHandler().handleBuyPremiumList(ctx, chatID, username, messageID)
 }
 
-func (h *Handler) handleBuyProduct(ctx context.Context, chatID int64, username string, messageID int, productID uint) error {
-	return h.getSubHandler().handleBuyProduct(ctx, chatID, username, messageID, productID)
+func (h *Handler) handleBuyProduct(ctx context.Context, chatID, telegramID int64, username string, messageID int, productID uint) error {
+	return h.getSubHandler().handleBuyProduct(ctx, chatID, telegramID, username, messageID, productID)
 }
 
 func (h *Handler) SetOrderService(orderService *service.OrderService) {
 	h.orderService = orderService
+}
+
+// SetPaymentBot подключает отдельный payment-инстанс Telegram API с таймаутом
+// HTTP (D1): invoice, answerPreCheckoutQuery и Stars-уведомления идут через него.
+// nil — платёжные вызовы завершаются ошибкой (fail-closed), long-poll клиент
+// для них не используется.
+func (h *Handler) SetPaymentBot(bot interfaces.BotAPI) {
+	h.paymentBotMu.Lock()
+	defer h.paymentBotMu.Unlock()
+
+	h.paymentBot = bot
+}
+
+// paymentAPI возвращает payment-инстанс с таймаутом HTTP (D1). Fail-closed:
+// payment-бот не настроен — ошибка вместо fallback на long-poll клиент,
+// чтобы платёжные вызовы не теряли гарантию таймаута.
+func (h *Handler) paymentAPI() (interfaces.BotAPI, error) {
+	h.paymentBotMu.RLock()
+	defer h.paymentBotMu.RUnlock()
+
+	if h.paymentBot == nil {
+		return nil, errors.New("bot: payment API is not configured")
+	}
+
+	return h.paymentBot, nil
+}
+
+// PaymentAPI возвращает актуальный payment-инстанс под тем же мьютексом, что и
+// внутренние платёжные вызовы. Composition root берёт его для fallback-ответа на
+// pre_checkout_query: фоновый ретрай может поднять инстанс уже после старта, и
+// ответ обязан уйти через текущий клиент, а не через снимок момента создания.
+func (h *Handler) PaymentAPI() (interfaces.BotAPI, error) {
+	return h.paymentAPI()
+}
+
+// sendViaPaymentAPI отправляет сообщение через payment-инстанс (fail-closed:
+// без payment-бота отправка невозможна — возвращается ошибка, а не отправка
+// через long-poll клиент).
+func (h *Handler) sendViaPaymentAPI(msg tgbotapi.Chattable) (tgbotapi.Message, error) {
+	api, err := h.paymentAPI()
+	if err != nil {
+		return tgbotapi.Message{}, err
+	}
+
+	return api.Send(msg)
+}
+
+// requestViaPaymentAPI выполняет запрос через payment-инстанс (fail-closed).
+func (h *Handler) requestViaPaymentAPI(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
+	api, err := h.paymentAPI()
+	if err != nil {
+		return nil, err
+	}
+
+	return api.Request(c)
 }
 
 // OrderService returns the payment service wired into the handler.
@@ -653,6 +720,22 @@ func (h *Handler) ClearAdminSendRateLimit(chatID int64) {
 
 // HandleUpdate routes incoming Telegram updates through the bot handlers.
 func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
+	// Pre-checkout идёт до rate-limiter и диспетчеризации: ответ обязан уйти
+	// в окно Telegram 10 секунд независимо от лимитов и очереди обработчиков.
+	if update.PreCheckoutQuery != nil {
+		h.handlePreCheckout(ctx, update)
+
+		return
+	}
+
+	// Финансовые ветки вне общего rate limiter (compliance: платёжные апдейты
+	// не отбрасываются лимитом), но с обычным handler timeout и метриками.
+	if h.IsFinancialUpdate(update) {
+		h.runFinancialUpdate(ctx, update)
+
+		return
+	}
+
 	// Единый дедлайн на диспетчеризации: каждый handler получает контекст
 	// с HandlerTimeout, копировать пролог в каждый handler не нужно.
 	ctx, cancel := h.withTimeout(ctx)
@@ -705,7 +788,8 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 	}()
 
 	if update.Message != nil {
-		if update.Message.IsCommand() {
+		switch {
+		case update.Message.IsCommand():
 			if h.isAdmin(chatID) && h.broadcastSessionActive(chatID) && update.Message.Command() != "broadcast" {
 				h.clearBroadcastSession(chatID)
 			}
@@ -735,11 +819,13 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 				err = h.HandleVersion(ctx, update)
 			case "lastreg":
 				err = h.handleAdminLastReg(ctx, update.Message.Chat.ID, update.Message.From.UserName, 0)
+			case "refund":
+				err = h.HandleRefund(ctx, update)
 			default:
 				h.SendMessage(ctx, update.Message.Chat.ID,
 					"Неизвестная команда. Используйте /start или /help")
 			}
-		} else {
+		default:
 			// Non-command message: if admin is composing a broadcast draft,
 			// treat it as the broadcast message; otherwise send help hint.
 			if h.isAdmin(chatID) && h.broadcastSessionActive(chatID) {
@@ -751,4 +837,22 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 	} else if update.CallbackQuery != nil {
 		err = h.HandleCallback(ctx, update)
 	}
+}
+
+// HandlePaySupport delegates the /paysupport command to the command layer.
+func (h *Handler) HandlePaySupport(ctx context.Context, update tgbotapi.Update) error {
+	if h.cmdHandler == nil {
+		return errors.New("handler: cmdHandler is nil, use NewHandler to construct Handler")
+	}
+
+	return h.cmdHandler.HandlePaySupport(ctx, update)
+}
+
+// HandleTerms delegates the /terms command to the command layer.
+func (h *Handler) HandleTerms(ctx context.Context, update tgbotapi.Update) error {
+	if h.cmdHandler == nil {
+		return errors.New("handler: cmdHandler is nil, use NewHandler to construct Handler")
+	}
+
+	return h.cmdHandler.HandleTerms(ctx, update)
 }

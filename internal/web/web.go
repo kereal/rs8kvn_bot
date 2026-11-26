@@ -88,7 +88,6 @@ const subserverNotFoundLogPruneAt = 4096
 // callback endpoint. It is set via SetPaymentConfig; when nil, the endpoint
 // returns 503 to signal that payments are not available.
 type PaymentConfig struct {
-	Enabled    bool
 	MerchantID string
 	Secret     string
 }
@@ -406,7 +405,7 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	orderService := s.orderService
 	s.mu.RUnlock()
 
-	if !paymentReady || pc == nil || !pc.Enabled || orderService == nil || bot == nil {
+	if !paymentReady || pc == nil || orderService == nil || bot == nil {
 		http.Error(w, "payments not available", http.StatusServiceUnavailable)
 		return
 	}
@@ -523,7 +522,7 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	status := strings.ToUpper(strings.TrimSpace(payload.Status))
 	switch status {
 	case "CONFIRMED":
-		confirmation, err := orderService.ConfirmPayment(notifyCtx, paymentID, payload.Payload, payload.Amount, payload.Currency)
+		confirmation, err := orderService.ConfirmPayment(notifyCtx, paymentID.String(), payload.Payload, payload.Amount, payload.Currency)
 		if err != nil {
 			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) || errors.Is(err, service.ErrInvalidPaymentTransition) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -554,7 +553,7 @@ func (s *Server) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 		// previously-paid order automatically downgrades the subscription to the
 		// free plan inside CancelPaymentByProvider (unless another paid order
 		// exists); a plain CANCELED only cancels the pending order.
-		_, _, err = orderService.CancelPaymentByProvider(notifyCtx, paymentID, status, payload.Amount, payload.Currency)
+		_, _, err = orderService.CancelPaymentByProvider(notifyCtx, paymentID.String(), status, payload.Amount, payload.Currency)
 		if err != nil {
 			if errors.Is(err, service.ErrAmountMismatch) || errors.Is(err, service.ErrCurrencyMismatch) {
 				http.Error(w, err.Error(), http.StatusBadRequest)

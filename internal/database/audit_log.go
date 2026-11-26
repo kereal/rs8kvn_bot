@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -63,6 +64,8 @@ const (
 	AuditEventOrderExpired          = "order_expired"
 	AuditEventOrderCanceled         = "order_canceled"
 	AuditEventChargebackReceived    = "chargeback_received"
+	AuditEventPaymentRefunded       = "payment_refunded"
+	AuditEventPaymentAutoRefunded   = "payment_auto_refunded"
 	AuditEventPaymentCreationUncert = "payment_creation_uncertain"
 
 	// Рассылки.
@@ -324,8 +327,9 @@ func AuditSubscriptionReanimated(sub *Subscription) *AuditLog {
 // AuditSubscriptionRenewed фиксирует успешную оплату (продление/активацию).
 // before — состояние подписки до платежа (nil для первой активации),
 // after — состояние, сохранённое транзакцией подтверждения платежа.
+// provider — идентификатор платёжного провайдера (actor_id события).
 // NewState строится из after, иначе событие показывало бы прежний тариф и срок.
-func AuditSubscriptionRenewed(before, after *Subscription, product *Product) *AuditLog {
+func AuditSubscriptionRenewed(before, after *Subscription, product *Product, provider string) *AuditLog {
 	details := auditSubDetails(after)
 	if product != nil {
 		details["product_id"] = product.ID
@@ -338,12 +342,16 @@ func AuditSubscriptionRenewed(before, after *Subscription, product *Product) *Au
 		details["old_expires_at"] = before.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 
+	if strings.TrimSpace(provider) == "" {
+		provider = PaymentProviderPlatega
+	}
+
 	return &AuditLog{
 		EntityType: EntitySubscription,
 		EntityID:   marshalAuditJSONString(formatSubID(after)),
 		Event:      AuditEventSubscriptionRenewed,
 		ActorType:  ActorPaymentProvider,
-		ActorID:    marshalAuditJSONString("platega"),
+		ActorID:    marshalAuditJSONString(provider),
 		OldState:   marshalAuditJSON(subStateSnapshot(before)),
 		NewState:   marshalAuditJSON(subStateSnapshot(after)),
 		Details:    marshalAuditDetails(details),
@@ -513,6 +521,9 @@ func AuditPaymentConfirmed(order *Order, sub *Subscription, product *Product, ne
 		"currency":        order.Currency,
 		"provider":        order.PaymentProvider,
 	}
+	if strings.TrimSpace(order.ProviderPaymentID) != "" {
+		details["provider_payment_id"] = order.ProviderPaymentID
+	}
 	if product != nil {
 		details["product_id"] = product.ID
 		details["product_name"] = product.Name
@@ -572,9 +583,9 @@ func AuditOrderCanceled(order *Order, actorType ActorType) *AuditLog {
 	}
 }
 
-// AuditChargebackReceived фиксирует чарджбэк от платёжного провайдера.
-// downgraded — была ли подписка понижена до free в той же транзакции.
-func AuditChargebackReceived(order *Order, sub *Subscription, downgraded bool) *AuditLog {
+// auditOrderRefundEvent — общий каркас ChargebackReceived/PaymentRefunded:
+// заказ paid→canceled от лица платёжного провайдера, details идентичны.
+func auditOrderRefundEvent(event string, order *Order, downgraded bool) *AuditLog {
 	details := map[string]any{
 		"order_id":        order.ID,
 		"subscription_id": order.SubscriptionID,
@@ -583,16 +594,65 @@ func AuditChargebackReceived(order *Order, sub *Subscription, downgraded bool) *
 		"provider":        order.PaymentProvider,
 		"downgraded":      downgraded,
 	}
+	if strings.TrimSpace(order.ProviderPaymentID) != "" {
+		details["provider_payment_id"] = order.ProviderPaymentID
+	}
 
 	return &AuditLog{
 		EntityType: EntityOrder,
 		EntityID:   marshalAuditJSONString(fmt.Sprintf("%d", order.ID)),
-		Event:      AuditEventChargebackReceived,
+		Event:      event,
 		ActorType:  ActorPaymentProvider,
 		ActorID:    marshalAuditJSONString(order.PaymentProvider),
 		OldState:   marshalAuditJSON(map[string]any{"order_status": string(OrderStatusPaid)}),
 		NewState:   marshalAuditJSON(map[string]any{"order_status": string(OrderStatusCanceled)}),
 		Details:    marshalAuditDetails(details),
+	}
+}
+
+// AuditChargebackReceived фиксирует чарджбэк от платёжного провайдера.
+// downgraded — была ли подписка понижена до free в той же транзакции.
+func AuditChargebackReceived(order *Order, sub *Subscription, downgraded bool) *AuditLog {
+	return auditOrderRefundEvent(AuditEventChargebackReceived, order, downgraded)
+}
+
+// AuditPaymentRefunded фиксирует полный возврат средств от платёжного провайдера.
+// downgraded — была ли подписка понижена до free в той же транзакции.
+func AuditPaymentRefunded(order *Order, sub *Subscription, downgraded bool) *AuditLog {
+	return auditOrderRefundEvent(AuditEventPaymentRefunded, order, downgraded)
+}
+
+// AuditPaymentAutoRefunded фиксирует автоматический возврат средств, применённый
+// сервисом (дубль оплаты Stars). order может быть nil — тогда событие
+// адресуется системе. reason описывает причину авто-возврата.
+//
+// По конвенции AGENTS.md actor_id платёжных событий — идентификатор провайдера
+// (см. AuditPaymentConfirmed/AuditPaymentRefunded), а не charge-ид: он остаётся
+// в details["provider_payment_id"].
+func AuditPaymentAutoRefunded(order *Order, telegramID int64, amountCents int64, currency string, providerPaymentID string, reason string) *AuditLog {
+	entityType, entityID := EntitySystem, (*string)(nil)
+
+	if order != nil {
+		entityType = EntityOrder
+		if order.ID > 0 {
+			entityID = marshalAuditJSONString(fmt.Sprintf("%d", order.ID))
+		}
+	}
+
+	return &AuditLog{
+		EntityType: entityType,
+		EntityID:   entityID,
+		Event:      AuditEventPaymentAutoRefunded,
+		ActorType:  ActorPaymentProvider,
+		ActorID:    marshalAuditJSONString(PaymentProviderTelegramStars),
+		Details: marshalAuditDetails(map[string]any{
+			"provider":            PaymentProviderTelegramStars,
+			"provider_payment_id": providerPaymentID,
+			"amount_cents":        amountCents,
+			"currency":            currency,
+			"reason":              reason,
+			"telegram_id":         telegramID,
+		}),
 	}
 }
 
@@ -726,9 +786,22 @@ func auditActorTelegram(sub *Subscription) *string {
 	return marshalAuditJSONString(fmt.Sprintf("%d", sub.TelegramID))
 }
 
+// auditRetentionExemptEvents — события, которые обрезка журнала не удаляет.
+// `payment_confirmed` — единственный след оплаты, переживающий рестарт и
+// каскадное удаление заказа (/del): по нему авто-возврат отличает дубль charge
+// от денег за уже оказанную услугу (см. autoRefundStarsCharge). Вместе с ним
+// хранится `payment_auto_refunded` — иначе повторная доставка старого webhook'а
+// попыталась бы вернуть деньги второй раз.
+var auditRetentionExemptEvents = []string{
+	AuditEventPaymentConfirmed,
+	AuditEventPaymentAutoRefunded,
+}
+
 // DeleteAuditLogBefore удаляет не более batch записей старше before и
 // возвращает число удалённых. Пачками — чтобы DELETE не держал write-lock на
-// всю таблицу и не блокировал платежи/синк.
+// всю таблицу и не блокировал платежи/синк. Платёжные события
+// (auditRetentionExemptEvents) не удаляются никогда: журнал для них — рабочее
+// состояние, а не история.
 func (s *Service) DeleteAuditLogBefore(ctx context.Context, before time.Time, batch int) (int64, error) {
 	if batch <= 0 {
 		batch = 1000
@@ -736,8 +809,8 @@ func (s *Service) DeleteAuditLogBefore(ctx context.Context, before time.Time, ba
 
 	result := s.db.WithContext(ctx).
 		Exec(`DELETE FROM audit_log WHERE id IN (
-			SELECT id FROM audit_log WHERE created_at < ? ORDER BY id LIMIT ?
-		)`, before, batch)
+			SELECT id FROM audit_log WHERE created_at < ? AND event NOT IN ? ORDER BY id LIMIT ?
+		)`, before, auditRetentionExemptEvents, batch)
 	if result.Error != nil {
 		return 0, fmt.Errorf("delete audit log before %s: %w", before.Format(time.RFC3339), result.Error)
 	}

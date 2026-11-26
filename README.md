@@ -18,6 +18,7 @@
 - 👥 Referral system — users generate invite codes with in-memory cache + periodic sync
 - 📊 Plans & pricing — plan-based traffic/device limits, products, orders, multi-node via `nodes`/`plan_nodes` schema
 - 💳 **Platega payments** — in-bot purchase flow (💎 Купить Premium), provider payment links, authenticated webhook (`X-MerchantId`/`X-Secret`) with atomic confirmation, renewals, and chargeback auto-downgrade to the free plan
+- ⭐ **Telegram Stars payments** — alternative provider selected by `PAYMENT_PROVIDER=telegram_stars`: the bot issues the invoice itself (`pre_checkout_query` + `successful_payment`), renewals and full refunds via `/refund <order_id>`
 - 🔗 Subscription server endpoint (`/sub/{subID}`) with multi-source aggregation, devices/IPs tracking, and profile headers, node-state synchronization via subscription_nodes table
 - 🌐 Multi-node VPN abstraction — `internal/vpn/` with `Client` interface, 3x-ui, proxman, and fetch support, per-node client provisioning
 - 📈 Prometheus metrics — `/metrics` endpoint with HTTP, bot, XUI, DB, cache, subscription metrics
@@ -75,6 +76,8 @@ See **[Installation Guide](doc/installation.md)** for:
 | `/mysub` | Show your subscription info (traffic usage, subscription link) |
 | `/help` | Show bot help |
 | `/invite` | Get your referral link |
+| `/paysupport` | Payment support FAQ (required for Telegram Stars) |
+| `/terms` | Show the user agreement |
 
 ## Admin Commands
 
@@ -87,6 +90,7 @@ See **[Installation Guide](doc/installation.md)** for:
 | `/broadcasts` | Show recent broadcasts; open details, cancel active campaigns, or retry failed recipients |
 | `/send <id or @username> <message>` | Send a message to a specific user |
 | `/refstats` | Show referral statistics (count per user from cache) |
+| `/refund <order_id>` | Refund a Telegram Stars order (full refund; idempotent) |
 
 **Examples:**
 
@@ -139,6 +143,22 @@ The response body is a JSON **array** of complete Xray-core client configs (`app
 - Existing clients do not need to be recreated. Save the above values once for legacy clients, then let the bot preserve them on subsequent add/update requests.
 - **Source**: [3x-ui inbound_traffic.go - autoRenewClients()](https://github.com/mhsanaei/3x-ui/blob/main/internal/web/service/inbound_traffic.go)
 
+### Payment Providers
+
+In-bot payments support two providers, selected by `PAYMENT_PROVIDER` when `PAYMENT_ENABLED=true`:
+
+| Variable | Values | Default | Purpose |
+|----------|--------|---------|---------|
+| `PAYMENT_ENABLED` | `true` / `false` | `false` | Enable in-bot payments |
+| `PAYMENT_PROVIDER` | `platega`, `telegram_stars` | `platega` | Active payment provider |
+| `PLATEGA_CALLBACK_ENABLED` | `true` / `false` | `false` | Keep the legacy Platega webhook enabled to settle old orders after switching to Stars |
+| `STARS_INVOICE_TTL` | Go duration (`15m`, `30m`, `1h`) | `15m` | Local lifetime of a Stars invoice |
+
+- `platega` — payment links plus the authenticated HTTP callback described below.
+- `telegram_stars` — the bot issues the invoice itself (`pre_checkout_query` + `successful_payment`); tariffs come from products with `currency='XTR'` (price in Stars), refunds are issued with `/refund <order_id>`.
+
+Switchover, rollback and the pre-launch checklist are described in **[doc/operations.md — Telegram Stars](doc/operations.md#8-telegram-stars)**.
+
 ### Payment Callback (`/payment/callback`)
 
 Receives Platega payment notifications on port 8880. Guard chain: POST-only → readiness (503) → `X-MerchantId`/`X-Secret` constant-time auth (401) → body ≤ 256 KiB, single JSON object → UUID `id` and amount/currency/status validation (400).
@@ -147,7 +167,7 @@ Receives Platega payment notifications on port 8880. Guard chain: POST-only → 
 - `CANCELED|CHARGEBACKED` → order cancellation; a chargeback on a paid order auto-downgrades the subscription to the free plan unless another paid order exists.
 - Mismatches, unknown statuses and other issues alert the admin (`NotifyPaymentIssue`).
 
-Expose it at `https://<domain>/payment/callback`: locally via `ngrok http 8880`, in production via nginx (see [doc/operations.md](doc/operations.md)). Enabled by `PAYMENT_ENABLED`, `PLATEGA_MERCHANT_ID`, `PLATEGA_SECRET`.
+Expose it at `https://<domain>/payment/callback`: locally via `ngrok http 8880`, in production via nginx (see [doc/operations.md](doc/operations.md)). Enabled when Platega is in use: `PAYMENT_ENABLED=true` with `PAYMENT_PROVIDER=platega`, or `PLATEGA_CALLBACK_ENABLED=true` (settling old orders after a switch to Stars); requires `PLATEGA_MERCHANT_ID` and `PLATEGA_SECRET`.
 
 ## Releases
 

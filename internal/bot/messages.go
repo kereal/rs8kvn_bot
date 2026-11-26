@@ -16,20 +16,26 @@ const (
 	MsgUnknownCommand     MessageKey = "unknown_command"
 	MsgUseStart           MessageKey = "use_start"
 
-	MsgSubNoActive        MessageKey = "sub.no_active"
-	MsgSubTempError       MessageKey = "sub.temp_error"
-	MsgSubCreateError     MessageKey = "sub.create_error"
-	MsgSubCreatedSuccess  MessageKey = "sub.created_success"
-	MsgPremiumOffer       MessageKey = "premium.offer"
-	MsgPremiumBenefits    MessageKey = "premium.benefits"
-	MsgPremiumBadge       MessageKey = "premium.badge"
-	MsgPremiumMenuTeaser  MessageKey = "premium.menu_teaser"
-	MsgPremiumAlready     MessageKey = "premium.already"
-	MsgPremiumUnavailable MessageKey = "premium.unavailable"
-	MsgPremiumConfirm     MessageKey = "premium.confirm"
-	MsgPremiumSuccess     MessageKey = "premium.success"
-	MsgPaymentInProgress  MessageKey = "payment.in_progress"
-	MsgPaymentNeedsReview MessageKey = "payment.needs_review"
+	MsgSubNoActive               MessageKey = "sub.no_active"
+	MsgSubTempError              MessageKey = "sub.temp_error"
+	MsgSubCreateError            MessageKey = "sub.create_error"
+	MsgSubCreatedSuccess         MessageKey = "sub.created_success"
+	MsgPremiumOffer              MessageKey = "premium.offer"
+	MsgPremiumBenefits           MessageKey = "premium.benefits"
+	MsgPremiumBadge              MessageKey = "premium.badge"
+	MsgPremiumMenuTeaser         MessageKey = "premium.menu_teaser"
+	MsgPremiumAlready            MessageKey = "premium.already"
+	MsgPremiumUnavailable        MessageKey = "premium.unavailable"
+	MsgPremiumConfirm            MessageKey = "premium.confirm"
+	MsgPremiumSuccess            MessageKey = "premium.success"
+	MsgPaymentInProgress         MessageKey = "payment.in_progress"
+	MsgPaymentInProgressStars    MessageKey = "payment.in_progress_stars"
+	MsgPaymentAwaitingAcceptance MessageKey = "payment.awaiting_acceptance"
+	MsgPaymentNeedsReview        MessageKey = "payment.needs_review"
+	MsgInvoiceSendFailed         MessageKey = "payment.invoice_send_failed"
+
+	MsgStarsAlreadyPaid     MessageKey = "stars.order_already_paid"
+	MsgStarsOrderNotPending MessageKey = "stars.order_not_pending"
 
 	MsgAdminNoSubs       MessageKey = "admin.no_subs"
 	MsgAdminLastReg      MessageKey = "admin.last_reg"
@@ -81,20 +87,26 @@ var messages = map[MessageKey]string{
 	MsgUnknownCommand:     "Неизвестная команда. Используйте /start или /help",
 	MsgUseStart:           "Используйте /start для начала работы с ботом.",
 
-	MsgSubNoActive:        "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.",
-	MsgSubTempError:       "❌ Временная ошибка. Попробуйте позже.",
-	MsgSubCreateError:     "❌ Ошибка при создании подписки.",
-	MsgSubCreatedSuccess:  "✅ Ваша подписка\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка (для Happ)\n`%s`",
-	MsgPremiumOffer:       "💎 *Бесплатный апгрейд*\n\nСейчас у вас тариф *%s*.\n\nВы можете получить *%s* сразу после подтверждения.\nСтоимость сейчас: *%s*.\n\nПосле подтверждения тариф сменится автоматически.",
-	MsgPremiumBenefits:    "✨ *Преимущества Premium*\n\n" + service.PremiumBenefitsText + "\n\nВыберите тариф",
-	MsgPremiumBadge:       "Вы — 💎 Premium",
-	MsgPremiumMenuTeaser:  "💎 Premium — безлимитный трафик и больше серверов",
-	MsgPremiumAlready:     "✅ У вас уже активирован тариф *%s*.",
-	MsgPremiumUnavailable: "❌ Бесплатный premium-продукт сейчас недоступен. Попробуйте позже.",
-	MsgPremiumConfirm:     "💳 Вы покупаете *%s* за *%s*.\n\nНажмите «Получить», чтобы сразу активировать тариф.",
-	MsgPremiumSuccess:     "✅ Ваша подписка %s активирована\n\n%s\n\n🔗 Ссылка на подписку\n`%s`\n\nОбновите подписку в программе чтобы получить изменения",
-	MsgPaymentInProgress:  "❌ Платёж уже запущен. Откройте ссылку, отправленную ранее, или дождитесь её истечения.",
-	MsgPaymentNeedsReview: "❌ Не удалось создать платёж: требуется ручная проверка. Обратитесь к администратору.",
+	MsgSubNoActive:               "❌ У вас нет активной подписки.\n\nНажмите «Получить подписку» для создания.",
+	MsgSubTempError:              "❌ Временная ошибка. Попробуйте позже.",
+	MsgSubCreateError:            "❌ Ошибка при создании подписки.",
+	MsgSubCreatedSuccess:         "✅ Ваша подписка\n\n📊 Трафик: %d ГБ\n\n🔗 Ссылка (для Happ)\n`%s`",
+	MsgPremiumOffer:              "💎 *Бесплатный апгрейд*\n\nСейчас у вас тариф *%s*.\n\nВы можете получить *%s* сразу после подтверждения.\nСтоимость сейчас: *%s*.\n\nПосле подтверждения тариф сменится автоматически.",
+	MsgPremiumBenefits:           "✨ *Преимущества Premium*\n\n" + service.PremiumBenefitsText + "\n\nВыберите тариф",
+	MsgPremiumBadge:              "Вы — 💎 Premium",
+	MsgPremiumMenuTeaser:         "💎 Premium — безлимитный трафик и больше серверов",
+	MsgPremiumAlready:            "✅ У вас уже активирован тариф *%s*.",
+	MsgPremiumUnavailable:        "❌ Бесплатный premium-продукт сейчас недоступен. Попробуйте позже.",
+	MsgPremiumConfirm:            "💳 Вы покупаете *%s* за *%s*.\n\nНажмите «Получить», чтобы сразу активировать тариф.",
+	MsgPremiumSuccess:            "✅ Ваша подписка %s активирована\n\n%s\n\n🔗 Ссылка на подписку\n`%s`\n\nОбновите подписку в программе чтобы получить изменения",
+	MsgPaymentInProgress:         "❌ Платёж уже запущен. Откройте ссылку, отправленную ранее, или дождитесь её истечения.",
+	MsgPaymentInProgressStars:    "❌ Платёж уже запущен. Нажмите на счёт, отправленный ранее, или дождитесь его истечения.",
+	MsgPaymentAwaitingAcceptance: "❌ Платёж уже запущен. Подтвердите условия в сообщении, которое мы отправили в личный чат, или дождитесь истечения заказа.",
+	MsgPaymentNeedsReview:        "❌ Не удалось создать платёж: требуется ручная проверка. Обратитесь к администратору.",
+	MsgInvoiceSendFailed:         "❌ Не удалось отправить счёт. Попробуйте снова через несколько минут.",
+
+	MsgStarsAlreadyPaid:     "✅ Оплата уже получена — подписка активна.",
+	MsgStarsOrderNotPending: "❌ Срок оплаты этого заказа истёк. Выберите тариф заново, чтобы получить новый счёт.",
 
 	MsgAdminNoSubs:       "📭 Нет активных подписок",
 	MsgAdminLastReg:      "📋 *Последние регистрации*\n\n",
