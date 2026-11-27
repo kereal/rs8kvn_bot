@@ -109,3 +109,54 @@ func TestIsNumericUsername(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatStarsAmount(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		amount int64
+		want   string
+	}{
+		{"zero", 0, "0 XTR"},
+		{"single", 199, "199 XTR"},
+		{"thousands separator", 2300, "2 300 XTR"},
+		{"large", 1234567, "1 234 567 XTR"},
+		{"negative", -2300, "-2 300 XTR"},
+		{"min int64", -9223372036854775808, "-9 223 372 036 854 775 808 XTR"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, FormatStarsAmount(tt.amount))
+		})
+	}
+}
+
+func TestFormatPriceCents(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		amount   int64
+		currency string
+		want     string
+	}{
+		{"XTR zero", 0, "XTR", "0 XTR"},
+		{"XTR single", 199, "XTR", "199 XTR"},
+		{"XTR thousands", 2300, "XTR", "2 300 XTR"},
+		{"XTR large", 1234567, "XTR", "1 234 567 XTR"},
+		{"XTR negative", -199, "XTR", "-199 XTR"},
+		{"lowercase XTR", 199, "xtr", "199 XTR"},
+		{"RUB whole", 19900, "RUB", "199₽"},
+		{"RUB fractional", 12737, "RUB", "127.37₽"},
+		{"empty currency keeps RUB rendering", 19900, "", "199₽"},
+		{"unknown currency keeps RUB rendering", 19900, "USD", "199₽"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, FormatPriceCents(tt.amount, tt.currency))
+		})
+	}
+}

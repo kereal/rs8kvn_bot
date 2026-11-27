@@ -9,10 +9,10 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/interfaces"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
@@ -223,7 +223,10 @@ func NewXUIClient() *XUIClient {
 
 // BotAPI is a mock implementation of the Telegram Bot API for testing.
 type BotAPI struct {
-	mu              sync.RWMutex
+	mu sync.RWMutex
+	// hookMu сериализует вызовы MakeRequestFunc, не удерживая mu: hook может
+	// безопасно вызывать другие методы этого же BotAPI (например, *Safe).
+	hookMu          sync.Mutex
 	sendCalled      bool
 	requestCalled   bool
 	LastSentText    string
@@ -235,8 +238,18 @@ type BotAPI struct {
 	LastRequest     tgbotapi.Chattable
 	SendFunc        func(c tgbotapi.Chattable) (tgbotapi.Message, error)
 	AllSentMessages []SentMessage
+	// AllChattables captures every Chattable passed to Send in order — needed
+	// to assert on non-text payloads like tgbotapi.InvoiceConfig (Stars).
+	AllChattables []tgbotapi.Chattable
+	// AllRequests captures every Chattable passed to Request in order
+	// (PreCheckoutConfig answers, DeleteMessage, Callback).
+	AllRequests []tgbotapi.Chattable
 	// DeletedMessageIDs captures the message ids passed to DeleteMessage.
 	DeletedMessageIDs []int
+	// MakeRequestError, if set, is returned by MakeRequest.
+	MakeRequestError error
+	// MakeRequestFunc, if set, replaces the default recording behaviour of MakeRequest.
+	MakeRequestFunc func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error)
 }
 
 // SentMessage represents a captured message
@@ -256,6 +269,7 @@ func (m *BotAPI) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 	m.sendCalled = true
 	m.SendCount++
 	m.LastChattable = c
+	m.AllChattables = append(m.AllChattables, c)
 
 	var msg SentMessage
 
@@ -295,6 +309,7 @@ func (m *BotAPI) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
 
 	m.requestCalled = true
 	m.LastRequest = c
+	m.AllRequests = append(m.AllRequests, c)
 
 	if dm, ok := c.(tgbotapi.DeleteMessageConfig); ok {
 		m.DeletedMessageIDs = append(m.DeletedMessageIDs, dm.MessageID)
@@ -307,12 +322,53 @@ func (m *BotAPI) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
 	return &tgbotapi.APIResponse{Ok: true}, nil
 }
 
+// AllChattablesSafe returns a copy of every Chattable passed to Send (thread-safe).
+func (m *BotAPI) AllChattablesSafe() []tgbotapi.Chattable {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	out := make([]tgbotapi.Chattable, len(m.AllChattables))
+	copy(out, m.AllChattables)
+
+	return out
+}
+
+// AllRequestsSafe returns a copy of every Chattable passed to Request (thread-safe).
+func (m *BotAPI) AllRequestsSafe() []tgbotapi.Chattable {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	out := make([]tgbotapi.Chattable, len(m.AllRequests))
+	copy(out, m.AllRequests)
+
+	return out
+}
+
 // SendCountSafe returns the number of Send calls (thread-safe).
 func (m *BotAPI) SendCountSafe() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	return m.SendCount
+}
+
+// MakeRequest mirrors BotAPI.MakeRequest (tgbotapi v5.5.1): the endpoint and
+// params are recorded so tests can assert on them.
+func (m *BotAPI) MakeRequest(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+	// The hook runs under its own mutex, never under m.mu: a hook is free to
+	// call SendCountSafe and friends without deadlocking the whole mock.
+	if m.MakeRequestFunc != nil {
+		m.hookMu.Lock()
+		defer m.hookMu.Unlock()
+
+		return m.MakeRequestFunc(endpoint, params)
+	}
+
+	if m.MakeRequestError != nil {
+		return nil, m.MakeRequestError
+	}
+
+	return &tgbotapi.APIResponse{Ok: true}, nil
 }
 
 // SendCalledSafe returns whether Send was called (thread-safe).
@@ -437,13 +493,13 @@ type ServiceStoreFake struct {
 	Broadcasts                                  map[uint]*database.Broadcast
 	AuditLogs                                   []database.AuditLog
 	BindTrialSubscriptionFunc                   func(ctx context.Context, subscriptionID string, telegramID int64, username string) (*database.Subscription, error)
-	CancelOrderCASFunc                          func(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error)
-	CancelPaidOrderAndDowngradeCASFunc          func(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error)
+	CancelOrderCASFunc                          func(ctx context.Context, provider string, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error)
+	CancelPaidOrderAndDowngradeCASFunc          func(ctx context.Context, p database.CancelPaidOrderParams) (*database.ChargebackResult, error)
 	ClaimExpiredTrialsFunc                      func(ctx context.Context, hours int) ([]database.Subscription, error)
 	ClaimReminderFunc                           func(ctx context.Context, id uint, bit int, expiresAt time.Time) (bool, error)
 	ClaimTrafficReminderFunc                    func(ctx context.Context, id uint, bit int) (bool, error)
 	CleanupExpiredTrialsFunc                    func(ctx context.Context, hours int) ([]database.Subscription, error)
-	ConfirmOrderPaidCASFunc                     func(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error)
+	ConfirmOrderPaidCASFunc                     func(ctx context.Context, p database.ConfirmPaidOrderParams) (bool, error)
 	CountActiveSubscriptionsFunc                func(ctx context.Context) (int64, error)
 	CountFreeSubscriptionsFunc                  func(ctx context.Context) (int64, error)
 	CountPremiumSubscriptionsFunc               func(ctx context.Context) (int64, error)
@@ -455,8 +511,8 @@ type ServiceStoreFake struct {
 	DeleteSubscriptionNodeFunc                  func(ctx context.Context, subID, nodeID uint) error
 	DeleteSubscriptionNodesBySubscriptionIDFunc func(ctx context.Context, subID uint) error
 	ExpireSubscriptionFunc                      func(ctx context.Context, id uint, freePlanID uint) error
-	FindOrCreatePendingPaymentOrderFunc         func(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
-	FindPendingPaymentOrderFunc                 func(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error)
+	FindOrCreatePendingPaymentOrderFunc         func(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, bool, error)
+	FindPendingPaymentOrderFunc                 func(ctx context.Context, subscriptionID, productID uint, provider string, now time.Time) (*database.Order, error)
 	GetAllSubscriptionsFunc                     func(ctx context.Context) ([]database.Subscription, error)
 	GetAnyByTelegramIDFunc                      func(ctx context.Context, telegramID int64) (*database.Subscription, error)
 	GetBroadcastRecipientsStatsFunc             func(ctx context.Context, broadcastID uint) (total, sent, blocked, unreachable, failed int64, report database.BroadcastDeliveryReport, err error)
@@ -469,9 +525,10 @@ type ServiceStoreFake struct {
 	GetNodesByPlanIDFunc                        func(ctx context.Context, planID uint) ([]database.Node, error)
 	GetNodesByPlanNameFunc                      func(ctx context.Context, planName string) ([]database.Node, error)
 	GetOrderByIDFunc                            func(ctx context.Context, id uint) (*database.Order, error)
-	GetOrderByProviderPaymentIDFunc             func(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*database.Order, error)
+	GetOrderByProviderPaymentIDFunc             func(ctx context.Context, provider string, providerPaymentID string) (*database.Order, error)
 	GetPaidOrdersWithoutProviderFeeAfterIDFunc  func(ctx context.Context, afterID uint, limit int) ([]database.Order, error)
-	GetPaidOrdersWithoutProviderFeeFunc         func(ctx context.Context, limit int) ([]database.Order, error)
+	HasOrdersByProviderFunc                     func(ctx context.Context, provider string) (bool, error)
+	HasPaymentConfirmedByProviderPaymentIDFunc  func(ctx context.Context, provider string, providerPaymentID string) (bool, error)
 	GetPendingBySubscriptionIDFunc              func(ctx context.Context, subscriptionID uint) ([]database.SubscriptionNode, error)
 	GetPendingSyncFunc                          func(ctx context.Context) ([]database.SubscriptionNode, error)
 	GetNodesWithParkedSyncFunc                  func(ctx context.Context, parkedAfter time.Time) ([]uint, error)
@@ -488,8 +545,8 @@ type ServiceStoreFake struct {
 	ReleaseParkedNodesOnNodeFunc                func(ctx context.Context, nodeID uint, parkedAfter time.Time) (int64, error)
 	ReleaseTrafficReminderFunc                  func(ctx context.Context, id uint, bit int) error
 	SaveOrderPaymentAmountsFunc                 func(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error
-	SavePaymentDetailsFunc                      func(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
-	AttachProviderPaymentIDFunc                 func(ctx context.Context, orderID uint, provider string, providerPaymentID uuid.UUID) (bool, error)
+	SavePaymentDetailsFunc                      func(ctx context.Context, orderID uint, providerPaymentID string, paymentURL string, paymentExpiresAt time.Time) error
+	AttachProviderPaymentIDFunc                 func(ctx context.Context, orderID uint, provider string, providerPaymentID string) (bool, error)
 	GetStalePendingOrdersAfterIDFunc            func(ctx context.Context, before time.Time, afterID uint, limit int) ([]database.Order, error)
 	ExpirePendingOrderFunc                      func(ctx context.Context, orderID uint) (bool, error)
 	UpdateRetryFunc                             func(ctx context.Context, subID, nodeID uint, retryCount int, retryAt *time.Time, lastErr *string) error
@@ -535,7 +592,7 @@ func (m *ServiceStoreFake) BindTrialSubscription(ctx context.Context, subscripti
 	return nil, gorm.ErrRecordNotFound
 }
 
-func (m *ServiceStoreFake) CancelOrderCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error) {
+func (m *ServiceStoreFake) CancelOrderCAS(ctx context.Context, provider string, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error) {
 	if m.CancelOrderCASFunc != nil {
 		return m.CancelOrderCASFunc(ctx, provider, providerPaymentID, fromStatuses)
 	}
@@ -544,7 +601,7 @@ func (m *ServiceStoreFake) CancelOrderCAS(ctx context.Context, provider string, 
 	defer m.mu.Unlock()
 
 	for _, order := range m.Orders {
-		if order.PaymentProvider == provider && order.ProviderPaymentID == providerPaymentID.String() {
+		if order.PaymentProvider == provider && order.ProviderPaymentID == providerPaymentID {
 			if slices.Contains(fromStatuses, order.Status) {
 				order.Status = database.OrderStatusCanceled
 				return true, nil
@@ -555,9 +612,9 @@ func (m *ServiceStoreFake) CancelOrderCAS(ctx context.Context, provider string, 
 	return false, nil
 }
 
-func (m *ServiceStoreFake) CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error) {
+func (m *ServiceStoreFake) CancelPaidOrderAndDowngradeCAS(ctx context.Context, p database.CancelPaidOrderParams) (*database.ChargebackResult, error) {
 	if m.CancelPaidOrderAndDowngradeCASFunc != nil {
-		return m.CancelPaidOrderAndDowngradeCASFunc(ctx, provider, providerPaymentID, now, freePlanID, applyPlan)
+		return m.CancelPaidOrderAndDowngradeCASFunc(ctx, p)
 	}
 
 	return nil, errors.New("mock atomic chargeback requires CancelPaidOrderAndDowngradeCASFunc")
@@ -603,9 +660,9 @@ func (m *ServiceStoreFake) CleanupExpiredTrials(ctx context.Context, hours int) 
 	return nil, nil
 }
 
-func (m *ServiceStoreFake) ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error) {
+func (m *ServiceStoreFake) ConfirmOrderPaidCAS(ctx context.Context, p database.ConfirmPaidOrderParams) (bool, error) {
 	if m.ConfirmOrderPaidCASFunc != nil {
-		return m.ConfirmOrderPaidCASFunc(ctx, orderID, paidAt, activatedAt, sub, product, applyPlan, callbackAmountCents)
+		return m.ConfirmOrderPaidCASFunc(ctx, p)
 	}
 
 	// The real implementation is a transactional CAS computing the new expiry
@@ -773,18 +830,18 @@ func (m *ServiceStoreFake) ExpireSubscription(ctx context.Context, id uint, free
 	return nil
 }
 
-func (m *ServiceStoreFake) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error) {
+func (m *ServiceStoreFake) FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, bool, error) {
 	if m.FindOrCreatePendingPaymentOrderFunc != nil {
-		return m.FindOrCreatePendingPaymentOrderFunc(ctx, subscriptionID, productID, amountCents, currency, now)
+		return m.FindOrCreatePendingPaymentOrderFunc(ctx, subscriptionID, productID, provider, amountCents, currency, paymentExpiresAt, now)
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	for _, order := range m.Orders {
-		if order.SubscriptionID == subscriptionID && order.ProductID == productID && order.PaymentProvider == "platega" && order.Status == database.OrderStatusPending {
+		if order.SubscriptionID == subscriptionID && order.ProductID == productID && order.PaymentProvider == provider && order.Status == database.OrderStatusPending {
 			if order.PaymentCreationUncertain {
-				return order, nil
+				return order, false, nil
 			}
 
 			if order.PaymentExpiresAt != nil && !now.Before(*order.PaymentExpiresAt) {
@@ -792,7 +849,7 @@ func (m *ServiceStoreFake) FindOrCreatePendingPaymentOrder(ctx context.Context, 
 				continue
 			}
 
-			return order, nil
+			return order, false, nil
 		}
 	}
 
@@ -800,22 +857,22 @@ func (m *ServiceStoreFake) FindOrCreatePendingPaymentOrder(ctx context.Context, 
 		m.Orders = make(map[uint]*database.Order)
 	}
 
-	order := &database.Order{ID: uint(len(m.Orders) + 1), SubscriptionID: subscriptionID, ProductID: productID, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: "platega", CreatedAt: now} // #nosec G115 -- slice length is non-negative
+	order := &database.Order{ID: uint(len(m.Orders) + 1), SubscriptionID: subscriptionID, ProductID: productID, Status: database.OrderStatusPending, AmountCents: amountCents, Currency: currency, PaymentProvider: provider, PaymentExpiresAt: paymentExpiresAt, CreatedAt: now} // #nosec G115 -- slice length is non-negative
 	m.Orders[order.ID] = order
 
-	return order, nil
+	return order, true, nil
 }
 
-func (m *ServiceStoreFake) FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error) {
+func (m *ServiceStoreFake) FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, now time.Time) (*database.Order, error) {
 	if m.FindPendingPaymentOrderFunc != nil {
-		return m.FindPendingPaymentOrderFunc(ctx, subscriptionID, productID, now)
+		return m.FindPendingPaymentOrderFunc(ctx, subscriptionID, productID, provider, now)
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	for _, order := range m.Orders {
-		if order.SubscriptionID == subscriptionID && order.ProductID == productID && order.PaymentProvider == "platega" && order.Status == database.OrderStatusPending {
+		if order.SubscriptionID == subscriptionID && order.ProductID == productID && order.PaymentProvider == provider && order.Status == database.OrderStatusPending {
 			if order.PaymentExpiresAt != nil && !now.Before(*order.PaymentExpiresAt) {
 				order.Status = database.OrderStatusExpired
 				continue
@@ -973,7 +1030,24 @@ func (m *ServiceStoreFake) GetOrderByID(ctx context.Context, id uint) (*database
 	return nil, gorm.ErrRecordNotFound
 }
 
-func (m *ServiceStoreFake) GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*database.Order, error) {
+func (m *ServiceStoreFake) HasOrdersByProvider(ctx context.Context, provider string) (bool, error) {
+	if m.HasOrdersByProviderFunc != nil {
+		return m.HasOrdersByProviderFunc(ctx, provider)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, order := range m.Orders {
+		if order.PaymentProvider == provider {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func (m *ServiceStoreFake) GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID string) (*database.Order, error) {
 	if m.GetOrderByProviderPaymentIDFunc != nil {
 		return m.GetOrderByProviderPaymentIDFunc(ctx, provider, providerPaymentID)
 	}
@@ -982,7 +1056,7 @@ func (m *ServiceStoreFake) GetOrderByProviderPaymentID(ctx context.Context, prov
 	defer m.mu.RUnlock()
 
 	for _, order := range m.Orders {
-		if order.PaymentProvider == provider && order.ProviderPaymentID == providerPaymentID.String() {
+		if order.PaymentProvider == provider && order.ProviderPaymentID == providerPaymentID {
 			return order, nil
 		}
 	}
@@ -990,29 +1064,9 @@ func (m *ServiceStoreFake) GetOrderByProviderPaymentID(ctx context.Context, prov
 	return nil, gorm.ErrRecordNotFound
 }
 
-func (m *ServiceStoreFake) GetPaidOrdersWithoutProviderFee(ctx context.Context, limit int) ([]database.Order, error) {
-	return m.GetPaidOrdersWithoutProviderFeeAfterID(ctx, 0, limit)
-}
-
 func (m *ServiceStoreFake) GetPaidOrdersWithoutProviderFeeAfterID(ctx context.Context, afterID uint, limit int) ([]database.Order, error) {
 	if m.GetPaidOrdersWithoutProviderFeeAfterIDFunc != nil {
 		return m.GetPaidOrdersWithoutProviderFeeAfterIDFunc(ctx, afterID, limit)
-	}
-
-	if m.GetPaidOrdersWithoutProviderFeeFunc != nil {
-		orders, err := m.GetPaidOrdersWithoutProviderFeeFunc(ctx, limit)
-		if err != nil {
-			return nil, err
-		}
-
-		filtered := orders[:0]
-		for _, order := range orders {
-			if order.ID > afterID {
-				filtered = append(filtered, order)
-			}
-		}
-
-		return filtered, nil
 	}
 
 	m.mu.RLock()
@@ -1156,6 +1210,33 @@ func (m *ServiceStoreFake) GetTrialSubscriptionBySubID(ctx context.Context, subs
 	return nil, gorm.ErrRecordNotFound
 }
 
+// HasPaymentConfirmedByProviderPaymentID reports whether a payment_confirmed
+// audit event exists for the given provider and provider payment ID.
+func (m *ServiceStoreFake) HasPaymentConfirmedByProviderPaymentID(ctx context.Context, provider string, providerPaymentID string) (bool, error) {
+	if m.HasPaymentConfirmedByProviderPaymentIDFunc != nil {
+		return m.HasPaymentConfirmedByProviderPaymentIDFunc(ctx, provider, providerPaymentID)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, entry := range m.AuditLogs {
+		if entry.Event != database.AuditEventPaymentConfirmed {
+			continue
+		}
+
+		if !strings.Contains(entry.Details, `"provider_payment_id":"`+providerPaymentID+`"`) {
+			continue
+		}
+
+		if provider == "" || strings.Contains(entry.Details, `"provider":"`+provider+`"`) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 // InsertAuditLog records an audit event in the in-memory fake. Tests assert on
 // m.AuditLogs to verify which events a flow produced.
 func (m *ServiceStoreFake) InsertAuditLog(ctx context.Context, e *database.AuditLog) error {
@@ -1244,7 +1325,7 @@ func (m *ServiceStoreFake) ExpirePendingOrder(ctx context.Context, orderID uint)
 }
 
 func (m *ServiceStoreFake) AttachProviderPaymentID(
-	ctx context.Context, orderID uint, provider string, providerPaymentID uuid.UUID,
+	ctx context.Context, orderID uint, provider string, providerPaymentID string,
 ) (bool, error) {
 	if m.AttachProviderPaymentIDFunc != nil {
 		return m.AttachProviderPaymentIDFunc(ctx, orderID, provider, providerPaymentID)
@@ -1276,7 +1357,7 @@ func (m *ServiceStoreFake) SaveOrderPaymentAmounts(ctx context.Context, orderID 
 	return nil
 }
 
-func (m *ServiceStoreFake) SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error {
+func (m *ServiceStoreFake) SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID string, paymentURL string, paymentExpiresAt time.Time) error {
 	if m.SavePaymentDetailsFunc != nil {
 		return m.SavePaymentDetailsFunc(ctx, orderID, providerPaymentID, paymentURL, paymentExpiresAt)
 	}
@@ -1289,7 +1370,7 @@ func (m *ServiceStoreFake) SavePaymentDetails(ctx context.Context, orderID uint,
 		return gorm.ErrRecordNotFound
 	}
 
-	order.ProviderPaymentID, order.PaymentURL, order.PaymentExpiresAt, order.PaymentCreationUncertain = providerPaymentID.String(), paymentURL, &paymentExpiresAt, false
+	order.ProviderPaymentID, order.PaymentURL, order.PaymentExpiresAt, order.PaymentCreationUncertain = providerPaymentID, paymentURL, &paymentExpiresAt, false
 
 	return nil
 }
@@ -1781,7 +1862,13 @@ func (m *BotStoreFake) GetStalePendingOrdersAfterID(
 	return nil, nil
 }
 
-func (m *BotStoreFake) ExpirePendingOrder(context.Context, uint) (bool, error) {
+func (m *BotStoreFake) ExpirePendingOrder(ctx context.Context, orderID uint) (bool, error) {
+	// Хук объявлен во встроенной ServiceStoreFake; без него метод возвращал
+	// всегда false и тесты не могли зафиксировать expire-исход.
+	if m.ExpirePendingOrderFunc != nil {
+		return m.ExpirePendingOrderFunc(ctx, orderID)
+	}
+
 	return false, nil
 }
 

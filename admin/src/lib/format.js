@@ -29,10 +29,37 @@ export function formatDate(value) {
   }).format(date)
 }
 
-// Money is stored in cents; the API never sends formatted strings.
-export function formatMoney(cents, currency = 'RUB') {
-  if (cents === null || cents === undefined) return '—'
-  const value = Number(cents) / 100
+// Minor units: RUB — kopecks (1 RUB = 100), XTR — whole Stars (1 Star = 1 minor
+// unit). Never mix currencies in one aggregate.
+function isStars(currency) {
+  return String(currency || 'RUB').toUpperCase() === 'XTR'
+}
+
+// User input → API minor units. RUB: major units × 100 (rounded); XTR: whole
+// Stars, no scaling — the Star IS the minor unit.
+export function toMinorUnits(value, currency = 'RUB') {
+  const major = Number(value)
+  if (!Number.isFinite(major) || major <= 0) return 0
+  return isStars(currency) ? Math.round(major) : Math.round(major * 100)
+}
+
+// API minor units → user input value (inverse of toMinorUnits).
+export function fromMinorUnits(minor, currency = 'RUB') {
+  const value = Number(minor)
+  if (!Number.isFinite(value) || value <= 0) return 0
+  return isStars(currency) ? value : value / 100
+}
+
+// The API never sends formatted strings.
+export function formatMoney(minor, currency = 'RUB') {
+  if (minor === null || minor === undefined) return '—'
+  if (isStars(currency)) {
+    const stars = Number(minor)
+    if (!Number.isFinite(stars)) return '—'
+    // Intl has no XTR currency formatting — label whole Stars by hand.
+    return `${new Intl.NumberFormat('ru-RU').format(stars)} Stars`
+  }
+  const value = Number(minor) / 100
   if (!Number.isFinite(value)) return '—'
   return new Intl.NumberFormat('ru-RU', {
     style: 'currency',

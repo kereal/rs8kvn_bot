@@ -304,7 +304,7 @@ func TestAPI_Contract_KeySets(t *testing.T) {
 			name:     "revenue",
 			method:   http.MethodGet,
 			path:     "/admin/api/revenue?days=7",
-			expected: []string{"currency", "days", "totals"},
+			expected: []string{"currencies", "currency", "days", "totals"},
 		},
 	}
 

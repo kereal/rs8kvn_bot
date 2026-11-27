@@ -23,6 +23,8 @@
     traffic_reset: 'Сброшен трафик подписки',
     order_created: 'Заказ создан',
     payment_confirmed: 'Оплата подтверждена',
+    payment_refunded: 'Платёж возвращён',
+    payment_auto_refunded: 'Платёж возвращён автоматически',
     order_expired: 'Заказ истёк',
     order_canceled: 'Заказ отменён',
     chargeback_received: 'Получен чарджбэк',

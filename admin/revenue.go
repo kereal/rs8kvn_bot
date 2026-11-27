@@ -3,17 +3,23 @@ package admin
 import (
 	"context"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 )
 
+// revenueCurrencyRe — допустимая валюта запроса: три латинские буквы
+// (RUB, XTR, USD…). Всё прочее — bad_request.
+var revenueCurrencyRe = regexp.MustCompile(`^[A-Za-z]{3}$`)
+
 // RevenueStore is the narrow read contract of the revenue aggregate. The
 // concrete *database.Service satisfies it; the screen never writes anywhere.
 type RevenueStore interface {
-	GetRevenueStats(ctx context.Context, days int, now time.Time) (database.RevenueStats, error)
+	GetRevenueStats(ctx context.Context, days int, currency string, now time.Time) (database.RevenueStats, error)
 }
 
 // Screen constants for the days window (P7-style bounds: clamp, never reject
@@ -26,11 +32,14 @@ const (
 
 // revenueResponse is the wire shape of GET /admin/api/revenue. Days are
 // consecutive UTC dates ending today, zero-filled for days without paid
-// orders — the view renders the chart without gap handling.
+// orders — the view renders the chart without gap handling. Every amount and
+// counter belongs to exactly one currency (Currency); Currencies lists all
+// currencies of paid orders in the period regardless of the selection.
 type revenueResponse struct {
-	Days     []revenueDay  `json:"days"`
-	Totals   revenueTotals `json:"totals"`
-	Currency string        `json:"currency"`
+	Days       []revenueDay  `json:"days"`
+	Totals     revenueTotals `json:"totals"`
+	Currency   string        `json:"currency"`
+	Currencies []string      `json:"currencies"`
 }
 
 type revenueDay struct {
@@ -69,7 +78,19 @@ func (s *Server) handleRevenue(w http.ResponseWriter, r *http.Request) {
 		days = min(max(parsed, revenueMinDays), revenueMaxDays)
 	}
 
-	stats, err := store.GetRevenueStats(r.Context(), days, time.Now().UTC())
+	// Валюта агрегата: пустая — авто-выбор в хранилище (RUB при наличии,
+	// иначе первая в стабильном порядке). Формат — три латинские буквы
+	// (RUB, XTR, USD…): всё прочее — bad_request, а не пустой результат.
+	currency := ""
+	if raw := r.URL.Query().Get("currency"); raw != "" {
+		if !revenueCurrencyRe.MatchString(raw) {
+			writeError(w, http.StatusBadRequest, "bad_request", "currency must be a 3-letter code")
+			return
+		}
+		currency = strings.ToUpper(raw)
+	}
+
+	stats, err := store.GetRevenueStats(r.Context(), days, currency, time.Now().UTC())
 	if err != nil {
 		s.writeStoreError(w, "get revenue stats", err)
 		return
@@ -84,6 +105,11 @@ func (s *Server) handleRevenue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Пустой список отдаём как [], а не null: панель итерируется по нему.
+	if stats.Currencies == nil {
+		stats.Currencies = []string{}
+	}
+
 	writeJSON(w, http.StatusOK, revenueResponse{
 		Days: daysPayload,
 		Totals: revenueTotals{
@@ -93,6 +119,7 @@ func (s *Server) handleRevenue(w http.ResponseWriter, r *http.Request) {
 			Canceled:      stats.Totals.Canceled,
 			Expired:       stats.Totals.Expired,
 		},
-		Currency: stats.Currency,
+		Currency:   stats.Currency,
+		Currencies: stats.Currencies,
 	})
 }

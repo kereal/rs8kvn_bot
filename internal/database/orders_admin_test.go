@@ -311,7 +311,7 @@ func TestGetRevenueStats_DayBucketsAndCallbackFallback(t *testing.T) {
 		AmountCents: 3000, Currency: "RUB", PaidAt: &paidAtNull,
 	}).Error)
 
-	stats, err := svc.GetRevenueStats(ctx, 3, revenueNow)
+	stats, err := svc.GetRevenueStats(ctx, 3, "", revenueNow)
 	require.NoError(t, err)
 
 	// Окно из 3 дней, заканчивающееся сегодня: [today-2, вчера, сегодня].
@@ -361,7 +361,7 @@ func TestGetRevenueStats_Totals(t *testing.T) {
 	expiredToday := today.Add(12 * time.Hour)
 	newOrder(OrderStatusExpired, 7000, nil, expiredToday)
 
-	stats, err := svc.GetRevenueStats(ctx, 2, revenueNow)
+	stats, err := svc.GetRevenueStats(ctx, 2, "", revenueNow)
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(3), stats.Totals.PaidOrders)
@@ -386,19 +386,115 @@ func TestGetRevenueStats_Currency(t *testing.T) {
 		AmountCents: 5000, Currency: "RUB", PaidAt: &paidAt,
 	}).Error)
 
-	stats, err := svc.GetRevenueStats(ctx, 7, revenueNow)
+	// Одна валюта: авто-выбор даёт RUB и полный список.
+	stats, err := svc.GetRevenueStats(ctx, 7, "", revenueNow)
 	require.NoError(t, err)
 	assert.Equal(t, "RUB", stats.Currency)
+	assert.Equal(t, []string{"RUB"}, stats.Currencies)
 
-	// Вторая валюта в оплаченных — currency пуст, суммы несравнимы.
+	// Вторая валюта: авто-выбор остаётся на RUB, список полный, суммы —
+	// строго RUB (XTR-заказ в totals не входит).
 	require.NoError(t, svc.db.Create(&Order{
 		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid,
-		AmountCents: 500, Currency: "USD", PaidAt: &paidAt,
+		AmountCents: 500, Currency: "XTR", PaidAt: &paidAt,
 	}).Error)
 
-	stats, err = svc.GetRevenueStats(ctx, 7, revenueNow)
+	stats, err = svc.GetRevenueStats(ctx, 7, "", revenueNow)
 	require.NoError(t, err)
-	assert.Empty(t, stats.Currency)
+	assert.Equal(t, "RUB", stats.Currency)
+	assert.Equal(t, []string{"RUB", "XTR"}, stats.Currencies)
+	assert.Equal(t, int64(1), stats.Totals.PaidOrders)
+	assert.Equal(t, int64(5000), stats.Totals.RevenueCents)
+
+	// Явно запрошенная XTR: те же периоды в валюте Stars.
+	stats, err = svc.GetRevenueStats(ctx, 7, "XTR", revenueNow)
+	require.NoError(t, err)
+	assert.Equal(t, "XTR", stats.Currency)
+	assert.Equal(t, []string{"RUB", "XTR"}, stats.Currencies)
+	assert.Equal(t, int64(1), stats.Totals.PaidOrders)
+	assert.Equal(t, int64(500), stats.Totals.RevenueCents)
+}
+
+func TestGetRevenueStats_CurrencyAutoPicksFirstWithoutRUB(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	product, sub := seedRevenueBase(t, svc)
+
+	today := revenueNow.Truncate(24 * time.Hour)
+	paidAt := today.Add(8 * time.Hour)
+	require.NoError(t, svc.db.Create(&Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid,
+		AmountCents: 300, Currency: "XTR", PaidAt: &paidAt,
+	}).Error)
+
+	stats, err := svc.GetRevenueStats(ctx, 7, "", revenueNow)
+	require.NoError(t, err)
+	assert.Equal(t, "XTR", stats.Currency)
+	assert.Equal(t, []string{"XTR"}, stats.Currencies)
+	assert.Equal(t, int64(1), stats.Totals.PaidOrders)
+}
+
+func TestGetRevenueStats_MissingCurrencyIsEmptyStats(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	product, sub := seedRevenueBase(t, svc)
+
+	today := revenueNow.Truncate(24 * time.Hour)
+	paidAt := today.Add(8 * time.Hour)
+	require.NoError(t, svc.db.Create(&Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid,
+		AmountCents: 5000, Currency: "RUB", PaidAt: &paidAt,
+	}).Error)
+
+	// Запрошенной валюты нет: нулевая статистика этой валюты, список
+	// доступных не зависит от выбора.
+	stats, err := svc.GetRevenueStats(ctx, 3, "USD", revenueNow)
+	require.NoError(t, err)
+	assert.Equal(t, "USD", stats.Currency)
+	assert.Equal(t, []string{"RUB"}, stats.Currencies)
+	assert.Equal(t, int64(0), stats.Totals.PaidOrders)
+	assert.Equal(t, int64(0), stats.Totals.RevenueCents)
+	assert.Equal(t, int64(0), stats.Totals.AvgCheckCents)
+	assert.Len(t, stats.Days, 3)
+	for _, day := range stats.Days {
+		assert.Equal(t, int64(0), day.RevenueCents)
+		assert.Equal(t, int64(0), day.Orders)
+	}
+}
+
+func TestGetRevenueStats_CanceledExpiredRemainGlobal(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	product, sub := seedRevenueBase(t, svc)
+
+	today := revenueNow.Truncate(24 * time.Hour)
+	canceledAt := today.Add(9 * time.Hour)
+	require.NoError(t, svc.db.Create(&Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusCanceled,
+		AmountCents: 7000, Currency: "XTR", CreatedAt: canceledAt,
+	}).Error)
+	require.NoError(t, svc.db.Create(&Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusExpired,
+		AmountCents: 7000, Currency: "RUB", CreatedAt: canceledAt,
+	}).Error)
+
+	// Статусы — общие операционные счётчики: валютная выборка их не меняет.
+	stats, err := svc.GetRevenueStats(ctx, 2, "RUB", revenueNow)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), stats.Totals.PaidOrders)
+	assert.Equal(t, int64(1), stats.Totals.Canceled)
+	assert.Equal(t, int64(1), stats.Totals.Expired)
+
+	stats, err = svc.GetRevenueStats(ctx, 2, "XTR", revenueNow)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), stats.Totals.Canceled)
+	assert.Equal(t, int64(1), stats.Totals.Expired)
 }
 
 func TestGetRevenueStats_DaysClampedToAtLeastOne(t *testing.T) {
@@ -407,7 +503,7 @@ func TestGetRevenueStats_DaysClampedToAtLeastOne(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	stats, err := svc.GetRevenueStats(ctx, 0, revenueNow)
+	stats, err := svc.GetRevenueStats(ctx, 0, "", revenueNow)
 	require.NoError(t, err)
 	assert.Len(t, stats.Days, 1)
 	assert.Equal(t, revenueNow.Format("2006-01-02"), stats.Days[0].Date)

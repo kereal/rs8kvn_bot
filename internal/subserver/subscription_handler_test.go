@@ -640,7 +640,7 @@ func TestFilterHeaders(t *testing.T) {
 	h := http.Header{}
 	h.Set("X-Hwid", "test-device")
 	h.Set("X-Forwarded-For", "1.2.3.4")
-	h.Set("X-Real-Ip", "5.6.7.8")
+	h.Set("X-Real-IP", "5.6.7.8")
 	h.Set("User-Agent", "v2rayng")
 	h.Set("Accept", "application/json")
 	h.Set("Authorization", "Bearer token")

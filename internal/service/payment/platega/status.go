@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 // TransactionStatusResponse содержит детали транзакции, возвращаемые
@@ -43,12 +41,20 @@ type TransactionStatusResponse struct {
 
 // GetTransactionStatus запрашивает статус и детали транзакции у провайдера.
 // Используется как best-effort источник комиссии: колбэк её не содержит.
-func (c *Client) GetTransactionStatus(ctx context.Context, transactionID uuid.UUID) (*TransactionStatusResponse, error) {
-	if transactionID == uuid.Nil {
+// transactionID — строковый ID транзакции; формат валидируется внутри,
+// семантика ошибок сохранена (пустой ID → "transaction ID is required",
+// невалидный формат → ErrProvider).
+func (c *Client) GetTransactionStatus(ctx context.Context, transactionID string) (*TransactionStatusResponse, error) {
+	if strings.TrimSpace(transactionID) == "" {
 		return nil, errors.New("transaction ID is required")
 	}
 
-	statusURL := fmt.Sprintf("%s/transaction/%s", strings.TrimRight(c.cfg.BaseURL, "/"), transactionID.String())
+	parsedID, parseErr := ParseTransactionID(transactionID)
+	if parseErr != nil {
+		return nil, fmt.Errorf("%w: %w", ErrProvider, parseErr)
+	}
+
+	statusURL := fmt.Sprintf("%s/transaction/%s", strings.TrimRight(c.cfg.BaseURL, "/"), parsedID.String())
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
 	if err != nil {
@@ -73,7 +79,7 @@ func (c *Client) GetTransactionStatus(ctx context.Context, transactionID uuid.UU
 		case http.StatusUnauthorized:
 			return nil, fmt.Errorf("%w: %s", ErrAuth, strings.TrimSpace(string(message)))
 		case http.StatusNotFound:
-			return nil, fmt.Errorf("%w: %s", ErrTransactionNotFound, transactionID.String())
+			return nil, fmt.Errorf("%w: %s", ErrTransactionNotFound, transactionID)
 		default:
 			return nil, fmt.Errorf("%w: %s: %s", ErrProvider, resp.Status, strings.TrimSpace(string(message)))
 		}

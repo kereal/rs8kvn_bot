@@ -13,7 +13,6 @@ import (
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"github.com/kereal/rs8kvn_bot/internal/metrics"
 	"github.com/kereal/rs8kvn_bot/internal/service"
-	"github.com/kereal/rs8kvn_bot/internal/service/payment/platega"
 	"github.com/kereal/rs8kvn_bot/internal/subserver"
 
 	"github.com/getsentry/sentry-go"
@@ -119,7 +118,8 @@ type appServices struct {
 }
 
 // initServices wires the subscription service, subserver, bot handler,
-// and cache invalidation composition.
+// and cache invalidation composition. Платёжный wiring (Platega, OrderService,
+// Stars) собирается отдельно в main.go — едином composition root.
 func initServices(cfg *config.Config, dbService *database.Service, deps *runtimeDeps, botAPI *tgbotapi.BotAPI, botConfig *bot.BotConfig) *appServices {
 	syncSvc := service.NewSyncService(dbService, deps.clients, deps.nodes)
 	subService := service.NewSubscriptionService(dbService, deps.clients, deps.nodes, cfg)
@@ -135,24 +135,205 @@ func initServices(cfg *config.Config, dbService *database.Service, deps *runtime
 		subServer.InvalidateSubscriber(subID)
 	})
 
-	var payment service.PaymentProvider
-	if cfg.PaymentEnabled {
-		payment = platega.New(platega.Config{MerchantID: cfg.PlategaMerchantID, Secret: cfg.PlategaSecret})
-	}
-
-	orderService := service.NewOrderService(dbService, subService, syncSvc, payment, "", cfg)
-	handler.SetOrderService(orderService)
-
-	return &appServices{subService: subService, subServer: subServer, handler: handler, orderService: orderService, syncService: syncSvc}
+	return &appServices{subService: subService, subServer: subServer, handler: handler, syncService: syncSvc}
 }
 
-// runEventLoop processes Telegram updates with bounded concurrency until
-// the shutdown context is cancelled. Blocks until all in-flight handlers
-// complete or the shutdown timeout elapses.
-func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Handler, updates tgbotapi.UpdatesChannel) {
-	updateSem := make(chan struct{}, config.MaxConcurrentHandlers)
+// preCheckoutMaxConcurrent — отдельный параллелизм для pre_checkout_query:
+// они лёгкие (валидация payload без сети), поэтому небольшой бюджет очереди
+// достаточен и не даёт неограниченного спавна горутин.
+const preCheckoutMaxConcurrent = 3
 
-	var updatesWg sync.WaitGroup
+// preCheckoutSlotWaitTimeout — бюджет ожидания свободного слота pre-checkout.
+// Полный worst case ответа: ожидание слота (1 c) + валидация заказа в БД
+// (bot.PreCheckoutTimeout, 4 c) + HTTP-ответ через payment-клиент (4 c) = 9 c —
+// укладывается в окно Telegram 10 c (§5.2 плана) с запасом в 1 c. Ждать в
+// очереди дольше нельзя: ответ опоздает и Telegram отклонит оплату.
+const preCheckoutSlotWaitTimeout = 1 * time.Second
+
+// preCheckoutAnswerer отвечает на pre_checkout_query OK=false, когда
+// fast-lane pre-checkout переполнен. Реализация живёт в composition root
+// (main.go): ответ уходит через payment-инстанс с HTTP-таймаутом (D1) —
+// polling-инстанс с long-poll без таймаута для этого не используется.
+type preCheckoutAnswerer func(queryID string)
+
+// updateMailbox — неограниченная очередь без блокировки отправителя.
+// Нужна финансовым апдейтам: отправка в канал конечной ёмкости может
+// заблокировать цикл чтения, а очередь читателя при этом ещё и ждёт слот
+// обработчика — так успешная оплата тормозила бы чтение следующих
+// pre_checkout_query. Здесь push не ждёт никогда, ожидание живёт в
+// горутине-диспетчере.
+type updateMailbox struct {
+	mu     sync.Mutex
+	cond   *sync.Cond
+	items  []tgbotapi.Update
+	closed bool
+}
+
+func newUpdateMailbox() *updateMailbox {
+	m := &updateMailbox{}
+	m.cond = sync.NewCond(&m.mu)
+
+	return m
+}
+
+func (m *updateMailbox) push(update tgbotapi.Update) {
+	m.mu.Lock()
+	m.items = append(m.items, update)
+	m.mu.Unlock()
+
+	m.cond.Signal()
+}
+
+// close запрещает дальнейшие push: pop вернёт false, когда очередь опустеет.
+func (m *updateMailbox) close() {
+	m.mu.Lock()
+	m.closed = true
+	m.mu.Unlock()
+
+	m.cond.Broadcast()
+}
+
+// pop блокирует вызывающего, пока не появится элемент или очередь не будет
+// закрыта. false — очередь закрыта и пуста.
+func (m *updateMailbox) pop() (tgbotapi.Update, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for len(m.items) == 0 && !m.closed {
+		m.cond.Wait()
+	}
+
+	if len(m.items) == 0 {
+		return tgbotapi.Update{}, false
+	}
+
+	update := m.items[0]
+	m.items[0] = tgbotapi.Update{}
+	m.items = m.items[1:]
+
+	return update, true
+}
+
+// financialUpdateContext создаёт контекст для уже принятого финансового
+// апдейта. Он не наследует отмену shutdown-ctx, иначе подтверждение оплаты
+// было бы прервано SIGTERM после того, как Telegram уже отдал апдейт боту.
+// Значения родительского контекста сохраняются; HandlerTimeout в обработчике
+// остаётся верхней границей времени работы.
+func financialUpdateContext(parent context.Context) context.Context {
+	return context.WithoutCancel(parent)
+}
+
+// regularUpdateQueueSize — буфер между чтением апдейтов и ожиданием слота
+// обычного обработчика. Чтение апдейтов никогда не стоит на занятом слоте:
+// иначе лежащий в канале pre_checkout_query (окно ответа Telegram — 10 c)
+// ждёт завершения чужого долгого обработчика.
+const regularUpdateQueueSize = config.MaxConcurrentHandlers * 4
+
+// runEventLoop processes Telegram updates with bounded concurrency until
+// the shutdown context is cancelled. Regular in-flight handlers are bounded
+// by ShutdownTimeout; accepted financial updates are always drained before
+// return, because a lost successful_payment means money charged but no order.
+func runEventLoop(ctx context.Context, botAPI *tgbotapi.BotAPI, handler *bot.Handler, updates tgbotapi.UpdatesChannel, answerPreCheckout preCheckoutAnswerer) {
+	updateSem := make(chan struct{}, config.MaxConcurrentHandlers)
+	// pre_checkout_query обслуживается отдельным путём с собственным
+	// небольшим семафором: успешная оплата держит общий слот на всё время
+	// подтверждения и post-commit SyncSubscription (до ~20 c), а окно ответа
+	// pre-checkout у Telegram — 10 c (валидация 4–5 c + HTTP 4 c, §5.2 плана).
+	// Ожидание свободного слота тоже ограничено: не хватило места — отвечаем
+	// OK=false с причиной, а не молчим (иначе Telegram повторяет запрос и
+	// заказ висит до TTL).
+	preCheckoutSem := make(chan struct{}, preCheckoutMaxConcurrent)
+
+	// regularQueue развязывает чтение и маршрутизацию апдейтов с ожиданием
+	// слота обычного обработчика: цикл чтения не блокируется, пока все слоты
+	// заняты. Лимит параллелизма сохраняется — слот всё так же один на
+	// обработчик, но ожидание живёт в диспетчере, а не в цикле чтения.
+	regularQueue := make(chan tgbotapi.Update, regularUpdateQueueSize)
+
+	// financialMailbox — отдельный путь для successful_payment и платёжных
+	// команд: неограниченная очередь, отправка в которую не блокирует чтение
+	// апдейтов даже при переполненной regularQueue.
+	financialMailbox := newUpdateMailbox()
+
+	var (
+		regularWg   sync.WaitGroup
+		financialWg sync.WaitGroup
+	)
+
+	// Диспетчер обычной очереди — единственное место, где ждём слот обработчика.
+	dispatcherDone := make(chan struct{})
+
+	go func() {
+		defer close(dispatcherDone)
+
+		for update := range regularQueue {
+			// После остановки обычные апдейты теряются: финансовые идут
+			// отдельным маршрутом и не должны ждать здесь слот.
+			if ctx.Err() != nil {
+				continue
+			}
+
+			select {
+			case updateSem <- struct{}{}:
+			case <-ctx.Done():
+				continue
+			}
+
+			regularWg.Add(1)
+
+			go func(u tgbotapi.Update) {
+				defer func() {
+					<-updateSem
+					regularWg.Done()
+				}()
+
+				handleUpdateSafely(ctx, handler, u)
+			}(update)
+		}
+	}()
+
+	// Диспетчер финансовых апдейтов: ждёт слот здесь, а не в цикле чтения,
+	// поэтому заполненная обычная очередь не задерживает приём оплаты.
+	financialDispatcherDone := make(chan struct{})
+
+	go func() {
+		defer close(financialDispatcherDone)
+
+		for {
+			update, ok := financialMailbox.pop()
+			if !ok {
+				return
+			}
+
+			// Принятый финансовый апдейт не отбрасывается при остановке:
+			// он запускается с детач-контекстом, поэтому SIGTERM не
+			// прерывает подтверждение оплаты. Слот ограничивает число
+			// финансовых горутин в обычном режиме; при остановке ждать его
+			// нельзя — обычные handler'ы могли зависнуть на сетевом ответе.
+			var gotSlot bool
+
+			select {
+			case updateSem <- struct{}{}:
+				gotSlot = true
+			case <-ctx.Done():
+			}
+
+			finCtx := financialUpdateContext(ctx)
+
+			financialWg.Add(1)
+
+			go func(u tgbotapi.Update) {
+				defer func() {
+					if gotSlot {
+						<-updateSem
+					}
+					financialWg.Done()
+				}()
+
+				handleUpdateSafely(finCtx, handler, u)
+			}(update)
+		}
+	}()
 
 eventLoop:
 	for {
@@ -163,21 +344,53 @@ eventLoop:
 				break eventLoop
 			}
 
+			if update.PreCheckoutQuery != nil {
+				// Fast-lane: собственный небольшой семафор, слот обычного
+				// обработчика не занимается и не ожидается.
+				select {
+				case preCheckoutSem <- struct{}{}:
+					regularWg.Add(1)
+
+					go func(u tgbotapi.Update) {
+						defer func() {
+							<-preCheckoutSem
+							regularWg.Done()
+						}()
+
+						handleUpdateSafely(ctx, handler, u)
+					}(update)
+				case <-time.After(preCheckoutSlotWaitTimeout):
+					logger.Warn("pre-checkout queue full, answering with error",
+						zap.String("query_id", update.PreCheckoutQuery.ID))
+					if answerPreCheckout != nil {
+						answerPreCheckout(update.PreCheckoutQuery.ID)
+					}
+				case <-ctx.Done():
+					logger.Info("Graceful shutdown initiated, draining updates...")
+					break eventLoop
+				}
+
+				continue
+			}
+
+			// Финансовый апдейт уходит в неограниченную очередь: чтение не
+			// ждёт ни места, ни слота обработчика (successful_payment —
+			// источник истины об оплате, терять его нельзя).
+			if handler.IsFinancialUpdate(update) {
+				financialMailbox.push(update)
+
+				continue
+			}
+
+			// Обычный апдейт маршрутизируется без ожидания свободного слота.
 			select {
-			case updateSem <- struct{}{}:
-				updatesWg.Add(1)
-
-				go func(u tgbotapi.Update) {
-					defer func() {
-						<-updateSem
-						updatesWg.Done()
-					}()
-
-					handleUpdateSafely(ctx, handler, u)
-				}(update)
-			case <-ctx.Done():
-				logger.Info("Graceful shutdown initiated, draining updates...")
-				break eventLoop
+			case regularQueue <- update:
+			default:
+				// Очередь переполнена: сбрасываем апдейт, чтобы не
+				// блокировать чтение pre_checkout_query и платежей.
+				logger.Warn("regular update queue full, dropping update",
+					zap.Bool("has_message", update.Message != nil),
+					zap.Bool("has_callback", update.CallbackQuery != nil))
 			}
 
 		case <-ctx.Done():
@@ -185,32 +398,61 @@ eventLoop:
 		}
 	}
 
+	// Чтение остановлено: диспетчеры доработают очереди и завершатся.
+	close(regularQueue)
+
 	logger.Info("Graceful shutdown initiated")
 	botAPI.StopReceivingUpdates()
 
-	// Drain the updates channel to prevent goroutine leak. StopReceivingUpdates
-	// closes the channel (via the polling goroutine on shutdownChannel), so a
-	// plain range exits once the buffered updates are exhausted.
+	// Tail the updates channel: хвост нельзя просто выбросить — offset в
+	// Telegram уже сдвинут при отправке в канал, поэтому оставшийся здесь
+	// successful_payment повторно не придёт. Финансовые апдейты хвоста
+	// маршрутизируются в тот же финансовый mailbox; обычные — теряются.
+	financialTailDone := make(chan struct{})
+
 	go func() {
-		for range updates {
-		}
+		defer close(financialTailDone)
+
+		drainBufferedUpdates(updates, handler.IsFinancialUpdate, financialMailbox.push)
 	}()
 
-	// Wait for in-flight update handlers to complete
-	logger.Info("Waiting for update handlers to complete...")
-
-	done := make(chan struct{})
+	// Wait for regular update handlers to complete; they observe ctx
+	// cancellation, so a bounded wait is acceptable.
+	regularDone := make(chan struct{})
 
 	go func() {
-		updatesWg.Wait()
-		close(done)
+		<-dispatcherDone
+		regularWg.Wait()
+		close(regularDone)
 	}()
 
 	select {
-	case <-done:
-		logger.Info("All update handlers completed successfully")
+	case <-regularDone:
 	case <-time.After(config.ShutdownTimeout):
-		logger.Warn("Timeout waiting for update handlers to complete")
+		logger.Warn("Timeout waiting for regular update handlers to complete")
+	}
+
+	// Accepted financial updates are the source of truth for payments: we do
+	// not cap the drain by ShutdownTimeout. Each handler is bounded by
+	// HandlerTimeout, so the wait terminates as long as the mailbox is not
+	// unbounded.
+	<-financialTailDone
+	financialMailbox.close()
+	<-financialDispatcherDone
+	financialWg.Wait()
+
+	logger.Info("All update handlers completed successfully")
+}
+
+// drainBufferedUpdates разбирает хвост канала апдейтов, оставшийся после
+// StopReceivingUpdates. Терять нельзя только финансовые апдейты: offset в
+// Telegram уже сдвинут, а успешная оплата — источник истины. Обычные апдейты
+// в хвосте остановки не обрабатываются. Вынесено ради тестируемости.
+func drainBufferedUpdates(updates <-chan tgbotapi.Update, isFinancial func(tgbotapi.Update) bool, route func(tgbotapi.Update)) {
+	for update := range updates {
+		if isFinancial(update) {
+			route(update)
+		}
 	}
 }
 

@@ -67,6 +67,36 @@ func TestAPI_ProductsCreateReturns201(t *testing.T) {
 	assert.Equal(t, float64(30), created["duration_days"])
 }
 
+// XTR: minor units are whole Stars, so the API must echo price_cents unscaled.
+func TestAPI_ProductsStarsPriceIsNotScaled(t *testing.T) {
+	t.Parallel()
+
+	srv, db := newTestServer(t)
+
+	plan := &database.Plan{Name: "premium", IsActive: true, DevicesLimit: 2}
+	require.NoError(t, db.GetDB().Create(plan).Error)
+
+	body := `{"plan_id":` + strconv.FormatUint(uint64(plan.ID), 10) +
+		`,"name":"Stars 30","duration_days":30,"price_cents":250,"currency":"XTR","is_active":true}`
+
+	rec := do(t, srv, http.MethodPost, "/admin/api/products", testToken, body)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+	var created map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
+	assert.Equal(t, float64(250), created["price_cents"])
+	assert.Equal(t, "XTR", created["currency"])
+
+	id := strconv.FormatUint(uint64(created["id"].(float64)), 10)
+	rec = do(t, srv, http.MethodPut, "/admin/api/products/"+id, testToken, body)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var updated map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &updated))
+	assert.Equal(t, float64(250), updated["price_cents"])
+	assert.Equal(t, "XTR", updated["currency"])
+}
+
 func TestAPI_ProductsCreateRejectsZeroDuration(t *testing.T) {
 	t.Parallel()
 

@@ -18,3 +18,12 @@ updates:
       - "dependencies"
     commit-message:
       prefix: "ci"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "docker"

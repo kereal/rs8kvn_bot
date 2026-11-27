@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
-  import { formatDays, formatMoney, humanError } from '../lib/format.js'
+  import { formatDays, formatMoney, fromMinorUnits, humanError, toMinorUnits } from '../lib/format.js'
   import Modal from '../lib/Modal.svelte'
 
   /** @type {import('../lib/types.js').Product[]} */
@@ -20,6 +20,8 @@
   let saving = $state(false)
   let formError = $state('')
   let form = $state(emptyForm())
+  // XTR: minor unit — целый Star, единица ввода числа и подписи меняются.
+  let starsCurrency = $derived(String(form.currency || 'RUB').trim().toUpperCase() === 'XTR')
 
   function emptyForm() {
     return {
@@ -27,7 +29,8 @@
       plan_id: 0,
       name: '',
       duration_days: 30,
-      price_rub: 0,
+      // Значение в единицах выбранной валюты: рубли для RUB, Stars для XTR.
+      price: 0,
       currency: 'RUB',
       is_active: true
     }
@@ -115,8 +118,9 @@
       plan_id: item.plan_id,
       name: item.name,
       duration_days: item.duration_days,
-      price_rub: item.price_cents / 100,
-      currency: item.currency,
+      // XTR: minor units — сами Stars, обратного деления на 100 нет.
+      price: fromMinorUnits(item.price_cents, item.currency),
+      currency: String(item.currency || 'RUB').toUpperCase(),
       is_active: item.is_active
     }
     formError = ''
@@ -129,13 +133,27 @@
       return
     }
 
+    const currency = String(form.currency || 'RUB').trim().toUpperCase()
+    const isStars = currency === 'XTR'
+    const price = Number(form.price)
+
+    if (!Number.isFinite(price) || price < 0) {
+      formError = isStars ? 'Цена в Stars — неотрицательное целое число' : 'Цена должна быть неотрицательной'
+      return
+    }
+
+    if (isStars && (!Number.isInteger(price) || price <= 0)) {
+      formError = 'Цена в Stars — целое положительное число'
+      return
+    }
+
     const payload = {
       plan_id: form.plan_id,
       name: form.name.trim(),
       duration_days: Number(form.duration_days) || 0,
-      // Ввод в рублях, в API — центы.
-      price_cents: Math.round((Number(form.price_rub) || 0) * 100),
-      currency: form.currency,
+      // Преобразование единиц живёт только в format.js.
+      price_cents: toMinorUnits(price, currency),
+      currency,
       is_active: form.is_active
     }
 
@@ -303,12 +321,27 @@
     <input id="product-duration" type="number" min="1" max="3650" bind:value={form.duration_days} />
   </div>
   <div class="field">
-    <label for="product-price">Цена (₽)</label>
-    <input id="product-price" type="number" min="0" step="0.01" bind:value={form.price_rub} />
+    <label for="product-price">{starsCurrency ? 'Цена (Stars)' : 'Цена (₽)'}</label>
+    <input
+      id="product-price"
+      type="number"
+      min={starsCurrency ? 1 : 0}
+      step={starsCurrency ? 1 : '0.01'}
+      bind:value={form.price}
+    />
+    {#if starsCurrency}
+      <span class="hint">Stars — целое число, 1 Star = 1 minor unit в API.</span>
+    {/if}
   </div>
   <div class="field">
     <label for="product-currency">Валюта</label>
-    <input id="product-currency" type="text" maxlength="3" bind:value={form.currency} />
+    <input
+      id="product-currency"
+      type="text"
+      maxlength="3"
+      placeholder="RUB или XTR"
+      bind:value={form.currency}
+    />
   </div>
   <label class="checkbox">
     <input type="checkbox" bind:checked={form.is_active} />

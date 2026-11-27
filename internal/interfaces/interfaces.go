@@ -5,7 +5,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/xui"
 
@@ -209,23 +208,25 @@ type ProductRepository interface {
 // OrderRepository provides order lifecycle and payment-intent operations.
 type OrderRepository interface {
 	GetOrderByID(ctx context.Context, id uint) (*database.Order, error)
-	GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID uuid.UUID) (*database.Order, error)
-	FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, now time.Time) (*database.Order, error)
-	FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, amountCents int64, currency string, now time.Time) (*database.Order, error)
+	GetOrderByProviderPaymentID(ctx context.Context, provider string, providerPaymentID string) (*database.Order, error)
+	// HasOrdersByProvider — стартовая проверка: нужен ли платёжный Telegram-инстанс
+	// (Stars) для возвратов по заказам провайдера.
+	HasOrdersByProvider(ctx context.Context, provider string) (bool, error)
+	FindPendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, now time.Time) (*database.Order, error)
+	FindOrCreatePendingPaymentOrder(ctx context.Context, subscriptionID, productID uint, provider string, amountCents int64, currency string, paymentExpiresAt *time.Time, now time.Time) (*database.Order, bool, error)
 	MarkPaymentCreationUncertain(ctx context.Context, orderID uint, uncertain bool) (bool, error)
-	SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID uuid.UUID, paymentURL string, paymentExpiresAt time.Time) error
+	SavePaymentDetails(ctx context.Context, orderID uint, providerPaymentID string, paymentURL string, paymentExpiresAt time.Time) error
 	// AttachProviderPaymentID привязывает id провайдера к заказу, у которого его
 	// ещё нет (callback обогнал сохранение деталей).
-	AttachProviderPaymentID(ctx context.Context, orderID uint, provider string, providerPaymentID uuid.UUID) (bool, error)
+	AttachProviderPaymentID(ctx context.Context, orderID uint, provider string, providerPaymentID string) (bool, error)
 	// Реконсиляция зависших pending-заказов воркером.
 	GetStalePendingOrdersAfterID(ctx context.Context, before time.Time, afterID uint, limit int) ([]database.Order, error)
 	ExpirePendingOrder(ctx context.Context, orderID uint) (bool, error)
 	SaveOrderPaymentAmounts(ctx context.Context, orderID uint, callbackAmountCents int64, providerFeeCents *int64) error
-	GetPaidOrdersWithoutProviderFee(ctx context.Context, limit int) ([]database.Order, error)
 	GetPaidOrdersWithoutProviderFeeAfterID(ctx context.Context, afterID uint, limit int) ([]database.Order, error)
-	ConfirmOrderPaidCAS(ctx context.Context, orderID uint, paidAt, activatedAt time.Time, sub *database.Subscription, product *database.Product, applyPlan database.ApplyPlanInTxFn, callbackAmountCents int64) (bool, error)
-	CancelOrderCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, fromStatuses []database.OrderStatus) (bool, error)
-	CancelPaidOrderAndDowngradeCAS(ctx context.Context, provider string, providerPaymentID uuid.UUID, now time.Time, freePlanID uint, applyPlan database.ChargebackPlanInTxFn) (*database.ChargebackResult, error)
+	ConfirmOrderPaidCAS(ctx context.Context, p database.ConfirmPaidOrderParams) (bool, error)
+	CancelOrderCAS(ctx context.Context, provider string, providerPaymentID string, fromStatuses []database.OrderStatus) (bool, error)
+	CancelPaidOrderAndDowngradeCAS(ctx context.Context, p database.CancelPaidOrderParams) (*database.ChargebackResult, error)
 }
 
 // BroadcastRepository provides CRUD for broadcast cards
@@ -345,6 +346,11 @@ type OrderStore interface {
 	GetPlanByName(ctx context.Context, name string) (*database.Plan, error)
 	GetProductByID(ctx context.Context, id uint) (*database.Product, error)
 	InsertAuditLog(ctx context.Context, e *database.AuditLog) error
+	// HasPaymentConfirmedByProviderPaymentID сообщает, подтверждался ли ранее
+	// платёж с указанным provider_payment_id: авто-возврат Stars не должен
+	// возвращать уже исполненный заказ. provider ограничивает поиск одним
+	// провайдером — одинаковые id у разных провайдеров не должны совпадать.
+	HasPaymentConfirmedByProviderPaymentID(ctx context.Context, provider string, providerPaymentID string) (bool, error)
 }
 
 // BotStore is the persistence seam of bot.Handler: broadcast management,
@@ -354,6 +360,9 @@ type OrderStore interface {
 type BotStore interface {
 	BroadcastRepository
 	GetByTelegramID(ctx context.Context, telegramID int64) (*database.Subscription, error)
+	// GetByID загружает подписку по её id: подтверждение владельца заказа в
+	// Stars-потоке идёт через связанную подписку, а не через callback-payload.
+	GetByID(ctx context.Context, id uint) (*database.Subscription, error)
 	GetLatestSubscriptions(ctx context.Context, limit int) ([]database.Subscription, error)
 	CountAllSubscriptions(ctx context.Context) (int64, error)
 	CountActiveSubscriptions(ctx context.Context) (int64, error)
@@ -362,6 +371,10 @@ type BotStore interface {
 	GetPlanByID(ctx context.Context, planID uint) (*database.Plan, error)
 	GetProductByID(ctx context.Context, id uint) (*database.Product, error)
 	ListActiveProducts(ctx context.Context) ([]database.Product, error)
+	// Stars acceptance flow: прямая загрузка заказа и освобождение pending
+	// при ошибке отправки (без повторного RequestPayment в callback).
+	GetOrderByID(ctx context.Context, id uint) (*database.Order, error)
+	ExpirePendingOrder(ctx context.Context, orderID uint) (bool, error)
 	GetInviteByCode(ctx context.Context, code string) (*database.Invite, error)
 	GetOrCreateInvite(ctx context.Context, referrerTGID int64, code string) (*database.Invite, error)
 	GetInviteByReferrer(ctx context.Context, referrerTGID int64) (*database.Invite, error)

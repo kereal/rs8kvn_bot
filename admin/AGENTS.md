@@ -157,9 +157,12 @@ Growing tables (`subscriptions`, `orders`, `audit_log`) take `?limit=` (default
 50, max 200), `?offset=`, `?q=`, `?sort=&order=`; allowed sort fields are
 whitelisted per handler.
 
-Payloads use **bytes** for traffic (`0` = unlimited), **cents** for money,
-**days** for durations, RFC3339 **UTC** for time. Conversion happens only in
-`src/lib/format.js`.
+Payloads use **bytes** for traffic (`0` = unlimited), **days** for durations,
+RFC3339 **UTC** for time, and **minor units** for money: RUB — kopecks
+(1 RUB = 100 minor units), XTR — whole Telegram Stars (1 Star = 1 minor unit,
+no scaling). Conversion (`toMinorUnits`/`fromMinorUnits`/`formatMoney`) happens
+only in `src/lib/format.js`. One value carries its currency from the row
+(`currency` field); currencies are never mixed in one aggregate.
 
 Errors: `{"code":str,"message":str,"details":{…}}` with codes `unauthorized`,
 `bad_request`, `validation`, `not_found`, `name_taken`, `protected`, `in_use`,

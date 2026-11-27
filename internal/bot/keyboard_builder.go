@@ -57,7 +57,7 @@ func (kb *KeyboardBuilder) BuyProductList(products []database.Product) tgbotapi.
 			continue
 		}
 
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s — %s", product.Name, utils.FormatPriceCents(product.PriceCents)), fmt.Sprintf("buy_product_%d", product.ID))))
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%s — %s", product.Name, utils.FormatPriceCents(product.PriceCents, product.Currency)), fmt.Sprintf("buy_product_%d", product.ID))))
 	}
 
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "back_to_start")))
@@ -69,7 +69,7 @@ func (kb *KeyboardBuilder) BuyProductList(products []database.Product) tgbotapi.
 func (kb *KeyboardBuilder) BuyProductConfirm(product *database.Product, paymentURL string) tgbotapi.InlineKeyboardMarkup {
 	price := ""
 	if product != nil {
-		price = utils.FormatPriceCents(product.PriceCents)
+		price = utils.FormatPriceCents(product.PriceCents, product.Currency)
 	}
 
 	return tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
@@ -77,6 +77,8 @@ func (kb *KeyboardBuilder) BuyProductConfirm(product *database.Product, paymentU
 		tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("⬅️ Назад", "buy_premium_list")),
 	}}
 }
+
+// Stars-клавиатуры — в stars_keyboard.go.
 
 // Back returns the inline keyboard with a back button.
 func (kb *KeyboardBuilder) Back() tgbotapi.InlineKeyboardMarkup {

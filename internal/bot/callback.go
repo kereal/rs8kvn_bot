@@ -106,9 +106,45 @@ func (c *CallbackHandler) HandleCallback(ctx context.Context, update tgbotapi.Up
 			return nil
 		}
 
-		err := c.h.handleBuyProduct(ctx, chatID, username, update.CallbackQuery.Message.MessageID, uint(id64))
+		// telegramID — Telegram user ID покупателя (invoice и заказ привязываются
+		// к нему), chatID — чат, в котором редактируется карточка тарифа.
+		err := c.h.handleBuyProduct(ctx, chatID, update.CallbackQuery.From.ID, username, update.CallbackQuery.Message.MessageID, uint(id64))
 		if err != nil {
 			return fmt.Errorf("handle buy_product: %w", err)
+		}
+	// Обработчики Stars — в stars_callback.go.
+	case strings.HasPrefix(data, "stars_accept_"):
+		// stars_accept_<order_id>_<product_id>_<card_chat_id>_<card_msg_id> —
+		// acceptance-кнопка из сообщения с условиями в личном чате покупателя.
+		raw := strings.TrimPrefix(data, "stars_accept_")
+		orderID, productID, cardChatID, cardMsgID, ok := parseStarsAcceptPayload(raw)
+		if !ok {
+			logger.Warn("invalid stars_accept callback payload",
+				zap.String("data", data))
+
+			return nil
+		}
+
+		err := c.h.getSubHandler().handleStarsAccept(ctx,
+			chatID, cardChatID, update.CallbackQuery.From.ID, username,
+			update.CallbackQuery.Message.MessageID, cardMsgID, orderID, productID)
+		if err != nil {
+			return fmt.Errorf("handle stars_accept: %w", err)
+		}
+	case strings.HasPrefix(data, "stars_invoice_back_"):
+		raw := strings.TrimPrefix(data, "stars_invoice_back_")
+
+		buyerTelegramID, invoiceMsgID, orderID, ok := parseStarsInvoiceBack(raw)
+		if !ok {
+			logger.Warn("invalid stars_invoice_back callback payload",
+				zap.String("data", data))
+
+			return nil
+		}
+
+		err := c.handleStarsInvoiceBack(ctx, chatID, update.CallbackQuery.From.ID, username, update.CallbackQuery.Message.MessageID, invoiceMsgID, buyerTelegramID, orderID)
+		if err != nil {
+			return fmt.Errorf("handle stars_invoice_back: %w", err)
 		}
 	case data == "menu_donate":
 		err := c.h.handleMenuDonate(ctx, chatID, username, update.CallbackQuery.Message.MessageID)

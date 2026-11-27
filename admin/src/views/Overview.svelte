@@ -12,6 +12,9 @@
   /** @type {import('../lib/types.js').RevenueResponse|null} */
   let revenue = $state(null)
   let revenueDays = $state(30)
+  // Валюта агрегата выручки: '' — авто-выбор сервера (RUB при наличии,
+  // иначе первая из доступных), иначе конкретный код из revenue.currencies.
+  let revenueCurrency = $state('')
   // Выручка грузится отдельно и молча: сбой агрегата не должен гасить весь
   // экран «Состояние» — карточка показывает «—», остальное остаётся живым.
   let revenueError = $state(false)
@@ -32,14 +35,17 @@
   async function loadRevenue() {
     revenueError = false
     try {
-      revenue = await api.get(`/admin/api/revenue?days=${revenueDays}`)
+      const currencyQuery = revenueCurrency ? `&currency=${encodeURIComponent(revenueCurrency)}` : ''
+      revenue = await api.get(`/admin/api/revenue?days=${revenueDays}${currencyQuery}`)
     } catch {
       revenue = null
       revenueError = true
     }
   }
 
-  function changeRevenueDays() {
+  // Период и валюта перезагружают агрегат заново: ответ относится строго
+  // к одной валюте, сервер смешивать не умеет и не должен.
+  function reloadRevenue() {
     revenue = null
     loadRevenue()
   }
@@ -134,9 +140,9 @@
     return c ? c.slice(0, 7) : '—'
   }
 
-  // Сумма в валюте периода; без валюты — рублёвый формат и пометка «несколько валют».
+  // Сумма в валюте выборки; конверсия minor units живёт в format.js.
   function money(cents) {
-    return revenue?.currency ? formatMoney(cents, revenue.currency) : (cents / 100).toLocaleString('ru-RU')
+    return formatMoney(cents, revenue?.currency || 'RUB')
   }
 
   // Рендерим только статусы с ненулевым счётчиком: в by_status приходят лишь
@@ -199,7 +205,7 @@
 {:else}
   <div class="kpis">
     <section class="panel kpi">
-      <span class="kpi-label">Выручка · {revenueDays} дней</span>
+      <span class="kpi-label">Выручка · {revenueDays} дней{revenue?.currency ? ` · ${revenue.currency}` : ''}</span>
       {#if revenueError}
         <span class="kpi-value">—</span>
         <span class="kpi-sub">не удалось загрузить</span>
@@ -210,16 +216,19 @@
         <span class="kpi-value">—</span>
         <span class="kpi-sub">Оплат за период нет</span>
       {:else}
-        <span class="kpi-value">
-          {money(revenue.totals.revenue_cents)}
-          {#if !revenue.currency}<span class="muted kpi-note">(несколько валют)</span>{/if}
-        </span>
+        <span class="kpi-value">{money(revenue.totals.revenue_cents)}</span>
         <span class="kpi-sub">{revenue.totals.paid_orders} оплат · ср. чек {money(revenue.totals.avg_check_cents)}</span>
       {/if}
-      <select class="period" bind:value={revenueDays} onchange={changeRevenueDays} aria-label="Период выручки">
+      <select class="period" bind:value={revenueDays} onchange={reloadRevenue} aria-label="Период выручки">
         <option value={7}>7 дней</option>
         <option value={30}>30 дней</option>
         <option value={90}>90 дней</option>
+      </select>
+      <select class="period" bind:value={revenueCurrency} onchange={reloadRevenue} aria-label="Валюта выручки">
+        <option value="">Авто</option>
+        {#each revenue?.currencies ?? [] as cur (cur)}
+          <option value={cur}>{cur}</option>
+        {/each}
       </select>
     </section>
 
@@ -263,7 +272,7 @@
 
     <section class="panel card">
         <h2>
-          Выручка по дням
+          Выручка по дням{revenue?.currency ? ` · ${revenue.currency}` : ''}
           <span class="chart-sum">{revenue ? money(revenue.totals.revenue_cents) : '—'}</span>
         </h2>
         {#if revenueError}
@@ -287,7 +296,7 @@
                 class="bar"
                 class:zero={d.revenue_cents === 0}
                 style={`height:${revBarPct(d.revenue_cents)}%`}
-                title={`${d.date}: ${d.orders} зак. — ${d.revenue_cents / 100}`}
+                title={`${d.date}: ${d.orders} зак. — ${money(d.revenue_cents)}`}
               ></div>
             {/each}
           </div>
@@ -406,16 +415,6 @@
     line-height: 1.15;
     letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
-  }
-
-  /* Пояснение «несколько валют» — отдельной строкой и мелким шрифтом,
-     чтобы число оставалось крупным. */
-  .kpi-value .kpi-note {
-    display: block;
-    margin-top: 2px;
-    font-size: 11px;
-    font-weight: 400;
-    letter-spacing: normal;
   }
 
   .kpi-sub {

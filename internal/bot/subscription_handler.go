@@ -399,6 +399,10 @@ func (sh *SubscriptionHandler) handleBuyPremiumList(ctx context.Context, chatID 
 		return sh.showBuyError(chatID, messageID, msg(MsgSubTempError))
 	}
 
+	// M1: при активном провайдере Stars в списке только XTR-товары — RUB-тариф
+	// виден иначе, но покупка упирается в fail-closed ошибку сервиса.
+	products = sh.filterProductsByProvider(products)
+
 	if len(products) == 0 {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Нет доступных тарифов")
 		kb := sh.h.keyboards.Back()
@@ -418,7 +422,9 @@ func (sh *SubscriptionHandler) handleBuyPremiumList(ctx context.Context, chatID 
 }
 
 // handleBuyProduct creates a Platega payment link for a specific product.
-func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int64, username string, messageID int, productID uint) error {
+// telegramID — Telegram user ID покупателя: заказ и invoice привязываются к нему.
+// chatID — чат, в котором редактируется карточка тарифа.
+func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID, telegramID int64, username string, messageID int, productID uint) error {
 	if sh.h.orderService == nil || !sh.h.paymentEnabled {
 		return sh.showBuyError(chatID, messageID, "❌ Платежи временно недоступны")
 	}
@@ -441,7 +447,11 @@ func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int6
 		zap.Int64("amount_cents", product.PriceCents),
 		zap.String("currency", product.Currency))
 
-	info, _, err := sh.h.orderService.RequestPayment(ctx, chatID, username, product)
+	if sh.isStarsProvider() {
+		return sh.handleStarsBuy(ctx, chatID, telegramID, username, messageID, product)
+	}
+
+	info, _, err := sh.h.orderService.RequestPayment(ctx, telegramID, username, product)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrPaymentDisabled):
@@ -461,7 +471,7 @@ func (sh *SubscriptionHandler) handleBuyProduct(ctx context.Context, chatID int6
 	}
 
 	text := fmt.Sprintf("Тариф: 💎 *%s*\n\nСтоимость: *%s*\n\nПосле оплаты тариф активируется автоматически.\nЕсли тариф уже активен, новые дни прибавятся к текущему сроку.\n\n_Платёжная система может дополнительно взимать комиссию._",
-		utils.EscapeMarkdown(product.Name), utils.FormatPriceCents(product.PriceCents))
+		utils.EscapeMarkdown(product.Name), utils.FormatPriceCents(product.PriceCents, product.Currency))
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	editMsg.ParseMode = "Markdown"
 	keyboard := sh.h.keyboards.BuyProductConfirm(product, info.URL)

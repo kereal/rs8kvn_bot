@@ -1818,6 +1818,43 @@ func TestDailyMaintenance_PrunesOldAuditLog(t *testing.T) {
 	assert.Equal(t, int64(2), freshLeft, "свежие записи остаются")
 }
 
+// Тест поведения: обрезка журнала никогда не удаляет платёжные события.
+// `payment_confirmed` — рабочее состояние авто-возврата (отличает дубль charge
+// от оплаченной услуги), его потеря после срока хранения открыла бы возврат
+// денег за уже оказанную услугу.
+func TestDailyMaintenance_KeepsPaymentEvents(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	old := time.Now().UTC().AddDate(0, 0, -181)
+	orderEntity, subEntity, actor := "42", "old", "1"
+
+	require.NoError(t, svc.InsertAuditLog(ctx, &AuditLog{
+		EntityType: EntityOrder, EntityID: &orderEntity, Event: AuditEventPaymentConfirmed,
+		ActorType: ActorPaymentProvider, ActorID: &actor, CreatedAt: old,
+	}))
+	require.NoError(t, svc.InsertAuditLog(ctx, &AuditLog{
+		EntityType: EntityOrder, EntityID: &orderEntity, Event: AuditEventPaymentAutoRefunded,
+		ActorType: ActorPaymentProvider, ActorID: &actor, CreatedAt: old,
+	}))
+	require.NoError(t, svc.InsertAuditLog(ctx, &AuditLog{
+		EntityType: EntitySubscription, EntityID: &subEntity, Event: AuditEventSubscriptionCreated,
+		ActorType: ActorUser, ActorID: &actor, CreatedAt: old,
+	}))
+
+	require.NoError(t, svc.DailyMaintenance(ctx, 180))
+
+	var paymentLeft, otherLeft int64
+
+	require.NoError(t, svc.GetDB().WithContext(ctx).Model(&AuditLog{}).
+		Where("event IN ?", auditRetentionExemptEvents).Count(&paymentLeft).Error)
+	require.NoError(t, svc.GetDB().WithContext(ctx).Model(&AuditLog{}).
+		Where("event = ?", AuditEventSubscriptionCreated).Count(&otherLeft).Error)
+
+	assert.Equal(t, int64(2), paymentLeft, "платёжные события переживают срок хранения")
+	assert.Zero(t, otherLeft, "обычные события старше срока хранения удаляются")
+}
+
 // Тест поведения: обновление БД, проходящее через rebuild-миграцию, оставляет
 // копию файла до неё; обычное обновление копию не делает.
 func TestSnapshotBeforeRebuild(t *testing.T) {

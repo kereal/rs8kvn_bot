@@ -2,19 +2,14 @@
 
 ## Before starting work
 
-1. Activate the project in Serena:
-   ```bash
-   serena_activate_project(project="rs8kvn_bot")
-   ```
-2. Read the relevant Serena memories for context (architecture, code_style, test-info, etc.)
-3. Отвечай всегда на русском
-4. После окончания работы, если это требуется, обновляй документацию и память
-5. Выбирай и применяй подходящие skills
-6. Инструменты: структурные вопросы по коду (кто вызывает, что реализует, что
+1. Отвечай всегда на русском
+2. После окончания работы, если это требуется, обновляй документацию и память
+3. Выбирай и применяй подходящие skills
+4. Используй подходящие mcp-инструменты
+5. Инструменты: структурные вопросы по коду (кто вызывает, что реализует, что
    объявлено в файле) — сначала граф кода; текстовые (литералы, SQL, конфиги) —
    grep/glob. Маршрутизация и подводные камни — в разделе
    «Codebase Knowledge Graph» ниже.
-
 
 ## Git commits
 
@@ -22,6 +17,10 @@
 - НИКОГДА не добавлять авто-футеры вида «Generated with Codebuff» / «Co-Authored-By: …»
   в сообщения коммитов — только описание изменения.
 
+## Память проекта (Hindsight)
+
+Долговременная память: Hindsight, self-hosted. Сервер — localhost:8888. Банк этого репозитория: omp-rs8kvn_bot (маппинг в ~/.hindsight/coding-agent.json)
+Можешь искать и записывать данные
 
 ## RTK - Rust Token Killer
 
@@ -156,6 +155,11 @@ Don't read and don't write
 - **Не логировать**: touches при /sub-запросах (devices/ips/last_request),
   per-item Warn-ретраи воркеров, трафик-сканы без исхода. Технические события —
   только сводки за прогон (`sync_run_degraded`, `orphaned_clients_revoked`).
+- **Retention не удаляет платёжные события** (`payment_confirmed`,
+  `payment_auto_refunded` — `auditRetentionExemptEvents`): по ним
+  `autoRefundStarsCharge` отличает дубль charge от денег за уже оказанную
+  услугу. Добавляя событие в этот список, помни: журнал для него — рабочее
+  состояние, а не история.
 - **FK нет**: история сущности переживает физическое удаление (admin /del).
 - actor_id админа передаётся через context: `service.WithAuditAdmin(ctx, chatID)`
   в HandleDel/HandleSetPlan, читается `adminTelegramIDFromCtx(ctx)`.

@@ -10,6 +10,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 
+	"github.com/kereal/rs8kvn_bot/internal/config"
 	"github.com/kereal/rs8kvn_bot/internal/database"
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 )
@@ -105,6 +106,8 @@ func (c *CommandHandler) HandleHelp(ctx context.Context, update tgbotapi.Update)
 /mysub - Показать информацию о подписке
 /help - Показать эту справку
 /invite - Получить реферальную ссылку
+/terms - Пользовательское соглашение
+/paysupport - Поддержка по вопросам оплаты и возврата
 
 *Функции бота:*
 📥 *Получить подписку* - Создать новую подписку или получить существующую
@@ -313,6 +316,42 @@ func (c *CommandHandler) handleBindTrial(ctx context.Context, chatID int64, user
 		}
 
 		c.h.IncrementReferralCount(referredBy)
+	}
+
+	return nil
+}
+
+// HandlePaySupport processes the /paysupport command (Telegram Bot Developer
+// Terms 6.2): обязательная команда поддержки при продажах цифровых товаров.
+func (c *CommandHandler) HandlePaySupport(ctx context.Context, update tgbotapi.Update) error {
+	if update.Message == nil {
+		logger.Error("HandlePaySupport called with nil Message")
+		return fmt.Errorf("nil message")
+	}
+
+	chatID := update.Message.Chat.ID
+
+	msg := tgbotapi.NewMessage(chatID, SupportText())
+	c.h.send(ctx, msg)
+
+	return nil
+}
+
+// HandleTerms processes the /terms command (Telegram Bot Developer Terms 6.2):
+// доступ к Пользовательскому соглашению командой, кнопка menu_terms уже есть.
+func (c *CommandHandler) HandleTerms(ctx context.Context, update tgbotapi.Update) error {
+	if update.Message == nil {
+		logger.Error("HandleTerms called with nil Message")
+		return fmt.Errorf("nil message")
+	}
+
+	chatID := update.Message.Chat.ID
+
+	// TermsText длиннее лимита Telegram (4096 символов): режем тем же
+	// splitMessage, что и menu-путь (sendLegalText), иначе Telegram
+	// отклоняет сообщение с «message is too long».
+	for _, chunk := range splitMessage(TermsText(), config.MaxTelegramMessageLen) {
+		c.h.send(ctx, tgbotapi.NewMessage(chatID, chunk))
 	}
 
 	return nil

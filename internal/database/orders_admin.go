@@ -168,13 +168,20 @@ type RevenueTotals struct {
 }
 
 // RevenueStats — денежные агрегаты для GET /admin/api/revenue. Pending-заказы
-// выручку не образуют и в totals не входят.
+// выручку не образуют и в totals не входят. Денежные суммы и число оплат
+// относятся строго к одной валюте Currency; canceled/expired остаются
+// операционными счётчиками за период и валютой не измеряются.
 type RevenueStats struct {
 	Days   []RevenueDay
 	Totals RevenueTotals
-	// Currency — единственная валюта оплаченных заказов периода; "" когда
-	// валют несколько (суммы в разных валютах складывать нельзя).
+	// Currency — валюта, к которой относятся все суммы и счётчики: запрошенная,
+	// либо выбранная автоматически (RUB, если среди оплаченных есть RUB-заказы,
+	// иначе первая в стабильном порядке), либо "" — когда валюта не запрошена и
+	// оплаченных заказов в периоде нет.
 	Currency string
+	// Currencies — все валюты оплаченных заказов периода в стабильном
+	// (алфавитном) порядке; список не зависит от выбранной валюты.
+	Currencies []string
 }
 
 // revenueDayRow — строка GROUP BY date(paid_at) из SQLite.
@@ -200,14 +207,37 @@ type revenueStatusCountsRow struct {
 // и не нулевое, иначе заявленная сумма (миграция 035).
 const revenueExpr = `COALESCE(NULLIF(callback_amount_cents, 0), amount_cents)`
 
+// pickRevenueCurrency выбирает валюту агрегата, когда клиент её не задал:
+// RUB, если среди оплаченных заказов периода есть RUB, иначе первая в
+// стабильном (алфавитном) порядке; пустой список — пустая строка.
+func pickRevenueCurrency(currencies []string) string {
+	for _, c := range currencies {
+		if c == "RUB" {
+			return "RUB"
+		}
+	}
+	if len(currencies) > 0 {
+		return currencies[0]
+	}
+	return ""
+}
+
 // GetRevenueStats возвращает дневную выручку и сводные цифры за последние days
-// дней (включая «сегодня» — now, UTC). days < 1 трактуется как 1. Дни без
-// оплаченных заказов заполняются нулями в Go — SQL не порождает пустые дни.
-// Отменённые и истёкшие считаются по created_at в том же окне (paid_at у них
-// не заполняется); оплаченные — по paid_at. now передаётся вызывающей
+// дней (включая «сегодня» — now, UTC) в валюте currency. days < 1 трактуется
+// как 1. Пустая currency означает авто-выбор: RUB, если среди оплаченных
+// заказов периода есть RUB, иначе первая валюта в стабильном (алфавитном)
+// порядке; без оплаченных заказов Currency остаётся пустой. Запрошенная валюта,
+// которой нет среди оплаченных, даёт нулевую статистику этой валюты и полный
+// список Currencies. Все суммы, число оплат и средний чек фильтруются
+// выбранной валютой и валют не смешивают. canceled/expired — общие
+// операционные счётчики за период.
+//
+// Дни без оплаченных заказов заполняются нулями в Go — SQL не порождает пустые
+// дни. Отменённые и истёкшие считаются по created_at в том же окне (paid_at у
+// них не заполняется); оплаченные — по paid_at. now передаётся вызывающей
 // стороной (хендлер — time.Now().UTC()): окно фиксируется один раз и не
 // может разъехаться между SQL-запросами на границе суток.
-func (s *Service) GetRevenueStats(ctx context.Context, days int, now time.Time) (RevenueStats, error) {
+func (s *Service) GetRevenueStats(ctx context.Context, days int, currency string, now time.Time) (RevenueStats, error) {
 	if days < 1 {
 		days = 1
 	}
@@ -216,12 +246,29 @@ func (s *Service) GetRevenueStats(ctx context.Context, days int, now time.Time) 
 	from := today.AddDate(0, 0, -(days - 1))
 	to := today.AddDate(0, 0, 1) // to — исключающая граница следующего дня
 
-	var rows []revenueDayRow
+	// Все валюты оплаченных заказов периода в стабильном порядке. Выбор
+	// валюты делается по оплаченным: сумма всегда относится к валюте, в
+	// которой были оплаты; canceled/expired фильтруются той же валютой.
+	var currencies []string
 	err := s.db.WithContext(ctx).Raw(`
+		SELECT DISTINCT currency FROM orders
+		WHERE status = ? AND paid_at >= ? AND paid_at < ?
+		ORDER BY currency`, OrderStatusPaid, from, to).Scan(&currencies).Error
+	if err != nil {
+		return RevenueStats{}, fmt.Errorf("failed to list revenue currencies: %w", err)
+	}
+
+	selected := currency
+	if selected == "" {
+		selected = pickRevenueCurrency(currencies)
+	}
+
+	var rows []revenueDayRow
+	err = s.db.WithContext(ctx).Raw(`
 		SELECT date(paid_at) AS day, COUNT(*) AS orders, SUM(`+revenueExpr+`) AS revenue
 		FROM orders
-		WHERE status = ? AND paid_at >= ? AND paid_at < ?
-		GROUP BY date(paid_at)`, OrderStatusPaid, from, to).Scan(&rows).Error
+		WHERE status = ? AND currency = ? AND paid_at >= ? AND paid_at < ?
+		GROUP BY date(paid_at)`, OrderStatusPaid, selected, from, to).Scan(&rows).Error
 	if err != nil {
 		return RevenueStats{}, fmt.Errorf("failed to aggregate daily revenue: %w", err)
 	}
@@ -246,7 +293,8 @@ func (s *Service) GetRevenueStats(ctx context.Context, days int, now time.Time) 
 	err = s.db.WithContext(ctx).Raw(`
 		SELECT COUNT(*) AS paid_orders, COALESCE(SUM(`+revenueExpr+`), 0) AS revenue
 		FROM orders
-		WHERE status = ? AND paid_at >= ? AND paid_at < ?`, OrderStatusPaid, from, to).Scan(&paid).Error
+		WHERE status = ? AND currency = ? AND paid_at >= ? AND paid_at < ?`,
+		OrderStatusPaid, selected, from, to).Scan(&paid).Error
 	if err != nil {
 		return RevenueStats{}, fmt.Errorf("failed to aggregate paid totals: %w", err)
 	}
@@ -257,19 +305,10 @@ func (s *Service) GetRevenueStats(ctx context.Context, days int, now time.Time) 
 			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS canceled,
 			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS expired
 		FROM orders
-		WHERE created_at >= ? AND created_at < ?`, OrderStatusCanceled, OrderStatusExpired, from, to).Scan(&counts).Error
+		WHERE created_at >= ? AND created_at < ?`,
+		OrderStatusCanceled, OrderStatusExpired, from, to).Scan(&counts).Error
 	if err != nil {
 		return RevenueStats{}, fmt.Errorf("failed to count canceled/expired orders: %w", err)
-	}
-
-	// Валюту отдаём одной строкой только если все оплаченные заказы периода
-	// в одной валюте; иначе суммы несравнимы и currency пуст.
-	var currencies []string
-	err = s.db.WithContext(ctx).Raw(`
-		SELECT DISTINCT currency FROM orders
-		WHERE status = ? AND paid_at >= ? AND paid_at < ?`, OrderStatusPaid, from, to).Scan(&currencies).Error
-	if err != nil {
-		return RevenueStats{}, fmt.Errorf("failed to list revenue currencies: %w", err)
 	}
 
 	stats := RevenueStats{
@@ -281,9 +320,8 @@ func (s *Service) GetRevenueStats(ctx context.Context, days int, now time.Time) 
 			Canceled:      counts.Canceled,
 			Expired:       counts.Expired,
 		},
-	}
-	if len(currencies) == 1 {
-		stats.Currency = currencies[0]
+		Currency:   selected,
+		Currencies: currencies,
 	}
 
 	return stats, nil

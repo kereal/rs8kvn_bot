@@ -221,8 +221,8 @@ func (s *Service) GetOrderOverview(ctx context.Context, id uint) (*OrderOverview
   (`pending → «Ожидает оплаты»`, `paid → «Оплачен»`, `expired → «Истёк»`,
   `canceled → «Отменён»`), не в `format.js` (форматирование сущности — не
   забота общего файла; см. ТЗ 07 §7);
-- сумма: `formatMoney(amount_cents, currency)` из `format.js` (хелпер уже
-  существует); в API — центы, конвертация только в UI (P15);
+- сумма: `formatMoney(amount_cents, currency)` из `format.js`; `RUB` — копейки,
+  `XTR` — целые Stars, конвертация только в UI (P15);
 - списано: `callback_amount_cents`; `null` → «—»; если отличается от
   `amount_cents` — подсветка (комиссия провайдера);
 - фильтры: select статуса, два инпута `type="date"` (от/до), поиск

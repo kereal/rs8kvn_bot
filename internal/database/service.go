@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/config"
@@ -23,6 +24,11 @@ type Service struct {
 	db *gorm.DB
 	// path — файл SQLite до перевода в DSN (для размера и пути в админке).
 	path string
+
+	// pendingMu защищает создание pending-платежа для провайдеров, которых не
+	// покрывает частичный уникальный индекс 034 (только payment_provider='platega').
+	// Один процесс, один SQLite-файл — мьютекса достаточно.
+	pendingMu sync.Mutex
 }
 
 // FilePath returns the SQLite file the service was opened on, as the caller

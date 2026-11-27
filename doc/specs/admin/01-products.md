@@ -91,6 +91,9 @@ DTO ответа:
 
 Тело запроса: `{"plan_id":int,"name":str,"duration_days":int,"price_cents":int,"currency":str,"is_active":bool}`.
 `currency` — три заглавные латинские буквы, по умолчанию `RUB`.
+`price_cents` хранит minor units выбранной валюты: для `RUB` это копейки
+(1 ₽ = 100), для `XTR` — целые Stars (1 Star = 1). Валюты в одном поле
+не смешивают; конверсия выполняется только в `admin/src/lib/format.js`.
 
 `subscriptions_count` / `orders_count` считаются одним запросом через
 `LEFT JOIN (SELECT … GROUP BY product_id)`; N+1 не допускается.
@@ -157,8 +160,10 @@ Sentinel-ошибки: `ErrProductInvalid`, `ErrProductNameTaken` (пара
 чекбокс «только активные».
 
 Модалка создания/правки (`<dialog>`, как в `Plans.svelte`): план (select,
-disabled при правке), название, срок, цена в рублях (ввод в рублях, в API —
-центы: `Math.round(value * 100)`), валюта, активность.
+disabled при правке), название, срок, цена, валюта, активность. Единица ввода
+зависит от валюты: `RUB` — рубли с двумя знаками (`Math.round(value * 100)` в
+API), `XTR` — целые Stars без масштабирования. Подпись поля: «Цена (₽)» или
+«Цена (Stars)».
 
 Удаление: confirm; если сервер ответил `in_use`, показать текст с числами
 («нельзя удалить: 12 подписок, 31 заказ») и оставить строку.

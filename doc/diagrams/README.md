@@ -46,14 +46,6 @@
 | [traffic-accounting.html](traffic-accounting.html) | Учёт трафика: 90%/exhausted предупреждения, bitmask `traffic_reminders_sent`, ре-включение после сброса |
 | [config-aggregation.html](config-aggregation.html) | Агрегация конфигов: 3 типа нод → fetch → детект формата → merge → кэш → клиент |
 
-## Ручные схемы
-
-Не сгенерированы archify: правятся вручную, JSON-спецификации у них нет.
-
-| Файл | Что показывает |
-|---|---|
-| [payment-flow.html](payment-flow.html) | Создание платежа, `/payment/callback`, chargeback (SVG-исходник рядом: `payment-flow.svg`) |
-
 ## Регенерация
 
 Спецификации (`*.json`) лежат рядом с HTML. Пересборка любой диаграммы:

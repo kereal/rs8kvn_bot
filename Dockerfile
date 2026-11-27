@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 # Build arguments for versioning
 ARG VERSION=prod
@@ -40,7 +40,7 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
 RUN upx -9 rs8kvn_bot
 
 # Runtime stage - minimal Alpine for production
-FROM alpine:3.21
+FROM alpine:3.24
 
 # Install runtime dependencies only
 # - ca-certificates: HTTPS connections

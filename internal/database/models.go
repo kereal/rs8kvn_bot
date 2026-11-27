@@ -208,6 +208,14 @@ const (
 	OrderStatusCanceled OrderStatus = "canceled"
 )
 
+// Payment provider identifiers stored in the payment_provider column.
+// Platega is the legacy ruble aggregator; Telegram Stars is the in-Telegram
+// XTR provider.
+const (
+	PaymentProviderPlatega       = "platega"
+	PaymentProviderTelegramStars = "telegram_stars"
+)
+
 type Order struct {
 	ID                       uint        `gorm:"primaryKey;column:id"`
 	SubscriptionID           uint        `gorm:"not null;column:subscription_id"`

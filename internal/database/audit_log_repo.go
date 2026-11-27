@@ -2,8 +2,10 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/kereal/rs8kvn_bot/internal/logger"
 	"go.uber.org/zap"
@@ -60,6 +62,56 @@ func (s *Service) insertAuditLogBestEffort(ctx context.Context, e *AuditLog) err
 	}
 
 	return nil
+}
+
+// HasPaymentConfirmedByProviderPaymentID сообщает, подтверждался ли ранее платёж
+// с указанным provider_payment_id (событие payment_confirmed). Нужен авто-возврату
+// Stars: charge уже исполненного заказа возвращать нельзя.
+//
+// provider ограничивает поиск одним провайдером: одинаковый provider_payment_id
+// у другого провайдера — другой платёж, совпадение было бы ложным и авто-возврат
+// Stars-платежа был бы пропущен.
+//
+// JSON1 в используемом SQLite (mattn/go-sqlite3) не собран, поэтому details
+// ищется литеральным вхождением через instr (core-функция SQLite, без JSON1):
+// фрагменты `"provider_payment_id":"..."` и `"provider":"..."` строятся через
+// json.Marshal, как и marshalAuditDetails, — кавычки и экранирование совпадают
+// с тем, как details реально записаны. Поиск регистрозависим (в отличие от
+// LIKE): charge-иды, различающиеся только регистром, — разные платежи, и
+// ложное совпадение означало бы пропущенный авто-возврат дубля оплаты.
+func (s *Service) HasPaymentConfirmedByProviderPaymentID(ctx context.Context, provider string, providerPaymentID string) (bool, error) {
+	chargeID := strings.TrimSpace(providerPaymentID)
+	providerName := strings.TrimSpace(provider)
+	if chargeID == "" || providerName == "" {
+		return false, nil
+	}
+
+	chargeEncoded, err := json.Marshal(chargeID)
+	if err != nil {
+		return false, fmt.Errorf("has payment confirmed by provider payment id: %w", err)
+	}
+
+	providerEncoded, err := json.Marshal(providerName)
+	if err != nil {
+		return false, fmt.Errorf("has payment confirmed by provider payment id: %w", err)
+	}
+
+	chargeFragment := `"provider_payment_id":` + string(chargeEncoded)
+	providerFragment := `"provider":` + string(providerEncoded)
+
+	var count int64
+
+	err = s.db.WithContext(ctx).
+		Model(&AuditLog{}).
+		Where("event = ?", AuditEventPaymentConfirmed).
+		Where("instr(details, ?) > 0", chargeFragment).
+		Where("instr(details, ?) > 0", providerFragment).
+		Count(&count).Error
+	if err != nil {
+		return false, fmt.Errorf("has payment confirmed by provider payment id: %w", err)
+	}
+
+	return count > 0, nil
 }
 
 // GetAuditLogByEntity возвращает историю событий сущности (новые первыми).

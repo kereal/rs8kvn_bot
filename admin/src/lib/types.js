@@ -53,12 +53,19 @@
  */
 
 /**
- * GET /admin/api/revenue?days=N — агрегат выручки (admin/revenue.go).
+ * GET /admin/api/revenue?days=N[&currency=RUB] — агрегат выручки (admin/revenue.go).
  * days — ровно N UTC-дат от старых к новым, последний = сегодня, пустые дни нулями.
+ * Все суммы, число оплат и средний чек относятся строго к одной валюте
+ * currency и валюты не смешивают. canceled/expired — общие операционные
+ * счётчики за период. currency — запрошенная валюта, либо авто-выбор сервера
+ * (RUB, если среди оплаченных есть RUB, иначе первая по алфавиту), либо ""
+ * когда валюта не запрошена и оплаченных заказов нет.
+ * currencies — все валюты оплаченных заказов периода независимо от выбора.
  * @typedef {object} RevenueResponse
  * @property {{date: string, orders: number, revenue_cents: number}[]} days
  * @property {{paid_orders: number, revenue_cents: number, avg_check_cents: number, canceled: number, expired: number}} totals
- * @property {string} currency — одна валюта периода или "" если несколько
+ * @property {string} currency — валюта выборки (см. выше)
+ * @property {string[]} currencies — валюты оплаченных заказов периода
  */
 
 /**

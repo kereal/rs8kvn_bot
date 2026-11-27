@@ -169,6 +169,8 @@ func AuditEventNames() []string {
 		AuditEventTrafficReset,
 		AuditEventOrderCreated,
 		AuditEventPaymentConfirmed,
+		AuditEventPaymentRefunded,
+		AuditEventPaymentAutoRefunded,
 		AuditEventOrderExpired,
 		AuditEventOrderCanceled,
 		AuditEventChargebackReceived,

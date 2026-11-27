@@ -85,7 +85,7 @@ func TestE2E_PaymentCycle_ResetTraffic(t *testing.T) {
 	srv := web.NewServer("127.0.0.1:0", env.db, env.cfg, env.botConfig.Username, env.subService, nil)
 	srv.SetOrderService(orderSvc)
 	srv.SetBot(env.botAPI)
-	srv.SetPaymentConfig(&web.PaymentConfig{Enabled: true, MerchantID: "merchant", Secret: "secret"})
+	srv.SetPaymentConfig(&web.PaymentConfig{MerchantID: "merchant", Secret: "secret"})
 	srv.SetPaymentReady(true)
 
 	srvCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

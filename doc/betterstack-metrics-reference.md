@@ -362,7 +362,6 @@ ORDER BY time
 - **GORM callbacks**: `internal/metrics/db.go`
 - **Тесты**: `internal/metrics/metrics_test.go`, `internal/metrics/db_test.go`
 - **Документация проекта**: `.serena/memories/metrics.md`
-- **Subserver audit**: `doc/subserver_metrics_audit.md`
 
 При добавлении новой метрики:
 1. Определить в `internal/metrics/metrics.go` через `promauto`
