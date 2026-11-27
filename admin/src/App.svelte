@@ -62,11 +62,16 @@
   $effect(() => {
     const onHash = () => (route = routeFromHash())
     const onSearch = () => (searchNonce += 1)
+    // 401 из api.js: сессия истекла — возвращаемся на экран входа. 403, 500 и
+    // сетевые ошибки это событие не поднимают: они не говорят о невалидном токене.
+    const onUnauthorized = () => (authed = false)
     window.addEventListener('hashchange', onHash)
     window.addEventListener('admin-search', onSearch)
+    window.addEventListener('admin-unauthorized', onUnauthorized)
     return () => {
       window.removeEventListener('hashchange', onHash)
       window.removeEventListener('admin-search', onSearch)
+      window.removeEventListener('admin-unauthorized', onUnauthorized)
     }
   })
 

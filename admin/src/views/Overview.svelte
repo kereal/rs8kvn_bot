@@ -1,13 +1,14 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
-  import { formatDate, formatMoney } from '../lib/format.js'
+  import { formatDate, formatMoney, formatTime, humanError } from '../lib/format.js'
   import GlobalSearch from '../lib/GlobalSearch.svelte'
 
   /** @type {import('../lib/types.js').Overview|null} */
   let data = $state(null)
   let loading = $state(true)
   let error = $state('')
+  let updatedAt = $state(null)
 
   /** @type {import('../lib/types.js').RevenueResponse|null} */
   let revenue = $state(null)
@@ -18,14 +19,18 @@
   // Выручка грузится отдельно и молча: сбой агрегата не должен гасить весь
   // экран «Состояние» — карточка показывает «—», остальное остаётся живым.
   let revenueError = $state(false)
+  // Свежесть агрегата показываем отдельно: выручка перезагружается сама
+  // (период/валюта), её время не обязано совпадать со временем основного экрана.
+  let revenueUpdatedAt = $state(null)
 
   async function load() {
     loading = true
     error = ''
     try {
       data = await api.get('/admin/api/overview')
+      updatedAt = new Date().toISOString()
     } catch (err) {
-      error = err.message
+      error = humanError(err)
     } finally {
       loading = false
     }
@@ -37,6 +42,7 @@
     try {
       const currencyQuery = revenueCurrency ? `&currency=${encodeURIComponent(revenueCurrency)}` : ''
       revenue = await api.get(`/admin/api/revenue?days=${revenueDays}${currencyQuery}`)
+      revenueUpdatedAt = new Date().toISOString()
     } catch {
       revenue = null
       revenueError = true
@@ -193,6 +199,7 @@
     <p class="subtitle">Ключевые показатели и очереди</p>
   </div>
   <button class="btn" onclick={load} disabled={loading}>Обновить</button>
+  {#if updatedAt}<span class="muted refreshed">Обновлено в {formatTime(updatedAt)}</span>{/if}
 </div>
 
 {#if error}
@@ -230,6 +237,7 @@
           <option value={cur}>{cur}</option>
         {/each}
       </select>
+      {#if revenueUpdatedAt}<span class="kpi-hint">Выручка обновлена в {formatTime(revenueUpdatedAt)}</span>{/if}
     </section>
 
     <section class="panel kpi">
@@ -385,6 +393,11 @@
 <GlobalSearch />
 
 <style>
+  /* Свежесть рядом с кнопкой обновления; кнопка прижата вправо page-head. */
+  .refreshed {
+    font-size: 12px;
+  }
+
   /* Макет: строка KPI, затем два столбца — графики слева, статусы справа.
      Ниже — «Система» в правой колонке; глобальный поиск под всем этим. */
   .kpis {

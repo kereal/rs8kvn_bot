@@ -106,6 +106,16 @@
     }
   }
 
+  // Аудит этой подписки: журнал открывается отфильтрованным по
+  // entity_type/entity_id (см. AuditLog onMount). Только история, без операций.
+  function openAudit() {
+    sessionStorage.setItem(
+      'admin_search',
+      JSON.stringify({ screen: 'audit', entity_type: 'subscription', entity_id: String(row.id) })
+    )
+    location.hash = '#/audit'
+  }
+
   async function loadPlans() {
     try {
       const data = await api.get('/admin/api/plans')
@@ -389,6 +399,8 @@
         <dd>{formatDate(row.started_at)}</dd>
         <dt>Истекает</dt>
         <dd>{formatDate(row.expires_at)}</dd>
+        <dt>История аудита</dt>
+        <dd><button class="btn btn-ghost" onclick={openAudit}>Открыть</button></dd>
       </dl>
     </section>
 

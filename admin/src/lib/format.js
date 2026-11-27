@@ -16,6 +16,14 @@ export function formatGib(bytes) {
   return `${bytesToGib(bytes)} ГБ`
 }
 
+// «Обновлено в HH:MM» рядом с кнопкой обновления списковых экранов.
+export function formatTime(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(date)
+}
+
 export function formatDate(value) {
   if (!value) return '—'
   const date = new Date(value)

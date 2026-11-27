@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -421,4 +422,84 @@ func TestAPI_Contract_KeySets(t *testing.T) {
 		assert.Equal(t, []string{"subscription", "warning"}, contractKeys(row))
 		assert.NotEmpty(t, row["warning"], "warning must carry a non-empty message")
 	})
+}
+
+// TestAPI_RouteRegistry pins the full panel route list (ADR-0002, P22): a route
+// removed or renamed by accident must fail here, not surface as a dead link in
+// the UI. Registration is proven by the mux behaviour: an unregistered path
+// falls through to Go's plain-text "404 page not found", while any registered
+// route answers with a JSON body (200, 400/404 from the handler, whatever).
+func TestAPI_RouteRegistry(t *testing.T) {
+	t.Parallel()
+
+	srv, _ := newTestServer(t)
+
+	// Метод + путь-представитель (динамические сегменты — конкретным id).
+	routes := []string{
+		"GET /admin/api/session",
+		"GET /admin/api/overview",
+		"GET /admin/api/plans",
+		"POST /admin/api/plans",
+		"GET /admin/api/plans/1",
+		"PUT /admin/api/plans/1",
+		"DELETE /admin/api/plans/1",
+		"GET /admin/api/plans/1/nodes",
+		"PUT /admin/api/plans/1/nodes",
+		"GET /admin/api/nodes",
+		"POST /admin/api/nodes",
+		"GET /admin/api/nodes/1",
+		"PUT /admin/api/nodes/1",
+		"DELETE /admin/api/nodes/1",
+		"POST /admin/api/nodes/1/health",
+		"GET /admin/api/nodes/1/live",
+		"GET /admin/api/products",
+		"POST /admin/api/products",
+		"GET /admin/api/products/1",
+		"PUT /admin/api/products/1",
+		"DELETE /admin/api/products/1",
+		"GET /admin/api/orders",
+		"GET /admin/api/orders/1",
+		"GET /admin/api/revenue",
+		"GET /admin/api/broadcasts",
+		"POST /admin/api/broadcasts",
+		"GET /admin/api/broadcasts/audience",
+		"POST /admin/api/broadcasts/preview",
+		"GET /admin/api/broadcasts/1",
+		"PUT /admin/api/broadcasts/1",
+		"DELETE /admin/api/broadcasts/1",
+		"POST /admin/api/broadcasts/1/cancel",
+		"POST /admin/api/broadcasts/1/retry",
+		"POST /admin/api/broadcasts/1/deactivate-blocked",
+		"GET /admin/api/invites",
+		"POST /admin/api/invites",
+		"DELETE /admin/api/invites/somecode",
+		"GET /admin/api/audit",
+		"GET /admin/api/audit/events",
+		"GET /admin/api/audit/1",
+		"GET /admin/api/trials",
+		"GET /admin/api/trials/stats",
+		"GET /admin/api/subscriptions",
+		"GET /admin/api/subscriptions/1",
+		"GET /admin/api/subscriptions/1/traffic",
+		"POST /admin/api/subscriptions/1/plan",
+		"POST /admin/api/subscriptions/1/revoke",
+		"POST /admin/api/subscriptions/1/reset-traffic",
+		"POST /admin/api/subscriptions/1/sync",
+		"DELETE /admin/api/subscriptions/1",
+	}
+
+	for _, route := range routes {
+		t.Run(route, func(t *testing.T) {
+			t.Parallel()
+
+			method, path, _ := strings.Cut(route, " ")
+			rec := do(t, srv, method, path, testToken, "{}")
+			assert.NotEqual(t, "404 page not found\n", rec.Body.String(),
+				"route %q is not registered in Handler()", route)
+		})
+	}
+
+	// SPA-фолбэк живёт на "/admin/": корень отдаёт разметку, не 404 и не 401.
+	rec := do(t, srv, http.MethodGet, "/admin/", testToken, "")
+	assert.NotEqual(t, "404 page not found\n", rec.Body.String())
 }

@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
-  import { formatDate, humanError } from '../lib/format.js'
+  import { formatDate, formatTime, humanError } from '../lib/format.js'
 
   // Словарь статусов — локальная константа вью (см. 00-common.md).
   const STATUS = {
@@ -17,6 +17,7 @@
   let total = $state(0)
   let loading = $state(true)
   let error = $state('')
+  let updatedAt = $state(null)
 
   let status = $state('')
   let planID = $state('')
@@ -55,6 +56,7 @@
       const data = await api.get(`/admin/api/subscriptions?${params}`)
       items = data.items || []
       total = data.total || 0
+      updatedAt = new Date().toISOString()
     } catch (err) {
       error = humanError(err)
     } finally {
@@ -170,7 +172,10 @@
       продление, сброс трафика, отзыв и удаление — в карточке подписки.
     </p>
   </div>
-  <button class="btn" onclick={load} disabled={loading}>Обновить</button>
+  <div class="head-actions">
+    {#if updatedAt}<span class="muted small">Обновлено в {formatTime(updatedAt)}</span>{/if}
+    <button class="btn" onclick={load} disabled={loading}>Обновить</button>
+  </div>
 </div>
 
 {#if error}
@@ -287,6 +292,12 @@
 </div>
 
 <style>
+  .head-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
   .check {
     display: flex;
     align-items: center;

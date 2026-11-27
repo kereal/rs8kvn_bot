@@ -7,6 +7,12 @@
   /** Разбор ввода: чистый классификатор, без побочных эффектов. */
   function parse(raw) {
     let value = raw.trim()
+    // Явные префиксы: order:42 / #order/42 — заказ по точному id,
+    // sub:42 / #sub/42 — карточка подписки по точному id.
+    let match = value.match(/^(?:order:|#order\/)(\d+)$/i)
+    if (match) return { kind: 'orders', q: match[1], id: match[1] }
+    match = value.match(/^(?:sub:|#sub\/)(\d+)$/i)
+    if (match) return { kind: 'subscription-detail', q: match[1] }
     // Плейсхолдер предлагает «#id» — решётку снимаем, дальше правила те же.
     if (/^#\d+$/.test(value)) value = value.slice(1)
     if (!value) return null
@@ -18,9 +24,10 @@
 
   // Мост к спискам: вью держат фильтры в своём стейте (не в URL), поэтому
   // адрес перехода несёт только экран — значение кладём в sessionStorage и
-  // читаем в onMount целевой вью (ключ 'admin_search').
-  function navigateTo(screen, q) {
-    sessionStorage.setItem('admin_search', JSON.stringify({ screen, q }))
+  // читаем в onMount целевой вью (ключ 'admin_search'). preset — опциональные
+  // допполя предустановки (например { id } для фильтра точного id в заказах).
+  function navigateTo(screen, q, preset = {}) {
+    sessionStorage.setItem('admin_search', JSON.stringify({ screen, q, ...preset }))
     // Переход на текущий экран не меняет хэш — без события вью не
     // перемонтируется и пресет никто не прочитает. App.svelte по событию
     // поднимает nonce в ключе {#key} и перемонтирует вью принудительно.
@@ -38,7 +45,12 @@
       return
     }
     ambiguous = null
-    navigateTo(target.kind, target.q)
+    // sub:42 — сразу карточка подписки, списка по id нет.
+    if (target.kind === 'subscription-detail') {
+      location.hash = `#/subscriptions/${target.q}`
+      return
+    }
+    navigateTo(target.kind, target.q, target.id ? { id: target.id } : {})
   }
 
   function choose(screen) {
@@ -64,7 +76,7 @@
     <input
       class="search"
       type="text"
-      placeholder="Поиск: telegram_id, #id, UUID платежа…"
+      placeholder="Поиск: order:42, sub:42, telegram_id, UUID платежа…"
       bind:value={query}
       onkeydown={(event) => {
         if (event.key === 'Escape') ambiguous = null

@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
-  import { formatDays, formatMoney, fromMinorUnits, humanError, toMinorUnits } from '../lib/format.js'
+  import { formatDays, formatMoney, formatTime, fromMinorUnits, humanError, toMinorUnits } from '../lib/format.js'
   import Modal from '../lib/Modal.svelte'
 
   /** @type {import('../lib/types.js').Product[]} */
@@ -10,6 +10,7 @@
   let plans = $state([])
   let loading = $state(true)
   let error = $state('')
+  let updatedAt = $state(null)
   let notice = $state('')
 
   let query = $state('')
@@ -46,6 +47,7 @@
       ])
       items = products.items || []
       plans = planList.items || []
+      updatedAt = new Date().toISOString()
     } catch (err) {
       error = humanError(err)
     } finally {
@@ -204,7 +206,10 @@
       менять можно только признак «в продаже».
     </p>
   </div>
-  <button class="btn btn-primary" onclick={openCreate}>Новый продукт</button>
+  <div class="head-actions">
+    {#if updatedAt}<span class="muted small">Обновлено в {formatTime(updatedAt)}</span>{/if}
+    <button class="btn btn-primary" onclick={openCreate}>Новый продукт</button>
+  </div>
 </div>
 
 {#if notice}
@@ -360,6 +365,12 @@
 </Modal>
 
 <style>
+  .head-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
   .toolbar select {
     width: auto;
   }

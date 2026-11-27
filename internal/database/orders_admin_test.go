@@ -102,6 +102,34 @@ func TestListOrderOverviews_StatusFilter_UniformWhere(t *testing.T) {
 	assert.Equal(t, OrderStatusPaid, items[0].Status)
 }
 
+func TestListOrderOverviews_IDFilter(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	rows := seedOrderFixtures(t, svc)
+
+	exact := rows[0].ID
+	items, total, err := svc.ListOrderOverviews(ctx, OrderAdminFilter{ID: &exact, Limit: 50})
+	require.NoError(t, err)
+
+	require.Len(t, items, 1)
+	assert.Equal(t, int64(1), total)
+	assert.Equal(t, exact, items[0].ID)
+
+	missing := uint(999999)
+	items, total, err = svc.ListOrderOverviews(ctx, OrderAdminFilter{ID: &missing, Limit: 50})
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), total)
+	assert.Empty(t, items)
+
+	// id сужает, но не ломает остальные фильтры: несочетаемый статус даёт ноль.
+	items, total, err = svc.ListOrderOverviews(ctx, OrderAdminFilter{ID: &exact, Status: string(OrderStatusCanceled), Limit: 50})
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), total)
+	assert.Empty(t, items)
+}
+
 func TestListOrderOverviews_QueryByTelegramID(t *testing.T) {
 	t.Parallel()
 

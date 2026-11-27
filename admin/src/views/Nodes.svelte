@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
-  import { formatDate, humanError } from '../lib/format.js'
+  import { formatDate, formatTime, humanError } from '../lib/format.js'
   import Modal from '../lib/Modal.svelte'
 
   const NODE_TYPES = [
@@ -14,6 +14,7 @@
   let items = $state([])
   let loading = $state(true)
   let error = $state('')
+  let updatedAt = $state(null)
   let notice = $state('')
 
   let query = $state('')
@@ -53,6 +54,7 @@
       const data = await api.get('/admin/api/nodes')
       items = data.items || []
       health = {}
+      updatedAt = new Date().toISOString()
     } catch (err) {
       error = humanError(err)
     } finally {
@@ -284,7 +286,10 @@
       провижинирует подписки. Тип ноды после создания менять нельзя.
     </p>
   </div>
-  <button class="btn btn-primary" onclick={openCreate}>Новая нода</button>
+  <div class="head-actions">
+    {#if updatedAt}<span class="muted small">Обновлено в {formatTime(updatedAt)}</span>{/if}
+    <button class="btn btn-primary" onclick={openCreate}>Новая нода</button>
+  </div>
 </div>
 
 {#if notice}
@@ -499,6 +504,12 @@
 </Modal>
 
 <style>
+  .head-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
   .badge-node-type {
     font-family: var(--font-mono, monospace);
   }

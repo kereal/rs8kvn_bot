@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
-  import { formatDate, humanError } from '../lib/format.js'
+  import { formatDate, formatTime, humanError } from '../lib/format.js'
 
   // Русские подписи — локальный словарь экрана (spec 07 §7): опции select
   // приходят с сервера (/admin/api/audit/events), подписи — отсюда. Новое
@@ -60,6 +60,7 @@
     plan: 'план',
     node: 'нода',
     product: 'продукт',
+    invite: 'инвайт',
     system: 'система'
   }
 
@@ -76,6 +77,7 @@
   let total = $state(0)
   let loading = $state(true)
   let error = $state('')
+  let updatedAt = $state(null)
 
   /** @type {string[]} */
   let events = $state([])
@@ -175,6 +177,7 @@
       const data = await api.get(`/admin/api/audit?${query.toString()}`)
       items = data.items || []
       total = data.total || 0
+      updatedAt = new Date().toISOString()
     } catch (err) {
       error = humanError(err)
     } finally {
@@ -236,6 +239,21 @@
   }
 
   onMount(() => {
+    // Карточки заказа/подписки/инвайта кладут предустановку сюда (одноразовый
+    // ключ): открываем журнал сразу отфильтрованным по их сущности.
+    const search = sessionStorage.getItem('admin_search')
+    if (search) {
+      sessionStorage.removeItem('admin_search')
+      try {
+        const preset = JSON.parse(search)
+        if (preset.screen === 'audit') {
+          if (preset.entity_type) filterEntityType = preset.entity_type
+          if (preset.entity_id) filterEntityId = String(preset.entity_id)
+        }
+      } catch {
+        // мусор в хранилище — игнорируем
+      }
+    }
     loadRegistry()
     load()
   })
@@ -289,6 +307,7 @@
       <option value={true}>Сначала новые</option>
       <option value={false}>Сначала старые</option>
     </select>
+    {#if updatedAt}<span class="muted small">Обновлено в {formatTime(updatedAt)}</span>{/if}
     <button class="btn btn-primary" onclick={() => load()}>Обновить</button>
   </div>
 

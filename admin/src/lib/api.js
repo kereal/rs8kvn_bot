@@ -37,13 +37,21 @@ export class ApiError extends Error {
   }
 }
 
+// Single place for "the session is over": clears the token and tells the shell
+// (App.svelte) to switch back to the login screen. Fired only on 401 — never
+// on 403, 500 or network errors, which are transient or not auth-related.
+function sessionExpired() {
+  setToken('')
+  window.dispatchEvent(new Event('admin-unauthorized'))
+}
+
 async function request(method, path, body, extraHeaders) {
   const headers = { Accept: 'application/json', ...extraHeaders }
   const token = normalizeToken(getToken())
   // A stale non-ASCII token from an earlier paste would make fetch() throw a
   // TypeError before any request leaves the tab. Treat it as "not signed in".
   if (token && !isUsableToken(token)) {
-    setToken('')
+    sessionExpired()
     throw new ApiError(401, 'unauthorized', 'token contains non-ASCII characters')
   }
   if (token) headers.Authorization = `Bearer ${token}`
@@ -73,7 +81,7 @@ async function request(method, path, body, extraHeaders) {
   if (!res.ok) {
     const code = data?.code || 'error'
     const message = data?.message || `HTTP ${res.status}`
-    if (res.status === 401) setToken('')
+    if (res.status === 401) sessionExpired()
     throw new ApiError(res.status, code, message, data?.details)
   }
 

@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
-  import { formatDate, humanError } from '../lib/format.js'
+  import { formatDate, formatTime, humanError } from '../lib/format.js'
   import Modal from '../lib/Modal.svelte'
 
   // Код бота принимает коды ^[a-z0-9]{6,16}$: они подставляются в
@@ -13,6 +13,7 @@
   let loading = $state(true)
   let error = $state('')
   let notice = $state('')
+  let updatedAt = $state(null)
 
   // Одно поле поиска: чисто число — сравнение с Telegram ID, иначе — подстрока кода.
   let query = $state('')
@@ -35,11 +36,21 @@
     try {
       const data = await api.get('/admin/api/invites')
       items = data.items || []
+      updatedAt = new Date().toISOString()
     } catch (err) {
       error = humanError(err)
     } finally {
       loading = false
     }
+  }
+
+  // История аудита конкретного инвайта: entity_id инвайта — его код.
+  function openAudit(invite) {
+    sessionStorage.setItem(
+      'admin_search',
+      JSON.stringify({ screen: 'audit', entity_type: 'invite', entity_id: invite.code })
+    )
+    location.hash = '#/audit'
   }
 
   onMount(load)
@@ -154,7 +165,10 @@
       Реферальные коды. У одного пользователя максимум один код; использованный код удалить нельзя.
     </p>
   </div>
-  <button class="btn btn-primary" onclick={openCreate}>Новый инвайт</button>
+  <div class="head-actions">
+    {#if updatedAt}<span class="muted refreshed">Обновлено в {formatTime(updatedAt)}</span>{/if}
+    <button class="btn btn-primary" onclick={openCreate}>Новый инвайт</button>
+  </div>
 </div>
 
 {#if notice}
@@ -212,6 +226,13 @@
             <td class="num" class:zero={invite.subscriptions_count === 0}>{invite.subscriptions_count}</td>
             <td class="actions">
               <button
+                class="btn btn-ghost"
+                title="История аудита инвайта"
+                onclick={() => openAudit(invite)}
+              >
+                Аудит
+              </button>
+              <button
                 class="btn btn-ghost btn-danger"
                 disabled={invite.subscriptions_count > 0}
                 title={deleteTitle(invite)}
@@ -249,6 +270,16 @@
 </Modal>
 
 <style>
+  .head-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .refreshed {
+    font-size: 12px;
+  }
+
   .copy {
     padding: 0 6px;
     margin-left: 6px;

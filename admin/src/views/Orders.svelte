@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
-  import { formatDate, formatMoney, humanError } from '../lib/format.js'
+  import { formatDate, formatMoney, formatTime, humanError } from '../lib/format.js'
 
   // Словарь статусов — локальная константа вью: форматирование сущности — не
   // забота общего format.js (см. ТЗ 07 §7).
@@ -21,6 +21,9 @@
   let status = $state('')
   let qInput = $state('')
   let qApplied = $state('')
+  // Точный id из глобального поиска (order:42): отдельный read-only фильтр,
+  // живёт до ручного сброса — так видно, что список сужен именно id.
+  let idFilter = $state('')
   let from = $state('')
   let to = $state('')
   let sort = $state('created_at')
@@ -29,6 +32,7 @@
   let offset = $state(0)
 
   let debounceTimer
+  let updatedAt = $state(null)
 
   async function load() {
     loading = true
@@ -36,6 +40,7 @@
     const params = new URLSearchParams()
     params.set('limit', String(limit))
     params.set('offset', String(offset))
+    if (idFilter) params.set('id', idFilter)
     if (status) params.set('status', status)
     if (qApplied) params.set('q', qApplied)
     if (from) params.set('from', from)
@@ -47,6 +52,7 @@
       const data = await api.get(`/admin/api/orders?${params}`)
       items = data.items || []
       total = data.total || 0
+      updatedAt = new Date().toISOString()
     } catch (err) {
       error = humanError(err)
     } finally {
@@ -62,8 +68,15 @@
       try {
         const preset = JSON.parse(search)
         if (preset.screen === 'orders' && preset.q) {
-          qInput = preset.q
-          qApplied = preset.q
+          // order:42 несёт точный id: фильтруем только им — q («42») вместе с
+          // id дал бы пересечение «точный id И похоже на 42» и пустой список.
+          if (preset.id) {
+            idFilter = preset.id
+            qInput = preset.q
+          } else {
+            qInput = preset.q
+            qApplied = preset.q
+          }
         }
       } catch {
         // мусор в хранилище — игнорируем
@@ -81,6 +94,7 @@
     status = ''
     qInput = ''
     qApplied = ''
+    idFilter = ''
     from = ''
     to = ''
     sort = 'created_at'
@@ -157,13 +171,17 @@
     <h1>
       Заказы
       <span class="badge badge-muted">только чтение</span>
+      {#if idFilter}<span class="badge badge-warn">id: {idFilter}</span>{/if}
     </h1>
     <p class="subtitle">
       Разбор платежей. Статусы меняются только платёжными транзакциями бота — вручную их
       править нельзя, чтобы не разойтись с провайдером.
     </p>
   </div>
-  <button class="btn" onclick={load} disabled={loading}>Обновить</button>
+  <div class="head-actions">
+    {#if updatedAt}<span class="muted refreshed">Обновлено в {formatTime(updatedAt)}</span>{/if}
+    <button class="btn" onclick={load} disabled={loading}>Обновить</button>
+  </div>
 </div>
 
 {#if error}
@@ -254,6 +272,16 @@
 </div>
 
 <style>
+  .head-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .refreshed {
+    font-size: 12px;
+  }
+
   .date {
     padding: 7px 10px;
     border: 1px solid var(--border);

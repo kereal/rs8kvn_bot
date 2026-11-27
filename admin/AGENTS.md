@@ -176,6 +176,26 @@ Secrets never appear in responses — expose `has_<secret>: bool` instead.
 Responses are `200` with a JSON body, not `204`: Chromium logs body-less `204`
 replies to PUT/DELETE as `net::ERR_ABORTED`, which looks like a failure.
 
+## Session expiry and screen chrome (cross-screen)
+
+- **401 → login.** `src/lib/api.js` clears the token on any `401` and dispatches
+  a single DOM event `admin-unauthorized`; `src/App.svelte` switches back to
+  `Login`. `403`, `500` and network errors never reset the session.
+- **Freshness.** Every list screen shows «Обновлено в HH:MM» (`formatTime` from
+  `src/lib/format.js`) next to its refresh control; the timestamp is set only
+  after a successful load.
+- **Global search** (`src/lib/GlobalSearch.svelte`): `order:42` / `#order/42`
+  jumps to the order filtered by exact id (`GET /admin/api/orders?id=`),
+  `sub:42` / `#sub/42` opens the subscription card, a bare number ≤ 6 digits
+  offers a «Подписка / Заказ» choice, ≥ 5 digits searches by `telegram_id`,
+  a UUID by `provider_payment_id`. The preset travels through the one-shot
+  `sessionStorage['admin_search']` key (`{screen, q, id?}`).
+- **Audit links.** The order, subscription and invite cards open the audit log
+  pre-filtered via the same `admin_search` key (`entity_type` + `entity_id`;
+  for invites the entity id is the code). The log itself stays read-only.
+- **Route registry.** The full list of 47 API routes is pinned by
+  `TestAPI_RouteRegistry` (`contract_test.go`); adding a screen extends it.
+
 ## Write scope (safety rule)
 
 The panel MUST NOT mutate state machines. Full matrix in ADR-0002 §2.
@@ -240,6 +260,9 @@ enter the token, exercise list → create → edit → delete. Dev mode with HMR
    создана» / «сущность удалена»). Повторное раскрытие не рефетчит.
 5. Неизвестное событие (нет в словаре) показывается своим кодом моноширинно.
 6. Экран только читает: ни одной кнопки мутации, бейдж «только чтение».
+7. `invite` присутствует в фильтре сущностей (реестр `EntityTypeNames`),
+   карточки заказа/подписки/инвайта открывают журнал предустановкой
+   `admin_search` — фильтр уже применён при первом рендере.
 
 ## Manual checklist: Рассылки (spec 06)
 

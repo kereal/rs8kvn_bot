@@ -209,6 +209,7 @@ func EntityTypeNames() []string {
 		string(EntityPlan),
 		string(EntityNode),
 		string(EntityProduct),
+		string(EntityInvite),
 		string(EntitySystem),
 	}
 }

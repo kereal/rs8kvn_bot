@@ -133,6 +133,8 @@ func TestAPI_OrdersList_BadRequests(t *testing.T) {
 		{"negative offset", "offset=-1"},
 		{"malformed from", "from=2026-13-99"},
 		{"malformed to", "to=01.11.2026"},
+		{"non-numeric id", "id=abc"},
+		{"zero id", "id=0"},
 	}
 
 	for _, tc := range cases {
@@ -144,6 +146,28 @@ func TestAPI_OrdersList_BadRequests(t *testing.T) {
 			assert.Contains(t, rec.Body.String(), "bad_request")
 		})
 	}
+}
+
+func TestAPI_OrdersList_IDFilter(t *testing.T) {
+	t.Parallel()
+
+	srv, db := newTestServer(t)
+	_, firstID := seedOrders(t, db, 3, time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC))
+
+	rec := do(t, srv, http.MethodGet, fmt.Sprintf("/admin/api/orders?id=%d", firstID), testToken, "")
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	items, total := decodeOrdersList(t, rec.Body.Bytes())
+	assert.Equal(t, int64(1), total)
+	require.Len(t, items, 1)
+	assert.Equal(t, float64(firstID), items[0]["id"])
+
+	// Несуществующий id — валидный фильтр, пустая страница, не 404.
+	rec = do(t, srv, http.MethodGet, "/admin/api/orders?id=999999", testToken, "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	items, total = decodeOrdersList(t, rec.Body.Bytes())
+	assert.Equal(t, int64(0), total)
+	assert.Empty(t, items)
 }
 
 func TestAPI_OrdersList_RequiresToken(t *testing.T) {

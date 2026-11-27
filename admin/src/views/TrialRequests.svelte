@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
-  import { formatDate, humanError } from '../lib/format.js'
+  import { formatDate, formatTime, humanError } from '../lib/format.js'
 
   // Типы появятся в types.js у интегратора (typedef TrialRequestsResponse);
   // локальная форма — чтобы svelte-check не падал до объединения веток.
@@ -13,6 +13,7 @@
   let total = $state(0)
   let loading = $state(true)
   let error = $state('')
+  let updatedAt = $state(null)
 
   // Агрегат грузится отдельно и молча: сбой статистики не гасит список.
   let stats = $state(null)
@@ -32,6 +33,7 @@
       const data = await api.get(`/admin/api/trials?${query.toString()}`)
       items = data.items || []
       total = data.total || 0
+      updatedAt = new Date().toISOString()
     } catch (err) {
       error = humanError(err)
     } finally {
@@ -61,7 +63,10 @@
     <h1>Триал-запросы</h1>
     <p class="subtitle">Антифрод: запросы триалов по IP. Экран только для чтения</p>
   </div>
-  <span class="badge-ro">только чтение</span>
+  <div class="head-actions">
+    {#if updatedAt}<span class="muted small">Обновлено в {formatTime(updatedAt)}</span>{/if}
+    <span class="badge-ro">только чтение</span>
+  </div>
 </div>
 
 {#if error}
@@ -160,6 +165,12 @@
 </div>
 
 <style>
+  .head-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
   .badge-ro {
     align-self: center;
     padding: 2px 10px;

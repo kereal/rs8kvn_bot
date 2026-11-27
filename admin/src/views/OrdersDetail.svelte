@@ -39,6 +39,16 @@
   function feeDiffers() {
     return row.callback_amount_cents !== null && row.callback_amount_cents !== row.amount_cents
   }
+
+  // Аудит этого заказа: журнал открывается отфильтрованным по entity_type/id
+  // (см. AuditLog onMount). Редактируемых операций из audit нет — только история.
+  function openAudit() {
+    sessionStorage.setItem(
+      'admin_search',
+      JSON.stringify({ screen: 'audit', entity_type: 'order', entity_id: String(row.id) })
+    )
+    location.hash = '#/audit'
+  }
 </script>
 
 <a class="back" href="#/orders">← К заказам</a>
@@ -85,6 +95,8 @@
         </dd>
         <dt>Ссылка действует до</dt>
         <dd>{formatDate(row.payment_expires_at)}</dd>
+        <dt>История аудита</dt>
+        <dd><button class="btn btn-ghost" onclick={openAudit}>Открыть</button></dd>
       </dl>
     </section>
 

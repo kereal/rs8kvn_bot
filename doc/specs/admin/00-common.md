@@ -129,6 +129,7 @@ api.put(path, body)      api.del(path)
 | `formatMoney(cents, currency)` | центы → «399 ₽» |
 | `formatDays(days)` | 30 → «30 дней» (плюрализация) |
 | `formatDate(value)` | RFC3339 → «05.11.2026, 12:30» (локаль) |
+| `formatTime(value)` | RFC3339 → «12:30» — «Обновлено в HH:MM» у кнопки обновления |
 | `formatGib(bytes)` / `bytesToGib` / `gibToBytes` | трафик |
 | `humanError(err)` | код → русский текст, фолбэк на `message` |
 | `errorMessages` | словарь кодов (расширяется интегратором) |
@@ -139,6 +140,31 @@ api.put(path, body)      api.del(path)
 **Навигация.** Роутер — хеш в `App.svelte`, вложенный id поддержан:
 `location.hash = '#/subscriptions/' + id`; detail-вью объявляет
 `let { id } = $props()` и получает id строкой. Список id игнорирует.
+
+## Общеэкранное поведение (2026-11-27)
+
+- **`401` → экран входа.** `api.js` на любом `401` очищает токен и посылает
+  DOM-событие `admin-unauthorized`; `App.svelte` возвращает интерфейс на
+  `Login`. `403`, `500` и сетевые ошибки сессию не сбрасывают.
+- **Свежесть списка.** Рядом с кнопкой обновления — «Обновлено в HH:MM»
+  (`formatTime`), время ставится только после успешной загрузки.
+- **Глобальный поиск** (`GlobalSearch.svelte`): `order:42` / `#order/42` —
+  заказ по точному id (фильтр `?id=`), `sub:42` / `#sub/42` — карточка
+  подписки, голое число ≤ 6 цифр — выбор «Подписка / Заказ», ≥ 5 цифр —
+  поиск по telegram_id, UUID — по `provider_payment_id`. Предустановка
+  передаётся через одноразовый ключ `sessionStorage['admin_search']`
+  (`{screen, q, id?}`).
+- **Ссылки на аудит.** Карточки заказа, подписки и инвайта открывают журнал,
+  отфильтрованный по сущности (тот же ключ `admin_search` с
+  `entity_type`/`entity_id`; у инвайта `entity_id` — код). Из журнала мутаций
+  нет.
+- **Реестр аудита.** Все `Entity*`/`Actor*`/`AuditEvent*` константы
+  `audit_log.go` обязаны быть в реестрах `EntityTypeNames()` /
+  `ActorTypeNames()` / `AuditEventNames()`; сверяет тест
+  `TestAuditRegistriesMatchConstants`.
+- **Маршруты.** Полный список 47 API-путей закреплён тестом
+  `TestAPI_RouteRegistry` (`admin/contract_test.go`); новый экран добавляет
+  строку и туда.
 
 ## Общие технические требования
 

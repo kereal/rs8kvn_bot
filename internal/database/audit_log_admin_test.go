@@ -351,11 +351,12 @@ func TestGetRecentAuditLog_DelegatesToPage(t *testing.T) {
 	}
 }
 
-// declaredAuditEventConstants parses audit_log.go and returns the value of every
-// AuditEvent* constant. The panel's event filter is built from AuditEventNames(),
-// and Go has no reflection over constants, so parsing the file is the only way
-// to prove the registry and the declarations agree.
-func declaredAuditEventConstants(t *testing.T) []string {
+// declaredAuditStringConstants parses audit_log.go and returns the value of
+// every <prefix>* string constant (AuditEvent, Entity, Actor). The panel's
+// filters are built from the hand-written registries, and Go has no reflection
+// over constants, so parsing the file is the only way to prove the registries
+// and the declarations agree.
+func declaredAuditStringConstants(t *testing.T, prefix string) []string {
 	t.Helper()
 
 	file, err := parser.ParseFile(token.NewFileSet(), "audit_log.go", nil, 0)
@@ -370,7 +371,7 @@ func declaredAuditEventConstants(t *testing.T) []string {
 		}
 
 		for i, name := range spec.Names {
-			if !strings.HasPrefix(name.Name, "AuditEvent") || i >= len(spec.Values) {
+			if !strings.HasPrefix(name.Name, prefix) || i >= len(spec.Values) {
 				continue
 			}
 
@@ -387,9 +388,15 @@ func declaredAuditEventConstants(t *testing.T) []string {
 		return true
 	})
 
-	require.NotEmpty(t, values, "audit_log.go must declare AuditEvent* constants")
+	require.NotEmpty(t, values, "audit_log.go must declare %s* constants", prefix)
 
 	return values
+}
+
+// declaredAuditEventConstants keeps the old name: the event registry test reads
+// like the spec it pins (doc/specs/admin/07-audit-log.md, criterion 5).
+func declaredAuditEventConstants(t *testing.T) []string {
+	return declaredAuditStringConstants(t, "AuditEvent")
 }
 
 func TestAuditRegistriesMatchConstants(t *testing.T) {
@@ -402,13 +409,13 @@ func TestAuditRegistriesMatchConstants(t *testing.T) {
 	// (doc/specs/admin/07-audit-log.md, criterion 5).
 	assert.ElementsMatch(t, declaredAuditEventConstants(t), events, "registry must list every declared AuditEvent* constant")
 
-	assert.Equal(t, []string{
-		"subscription", "order", "broadcast", "plan", "node", "product", "system",
-	}, EntityTypeNames())
+	// Entity and Actor registries are parsed out of the declarations the same
+	// way as events: a new Entity*/Actor* constant missing from the registry
+	// would never reach the panel's filter selects.
+	assert.ElementsMatch(t, declaredAuditStringConstants(t, "Entity"), EntityTypeNames(), "registry must list every declared Entity* constant")
+	assert.ElementsMatch(t, declaredAuditStringConstants(t, "Actor"), ActorTypeNames(), "registry must list every declared Actor* constant")
 
-	assert.Equal(t, []string{
-		"user", "admin", "worker", "payment_provider", "system",
-	}, ActorTypeNames())
+	assert.Contains(t, EntityTypeNames(), string(EntityInvite), "invite must be addressable in the audit registry")
 
 	// Every registry entry must be usable as a filter without an error.
 	svc := newTestService(t)

@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/kereal/rs8kvn_bot/internal/database"
@@ -157,6 +158,16 @@ func parseOrderFilter(w http.ResponseWriter, r *http.Request) (database.OrderAdm
 	}
 
 	f.Query = query.Get("q")
+
+	if raw := query.Get("id"); raw != "" {
+		id, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || id == 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "id must be a positive integer")
+			return f, false
+		}
+		exact := uint(id)
+		f.ID = &exact
+	}
 
 	from, ok := parseOrderDate(w, r, "from")
 	if !ok {

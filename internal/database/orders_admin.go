@@ -14,6 +14,7 @@ import (
 // OrderAdminFilter — фильтры экрана «Заказы». Zero value = без фильтра.
 // Валидация строковых полей — в хендлере (белые списки P8), здесь — только SQL.
 type OrderAdminFilter struct {
+	ID     *uint      // точный orders.id (глобальный поиск «order:42»)
 	Status string     // "" | pending | paid | expired | canceled
 	Query  string     // telegram_id (цифры) или provider_payment_id
 	From   *time.Time // окно created_at, from включительно
@@ -49,6 +50,10 @@ func buildOrderAdminQuery(s *Service, ctx context.Context, f OrderAdminFilter) *
 		Joins("LEFT JOIN subscriptions ON subscriptions.id = orders.subscription_id").
 		Joins("LEFT JOIN products ON products.id = orders.product_id").
 		Joins("LEFT JOIN plans ON products.plan_id = plans.id")
+
+	if f.ID != nil {
+		q = q.Where("orders.id = ?", *f.ID)
+	}
 
 	if f.Status != "" {
 		q = q.Where("orders.status = ?", f.Status)
