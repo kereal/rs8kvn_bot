@@ -4,53 +4,341 @@
   "meta": {
     "title": "Двухфазное удаление подписки (admin /del)",
     "output": "doc/diagrams/subscription-teardown.html",
-    "viewBox": [1060, 840],
+    "viewBox": [
+      1060,
+      655
+    ],
     "quality_profile": "showcase",
     "views": [
-      { "id": "revoke", "label": "Фаза 1: revoke", "focus": ["admin", "bot", "subs", "db"], "note": "Подписка помечается revoked до любого внешнего эффекта — /sub/{subID} сразу 404." },
-      { "id": "deprovision", "label": "Фаза 2: депровизия", "focus": ["subs", "db", "nodes"], "note": "MarkAllForRemoval синхронно, sync best-effort: pending-записи — очередь ретрая." },
-      { "id": "hard-delete", "label": "Фаза 3: удаление", "focus": ["subs", "db", "cache"], "note": "Физическое удаление только когда очередь пуста: узлы, затем родительская строка." }
-    ]
+      {
+        "id": "revoke",
+        "label": "Фаза 1: revoke",
+        "focus": [
+          "admin",
+          "bot",
+          "subs",
+          "db"
+        ],
+        "note": "Подписка помечается revoked до любого внешнего эффекта — /sub/{subID} сразу 404."
+      },
+      {
+        "id": "deprovision",
+        "label": "Фаза 2: депровизия",
+        "focus": [
+          "subs",
+          "db",
+          "nodes"
+        ],
+        "note": "MarkAllForRemoval синхронно, sync best-effort: pending-записи — очередь ретрая."
+      },
+      {
+        "id": "hard-delete",
+        "label": "Фаза 3: удаление",
+        "focus": [
+          "subs",
+          "db",
+          "cache"
+        ],
+        "note": "Физическое удаление только когда очередь пуста: узлы, затем родительская строка."
+      }
+    ],
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    }
   },
   "participants": [
-    { "id": "admin", "type": "external", "label": "Админ", "sublabel": "Telegram" },
-    { "id": "bot", "type": "backend", "label": "Bot Handler", "sublabel": "команда /del" },
-    { "id": "subs", "type": "backend", "label": "SubSvc", "sublabel": "teardown" },
-    { "id": "db", "type": "database", "label": "SQLite", "sublabel": "GORM" },
-    { "id": "nodes", "type": "cloud", "label": "VPN-ноды", "sublabel": "адаптеры" },
-    { "id": "cache", "type": "database", "label": "Кэши", "sublabel": "bot + subserver" }
+    {
+      "id": "admin",
+      "type": "external",
+      "label": "Админ",
+      "sublabel": "Telegram",
+      "sources": [
+        {
+          "path": "internal/bot/admin.go",
+          "label": "команда /del"
+        }
+      ]
+    },
+    {
+      "id": "bot",
+      "type": "backend",
+      "label": "Bot Handler",
+      "sublabel": "команда /del",
+      "sources": [
+        {
+          "path": "internal/bot/admin.go",
+          "label": "вызов DeleteByID"
+        }
+      ]
+    },
+    {
+      "id": "subs",
+      "type": "backend",
+      "label": "SubSvc",
+      "sublabel": "teardown",
+      "sources": [
+        {
+          "path": "internal/service/subscription.go",
+          "line": 397,
+          "end_line": 410,
+          "label": "markRevokedSub"
+        },
+        {
+          "path": "internal/service/subscription.go",
+          "line": 452,
+          "end_line": 461,
+          "label": "deprovisionSub"
+        },
+        {
+          "path": "internal/service/subscription.go",
+          "line": 469,
+          "end_line": 529,
+          "label": "revokeAndDeprovisionThenDelete"
+        }
+      ]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "SQLite",
+      "sublabel": "GORM",
+      "sources": [
+        {
+          "path": "internal/database/subscriptions.go",
+          "line": 55,
+          "end_line": 70,
+          "label": "GetByID"
+        },
+        {
+          "path": "internal/database/subscriptions.go",
+          "line": 121,
+          "end_line": 135,
+          "label": "DeleteSubscriptionByID"
+        },
+        {
+          "path": "internal/database/subscription_nodes.go",
+          "line": 12,
+          "end_line": 25,
+          "label": "GetBySubscriptionID"
+        }
+      ]
+    },
+    {
+      "id": "nodes",
+      "type": "cloud",
+      "label": "VPN-ноды",
+      "sublabel": "адаптеры",
+      "sources": [
+        {
+          "path": "internal/service/sync.go",
+          "line": 184,
+          "end_line": 210,
+          "label": "MarkAllForRemoval"
+        }
+      ]
+    },
+    {
+      "id": "cache",
+      "type": "database",
+      "label": "Кэши",
+      "sublabel": "bot + subserver",
+      "sources": [
+        {
+          "path": "internal/service/subscription.go",
+          "line": 510,
+          "end_line": 514,
+          "label": "InvalidateBySubID"
+        }
+      ]
+    }
   ],
   "segments": [
-    { "from": 160, "to": 250, "label": "Команда" },
-    { "from": 265, "to": 380, "label": "Фаза 1: revoke" },
-    { "from": 395, "to": 560, "label": "Фаза 2: депровизия" },
-    { "from": 575, "to": 715, "label": "Фаза 3: удаление" }
+    {
+      "from": 162,
+      "to": 222,
+      "label": "Команда"
+    },
+    {
+      "from": 246,
+      "to": 308,
+      "label": "Фаза 1: revoke"
+    },
+    {
+      "from": 330,
+      "to": 424,
+      "label": "Фаза 2: депровизия"
+    },
+    {
+      "from": 436,
+      "to": 552,
+      "label": "Фаза 3: удаление"
+    }
   ],
   "messages": [
-    { "id": "del", "from": "admin", "to": "bot", "y": 195, "label": "/del <id>", "variant": "emphasis" },
-    { "id": "get-sub", "from": "subs", "to": "db", "y": 235, "label": "GetByID", "note": "DeleteByID — единственный путь физического удаления" },
-    { "id": "sub-row", "from": "db", "to": "subs", "y": 270, "label": "подписка", "variant": "return" },
-    { "id": "mark-revoked", "from": "subs", "to": "db", "y": 320, "label": "UpdateSubscription: revoked", "variant": "emphasis", "note": "сбой → откат, статус не менялся" },
-    { "id": "revoked-ok", "from": "db", "to": "subs", "y": 355, "label": "записано", "variant": "return" },
-    { "id": "mark-all", "from": "subs", "to": "db", "y": 430, "label": "MarkAllForRemoval → pending_remove", "variant": "emphasis" },
-    { "id": "sync-nodes", "from": "subs", "to": "nodes", "y": 475, "label": "SyncSubscription: DeleteSubscription", "variant": "dashed", "note": "best-effort: сбой остаётся в очереди ретрая" },
-    { "id": "verify-empty", "from": "subs", "to": "db", "y": 505, "label": "GetBySubscriptionID: очередь пуста?", "variant": "security" },
-    { "id": "still-pending", "from": "db", "to": "subs", "y": 550, "label": "не пусто → ошибка, retry сохранён", "variant": "return" },
-    { "id": "del-nodes", "from": "subs", "to": "db", "y": 610, "label": "DeleteSubscriptionNodesBySubscriptionID", "variant": "emphasis", "note": "сначала связи, потом родитель — FK-safe" },
-    { "id": "del-sub", "from": "subs", "to": "db", "y": 650, "label": "DeleteSubscriptionByID", "variant": "emphasis" },
-    { "id": "invalidate", "from": "subs", "to": "cache", "y": 705, "label": "InvalidateBySubID", "variant": "dashed" },
-    { "id": "ack", "from": "bot", "to": "admin", "y": 745, "label": "подтверждение удаления", "variant": "return" }
+    {
+      "id": "del",
+      "from": "admin",
+      "to": "bot",
+      "y": 172,
+      "label": "/del <id>",
+      "variant": "emphasis"
+    },
+    {
+      "id": "get-sub",
+      "from": "subs",
+      "to": "db",
+      "y": 204,
+      "label": "GetByID"
+    },
+    {
+      "id": "sub-row",
+      "from": "db",
+      "to": "subs",
+      "y": 232,
+      "label": "подписка",
+      "variant": "return"
+    },
+    {
+      "id": "mark-revoked",
+      "from": "subs",
+      "to": "db",
+      "y": 264,
+      "label": "UpdateSubscription: revoked",
+      "variant": "emphasis"
+    },
+    {
+      "id": "revoked-ok",
+      "from": "db",
+      "to": "subs",
+      "y": 292,
+      "label": "записано",
+      "variant": "return"
+    },
+    {
+      "id": "mark-all",
+      "from": "subs",
+      "to": "db",
+      "y": 324,
+      "label": "MarkAllForRemoval → pending_remove",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sync-nodes",
+      "from": "subs",
+      "to": "nodes",
+      "y": 352,
+      "label": "SyncSubscription: DeleteSubscription",
+      "variant": "dashed"
+    },
+    {
+      "id": "verify-empty",
+      "from": "subs",
+      "to": "db",
+      "y": 380,
+      "label": "GetBySubscriptionID: очередь пуста?",
+      "variant": "security"
+    },
+    {
+      "id": "still-pending",
+      "from": "db",
+      "to": "subs",
+      "y": 408,
+      "label": "не пусто → ошибка, retry сохранён",
+      "variant": "return"
+    },
+    {
+      "id": "del-nodes",
+      "from": "subs",
+      "to": "db",
+      "y": 448,
+      "label": "DeleteSubscriptionNodesBySubscriptionID",
+      "variant": "emphasis"
+    },
+    {
+      "id": "del-sub",
+      "from": "subs",
+      "to": "db",
+      "y": 476,
+      "label": "DeleteSubscriptionByID",
+      "variant": "emphasis"
+    },
+    {
+      "id": "invalidate",
+      "from": "subs",
+      "to": "cache",
+      "y": 508,
+      "label": "InvalidateBySubID",
+      "variant": "dashed"
+    },
+    {
+      "id": "ack",
+      "from": "bot",
+      "to": "admin",
+      "y": 536,
+      "label": "подтверждение удаления",
+      "variant": "return"
+    }
   ],
   "activations": [
-    { "participant": "bot", "from": 195, "to": 750, "type": "backend" },
-    { "participant": "subs", "from": 230, "to": 705, "type": "backend" },
-    { "participant": "db", "from": 230, "to": 665, "type": "database" },
-    { "participant": "nodes", "from": 470, "to": 480, "type": "cloud" },
-    { "participant": "cache", "from": 695, "to": 705, "type": "database" }
+    {
+      "participant": "bot",
+      "from": 172,
+      "to": 544,
+      "type": "backend"
+    },
+    {
+      "participant": "subs",
+      "from": 200,
+      "to": 512,
+      "type": "backend"
+    },
+    {
+      "participant": "db",
+      "from": 200,
+      "to": 482,
+      "type": "database"
+    },
+    {
+      "participant": "nodes",
+      "from": 348,
+      "to": 358,
+      "type": "cloud"
+    },
+    {
+      "participant": "cache",
+      "from": 504,
+      "to": 514,
+      "type": "database"
+    }
   ],
   "cards": [
-    { "dot": "cyan", "title": "Порядок фаз", "items": ["Сначала revoke: доступ отозван до любых внешних эффектов", "Депровизия best-effort: сбой не теряет работу", "Удаление строки — только после пустой очереди нод"] },
-    { "dot": "rose", "title": "Единственный путь", "items": ["DeleteByID вызывается только админской командой /del", "Все остальные потоки меняют статус, не удаляя строки", "Исключение — CleanupExpiredTrials для анонимных триалов"] },
-    { "dot": "amber", "title": "Отказоустойчивость", "items": ["Сбой MarkAllForRemoval прерывает teardown с ошибкой", "Сбой node-sync только Warn: pending_remove остаётся в БД", "FK-safe порядок: связи удаляются раньше родительской строки"] }
+    {
+      "dot": "cyan",
+      "title": "Порядок фаз",
+      "items": [
+        "Сначала revoke: доступ отозван до любых внешних эффектов",
+        "Депровизия best-effort: сбой не теряет работу",
+        "Удаление строки — только после пустой очереди нод"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Единственный путь",
+      "items": [
+        "DeleteByID вызывается только админской командой /del",
+        "Все остальные потоки меняют статус, не удаляя строки",
+        "Исключение — CleanupExpiredTrials для анонимных триалов"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Отказоустойчивость",
+      "items": [
+        "Сбой MarkAllForRemoval прерывает teardown с ошибкой",
+        "Сбой node-sync только Warn: pending_remove остаётся в БД",
+        "FK-safe порядок: связи удаляются раньше родительской строки"
+      ]
+    }
   ]
 }

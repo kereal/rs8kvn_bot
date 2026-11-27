@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "1a6bf883-bcde-441a-aad8-8fa5f354735d",
+  "status": "current",
+  "command": "deliver",
+  "type": "lifecycle",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/customer-journey.lifecycle.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/customer-journey.html",
+  "specification": {
+    "sha256": "9535d7968bbfd25a9a130f12fe5193bfc1b9a4b4c08cd1719f872d0c0999bebc",
+    "bytes": 9143
+  },
+  "artifact": {
+    "sha256": "ae8afa584b9a2ec62bb17c583e4c19c509c504436e87c85d2c355ed8baa487e4",
+    "bytes": 951347
+  }
+}

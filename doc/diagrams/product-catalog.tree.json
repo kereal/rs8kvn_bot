@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "diagram_type": "tree",
+  "meta": {
+    "title": "Продуктовый каталог: возможности из кода",
+    "subtitle": "Разложение по возможностям: связи — вложенность, не вызовы.",
+    "output": "doc/diagrams/product-catalog.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
+    "views": [
+      { "id": "catalog", "label": "Каталог", "focus": ["plans", "products"], "note": "План — лимиты подписки; продукт — продаваемый SKU." },
+      { "id": "sell", "label": "Продажа", "focus": ["purchase", "fulfillment"], "note": "Два провайдера оплаты и единый confirm-хвост." }
+    ]
+  },
+  "nodes": [
+    { "id": "root", "label": "Продуктовый каталог", "sublabel": "plans + products + продажа", "sources": [{ "path": "internal/database/products.go", "line": 13, "end_line": 27 }, { "path": "internal/database/plans.go", "line": 13, "end_line": 31 }] },
+
+    { "id": "plans", "label": "Тарифные планы", "parent": "root", "sublabel": "базовые лимиты подписки", "sources": [{ "path": "internal/database/plans.go", "line": 13, "end_line": 31 }] },
+    { "id": "free_plan", "label": "Free-план", "parent": "plans", "sublabel": "20 GiB трафика, витрина отключена", "sources": [{ "path": "internal/database/models.go", "line": 30, "end_line": 38 }, { "path": "internal/database/migrations/040_set_free_plan_traffic_20gib.up.sql", "line": 1, "end_line": 2 }, { "path": "internal/bot/handler.go", "line": 510, "end_line": 516 }] },
+    { "id": "trial", "label": "Trial-подписки", "parent": "plans", "sublabel": "по инвайту, привязка и очистка", "sources": [{ "path": "internal/database/trials.go", "line": 33, "end_line": 64 }, { "path": "internal/database/trials.go", "line": 117, "end_line": 140 }] },
+    { "id": "plan_nodes", "label": "Привязка плана к нодам", "parent": "plans", "sublabel": "reconcile подписочных нод", "sources": [{ "path": "internal/service/plan_reconcile.go", "line": 99, "end_line": 120 }] },
+
+    { "id": "products", "label": "Продукты", "parent": "root", "sublabel": "SKU: план + срок + цена", "sources": [{ "path": "internal/database/products.go", "line": 13, "end_line": 27 }] },
+    { "id": "active_list", "label": "Активная витрина", "parent": "products", "sublabel": "ListActiveProducts", "sources": [{ "path": "internal/database/products.go", "line": 13, "end_line": 27 }] },
+    { "id": "guarded_updates", "label": "Guarded-обновления", "parent": "products", "sublabel": "UpdateProductGuarded", "sources": [{ "path": "internal/database/products.go", "line": 49, "end_line": 49 }] },
+    { "id": "xtr_products", "label": "Продукты в Stars (XTR)", "parent": "products", "sublabel": "currency=XTR, 1 Star = 1 minor unit", "sources": [{ "path": "internal/service/order_stars.go", "line": 71, "end_line": 78 }] },
+
+    { "id": "purchase", "label": "Покупка", "parent": "root", "sublabel": "OrderService seam" },
+    { "id": "platega_checkout", "label": "Platega, рубли", "parent": "purchase", "sublabel": "RequestPayment → платёжная ссылка", "sources": [{ "path": "internal/service/order_platega.go", "line": 58, "end_line": 74 }, { "path": "internal/service/order_platega.go", "line": 193, "end_line": 210 }] },
+    { "id": "stars_checkout", "label": "Telegram Stars", "parent": "purchase", "sublabel": "requestStarsPayment → invoice", "sources": [{ "path": "internal/service/order_stars.go", "line": 71, "end_line": 116 }] },
+    { "id": "pending_guard", "label": "Guard повторной оплаты", "parent": "purchase", "sublabel": "один pending-заказ на пару", "sources": [{ "path": "internal/service/order_stars.go", "line": 96, "end_line": 106 }] },
+
+    { "id": "fulfillment", "label": "Исполнение", "parent": "root", "sublabel": "после оплаты" },
+    { "id": "confirm", "label": "Confirm и активация", "parent": "fulfillment", "sublabel": "CAS-переход pending → paid", "sources": [{ "path": "internal/service/order_platega.go", "line": 441, "end_line": 460 }, { "path": "internal/service/order.go", "line": 471, "end_line": 497 }] },
+    { "id": "plan_apply", "label": "Применение плана", "parent": "fulfillment", "sublabel": "план → ноды подписки", "sources": [{ "path": "internal/database/orders.go", "line": 520, "end_line": 560 }] },
+    { "id": "expiry", "label": "Истечение и даунгрейд", "parent": "fulfillment", "sublabel": "→ free-план", "sources": [{ "path": "internal/service/subscription.go", "line": 1335, "end_line": 1343 }] }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Как читать дерево",
+      "items": [
+        "Корень — коммерческая витрина бота: тарифы, SKU и покупка.",
+        "Free-план и trial — не товары, а базовые состояния подписки, поэтому живут в ветке планов.",
+        "Покупка имеет два провайдера, но один confirm-хвост и одну витрину pending-заказов."
+      ]
+    }
+  ]
+}

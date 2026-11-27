@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Платёж Telegram Stars (XTR)",
+    "output": "doc/diagrams/stars-payment.html",
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "provider": "github",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "consent-invoice", "label": "Согласие и счёт", "focus": ["user", "bot", "payapi"], "note": "Двухшаговый поток: условия и согласие в личном чате, invoice XTR строго после согласия." },
+      { "id": "precheck", "label": "Pre-checkout", "focus": ["user", "bot", "payapi"], "note": "Fast-lane вне общего лимитера: валидация без побочных эффектов, ответ всегда." },
+      { "id": "cas", "label": "CAS-подтверждение", "focus": ["bot", "ordersvc", "db"], "note": "Lock по charge ID и один CAS pending|expired→paid с fee=0." }
+    ]
+  },
+  "participants": [
+    { "id": "user", "type": "external", "label": "Покупатель", "sublabel": "Telegram" },
+    { "id": "bot", "type": "backend", "label": "Bot Handler", "sublabel": "internal/bot", "sources": [{ "path": "internal/bot/stars_flow.go", "line": 230, "end_line": 461 }, { "path": "internal/bot/stars_flow.go", "line": 531, "end_line": 585 }, { "path": "internal/bot/stars_flow.go", "line": 586, "end_line": 744 }] },
+    { "id": "payapi", "type": "external", "label": "Bot API · payment", "sublabel": "таймаут 4s", "sources": [{ "path": "cmd/bot/main.go", "line": 316, "end_line": 349 }, { "path": "internal/service/payment/stars/invoice.go", "line": 24, "end_line": 66 }, { "path": "internal/service/payment/stars/refund.go", "line": 13, "end_line": 36 }] },
+    { "id": "ordersvc", "type": "backend", "label": "OrderService", "sublabel": "internal/service", "sources": [{ "path": "internal/service/order_stars.go", "line": 71, "end_line": 135 }, { "path": "internal/service/order_stars.go", "line": 185, "end_line": 390 }, { "path": "internal/service/order_stars.go", "line": 392, "end_line": 433 }] },
+    { "id": "db", "type": "database", "label": "SQLite", "sublabel": "GORM", "sources": [{ "path": "internal/database/orders.go", "line": 385, "end_line": 473 }] },
+    { "id": "nodes", "type": "cloud", "label": "VPN-ноды", "sublabel": "3x-ui · proxman", "sources": [{ "path": "internal/service/sync.go", "line": 227, "end_line": 276 }] },
+    { "id": "tg", "type": "external", "label": "Telegram", "sublabel": "админ", "sources": [{ "path": "internal/service/order.go", "line": 584, "end_line": 590 }] }
+  ],
+  "segments": [
+    { "from": 150, "to": 330, "label": "Покупка и согласие" },
+    { "from": 440, "to": 715, "label": "Invoice XTR" },
+    { "from": 730, "to": 1000, "label": "Pre-checkout fast-lane" },
+    { "from": 1020, "to": 1340, "label": "successful_payment → CAS" },
+    { "from": 1350, "to": 1595, "label": "Post-commit" },
+    { "from": 1605, "to": 2010, "label": "Дубли и возвраты" }
+  ],
+  "messages": [
+    { "id": "buy", "from": "user", "to": "bot", "y": 190, "label": "«Купить» · Stars-тариф", "variant": "default" },
+    { "id": "req-order", "from": "bot", "to": "ordersvc", "y": 240, "label": "RequestPayment", "variant": "emphasis" },
+    { "id": "pending-order", "from": "ordersvc", "to": "db", "y": 290, "label": "FindOrCreatePendingOrder", "variant": "default", "note": "TTL invoice 15m (STARS_INVOICE_TTL)" },
+    { "id": "pending-row", "from": "db", "to": "ordersvc", "y": 375, "label": "pending + payment_expires_at", "variant": "return" },
+    { "id": "terms", "from": "bot", "to": "user", "y": 420, "label": "условия + кнопка «Принимаю»", "variant": "return" },
+    { "id": "accept", "from": "user", "to": "bot", "y": 480, "label": "stars_accept_callback", "variant": "default" },
+    { "id": "owner-check", "from": "bot", "to": "db", "y": 540, "label": "order · владелец · статус", "variant": "default" },
+    { "id": "send-invoice", "from": "bot", "to": "payapi", "y": 610, "label": "sendInvoice · XTR", "variant": "emphasis", "note": "fail-closed: Amount>0, payload=order ID" },
+    { "id": "invoice-sent", "from": "payapi", "to": "bot", "y": 700, "label": "счёт отправлен", "variant": "return" },
+    { "id": "pcq", "from": "user", "to": "bot", "y": 770, "label": "pre_checkout_query", "variant": "emphasis", "note": "fast-lane: слот 1s, вне rate limiter" },
+    { "id": "validate", "from": "bot", "to": "ordersvc", "y": 870, "label": "ValidateStarsPreCheckout", "variant": "security", "note": "XTR: точное равенство суммы · владелец · pending|expired" },
+    { "id": "answer", "from": "bot", "to": "payapi", "y": 985, "label": "answerPreCheckout ok/err", "variant": "security", "note": "ответ всегда · бюджет ≤9s < 10s" },
+    { "id": "payment", "from": "user", "to": "bot", "y": 1060, "label": "successful_payment", "variant": "emphasis" },
+    { "id": "confirm", "from": "bot", "to": "ordersvc", "y": 1125, "label": "ConfirmStarsPayment", "variant": "emphasis", "note": "lock по charge ID · detachCtx=WithoutCancel" },
+    { "id": "cas", "from": "ordersvc", "to": "db", "y": 1235, "label": "ConfirmOrderPaidCAS", "variant": "emphasis", "note": "одна tx: paid + charge + fee=0 + план" },
+    { "id": "cas-ok", "from": "db", "to": "ordersvc", "y": 1330, "label": "paid · activated", "variant": "return" },
+    { "id": "invalidate", "from": "ordersvc", "to": "db", "y": 1385, "label": "InvalidateBySubID", "variant": "dashed" },
+    { "id": "admin", "from": "ordersvc", "to": "tg", "y": 1425, "label": "notifyAdminPaid", "variant": "dashed" },
+    { "id": "sync", "from": "ordersvc", "to": "nodes", "y": 1465, "label": "SyncSubscription · 20s", "variant": "dashed", "note": "best-effort: сбой дообгонит sync-воркер" },
+    { "id": "paid-msg", "from": "bot", "to": "user", "y": 1565, "label": "подписка активирована", "variant": "return" },
+    { "id": "dup-delivery", "from": "user", "to": "bot", "y": 1660, "label": "повторный successful_payment", "variant": "dashed" },
+    { "id": "dup-noop", "from": "bot", "to": "ordersvc", "y": 1700, "label": "тот же charge → no-op", "variant": "dashed" },
+    { "id": "new-charge", "from": "user", "to": "bot", "y": 1755, "label": "новый charge на paid-заказ", "variant": "dashed" },
+    { "id": "audit-guard", "from": "ordersvc", "to": "db", "y": 1805, "label": "HasPaymentConfirmedByProviderPaymentID", "variant": "security", "note": "audit-guard fail-closed" },
+    { "id": "auto-refund", "from": "ordersvc", "to": "payapi", "y": 1895, "label": "refundStarPayment", "variant": "security", "note": "авто-возврат дубля + audit payment_auto_refunded" },
+    { "id": "manual-refund", "from": "ordersvc", "to": "payapi", "y": 1985, "label": "/refund → RefundStarsOrder", "variant": "dashed", "note": "Telegram refund → CAS paid→canceled + downgrade" }
+  ],
+  "activations": [
+    { "participant": "bot", "from": 190, "to": 1710, "type": "backend" },
+    { "participant": "payapi", "from": 610, "to": 1995, "type": "external" },
+    { "participant": "ordersvc", "from": 240, "to": 1995, "type": "backend" },
+    { "participant": "db", "from": 290, "to": 1815, "type": "database" },
+    { "participant": "nodes", "from": 1460, "to": 1475, "type": "cloud" },
+    { "participant": "tg", "from": 1420, "to": 1435, "type": "external" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Fail-closed invoice",
+      "items": [
+        "Валюта только XTR (1 Star = 1 minor unit), Amount > 0, title 1..32 рун",
+        "payload = order ID; invoice отправляется ТОЛЬКО из acceptance-callback после согласия с /terms",
+        "Sent-set (1024) + in-flight guard не дают задвоить invoice; повторный клик по pending — подсказка"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Бюджет pre-checkout",
+      "items": [
+        "Strogого последовательно: слот fast-lane 1s + валидация 4s + HTTP-ответ 4s ≤ 9s < окно Telegram 10s",
+        "Ответ уходит ВСЕГДА: ok=false при любой ошибке с подсказкой /paysupport",
+        "Финансовые апдейты (pre_checkout, successful_payment) идут вне общего rate limiter"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Идемпотентность и авто-возврат",
+      "items": [
+        "Повторная доставка того же charge — no-op без второго продления",
+        "Новый charge на paid/canceled заказе — авто-возврат refundStarPayment; entitlement не меняется",
+        "Audit-guard: charge уже подтверждён — возврата нет; журнал недоступен — fail-closed",
+        "«already refunded» от Telegram — идемпотентный успех"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Сроки и recovery",
+      "items": [
+        "TTL invoice 15m по умолчанию (STARS_INVOICE_TTL), выставляется атомарно с INSERT заказа",
+        "Pending-заказы Stars истекают локально в reconcile (два прохода, Platega-очередь отдельно)",
+        "Поздний successful_payment активирует expired-заказ: grace-окна, как у Platega, в Stars нет",
+        "Payment API — отдельный инстанс с HTTP-таймаутом 4s: long-poll getUpdates его не разделяет"
+      ]
+    }
+  ]
+}

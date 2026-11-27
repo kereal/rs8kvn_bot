@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "ec7ff2da-e771-442a-843d-6cf9e104fdea",
+  "status": "current",
+  "command": "deliver",
+  "type": "tree",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/product-catalog.tree.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/product-catalog.html",
+  "specification": {
+    "sha256": "8cfc9864bcc37c0f0073f887f8e4acb44250bf3de5d249053628c9aced004fdf",
+    "bytes": 5605
+  },
+  "artifact": {
+    "sha256": "b473021318de1f925384560e31b2c28e600dd22856d50a714d38776a79d55f94",
+    "bytes": 960888
+  }
+}

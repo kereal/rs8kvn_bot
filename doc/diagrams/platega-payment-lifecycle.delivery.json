@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "a737b865-caab-4657-8dc8-12c358d38bde",
+  "status": "current",
+  "command": "deliver",
+  "type": "sequence",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/platega-payment-lifecycle.sequence.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/platega-payment-lifecycle.html",
+  "specification": {
+    "sha256": "5d34756a86ec7754d3b8ca45c34505976e9df9239f353b228f1a6e4a94ee0a82",
+    "bytes": 9784
+  },
+  "artifact": {
+    "sha256": "e09159b549f22ebde3fd3c659c0efc9aa70905d2b33beecee93220393f81df4b",
+    "bytes": 961058
+  }
+}

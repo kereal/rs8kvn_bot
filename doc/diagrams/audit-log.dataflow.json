@@ -1,0 +1,458 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Журнал аудита: кто, что и как пишет",
+    "subtitle": "append-only audit_log: best-effort по умолчанию, атомарно — только в платёжных транзакциях; ретеншн с исключениями.",
+    "output": "doc/diagrams/audit-log.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
+    "views": [
+      {
+        "id": "write",
+        "label": "Кто пишет",
+        "focus": [
+          "user",
+          "admin",
+          "providers",
+          "subs_svc",
+          "order_svc",
+          "bcast_worker"
+        ],
+        "note": "Актеры и сервисы-писатели: user/admin/worker/payment_provider/system."
+      },
+      {
+        "id": "atomic",
+        "label": "Платёжная атомарность",
+        "focus": [
+          "order_svc",
+          "pay_tx",
+          "audit_store"
+        ],
+        "note": "Единственный путь, где ошибка журнала ломает операцию."
+      },
+      {
+        "id": "keep",
+        "label": "Ретеншн и чтение",
+        "focus": [
+          "audit_store",
+          "retention",
+          "refund_guard",
+          "read_api"
+        ],
+        "note": "Что удаляется, что переживает очистку и кто реально читает журнал."
+      }
+    ]
+  },
+  "stages": [
+    {
+      "label": "Актеры"
+    },
+    {
+      "label": "Сервисы"
+    },
+    {
+      "label": "Платёжная tx"
+    },
+    {
+      "label": "Хранилище"
+    },
+    {
+      "label": "Жизненный цикл"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "user",
+      "type": "frontend",
+      "label": "Пользователь бота",
+      "sublabel": "actor_type=user",
+      "stage": 0,
+      "row": 0,
+      "sources": [
+        {
+          "path": "internal/database/audit_log.go",
+          "line": 30,
+          "end_line": 36
+        }
+      ]
+    },
+    {
+      "id": "admin",
+      "type": "frontend",
+      "label": "Админ бота",
+      "sublabel": "WithAuditAdmin → actor_id",
+      "stage": 0,
+      "row": 1,
+      "sources": [
+        {
+          "path": "internal/bot/admin.go",
+          "line": 121,
+          "end_line": 122
+        },
+        {
+          "path": "internal/bot/admin_stars.go",
+          "line": 38,
+          "end_line": 39
+        }
+      ]
+    },
+    {
+      "id": "providers",
+      "type": "external",
+      "label": "Платёжные провайдеры",
+      "sublabel": "Platega callback, Stars payment",
+      "stage": 0,
+      "row": 2,
+      "sources": [
+        {
+          "path": "internal/database/audit_log.go",
+          "line": 30,
+          "end_line": 36
+        },
+        {
+          "path": "internal/service/order_platega.go",
+          "line": 441,
+          "end_line": 448
+        }
+      ]
+    },
+    {
+      "id": "trial_worker",
+      "type": "backend",
+      "label": "Воркеры очистки trial",
+      "sublabel": "audit внутри пакета database",
+      "stage": 0,
+      "row": 3,
+      "sources": [
+        {
+          "path": "internal/database/audit_log_repo.go",
+          "line": 51,
+          "end_line": 55
+        }
+      ]
+    },
+    {
+      "id": "subs_svc",
+      "type": "backend",
+      "label": "SubscriptionService",
+      "sublabel": "logAudit — best-effort",
+      "stage": 1,
+      "row": 0,
+      "sources": [
+        {
+          "path": "internal/service/subscription.go",
+          "line": 49,
+          "end_line": 62
+        }
+      ]
+    },
+    {
+      "id": "order_svc",
+      "type": "backend",
+      "label": "OrderService",
+      "sublabel": "order_created / payment_auto_refunded",
+      "stage": 1,
+      "row": 1,
+      "sources": [
+        {
+          "path": "internal/service/order_platega.go",
+          "line": 426,
+          "end_line": 433
+        },
+        {
+          "path": "internal/service/order_stars.go",
+          "line": 435,
+          "end_line": 447
+        }
+      ]
+    },
+    {
+      "id": "bcast_worker",
+      "type": "backend",
+      "label": "BroadcastWorker",
+      "sublabel": "started / completed / failed",
+      "stage": 1,
+      "row": 2,
+      "sources": [
+        {
+          "path": "internal/bot/broadcast_worker.go",
+          "line": 132,
+          "end_line": 132
+        },
+        {
+          "path": "internal/bot/broadcast_worker.go",
+          "line": 440,
+          "end_line": 447
+        }
+      ]
+    },
+    {
+      "id": "db_be",
+      "type": "database",
+      "label": "database.Service",
+      "sublabel": "insertAuditLogBestEffort",
+      "stage": 1,
+      "row": 3,
+      "sources": [
+        {
+          "path": "internal/database/audit_log_repo.go",
+          "line": 51,
+          "end_line": 65
+        }
+      ]
+    },
+    {
+      "id": "pay_tx",
+      "type": "backend",
+      "label": "Платёжные транзакции",
+      "sublabel": "InsertAuditLogInTx — атомарно",
+      "stage": 2,
+      "row": 3,
+      "emphasis": true,
+      "sources": [
+        {
+          "path": "internal/database/audit_log_repo.go",
+          "line": 35,
+          "end_line": 49
+        },
+        {
+          "path": "internal/database/orders.go",
+          "line": 502,
+          "end_line": 515
+        }
+      ]
+    },
+    {
+      "id": "audit_store",
+      "type": "database",
+      "label": "audit_log (SQLite)",
+      "sublabel": "append-only, без FK",
+      "stage": 3,
+      "row": 1,
+      "emphasis": true,
+      "sources": [
+        {
+          "path": "internal/database/audit_log.go",
+          "line": 84,
+          "end_line": 106
+        },
+        {
+          "path": "internal/database/migrations/039_create_audit_log.up.sql",
+          "line": 27,
+          "end_line": 38
+        }
+      ]
+    },
+    {
+      "id": "retention",
+      "type": "backend",
+      "label": "DailyMaintenance",
+      "sublabel": "ретеншн: батчи по 1000",
+      "stage": 4,
+      "row": 0,
+      "sources": [
+        {
+          "path": "internal/database/maintenance.go",
+          "line": 18,
+          "end_line": 59
+        },
+        {
+          "path": "cmd/bot/main.go",
+          "line": 518,
+          "end_line": 521
+        }
+      ]
+    },
+    {
+      "id": "refund_guard",
+      "type": "security",
+      "label": "Guard авто-возврата Stars",
+      "sublabel": "HasPaymentConfirmedByProviderPaymentID",
+      "stage": 4,
+      "row": 1,
+      "sources": [
+        {
+          "path": "internal/database/audit_log_repo.go",
+          "line": 67,
+          "end_line": 83
+        },
+        {
+          "path": "internal/service/order_stars.go",
+          "line": 392,
+          "end_line": 401
+        }
+      ]
+    },
+    {
+      "id": "read_api",
+      "type": "backend",
+      "label": "Read API журнала",
+      "sublabel": "Get*AuditLog — production-вызовов нет",
+      "stage": 4,
+      "row": 2,
+      "sources": [
+        {
+          "path": "internal/database/audit_log_repo.go",
+          "line": 117,
+          "end_line": 174
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "user-subs",
+      "from": "user",
+      "to": "subs_svc",
+      "label": "создание / продление / удаление",
+      "classification": "subscription lifecycle",
+      "variant": "default"
+    },
+    {
+      "id": "admin-subs",
+      "from": "admin",
+      "to": "subs_svc",
+      "label": "админ-операции",
+      "classification": "actor_id=admin",
+      "variant": "default"
+    },
+    {
+      "id": "admin-order",
+      "from": "admin",
+      "to": "order_svc",
+      "label": "refund /stars",
+      "classification": "actor_id=admin",
+      "variant": "default"
+    },
+    {
+      "id": "providers-order",
+      "from": "providers",
+      "to": "order_svc",
+      "label": "callback / successful_payment",
+      "classification": "actor_type=payment_provider",
+      "variant": "default"
+    },
+    {
+      "id": "trial-db",
+      "from": "trial_worker",
+      "to": "db_be",
+      "label": "события воркеров",
+      "classification": "actor_type=system",
+      "variant": "default"
+    },
+    {
+      "id": "subs-insert",
+      "from": "subs_svc",
+      "to": "audit_store",
+      "label": "INSERT",
+      "classification": "ошибка = Warn, операция продолжается",
+      "variant": "default"
+    },
+    {
+      "id": "order-insert",
+      "from": "order_svc",
+      "to": "audit_store",
+      "label": "INSERT",
+      "classification": "order_created / payment_auto_refunded",
+      "variant": "default"
+    },
+    {
+      "id": "bcast-insert",
+      "from": "bcast_worker",
+      "to": "audit_store",
+      "label": "INSERT",
+      "classification": "рассылки",
+      "variant": "default"
+    },
+    {
+      "id": "db-insert",
+      "from": "db_be",
+      "to": "audit_store",
+      "label": "INSERT",
+      "classification": "trial cleanup",
+      "variant": "default"
+    },
+    {
+      "id": "order-tx",
+      "from": "order_svc",
+      "to": "pay_tx",
+      "label": "события платежей",
+      "classification": "ошибка журнала откатывает tx",
+      "variant": "emphasis"
+    },
+    {
+      "id": "tx-insert",
+      "from": "pay_tx",
+      "to": "audit_store",
+      "label": "INSERT в tx",
+      "classification": "атомарно с изменением заказа/подписки",
+      "variant": "emphasis"
+    },
+    {
+      "id": "retention-delete",
+      "from": "audit_store",
+      "to": "retention",
+      "label": "DELETE старше cutoff, кроме исключений",
+      "classification": "пачками по 1000, write-lock не держится",
+      "variant": "dashed"
+    },
+    {
+      "id": "guard-read",
+      "from": "audit_store",
+      "to": "refund_guard",
+      "label": "SELECT payment_confirmed",
+      "classification": "след оплаты переживает рестарт и /del",
+      "variant": "security"
+    },
+    {
+      "id": "read-select",
+      "from": "audit_store",
+      "to": "read_api",
+      "label": "SELECT (не подключено в runtime)",
+      "classification": "опциональная возможность",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Best-effort по умолчанию",
+      "items": [
+        "logAudit сервисов и insertAuditLogBestEffort воркеров пишут журнал не влияя на бизнес-операцию: ошибка — Warn в лог.",
+        "Контракт зафиксирован в AuditLogger (internal/database/audit_log.go:112-114).",
+        "Типы сущностей и событий — открытые реестры констант Go, без CHECK и миграций."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Атомарность платёжных транзакций",
+      "items": [
+        "В ConfirmOrderPaidCAS событие payment_confirmed пишется InsertAuditLogInTx в той же транзакции, что и продление подписки.",
+        "Откат транзакции откатывает и событие — журнал отражает только зафиксированные факты (internal/database/orders.go:502-508).",
+        "Тот же приём в отмене и chargeback-таймлайне заказа."
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Ретеншн и исключения",
+      "items": [
+        "Суточный DailyMaintenance удаляет записи старше AUDIT_LOG_RETENTION_DAYS (по умолчанию 180 дней) пачками по 1000.",
+        "Исключения: payment_confirmed и payment_auto_refunded не удаляются никогда — это рабочее состояние авто-возврата Stars, а не история.",
+        "По payment_confirmed guard отличает дубль charge от денег за уже оказанную услугу после рестарта и каскадного /del."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Чтение журнала",
+      "items": [
+        "Таблица append-only и без FK: история переживает физическое удаление сущности.",
+        "GetAuditLogByEntity / ByEvent / Recent реализованы, но production call sites не найдены — путь показан пунктиром.",
+        "Единственный runtime-читатель — guard авто-возврата: поиск по details литеральным instr (JSON1 не собран)."
+      ]
+    }
+  ]
+}

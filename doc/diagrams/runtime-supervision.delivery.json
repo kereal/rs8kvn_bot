@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "9b8390d0-b0c9-47bd-bf6f-ed829894b958",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/runtime-supervision.architecture.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/runtime-supervision.html",
+  "specification": {
+    "sha256": "79a25b024e0f9b802a8270b230c482cd9341147a37240ce8de6d3e3412710953",
+    "bytes": 7216
+  },
+  "artifact": {
+    "sha256": "299f7486114194dc6658911493fb87bacd94e2fe8ef4e7c1a1df1519bc885609",
+    "bytes": 978467
+  }
+}

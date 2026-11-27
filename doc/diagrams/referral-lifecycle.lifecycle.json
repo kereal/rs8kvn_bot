@@ -1,0 +1,268 @@
+{
+  "schema_version": 3,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Жизненный цикл реферальной механики",
+    "subtitle": "Код → ссылки → переход → атрибуция → уведомление → счётчик; бонус не начисляется",
+    "output": "doc/diagrams/referral-lifecycle.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
+    "views": [
+      {
+        "id": "issue",
+        "label": "Выдача кода",
+        "focus": [
+          "no_code",
+          "code_issued",
+          "shared"
+        ],
+        "note": "Первый вызов /invite генерирует единственный код реферера и обе ссылки."
+      },
+      {
+        "id": "attribute",
+        "label": "Атрибуция",
+        "focus": [
+          "clicked",
+          "attributed",
+          "notified"
+        ],
+        "note": "Переход по share_ кэширует код; подписка пишет referred_by, реферер получает уведомление."
+      },
+      {
+        "id": "count",
+        "label": "Счётчик",
+        "focus": [
+          "notified",
+          "counted",
+          "decremented"
+        ],
+        "note": "Счётчик живёт в кэше; истина — COUNT(*) по subscriptions.referred_by."
+      }
+    ]
+  },
+  "mainPath": [
+    "code_issued",
+    "shared",
+    "clicked",
+    "attributed",
+    "notified"
+  ],
+  "states": [
+    {
+      "id": "code_issued",
+      "type": "start",
+      "label": "Код выдан",
+      "sublabel": "GetOrCreateInvite",
+      "step": "01",
+      "sources": [
+        {
+          "path": "internal/bot/referral_handler.go",
+          "line": 86,
+          "end_line": 110,
+          "label": "генерация кода"
+        },
+        {
+          "path": "internal/database/invites.go",
+          "line": 35,
+          "end_line": 64,
+          "label": "GetOrCreateInvite"
+        }
+      ]
+    },
+    {
+      "id": "shared",
+      "type": "waiting",
+      "label": "Ссылки",
+      "sublabel": "2 ссылки",
+      "step": "03",
+      "sources": [
+        {
+          "path": "internal/bot/referral_handler.go",
+          "line": 112,
+          "end_line": 131,
+          "label": "ссылки"
+        }
+      ]
+    },
+    {
+      "id": "clicked",
+      "type": "active",
+      "label": "Переход",
+      "sublabel": "кэш 60 мин",
+      "step": "04",
+      "sources": [
+        {
+          "path": "internal/bot/command.go",
+          "line": 166,
+          "end_line": 244,
+          "label": "handleShareStart"
+        }
+      ]
+    },
+    {
+      "id": "attributed",
+      "type": "success",
+      "label": "Атрибуция",
+      "sublabel": "referred_by",
+      "step": "05",
+      "sources": [
+        {
+          "path": "internal/service/subscription.go",
+          "line": 213,
+          "end_line": 228,
+          "label": "Create + invite"
+        },
+        {
+          "path": "internal/database/trials.go",
+          "line": 143,
+          "end_line": 175,
+          "label": "BindTrial + invite"
+        }
+      ]
+    },
+    {
+      "id": "notified",
+      "type": "success",
+      "label": "Уведомлён",
+      "sublabel": "уведомления",
+      "step": "06",
+      "sources": [
+        {
+          "path": "internal/bot/command.go",
+          "line": 286,
+          "end_line": 319,
+          "label": "уведомления"
+        }
+      ]
+    },
+    {
+      "id": "counted",
+      "type": "neutral",
+      "label": "Счётчик",
+      "sublabel": "кэш; истина БД",
+      "sources": [
+        {
+          "path": "internal/bot/referral_cache.go",
+          "line": 15,
+          "end_line": 23,
+          "label": "источник истины"
+        },
+        {
+          "path": "internal/bot/referral_cache.go",
+          "line": 87,
+          "end_line": 117,
+          "label": "Increment / Save no-op"
+        }
+      ]
+    },
+    {
+      "id": "decremented",
+      "type": "failure",
+      "label": "Удалена",
+      "sublabel": "счётчик −1",
+      "sources": [
+        {
+          "path": "internal/bot/admin.go",
+          "line": 160,
+          "end_line": 166,
+          "label": "decrement"
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "id": "r2",
+      "from": "code_issued",
+      "to": "shared",
+      "label": "2 ссылки"
+    },
+    {
+      "id": "r3",
+      "from": "shared",
+      "to": "clicked",
+      "label": "переход"
+    },
+    {
+      "id": "r4",
+      "from": "clicked",
+      "to": "attributed",
+      "label": "подписка"
+    },
+    {
+      "id": "r5",
+      "from": "attributed",
+      "to": "notified",
+      "label": "notify"
+    },
+    {
+      "id": "r6",
+      "from": "notified",
+      "to": "counted",
+      "label": "инкремент"
+    },
+    {
+      "id": "r7",
+      "from": "attributed",
+      "to": "counted",
+      "label": "COUNT(*)",
+      "variant": "dashed",
+      "note": "часовой Sync возвращает кэш к истине"
+    },
+    {
+      "id": "r8",
+      "from": "shared",
+      "to": "clicked",
+      "label": "/i/{code}",
+      "variant": "dashed"
+    },
+    {
+      "id": "r9",
+      "from": "attributed",
+      "to": "decremented",
+      "label": "/del",
+      "variant": "security"
+    },
+    {
+      "id": "r10",
+      "from": "decremented",
+      "to": "counted",
+      "label": "декремент",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Выдача кода",
+      "items": [
+        "После миграции 005 у каждого реферера максимум один код",
+        "Код генерируется при первом /invite и переиспользуется",
+        "Две формы ссылки: deep-link бота share_{code} и веб-лендинг /i/{code}"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Атрибуция",
+      "items": [
+        "Переход по share_ валидирует код и кэширует его на 60 минут (pendingInvites)",
+        "CreateSubscription резолвит код в транзакции → referred_by + invite_code",
+        "BindTrial восстанавливает referred_by из invite-таблицы при привязке trial",
+        "Активная подписка получателя игнорирует share-переход (главное меню)"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Счётчик и границы механики",
+      "items": [
+        "Счётчик — in-memory кэш для отображения; истина — COUNT(*) GROUP BY referred_by по subscriptions",
+        "Increment/Decrement правят кэш в реальном времени; Save — no-op, часовой Sync пересчитывает из БД",
+        "Уведомление рефереру best-effort: сбой отправки логируется, атрибуция не отменяется",
+        "РЕФЕРАЛЬНЫЙ БОНУС НЕ НАЧИСЛЯЕТСЯ: в коде нет начислений — только атрибуция, уведомления и счётчик"
+      ]
+    }
+  ]
+}

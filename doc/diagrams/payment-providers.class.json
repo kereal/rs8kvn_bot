@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "diagram_type": "class",
+  "meta": {
+    "title": "Платёжные провайдеры: контракты и реализации",
+    "subtitle": "OrderService платит через PlategaClient; Stars-клиент подключается атомарным указателем и зовёт Telegram Bot API.",
+    "output": "doc/diagrams/payment-providers.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
+    "views": [
+      { "id": "platega", "label": "Platega", "focus": ["order_service", "platega_iface", "platega_client"], "note": "Rubли: HTTP-агрегатор, создание и статус транзакции." },
+      { "id": "stars", "label": "Stars", "focus": ["order_service", "stars_client", "make_requester", "bot_api"], "note": "Refund поверх BotAPI; tgbotapi v5.5.1 без per-request ctx." }
+    ]
+  },
+  "layout": {
+    "mode": "grid"
+  },
+  "types": [
+    {
+      "id": "order_service",
+      "label": "OrderService",
+      "kind": "class",
+      "sublabel": "создание заказов и подтверждение оплаты",
+      "row": 0,
+      "col": 0,
+      "sources": [{ "path": "internal/service/order.go", "line": 39, "end_line": 62 }],
+      "attributes": [
+        { "name": "db", "type": "interfaces.OrderStore", "visibility": "private" },
+        { "name": "payment", "type": "PlategaClient", "visibility": "private" },
+        { "name": "stars", "type": "atomic.Pointer[stars.Client]", "visibility": "private" },
+        { "name": "cfg", "type": "*config.Config", "visibility": "private" }
+      ],
+      "methods": [
+        { "name": "RequestPayment", "parameters": "ctx, telegramID, username, product", "returns": "*PaymentInfo, *database.Order, error", "visibility": "public" },
+        { "name": "ConfirmPayment", "parameters": "ctx, callback", "returns": "*database.Order, bool, error", "visibility": "public" },
+        { "name": "ConfirmStarsPayment", "parameters": "ctx, chargeID, payload, amount, currency, telegramID", "returns": "*PaymentConfirmation, error", "visibility": "public" },
+        { "name": "ValidateStarsPreCheckout", "parameters": "ctx, payload, telegramID, amount, currency", "returns": "error", "visibility": "public" },
+        { "name": "RefundStarsOrder", "parameters": "ctx, orderID", "returns": "*StarsRefundResult, error", "visibility": "public" },
+        { "name": "SetStarsClient", "parameters": "c *stars.Client", "returns": "void", "visibility": "public" }
+      ]
+    },
+    {
+      "id": "platega_iface",
+      "label": "PlategaClient",
+      "kind": "interface",
+      "sublabel": "минимальный исходящий контракт оплаты",
+      "row": 0,
+      "col": 1,
+      "sources": [{ "path": "internal/service/order_platega.go", "line": 21, "end_line": 28 }],
+      "methods": [
+        { "name": "CreateTransaction", "parameters": "ctx, req platega.CreateTransactionRequest", "returns": "*platega.CreateTransactionResponse, error", "visibility": "public", "abstract": true },
+        { "name": "GetTransactionStatus", "parameters": "ctx, transactionID string", "returns": "*platega.TransactionStatusResponse, error", "visibility": "public", "abstract": true }
+      ]
+    },
+    {
+      "id": "platega_client",
+      "label": "platega.Client",
+      "kind": "class",
+      "sublabel": "HTTP-клиент агрегатора Platega",
+      "row": 1,
+      "col": 1,
+      "sources": [{ "path": "internal/service/payment/platega/client.go", "line": 43, "end_line": 48 }, { "path": "internal/service/payment/platega/client.go", "line": 137, "end_line": 150 }],
+      "attributes": [
+        { "name": "cfg", "type": "Config", "visibility": "private" },
+        { "name": "rejectingClient", "type": "*http.Client", "visibility": "private" }
+      ],
+      "methods": [
+        { "name": "CreateTransaction", "parameters": "ctx, req CreateTransactionRequest", "returns": "*CreateTransactionResponse, error", "visibility": "public" },
+        { "name": "GetTransactionStatus", "parameters": "ctx, transactionID string", "returns": "*TransactionStatusResponse, error", "visibility": "public" }
+      ]
+    },
+    {
+      "id": "stars_client",
+      "label": "stars.Client",
+      "kind": "class",
+      "sublabel": "прямые вызовы Telegram API для Stars",
+      "row": 0,
+      "col": 2,
+      "sources": [{ "path": "internal/service/payment/stars/stars.go", "line": 12, "end_line": 22 }, { "path": "internal/service/payment/stars/refund.go", "line": 20, "end_line": 40 }],
+      "attributes": [
+        { "name": "api", "type": "MakeRequester", "visibility": "private" }
+      ],
+      "methods": [
+        { "name": "Refund", "parameters": "ctx, telegramID int64, chargeID string", "returns": "error", "visibility": "public" }
+      ]
+    },
+    {
+      "id": "make_requester",
+      "label": "stars.MakeRequester",
+      "kind": "interface",
+      "sublabel": "единственный нужный метод BotAPI",
+      "row": 1,
+      "col": 2,
+      "sources": [{ "path": "internal/service/payment/stars/stars.go", "line": 12, "end_line": 14 }],
+      "methods": [
+        { "name": "MakeRequest", "parameters": "endpoint string, params tgbotapi.Params", "returns": "*tgbotapi.APIResponse, error", "visibility": "public", "abstract": true }
+      ]
+    },
+    {
+      "id": "bot_api",
+      "label": "tgbotapi.BotAPI",
+      "kind": "class",
+      "sublabel": "payment-инстанс бота (отдельный HTTP-таймаут)",
+      "row": 2,
+      "col": 2,
+      "sources": [{ "path": "cmd/bot/main.go", "line": 730, "end_line": 733 }, { "path": "cmd/bot/main.go", "line": 745, "end_line": 751 }]
+    }
+  ],
+  "relationships": [
+    { "id": "uses_platega", "from": "order_service", "to": "platega_iface", "kind": "dependency", "label": "платит через" },
+    { "id": "platega_impl", "from": "platega_client", "to": "platega_iface", "kind": "realization" },
+    { "id": "holds_stars", "from": "order_service", "to": "stars_client", "kind": "association", "label": "atomic.Pointer, nil = fail-closed" },
+    { "id": "stars_api", "from": "stars_client", "to": "make_requester", "kind": "association", "label": "holds api" },
+    { "id": "botapi_impl", "from": "bot_api", "to": "make_requester", "kind": "realization", "label": "stars.New(paymentAPI)" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Seam провайдеров",
+      "items": [
+        "OrderService не знает конкретного провайдера: рубли идут через интерфейс PlategaClient, Stars — через атомарный указатель на stars.Client.",
+        "Активный провайдер выбирает activeProvider() по конфигу; нулевой stars.Pointer означает fail-closed.",
+        "Реестр идентификаторов провайдеров — константы database.PaymentProviderPlatega / TelegramStars."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Stars и BotAPI",
+      "items": [
+        "tgbotapi v5.5.1 не имеет per-request context: payment-вызовы живут на отдельном инстансе с жёстким HTTP-таймаутом.",
+        "stars.New(paymentAPI) подключается при старте и ретраем восстановления после деградации.",
+        "Refund различает already-refunded через ответ Telegram API."
+      ]
+    }
+  ]
+}

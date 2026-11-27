@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "c061d06d-d8a4-48cb-92d2-3f113cdf0d50",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/project-map.architecture.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/project-map.html",
+  "specification": {
+    "sha256": "ec09e895c90e3d66c864eff8718368ab9fc332054432bbeab881604908ced389",
+    "bytes": 8511
+  },
+  "artifact": {
+    "sha256": "c9a3039e0343988ef059f62fc9c86442d4071bc28854901121e8d41f987cefc9",
+    "bytes": 989938
+  }
+}

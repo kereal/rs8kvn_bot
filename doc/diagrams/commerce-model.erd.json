@@ -1,0 +1,594 @@
+{
+  "schema_version": 1,
+  "diagram_type": "erd",
+  "meta": {
+    "title": "Commerce-домен rs8kvn_bot: физическая схема",
+    "locale": "ru",
+    "subtitle": "Все физические колонки шести торговых таблиц: подписки, заказы, каталог, аудит, рассылки.",
+    "output": "doc/diagrams/commerce-model.html",
+    "quality_profile": "standard",
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
+    "views": [
+      {
+        "id": "catalog",
+        "label": "Каталог",
+        "focus": [
+          "products",
+          "plans"
+        ],
+        "note": "План задаёт лимиты, продукт — продаваемый SKU (план + срок + цена)."
+      },
+      {
+        "id": "checkout",
+        "label": "Оплата",
+        "focus": [
+          "orders",
+          "subscriptions",
+          "products"
+        ],
+        "note": "Заказ каскадно удаляется вместе с подпиской; продукт иммутабелен."
+      },
+      {
+        "id": "journal",
+        "label": "Аудит и рассылки",
+        "focus": [
+          "audit_log",
+          "broadcasts"
+        ],
+        "note": "append-only таблицы без FK."
+      }
+    ]
+  },
+  "layout": {
+    "mode": "grid",
+    "gapX": 72,
+    "gapY": 38
+  },
+  "entities": [
+    {
+      "id": "subscriptions",
+      "label": "subscriptions",
+      "sublabel": "миграции 000, 033, 038",
+      "tag": "подписки",
+      "row": 0,
+      "col": 0,
+      "sources": [
+        {
+          "path": "internal/database/migrations/033_enforce_subscription_status_check.up.sql",
+          "line": 18,
+          "end_line": 37
+        }
+      ],
+      "attributes": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "key": "pk"
+        },
+        {
+          "name": "telegram_id",
+          "type": "BIGINT NOT NULL",
+          "key": "uk"
+        },
+        {
+          "name": "username",
+          "type": "VARCHAR(255)"
+        },
+        {
+          "name": "client_id",
+          "type": "VARCHAR(255)",
+          "key": "uk"
+        },
+        {
+          "name": "subscription_id",
+          "type": "VARCHAR(255)",
+          "key": "uk"
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(50) NOT NULL DEFAULT 'active'"
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME"
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME"
+        },
+        {
+          "name": "invite_code",
+          "type": "VARCHAR(16)"
+        },
+        {
+          "name": "referred_by",
+          "type": "BIGINT"
+        },
+        {
+          "name": "plan_id",
+          "type": "INTEGER",
+          "key": "fk",
+          "references": "plans.id"
+        },
+        {
+          "name": "devices",
+          "type": "TEXT NOT NULL DEFAULT '[]'"
+        },
+        {
+          "name": "ips",
+          "type": "TEXT NOT NULL DEFAULT '[]'"
+        },
+        {
+          "name": "expires_at",
+          "type": "DATETIME"
+        },
+        {
+          "name": "product_id",
+          "type": "INTEGER",
+          "key": "fk",
+          "references": "products.id"
+        },
+        {
+          "name": "started_at",
+          "type": "DATETIME"
+        },
+        {
+          "name": "price_paid_cents",
+          "type": "INTEGER NOT NULL DEFAULT 0"
+        },
+        {
+          "name": "currency",
+          "type": "CHAR(3)"
+        },
+        {
+          "name": "last_request",
+          "type": "DATETIME"
+        },
+        {
+          "name": "reminders_sent",
+          "type": "INTEGER NOT NULL DEFAULT 0"
+        },
+        {
+          "name": "traffic_reminders_sent",
+          "type": "INTEGER NOT NULL DEFAULT 0"
+        }
+      ]
+    },
+    {
+      "id": "orders",
+      "label": "orders",
+      "sublabel": "миграции 017, 031, 034, 035",
+      "tag": "заказы",
+      "row": 0,
+      "col": 1,
+      "sources": [
+        {
+          "path": "internal/database/migrations/034_orders_subscription_cascade.up.sql",
+          "line": 11,
+          "end_line": 25
+        }
+      ],
+      "attributes": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "key": "pk"
+        },
+        {
+          "name": "subscription_id",
+          "type": "INTEGER NOT NULL",
+          "key": "fk",
+          "references": "subscriptions.id"
+        },
+        {
+          "name": "product_id",
+          "type": "INTEGER NOT NULL",
+          "key": "fk",
+          "references": "products.id"
+        },
+        {
+          "name": "status",
+          "type": "TEXT NOT NULL CHECK IN (pending|paid|expired|canceled)"
+        },
+        {
+          "name": "amount_cents",
+          "type": "INTEGER NOT NULL CHECK >= 0"
+        },
+        {
+          "name": "currency",
+          "type": "CHAR(3) NOT NULL DEFAULT 'RUB'"
+        },
+        {
+          "name": "payment_provider",
+          "type": "TEXT"
+        },
+        {
+          "name": "provider_payment_id",
+          "type": "TEXT",
+          "key": "uk"
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME NOT NULL"
+        },
+        {
+          "name": "paid_at",
+          "type": "DATETIME"
+        },
+        {
+          "name": "activated_at",
+          "type": "DATETIME"
+        },
+        {
+          "name": "expires_at",
+          "type": "DATETIME"
+        },
+        {
+          "name": "payment_url",
+          "type": "TEXT"
+        },
+        {
+          "name": "payment_expires_at",
+          "type": "DATETIME"
+        },
+        {
+          "name": "payment_creation_uncertain",
+          "type": "BOOLEAN NOT NULL DEFAULT FALSE"
+        },
+        {
+          "name": "callback_amount_cents",
+          "type": "INTEGER"
+        },
+        {
+          "name": "provider_fee_cents",
+          "type": "INTEGER"
+        }
+      ]
+    },
+    {
+      "id": "products",
+      "label": "products",
+      "sublabel": "миграции 013, 021",
+      "tag": "каталог",
+      "row": 0,
+      "col": 2,
+      "sources": [
+        {
+          "path": "internal/database/migrations/013_create_products.up.sql",
+          "line": 1,
+          "end_line": 13
+        }
+      ],
+      "attributes": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "key": "pk"
+        },
+        {
+          "name": "plan_id",
+          "type": "INTEGER NOT NULL",
+          "key": "fk",
+          "references": "plans.id"
+        },
+        {
+          "name": "duration_days",
+          "type": "INTEGER NOT NULL"
+        },
+        {
+          "name": "price_cents",
+          "type": "INTEGER NOT NULL"
+        },
+        {
+          "name": "currency",
+          "type": "CHAR(3) NOT NULL DEFAULT 'RUB'"
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR(255) NOT NULL DEFAULT ''"
+        },
+        {
+          "name": "is_active",
+          "type": "INTEGER NOT NULL DEFAULT 1"
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME"
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME"
+        }
+      ]
+    },
+    {
+      "id": "plans",
+      "label": "plans",
+      "sublabel": "миграции 007, 016, 019, 024",
+      "tag": "каталог",
+      "row": 1,
+      "col": 2,
+      "sources": [
+        {
+          "path": "internal/database/migrations/007_create_plans.up.sql",
+          "line": 1,
+          "end_line": 9
+        }
+      ],
+      "attributes": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "key": "pk"
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR(255) NOT NULL",
+          "key": "uk"
+        },
+        {
+          "name": "devices_limit",
+          "type": "INTEGER NOT NULL"
+        },
+        {
+          "name": "traffic_limit",
+          "type": "INTEGER NOT NULL"
+        },
+        {
+          "name": "is_active",
+          "type": "BOOLEAN NOT NULL DEFAULT 1"
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME"
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME"
+        }
+      ]
+    },
+    {
+      "id": "audit_log",
+      "label": "audit_log",
+      "sublabel": "миграция 039; append-only, без FK",
+      "tag": "аудит",
+      "row": 1,
+      "col": 0,
+      "sources": [
+        {
+          "path": "internal/database/migrations/039_create_audit_log.up.sql",
+          "line": 27,
+          "end_line": 38
+        }
+      ],
+      "attributes": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "key": "pk"
+        },
+        {
+          "name": "entity_type",
+          "type": "TEXT NOT NULL"
+        },
+        {
+          "name": "entity_id",
+          "type": "TEXT"
+        },
+        {
+          "name": "event",
+          "type": "TEXT NOT NULL"
+        },
+        {
+          "name": "actor_type",
+          "type": "TEXT NOT NULL"
+        },
+        {
+          "name": "actor_id",
+          "type": "TEXT"
+        },
+        {
+          "name": "old_state",
+          "type": "TEXT"
+        },
+        {
+          "name": "new_state",
+          "type": "TEXT"
+        },
+        {
+          "name": "details",
+          "type": "TEXT NOT NULL DEFAULT '{}'"
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME NOT NULL"
+        }
+      ]
+    },
+    {
+      "id": "broadcasts",
+      "label": "broadcasts",
+      "sublabel": "миграция 036",
+      "tag": "рассылки",
+      "row": 1,
+      "col": 1,
+      "sources": [
+        {
+          "path": "internal/database/migrations/036_create_broadcasts.up.sql",
+          "line": 27,
+          "end_line": 48
+        }
+      ],
+      "attributes": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "key": "pk"
+        },
+        {
+          "name": "name",
+          "type": "TEXT NOT NULL"
+        },
+        {
+          "name": "filters",
+          "type": "TEXT NOT NULL DEFAULT '{}'"
+        },
+        {
+          "name": "message_text",
+          "type": "TEXT NOT NULL"
+        },
+        {
+          "name": "status",
+          "type": "TEXT NOT NULL DEFAULT 'scheduled' CHECK IN (scheduled|running|completed|failed|canceled)"
+        },
+        {
+          "name": "planned_at",
+          "type": "DATETIME"
+        },
+        {
+          "name": "started_at",
+          "type": "DATETIME"
+        },
+        {
+          "name": "finished_at",
+          "type": "DATETIME"
+        },
+        {
+          "name": "recipients_total",
+          "type": "INTEGER NOT NULL DEFAULT 0"
+        },
+        {
+          "name": "sent_count",
+          "type": "INTEGER NOT NULL DEFAULT 0"
+        },
+        {
+          "name": "blocked_count",
+          "type": "INTEGER NOT NULL DEFAULT 0"
+        },
+        {
+          "name": "unreachable_count",
+          "type": "INTEGER NOT NULL DEFAULT 0"
+        },
+        {
+          "name": "failed_count",
+          "type": "INTEGER NOT NULL DEFAULT 0"
+        },
+        {
+          "name": "last_error",
+          "type": "TEXT NOT NULL DEFAULT ''"
+        },
+        {
+          "name": "retry_at",
+          "type": "DATETIME"
+        },
+        {
+          "name": "retry_count",
+          "type": "INTEGER NOT NULL DEFAULT 0"
+        },
+        {
+          "name": "delivery_report",
+          "type": "TEXT NOT NULL DEFAULT '{}'"
+        },
+        {
+          "name": "recipients_state",
+          "type": "TEXT NOT NULL DEFAULT '{\"snapshot\":false,\"recipients\":[]}'"
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME NOT NULL"
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME NOT NULL"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "id": "orders_subs",
+      "from": "orders",
+      "to": "subscriptions",
+      "label": "по subscription_id",
+      "fromCardinality": "many",
+      "toCardinality": "one"
+    },
+    {
+      "id": "orders_products",
+      "from": "orders",
+      "to": "products",
+      "label": "по product_id",
+      "fromCardinality": "many",
+      "toCardinality": "one"
+    },
+    {
+      "id": "subs_plans",
+      "from": "subscriptions",
+      "to": "plans",
+      "label": "по plan_id",
+      "fromCardinality": "many",
+      "toCardinality": "one",
+      "fromOptional": true
+    },
+    {
+      "id": "subs_products",
+      "from": "subscriptions",
+      "to": "products",
+      "label": "по product_id",
+      "fromCardinality": "many",
+      "toCardinality": "one",
+      "fromOptional": true
+    },
+    {
+      "id": "products_plans",
+      "from": "products",
+      "to": "plans",
+      "label": "ON DELETE CASCADE",
+      "fromCardinality": "many",
+      "toCardinality": "one"
+    },
+    {
+      "id": "audit_orders",
+      "from": "audit_log",
+      "to": "orders",
+      "label": "entity_id → order (FK нет)",
+      "fromCardinality": "many",
+      "toCardinality": "one",
+      "fromOptional": true,
+      "identifying": false
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Ключи и уникальность",
+      "items": [
+        "subscriptions: уникальны telegram_id, client_id, subscription_id (миграция 033).",
+        "orders: составной частичный UNIQUE (payment_provider, provider_payment_id) WHERE provider_payment_id не пуст; у marker 'uk' показан на provider_payment_id.",
+        "plans.name уникален; products имеет UNIQUE (plan_id, duration_days)."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Каскады и опциональность",
+      "items": [
+        "orders.subscription_id — ON DELETE CASCADE (миграция 034): /del удаляет заказы вместе с подпиской.",
+        "products.plan_id — ON DELETE CASCADE; сами продукты иммутабельны и не удаляются, поэтому orders.product_id без каскада.",
+        "subscriptions.plan_id и subscriptions.product_id nullable — подписка может существовать без покупки (trial, free)."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Аудит вне графа ссылок",
+      "items": [
+        "audit_log не имеет FK: entity_type/entity_id — адресная строка, история переживает физическое удаление сущности.",
+        "Связь с orders нарисована пунктиром как логическая, не enforced.",
+        "event/entity_type/actor_type без CHECK — целостность имён держит Go-реестр констант (internal/database/audit_log.go:40-82)."
+      ]
+    }
+  ]
+}

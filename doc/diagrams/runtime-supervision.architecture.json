@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Runtime rs8kvn_bot — очереди, платежи и надзор воркеров",
+    "output": "doc/diagrams/runtime-supervision.html",
+    "quality_profile": "showcase",
+    "locale": "ru",
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
+    "views": [
+      {
+        "id": "update-lanes",
+        "label": "Telegram очереди",
+        "focus": ["telegram", "fast-lane", "financial-mailbox", "regular-queue", "handlers"],
+        "note": "Pre-checkout отвечает в отдельном fast-lane, financial updates не блокируются обычной очередью."
+      },
+      {
+        "id": "workers",
+        "label": "Надзор воркеров",
+        "focus": ["supervisor", "workers", "db"],
+        "note": "Panic воркера перезапускается с backoff; обычный return означает штатное завершение."
+      },
+      {
+        "id": "payments",
+        "label": "Платёжный контур",
+        "focus": ["telegram", "payment-api", "handlers", "web"],
+        "note": "Платёжный Telegram-клиент отделён от long polling и нужен для Stars invoice, refund и ответов pre-checkout."
+      }
+    ]
+  },
+  "layout": {
+    "mode": "auto"
+  },
+  "components": [
+    {
+      "id": "telegram",
+      "type": "external",
+      "label": "Telegram Bot API",
+      "sublabel": "long polling",
+      "sources": [
+        {"path": "cmd/bot/main.go", "line": 737, "end_line": 750}
+      ]
+    },
+    {
+      "id": "fast-lane",
+      "type": "backend",
+      "label": "Pre-checkout fast lane",
+      "sublabel": "ответ в окно Telegram",
+      "tag": "до 4 concurrently",
+      "sources": [
+        {"path": "cmd/bot/lifecycle.go", "line": 236, "end_line": 445}
+      ]
+    },
+    {
+      "id": "financial-mailbox",
+      "type": "backend",
+      "label": "Financial mailbox",
+      "sublabel": "successful_payment + платёжные команды",
+      "tag": "без bounded drop",
+      "sources": [
+        {"path": "cmd/bot/lifecycle.go", "line": 236, "end_line": 445}
+      ]
+    },
+    {
+      "id": "regular-queue",
+      "type": "backend",
+      "label": "Regular update queue",
+      "sublabel": "команды и callback",
+      "tag": "40 buffered",
+      "sources": [
+        {"path": "cmd/bot/lifecycle.go", "line": 228, "end_line": 445}
+      ]
+    },
+    {
+      "id": "handlers",
+      "type": "backend",
+      "label": "Bot handlers",
+      "sublabel": "bounded concurrency",
+      "tag": "10 slots",
+      "sources": [
+        {"path": "internal/config/constants.go", "line": 50, "end_line": 55},
+        {"path": "cmd/bot/lifecycle.go", "line": 236, "end_line": 445}
+      ]
+    },
+    {
+      "id": "payment-api",
+      "type": "external",
+      "label": "Payment Bot API",
+      "sublabel": "отдельный BotAPI client",
+      "tag": "invoice · refund · answer",
+      "sources": [
+        {"path": "cmd/bot/main.go", "line": 707, "end_line": 760}
+      ]
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "Web server :8880",
+      "sublabel": "HTTP edge",
+      "sources": [
+        {"path": "internal/web/web.go", "line": 222, "end_line": 252},
+        {"path": "cmd/bot/main.go", "line": 607, "end_line": 690}
+      ]
+    },
+    {
+      "id": "supervisor",
+      "type": "security",
+      "label": "Worker supervisor",
+      "sublabel": "restart после panic",
+      "tag": "5s → 2m backoff",
+      "sources": [
+        {"path": "cmd/bot/supervisor.go", "line": 13, "end_line": 78}
+      ]
+    },
+    {
+      "id": "workers",
+      "type": "backend",
+      "label": "Background workers",
+      "sublabel": "sync · expire · traffic · backup",
+      "tag": "9 / 8 workers",
+      "sources": [
+        {"path": "cmd/bot/main.go", "line": 436, "end_line": 599}
+      ]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "SQLite + GORM",
+      "sublabel": "WAL · embedded migrations",
+      "sources": [
+        {"path": "cmd/bot/main.go", "line": 600, "end_line": 660},
+        {"path": "internal/database/models.go", "line": 1, "end_line": 40}
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Процесс rs8kvn_bot",
+      "wraps": ["fast-lane", "financial-mailbox", "regular-queue", "handlers", "payment-api", "web", "supervisor", "workers", "db"]
+    },
+    {
+      "kind": "region",
+      "label": "Приоритетные финансовые маршруты",
+      "wraps": ["fast-lane", "financial-mailbox"]
+    }
+  ],
+  "connections": [
+    {"id": "tg-fast", "from": "telegram", "to": "fast-lane", "label": "pre_checkout_query", "variant": "security"},
+    {"id": "tg-financial", "from": "telegram", "to": "financial-mailbox", "label": "successful_payment", "variant": "emphasis"},
+    {"id": "tg-regular", "from": "telegram", "to": "regular-queue", "label": "commands / callbacks"},
+    {"id": "fast-handler", "from": "fast-lane", "to": "handlers", "label": "валидация"},
+    {"id": "financial-handler", "from": "financial-mailbox", "to": "handlers", "label": "подтверждение + post-commit", "variant": "emphasis"},
+    {"id": "regular-handler", "from": "regular-queue", "to": "handlers", "label": "bounded dispatch"},
+    {"id": "handlers-payment", "from": "handlers", "to": "payment-api", "label": "invoice / refund / pre-checkout", "variant": "emphasis"},
+    {"id": "handlers-db", "from": "handlers", "to": "db", "label": "SQL"},
+    {"id": "web-db", "from": "web", "to": "db", "label": "read / write"},
+    {"id": "web-telegram", "from": "web", "to": "telegram", "label": "уведомления"},
+    {"id": "supervisor-workers", "from": "supervisor", "to": "workers", "label": "перезапуск после panic", "variant": "security"},
+    {"id": "workers-db", "from": "workers", "to": "db", "label": "jobs / state"}
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Приоритеты Telegram",
+      "items": [
+        "Pre-checkout обслуживается отдельным fast-lane: переполнение даёт OK=false, а не молчание.",
+        "Financial mailbox не отбрасывает successful_payment при заполненной regular queue.",
+        "Обычная очередь ограничена и может отбросить обычный update ради приёма платежного сигнала."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Надёжность",
+      "items": [
+        "Long polling и платежные HTTP-вызовы используют разные BotAPI-клиенты и таймауты.",
+        "Panic фонового воркера перезапускается с exponential backoff от 5 секунд до 2 минут.",
+        "Graceful shutdown сначала останавливает выдачу подписок, затем ждёт workers и handlers."
+      ]
+    }
+  ]
+}

@@ -1,36 +1,235 @@
 {
-  "schema_version": 1,
+  "schema_version": 3,
   "diagram_type": "lifecycle",
   "meta": {
-    "title": "Жизненный цикл подписки (Subscription)",
+    "title": "Жизненный цикл подписки",
+    "locale": "ru",
     "output": "doc/diagrams/subscription-lifecycle.html",
     "quality_profile": "showcase",
-    "views": [
-      { "id": "main-path", "label": "Создание и работа", "focus": ["created", "active"], "note": "Подписка создаётся через план, клиенты провизируются на нодах." },
-      { "id": "renew-loop", "label": "Продление", "focus": ["active", "expired"], "note": "ExpireWorker помечает истёкшие, оплата/продление реанимирует подписку." },
-      { "id": "revocation", "label": "Отзыв", "focus": ["active", "expired", "revoked"], "note": "Двухфазное удаление: revoke → депровизионировать; физическое удаление — редкие исключения." }
-    ]
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    }
   },
-  "lanes": [
-    { "id": "main", "label": "Состояния подписки" },
-    { "id": "terminal", "label": "Отзыв" }
+  "mainPath": [
+    "joined",
+    "purchased",
+    "expiring",
+    "downgraded_free"
   ],
   "states": [
-    { "id": "created", "type": "start", "label": "создана", "sublabel": "free / trial / платный план", "lane": "main", "col": 0, "step": "01", "tag": "intake" },
-    { "id": "active", "type": "active", "label": "active", "sublabel": "клиенты на нодах", "lane": "main", "col": 1, "step": "02", "tag": "рабочее" },
-    { "id": "expired", "type": "waiting", "label": "expired", "sublabel": "ExpiresAt прошло", "lane": "main", "col": 2, "step": "03", "tag": "ExpireWorker" },
-    { "id": "revoked", "type": "failure", "label": "revoked", "sublabel": "subserver отдаёт 404", "lane": "terminal", "col": 0, "tag": "не удаляется" }
+    {
+      "id": "joined",
+      "type": "start",
+      "label": "Активна (free)",
+      "sublabel": "free-план · статус active",
+      "sources": [
+        {
+          "path": "internal/service/subscription.go",
+          "line": 189,
+          "end_line": 191
+        },
+        {
+          "path": "internal/service/subscription.go",
+          "line": 1182,
+          "end_line": 1190
+        }
+      ]
+    },
+    {
+      "id": "purchased",
+      "type": "active",
+      "label": "Активна (платная)",
+      "sublabel": "оплата: план + expires_at, статус active",
+      "sources": [
+        {
+          "path": "internal/database/orders.go",
+          "line": 473,
+          "end_line": 505
+        }
+      ]
+    },
+    {
+      "id": "expiring",
+      "type": "waiting",
+      "label": "Приближается срок",
+      "sublabel": "напоминания 3d / 1d / 3h",
+      "sources": [
+        {
+          "path": "internal/service/subscription_reminders.go",
+          "line": 29,
+          "end_line": 31
+        }
+      ]
+    },
+    {
+      "id": "downgraded_free",
+      "type": "active",
+      "label": "Downgrade до free",
+      "sublabel": "план → free · статус active остаётся",
+      "tag": "истечение ≠ статус expired",
+      "sources": [
+        {
+          "path": "internal/service/subscription.go",
+          "line": 1317,
+          "end_line": 1364
+        },
+        {
+          "path": "internal/database/subscriptions.go",
+          "line": 382,
+          "end_line": 431
+        }
+      ]
+    },
+    {
+      "id": "trial",
+      "type": "active",
+      "label": "Trial",
+      "sublabel": "анонимная trial-подписка",
+      "sources": [
+        {
+          "path": "internal/service/subscription.go",
+          "line": 703,
+          "end_line": 730
+        }
+      ]
+    },
+    {
+      "id": "revoked",
+      "type": "neutral",
+      "label": "revoked",
+      "sublabel": "доступ снят, строка сохранена",
+      "sources": [
+        {
+          "path": "internal/service/subscription.go",
+          "line": 397,
+          "end_line": 461
+        }
+      ]
+    },
+    {
+      "id": "deleted",
+      "type": "failure",
+      "label": "Строка удалена",
+      "sublabel": "только когда привязок не осталось",
+      "sources": [
+        {
+          "path": "internal/service/subscription.go",
+          "line": 469,
+          "end_line": 529
+        }
+      ]
+    }
   ],
   "transitions": [
-    { "id": "t-provision", "from": "created", "to": "active", "label": "Sync: pending_add → active", "variant": "emphasis", "route": "straight", "labelDy": 55 },
-    { "id": "t-expire", "from": "active", "to": "expired", "label": "ExpireWorker", "variant": "default", "route": "straight", "labelDy": -25, "labelSegment": 0 },
-    { "id": "t-renew", "from": "expired", "to": "active", "label": "оплата / Renew", "variant": "emphasis", "route": "drop", "labelDy": 90, "labelDx": -70, "labelSegment": 1 },
-    { "id": "t-revoke", "from": "active", "to": "revoked", "label": "revoke → депровизия", "variant": "security", "route": "drop", "labelDx": -30 },
-    { "id": "t-trial-cleanup", "from": "expired", "to": "revoked", "label": "CleanupExpiredTrials", "variant": "security", "route": "drop", "labelDy": 40, "labelDx": 45 }
+    {
+      "id": "joined-purchased",
+      "from": "joined",
+      "to": "purchased",
+      "label": "оплата",
+      "variant": "emphasis"
+    },
+    {
+      "id": "purchased-expiring",
+      "from": "purchased",
+      "to": "expiring",
+      "label": "истечение близко"
+    },
+    {
+      "id": "expiring-purchased",
+      "from": "expiring",
+      "to": "purchased",
+      "label": "продление",
+      "variant": "dashed"
+    },
+    {
+      "id": "expiring-downgraded",
+      "from": "expiring",
+      "to": "downgraded_free",
+      "label": "downgrade до free",
+      "variant": "emphasis"
+    },
+    {
+      "id": "downgraded-purchased",
+      "from": "downgraded_free",
+      "to": "purchased",
+      "label": "повторная покупка",
+      "variant": "dashed"
+    },
+    {
+      "id": "joined-trial",
+      "from": "joined",
+      "to": "trial",
+      "label": "инвайт"
+    },
+    {
+      "id": "trial-deleted",
+      "from": "trial",
+      "to": "deleted",
+      "label": "cleanup trial"
+    },
+    {
+      "id": "purchased-revoked",
+      "from": "purchased",
+      "to": "revoked",
+      "label": "отзыв",
+      "variant": "security"
+    },
+    {
+      "id": "downgraded-revoked",
+      "from": "downgraded_free",
+      "to": "revoked",
+      "label": "отзыв",
+      "variant": "security"
+    },
+    {
+      "id": "revoked-joined",
+      "from": "revoked",
+      "to": "joined",
+      "label": "reanimate"
+    },
+    {
+      "id": "revoked-deleted",
+      "from": "revoked",
+      "to": "deleted",
+      "label": "удаление"
+    }
   ],
   "cards": [
-    { "dot": "emerald", "title": "Рабочее состояние", "items": ["Активная подписка агрегируется subserver'ом в /sub/{subID}", "Смена плана идёт через reconcile нод, без смены состояния", "Кэш подписки инвалидируется при каждом изменении"] },
-    { "dot": "amber", "title": "Продление", "items": ["Истечение не удаляет доступ мгновенно — состояние waiting", "Оплата возвращает expired → active с новым ExpiresAt", "Free-план с reset=30 продлевается панелью 3x-ui"] },
-    { "dot": "rose", "title": "Отзыв без удаления", "items": ["Подписки никогда не удаляются физически по расписанию", "revoked → subserver 404, депровизионирование в фоне", "Физическое удаление: только admin /del и очистка истёкших триалов"] }
+    {
+      "dot": "rose",
+      "title": "Фактическое поведение истечения",
+      "items": [
+        "Enum 'expired' зарезервирован — для платных подписок не используется; 'expired' достигают только trial при cleanup",
+        "GetExpiredPaidSubscriptions: expires_at<=now и план не free/trial; ExpireSubscriptionWithPlanCAS обнуляет поля и ставит pending sync",
+        "status='active' сохраняется — перехода active→expired в коде нет; 'expired' достигают только trial-подписки при cleanup"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Двухфазный отзыв",
+      "items": [
+        "Фаза 1 (синхронно): markRevokedSub + MarkAllForRemoval (pending_remove)",
+        "Фаза 2 (best-effort): SyncSubscription удаляет клиентов с панелей; сбои добирает SyncPendingNodes (воркер 5m)",
+        "DeactivateBlockedBroadcastRecipients: до 25 немедленных sync за прогон, остальные — фоново"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Возобновление",
+      "items": [
+        "revoked не удаляется (политика «подписки не удаляем»)",
+        "reanimateRevokedSubscription: оживление только после успешной очистки stale-привязок, с сохранением ClientID",
+        "Оплата после downgrade снова делает подписку платной; продление той же даты складывается поверх текущего срока"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Прочее",
+      "items": [
+        "CreateTrial: trial-план, отрицательный telegram_id, без auto-renew",
+        "Reminder worker каждые 30m; биты 3d/1d/3h в reminders_sent"
+      ]
+    }
   ]
 }

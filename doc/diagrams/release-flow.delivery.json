@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "b406c2e4-187f-4ac8-b26d-8f6c9af3a2ea",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/release-flow.workflow.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/release-flow.html",
+  "specification": {
+    "sha256": "5e11b3a2878f795dd0cab1d8bb54c3ebeb9db27b18e758440efffb8260122544",
+    "bytes": 6534
+  },
+  "artifact": {
+    "sha256": "c7d1fc928015a7fd50213e656ec982ecea005e296d8654ffbe54bb1e2d83a03a",
+    "bytes": 956316
+  }
+}

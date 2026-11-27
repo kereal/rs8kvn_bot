@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "ecda9fdd-bc04-4c9f-9de6-1c6985a31a5a",
+  "status": "current",
+  "command": "deliver",
+  "type": "dataflow",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/traffic-accounting.dataflow.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/traffic-accounting.html",
+  "specification": {
+    "sha256": "d0c3350bb2b6d68858817867e45c888d308ba8ba5ca37751e28dcad08f9b708b",
+    "bytes": 9778
+  },
+  "artifact": {
+    "sha256": "bd2b0964f2a42e13b31f97d8c86dbeb4ce69b6f9984bf40975c52927f958036d",
+    "bytes": 948135
+  }
+}

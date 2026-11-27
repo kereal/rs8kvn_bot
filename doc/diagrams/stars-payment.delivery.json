@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "37d78342-bc86-4f99-8f56-720436ad6222",
+  "status": "current",
+  "command": "deliver",
+  "type": "sequence",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/stars-payment.sequence.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/stars-payment.html",
+  "specification": {
+    "sha256": "78cd09795aa182f8e2a6ded7d66898eac282c668ce3db4226fa8be2148bfa18c",
+    "bytes": 10002
+  },
+  "artifact": {
+    "sha256": "a86e9fc2bf6f32267f61cf68c5557159d7953c64ef7ac7e814e56e3827ad1c56",
+    "bytes": 960645
+  }
+}

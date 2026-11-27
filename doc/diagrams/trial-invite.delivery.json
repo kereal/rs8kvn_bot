@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "17bbdbbf-4135-4107-86ba-527bf6c2dd9b",
+  "status": "current",
+  "command": "deliver",
+  "type": "sequence",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/trial-invite.sequence.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/trial-invite.html",
+  "specification": {
+    "sha256": "1efaaf0ab01433469eba9abdde922a8eceab53fae95295041ba6b54fb84e1979",
+    "bytes": 8126
+  },
+  "artifact": {
+    "sha256": "092691b9acf0f8ffd0fff9b1101acabb7aa474805f1b333002587796951dec77",
+    "bytes": 942649
+  }
+}

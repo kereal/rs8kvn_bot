@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "05d6cc9a-08c5-46fb-b764-553f8846abb4",
+  "status": "current",
+  "command": "deliver",
+  "type": "lifecycle",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/subscription-nodes-sync.lifecycle.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/subscription-nodes-sync.html",
+  "specification": {
+    "sha256": "dcfeb3fa25bc88e1b5c8c2687d20b6454f437eb6e06f98d025e1e10d0dea66a7",
+    "bytes": 6683
+  },
+  "artifact": {
+    "sha256": "2cd461351e51f9a40ebec68d0765cf4f57f88d24f218b4f2b6962c655c7635e3",
+    "bytes": 960693
+  }
+}

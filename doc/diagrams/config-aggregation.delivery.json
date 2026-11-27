@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "d7aad9a2-2fbf-4599-9c9d-67011cb221a4",
+  "status": "current",
+  "command": "deliver",
+  "type": "dataflow",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/config-aggregation.dataflow.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/config-aggregation.html",
+  "specification": {
+    "sha256": "c9d371af2707274460f874050bc52b56ec3dc7929f61c1be00cd212fadebeae4",
+    "bytes": 9270
+  },
+  "artifact": {
+    "sha256": "3e12534709697a6a163595678b242e574cea005914edb478254ffd1b3f318285",
+    "bytes": 946625
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "df693e1b-2bc9-4860-bdbd-0e1cab479640",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/marketing-funnel.workflow.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/marketing-funnel.html",
+  "specification": {
+    "sha256": "eb663865bef55c61914a513bd6f0dd6081429e0aae4cb4049f8b0cb479e5013d",
+    "bytes": 14008
+  },
+  "artifact": {
+    "sha256": "1b1480e9f9b37b439730c7f9d78d9da5326cfd058fe6c9b49cf2fd4711dcaf62",
+    "bytes": 964932
+  }
+}

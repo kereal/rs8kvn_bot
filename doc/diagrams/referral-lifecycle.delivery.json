@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "37f6958e-e15e-4fda-ace0-63d07d4cd224",
+  "status": "current",
+  "command": "deliver",
+  "type": "lifecycle",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/referral-lifecycle.lifecycle.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/referral-lifecycle.html",
+  "specification": {
+    "sha256": "f33a1493cfd67ac1b87b6763b17fc7c72de23021b14a349ef8f9f05c661ae89f",
+    "bytes": 7530
+  },
+  "artifact": {
+    "sha256": "95ec850d922bea0831d41a218d12c436a028491b2a28913ab31ae233f787361e",
+    "bytes": 943859
+  }
+}

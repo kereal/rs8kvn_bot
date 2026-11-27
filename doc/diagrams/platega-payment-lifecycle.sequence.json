@@ -4,66 +4,100 @@
   "meta": {
     "title": "Жизненный цикл платежа Platega",
     "output": "doc/diagrams/platega-payment-lifecycle.html",
-    "viewBox": [1060, 900],
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "provider": "github",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
     "quality_profile": "showcase",
     "views": [
-      { "id": "guard-chain", "label": "Защита вебхука", "focus": ["platega", "web"], "note": "POST-only → readiness 503 → constant-time заголовки → лимит тела и один JSON." },
-      { "id": "confirm-path", "label": "Подтверждение", "focus": ["platega", "web", "ordersvc", "db"], "note": "Per-order lock, валидация суммы и CAS pending→paid одной транзакцией." },
+      { "id": "guard-chain", "label": "Защита вебхука", "focus": ["platega", "web"], "note": "POST-only → readiness 503 → constant-time заголовки → тело ≤256 KiB и ровно один JSON." },
+      { "id": "confirm-path", "label": "Подтверждение", "focus": ["web", "ordersvc", "db"], "note": "Per-order lock, amount ≥ заказа, settlement grace 5 мин и один CAS pending|expired→paid." },
       { "id": "post-commit", "label": "Post-commit", "focus": ["ordersvc", "db", "nodes", "tg"], "note": "Кэш подписки, алерт админу, best-effort sync и ответ провайдеру." }
     ]
   },
   "participants": [
-    { "id": "platega", "type": "external", "label": "Platega", "sublabel": "провайдер" },
-    { "id": "web", "type": "frontend", "label": "Web :8880", "sublabel": "HTTP-приём" },
-    { "id": "ordersvc", "type": "backend", "label": "OrderService", "sublabel": "internal/service" },
-    { "id": "db", "type": "database", "label": "SQLite", "sublabel": "GORM" },
-    { "id": "nodes", "type": "cloud", "label": "VPN-ноды", "sublabel": "3x-ui · proxman" },
-    { "id": "tg", "type": "external", "label": "Telegram", "sublabel": "админ · юзер" }
+    { "id": "user", "type": "external", "label": "Пользователь", "sublabel": "Telegram" },
+    { "id": "bot", "type": "backend", "label": "Bot Handler", "sublabel": "internal/bot", "sources": [{ "path": "internal/bot/subscription_handler.go", "line": 427, "end_line": 492 }] },
+    { "id": "ordersvc", "type": "backend", "label": "OrderService", "sublabel": "internal/service", "sources": [{ "path": "internal/service/order_platega.go", "line": 441, "end_line": 450 }, { "path": "internal/service/order_platega.go", "line": 538, "end_line": 675 }, { "path": "internal/service/order_platega.go", "line": 807, "end_line": 929 }] },
+    { "id": "platega", "type": "external", "label": "Platega", "sublabel": "провайдер", "sources": [{ "path": "internal/service/payment/platega/client.go", "line": 137 }, { "path": "internal/service/payment/platega/callback.go", "line": 141 }] },
+    { "id": "web", "type": "frontend", "label": "Web :8880", "sublabel": "HTTP-приём", "sources": [{ "path": "internal/web/web.go", "line": 391, "end_line": 583 }, { "path": "internal/web/web.go", "line": 227 }] },
+    { "id": "db", "type": "database", "label": "SQLite", "sublabel": "GORM", "sources": [{ "path": "internal/database/orders.go", "line": 385, "end_line": 473 }] },
+    { "id": "nodes", "type": "cloud", "label": "VPN-ноды", "sublabel": "3x-ui · proxman", "sources": [{ "path": "internal/service/sync.go", "line": 227, "end_line": 276 }] },
+    { "id": "tg", "type": "external", "label": "Telegram", "sublabel": "админ · юзер", "sources": [{ "path": "internal/service/order.go", "line": 584, "end_line": 590 }, { "path": "internal/service/order.go", "line": 686, "end_line": 721 }] }
   ],
   "segments": [
-    { "from": 160, "to": 300, "label": "Вебхук" },
-    { "from": 315, "to": 510, "label": "Подтверждение" },
-    { "from": 525, "to": 700, "label": "Post-commit действия" },
-    { "from": 715, "to": 815, "label": "Ответ провайдеру" }
+    { "from": 150, "to": 320, "label": "Выпуск ссылки" },
+    { "from": 370, "to": 845, "label": "Вебхук (опциональный путь)" },
+    { "from": 860, "to": 1180, "label": "Подтверждение" },
+    { "from": 1195, "to": 1430, "label": "Post-commit" },
+    { "from": 1440, "to": 1670, "label": "Отмена / чарджбэк" }
   ],
   "messages": [
-    { "id": "webhook-post", "from": "platega", "to": "web", "y": 200, "label": "POST /payment/callback", "variant": "emphasis", "note": "guard-chain: POST-only → 503 → X-MerchantId/X-Secret constant-time → ≤256 KiB, один JSON" },
-    { "id": "guard-reject", "from": "web", "to": "platega", "y": 265, "label": "401/400 + алерт админу", "variant": "return" },
-    { "id": "confirm-call", "from": "web", "to": "ordersvc", "y": 350, "label": "ConfirmPayment(id, amount, currency)", "variant": "emphasis", "note": "per-order lock 30s · валюта и amount ≥ order · paid → идемпотентный no-op" },
-    { "id": "load-order", "from": "ordersvc", "to": "db", "y": 405, "label": "GetOrderByProviderPaymentID" },
-    { "id": "order-row", "from": "db", "to": "ordersvc", "y": 450, "label": "order (pending)", "variant": "return" },
-    { "id": "cas-confirm", "from": "ordersvc", "to": "db", "y": 488, "label": "ConfirmOrderPaidCAS: order+sub+plan", "variant": "emphasis", "note": "одна транзакция" },
-    { "id": "cas-ok", "from": "db", "to": "ordersvc", "y": 560, "label": "paid · Activated=true", "variant": "return" },
-    { "id": "invalidate-cache", "from": "ordersvc", "to": "db", "y": 600, "label": "InvalidateBySubID (кэш subserver)", "variant": "dashed" },
-    { "id": "admin-alert", "from": "ordersvc", "to": "tg", "y": 645, "label": "notifyAdminPaid", "variant": "dashed" },
-    { "id": "sync-call", "from": "ordersvc", "to": "nodes", "y": 678, "label": "SyncSubscription · 20s", "variant": "dashed", "note": "best-effort: сбой дообгонит SyncPendingNodes" },
-    { "id": "user-note", "from": "web", "to": "tg", "y": 745, "label": "BuildPaidUserNotification → Send", "variant": "dashed" },
-    { "id": "webhook-ack", "from": "web", "to": "platega", "y": 795, "label": "{ok:true}", "variant": "return" }
+    { "id": "buy", "from": "user", "to": "bot", "y": 190, "label": "«Купить» · тариф", "variant": "default" },
+    { "id": "request-payment", "from": "bot", "to": "ordersvc", "y": 230, "label": "RequestPayment", "variant": "emphasis" },
+    { "id": "pending-order", "from": "ordersvc", "to": "db", "y": 270, "label": "FindOrCreatePendingOrder", "variant": "default" },
+    { "id": "pending-row", "from": "db", "to": "ordersvc", "y": 305, "label": "pending-интент", "variant": "return" },
+    { "id": "create-transaction", "from": "ordersvc", "to": "platega", "y": 350, "label": "CreateTransaction → URL", "variant": "emphasis", "note": "XTR отклоняется до ссылки" },
+    { "id": "link-back", "from": "platega", "to": "ordersvc", "y": 440, "label": "URL + transaction id", "variant": "return" },
+    { "id": "save-details", "from": "ordersvc", "to": "db", "y": 480, "label": "SavePaymentDetails", "variant": "dashed" },
+    { "id": "payment-url", "from": "ordersvc", "to": "bot", "y": 520, "label": "PaymentInfo{URL}", "variant": "return" },
+    { "id": "show-link", "from": "bot", "to": "user", "y": 560, "label": "кнопка оплаты Platega", "variant": "return" },
+    { "id": "webhook-post", "from": "platega", "to": "web", "y": 600, "label": "POST /payment/callback", "variant": "emphasis", "note": "только при ShouldEnablePlategaCallback" },
+    { "id": "guard-reject", "from": "web", "to": "platega", "y": 700, "label": "405 / 503 / 401 / 400", "variant": "return", "note": "POST→503→подпись→один JSON" },
+    { "id": "guard-alert", "from": "web", "to": "tg", "y": 800, "label": "алерт админу · 1/мин", "variant": "dashed" },
+    { "id": "confirm-call", "from": "web", "to": "ordersvc", "y": 880, "label": "ConfirmPayment", "variant": "emphasis", "note": "lock 30s · notifyCtx=WithoutCancel" },
+    { "id": "load-order", "from": "ordersvc", "to": "db", "y": 980, "label": "GetOrderByProviderPaymentID", "variant": "default" },
+    { "id": "order-row", "from": "db", "to": "ordersvc", "y": 1020, "label": "order (pending)", "variant": "return" },
+    { "id": "cas-confirm", "from": "ordersvc", "to": "db", "y": 1070, "label": "ConfirmOrderPaidCAS", "variant": "emphasis", "note": "одна tx: order+subscription+plan+audit" },
+    { "id": "cas-ok", "from": "db", "to": "ordersvc", "y": 1160, "label": "paid · activated", "variant": "return" },
+    { "id": "invalidate-cache", "from": "ordersvc", "to": "db", "y": 1205, "label": "InvalidateBySubID", "variant": "dashed" },
+    { "id": "admin-alert", "from": "ordersvc", "to": "tg", "y": 1245, "label": "notifyAdminPaid", "variant": "dashed" },
+    { "id": "sync-call", "from": "ordersvc", "to": "nodes", "y": 1285, "label": "SyncSubscription · 20s", "variant": "dashed", "note": "best-effort: сбой дообгонит sync-воркер" },
+    { "id": "user-note", "from": "web", "to": "tg", "y": 1375, "label": "BuildPaidUserNotification → Send", "variant": "dashed" },
+    { "id": "webhook-ack", "from": "web", "to": "platega", "y": 1415, "label": "{ok:true} 200", "variant": "return" },
+    { "id": "cancel-post", "from": "platega", "to": "web", "y": 1470, "label": "POST CANCELED / CHARGEBACKED", "variant": "default" },
+    { "id": "cancel-call", "from": "web", "to": "ordersvc", "y": 1510, "label": "CancelPaymentByProvider", "variant": "dashed" },
+    { "id": "chargeback-tx", "from": "ordersvc", "to": "db", "y": 1550, "label": "tx: canceled / paid→free", "variant": "default", "note": "chargeback снижает до free-плана" },
+    { "id": "downgrade-sync", "from": "ordersvc", "to": "nodes", "y": 1640, "label": "syncDowngradeAfterCommit", "variant": "dashed" }
   ],
   "activations": [
-    { "participant": "web", "from": 200, "to": 800, "type": "frontend" },
-    { "participant": "ordersvc", "from": 350, "to": 690, "type": "backend" },
-    { "participant": "db", "from": 400, "to": 610, "type": "database" },
-    { "participant": "nodes", "from": 673, "to": 695, "type": "cloud" },
-    { "participant": "tg", "from": 640, "to": 755, "type": "external" }
+    { "participant": "bot", "from": 190, "to": 565, "type": "backend" },
+    { "participant": "ordersvc", "from": 230, "to": 1650, "type": "backend" },
+    { "participant": "platega", "from": 350, "to": 1480, "type": "external" },
+    { "participant": "web", "from": 600, "to": 1520, "type": "frontend" },
+    { "participant": "db", "from": 270, "to": 1560, "type": "database" },
+    { "participant": "nodes", "from": 1280, "to": 1295, "type": "cloud" },
+    { "participant": "nodes", "from": 1635, "to": 1650, "type": "cloud" },
+    { "participant": "tg", "from": 795, "to": 1390, "type": "external" }
   ],
   "cards": [
     {
       "dot": "rose",
+      "title": "Необязательный путь",
+      "items": [
+        "Endpoint /payment/callback зарегистрирован всегда, но отдаёт 503, пока paymentReady/paymentConfig/orderService/bot не подключены",
+        "Конфиг выставляется только при ShouldEnablePlategaCallback: активные продажи через platega либо legacy-расчёт старых заказов (PLATEGA_CALLBACK_ENABLED)",
+        "В Stars-режиме продажа идёт через invoice Telegram — callback как торговый путь не работает"
+      ]
+    },
+    {
+      "dot": "cyan",
       "title": "Защита вебхука",
       "items": [
         "POST-only → readiness 503 → X-MerchantId/X-Secret constant-time → 401",
-        "Тело ≤ 256 KiB, ровно один JSON-объект, UUID id и валидная сумма",
-        "Все отклонения алертят админа через NotifyPaymentIssue"
+        "Тело ≤ 256 KiB, ровно один JSON-документ, UUID id и валидная сумма",
+        "Отклонения алертят админу через NotifyPaymentIssue; алерт подписи троттлится 1/мин"
       ]
     },
     {
       "dot": "emerald",
       "title": "Идемпотентность",
       "items": [
-        "Per-order lock сериализует повторные вебхуки одного платежа",
-        "Повторный CONFIRMED для paid-заказа — no-op (Activated=false)",
-        "Просроченный заказ принимается в 5-минутном settlement grace"
+        "Per-order lock (30s) сериализует повторные вебхуки одного платежа",
+        "Повторный CONFIRMED для paid-заказа — no-op",
+        "Expired принимается в 5-минутном settlement grace от PaymentExpiresAt — это правило только Platega",
+        "Суммы сравниваются как callback cents ≥ order.AmountCents; разница — комиссия провайдера"
       ]
     },
     {
@@ -71,7 +105,7 @@
       "title": "Надёжность",
       "items": [
         "notifyCtx = context.WithoutCancel: обрыв соединения не теряет оплату",
-        "CAS-транзакция меняет order+subscription+plan атомарно",
+        "CAS-транзакция меняет order+subscription+plan и пишет аудит атомарно",
         "Сбой VPN-sync не влияет на 200 — SyncPendingNodes дообгонит"
       ]
     }

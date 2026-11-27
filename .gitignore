@@ -56,3 +56,6 @@ mcp.json
 
 # Local planning artifacts
 .planning/
+
+# Archify local review receipts/finalize evidence
+.archify/

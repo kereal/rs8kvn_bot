@@ -1,37 +1,226 @@
 {
-  "schema_version": 1,
+  "schema_version": 3,
   "diagram_type": "lifecycle",
   "meta": {
-    "title": "Автомат синхронизации subscription_nodes",
+    "title": "Синхронизация привязок подписка ↔ нода",
+    "locale": "ru",
     "output": "doc/diagrams/subscription-nodes-sync.html",
     "quality_profile": "showcase",
-    "views": [
-      { "id": "main-rail", "label": "Основной цикл", "focus": ["created", "active", "pending_update", "removed"], "note": "Создание клиента, активная работа, обновление плана и снятие с ноды." },
-      { "id": "retry-loop", "label": "Retry с backoff", "focus": ["pending_update", "retry", "created"], "note": "Недоступная нода возвращает запись в очередь SyncPendingNodes." }
-    ]
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    }
   },
-  "lanes": [
-    { "id": "main", "label": "Состояния связи подписка-нода" },
-    { "id": "recovery", "label": "Очередь retry" }
+  "mainPath": [
+    "pending_add",
+    "active"
   ],
   "states": [
-    { "id": "created", "type": "start", "label": "pending_add", "sublabel": "клиент создан в БД", "lane": "main", "col": 0, "step": "01", "tag": "DB-setup" },
-    { "id": "active", "type": "active", "label": "active", "sublabel": "клиент на ноде", "lane": "main", "col": 1, "step": "02", "tag": "рабочее" },
-    { "id": "pending_update", "type": "waiting", "label": "pending_update", "sublabel": "смена плана/лимитов", "lane": "main", "col": 2, "step": "03", "tag": "обновление" },
-    { "id": "removed", "type": "success", "label": "removed", "sublabel": "депровизионировано", "lane": "main", "col": 3, "step": "04", "tag": "чисто" },
-    { "id": "retry", "type": "failure", "label": "Retry с backoff", "sublabel": "RetryCount++ · RetryAt", "lane": "recovery", "col": 1, "tag": "SyncPendingNodes" }
+    {
+      "id": "pending_add",
+      "type": "start",
+      "label": "pending_add",
+      "sublabel": "запрошено добавление ноды",
+      "sources": [
+        {
+          "path": "internal/service/subscription.go",
+          "line": 1288,
+          "end_line": 1296
+        },
+        {
+          "path": "internal/database/models.go",
+          "line": 340,
+          "end_line": 356
+        }
+      ]
+    },
+    {
+      "id": "active",
+      "type": "success",
+      "label": "active",
+      "sublabel": "операция выполнена на панели",
+      "sources": [
+        {
+          "path": "internal/service/sync.go",
+          "line": 686,
+          "end_line": 725
+        }
+      ]
+    },
+    {
+      "id": "pending_update",
+      "type": "active",
+      "label": "pending_update",
+      "sublabel": "запрошено обновление (смена тарифа)",
+      "sources": [
+        {
+          "path": "internal/service/sync.go",
+          "line": 1274,
+          "end_line": 1304
+        },
+        {
+          "path": "internal/database/subscription_nodes.go",
+          "line": 104,
+          "end_line": 107
+        }
+      ]
+    },
+    {
+      "id": "pending_remove",
+      "type": "waiting",
+      "label": "pending_remove",
+      "sublabel": "запрошено удаление ноды",
+      "sources": [
+        {
+          "path": "internal/service/sync.go",
+          "line": 184,
+          "end_line": 223
+        }
+      ]
+    },
+    {
+      "id": "parked",
+      "type": "failure",
+      "label": "Парковка",
+      "sublabel": "pending-статус + retry_at 9999",
+      "sources": [
+        {
+          "path": "internal/service/sync.go",
+          "line": 845,
+          "end_line": 878
+        },
+        {
+          "path": "internal/service/sync.go",
+          "line": 936,
+          "end_line": 943
+        }
+      ]
+    },
+    {
+      "id": "no_binding",
+      "type": "neutral",
+      "label": "Без привязки",
+      "sublabel": "строка binding удалена (не статус)",
+      "sources": [
+        {
+          "path": "internal/service/sync.go",
+          "line": 774,
+          "end_line": 803
+        }
+      ]
+    }
   ],
   "transitions": [
-    { "id": "t-add-ok", "from": "created", "to": "active", "label": "CreateSubscription ok", "variant": "emphasis", "route": "straight", "labelDy": -45 },
-    { "id": "t-plan-change", "from": "active", "to": "pending_update", "label": "MarkPendingUpdate", "variant": "default", "route": "straight", "labelDy": -25, "labelDx": -80, "labelSegment": 0 },
-    { "id": "t-update-ok", "from": "pending_update", "to": "active", "label": "UpdateSubscription ok", "variant": "emphasis", "route": "drop", "labelDy": 50, "labelSegment": 1 },
-    { "id": "t-remove", "from": "active", "to": "removed", "label": "pending_remove: DeleteSubscription ok", "variant": "security", "route": "top-channel" },
-    { "id": "t-add-fail", "from": "created", "to": "retry", "label": "нода недоступна", "variant": "security", "route": "drop", "labelDx": 40 },
-    { "id": "t-retry-back", "from": "retry", "to": "pending_update", "label": "экспоненциальный backoff", "variant": "emphasis", "route": "drop" }
+    {
+      "id": "add-active",
+      "from": "pending_add",
+      "to": "active",
+      "label": "создание",
+      "variant": "emphasis"
+    },
+    {
+      "id": "update-active",
+      "from": "pending_update",
+      "to": "active",
+      "label": "обновление"
+    },
+    {
+      "id": "update-add",
+      "from": "pending_update",
+      "to": "pending_add",
+      "label": "клиента нет",
+      "variant": "dashed"
+    },
+    {
+      "id": "add-remove",
+      "from": "pending_add",
+      "to": "pending_remove",
+      "label": "отзыв",
+      "variant": "security"
+    },
+    {
+      "id": "update-remove",
+      "from": "pending_update",
+      "to": "pending_remove",
+      "label": "отзыв",
+      "variant": "security"
+    },
+    {
+      "id": "active-remove",
+      "from": "active",
+      "to": "pending_remove",
+      "label": "MarkAllForRemoval",
+      "variant": "security"
+    },
+    {
+      "id": "remove-nobinding",
+      "from": "pending_remove",
+      "to": "no_binding",
+      "label": "удаление строки"
+    },
+    {
+      "id": "add-parked",
+      "from": "pending_add",
+      "to": "parked",
+      "label": "ошибка / 10 неудач"
+    },
+    {
+      "id": "update-parked",
+      "from": "pending_update",
+      "to": "parked",
+      "label": "ошибка / 10 неудач"
+    },
+    {
+      "id": "remove-parked",
+      "from": "pending_remove",
+      "to": "parked",
+      "label": "нода недоступна"
+    },
+    {
+      "id": "parked-retry",
+      "from": "parked",
+      "to": "pending_add",
+      "label": "нода вернулась",
+      "variant": "dashed"
+    }
   ],
   "cards": [
-    { "dot": "emerald", "title": "Основной цикл", "items": ["Структурная фаза (pending_*) пишется в БД синхронно и обязана succeed", "Внешний sync выполняет воркер как best-effort", "Успех переводит связь в active и сбрасывает RetryCount"] },
-    { "dot": "rose", "title": "Отказоустойчивость", "items": ["Недоступная нода не ломает поток — запись ждёт в очереди", "RetryAt задаёт экспоненциальную задержку следующей попытки", "Агрегированный сбой прохода воркер логирует Warn и продолжает"] },
-    { "dot": "cyan", "title": "Депровизионирование", "items": ["pending_remove — единица снятия клиента с ноды", "Успешное удаление делает связь терминальной", "Подписка при этом лишь revoked — строки не удаляются"] }
+    {
+      "dot": "cyan",
+      "title": "Кто двигает статусы",
+      "items": [
+        "ensureSubscriptionNodes: pending_add при создании/изменении подписки",
+        "ApplyPlanToSubscription / reconcilePlanNodes: pending_update и pending_add/remove при смене плана",
+        "revoke/deprovision: pending_remove на все привязки; admin /del и деактивация рассылок"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Особые ветки",
+      "items": [
+        "fallbackUpdateToCreate: not-found от панели превращает pending_update в pending_add",
+        "Stale add/update у revoked-подписки коэрсится в pending_remove до вывоза на панель",
+        "not-found при удалении — идемпотентный успех; отсутствующая/неактивная нода — строка удаляется сразу без ретраев",
+        "admin /del и деактивация рассылок ставят pending_remove через MarkAllForRemoval"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Исполнитель",
+      "items": [
+        "SyncSubscription (по подписке, под per-subscription lock) и SyncPendingNodes (воркер, 5m) обрабатывают одинаковый pending-набор",
+        "Один сбой ноды не отменяет остальные; возврат ошибки только для DB/cancel",
+        "NodeHealth: недоступность ноды = retryUnavailableNode с backoff, а не ошибка потока"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Ретраи и парковка",
+      "items": [
+        "Ретраебельные: сетевые таймауты, errNodeUnavailable, ErrIncompleteFanout, transient SQLite lock",
+        "Лестница до maxSyncRetries=10 с экспоненциальным retry_at",
+        "Парковка — не новый статус: pending-статус сохраняется, GetPendingSync не выбирает строку до снятия парковки"
+      ]
+    }
   ]
 }

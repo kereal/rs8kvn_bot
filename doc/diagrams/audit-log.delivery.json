@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "daf905ee-0f6c-46d4-9421-9780456f7bbd",
+  "status": "current",
+  "command": "deliver",
+  "type": "dataflow",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/audit-log.dataflow.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/audit-log.html",
+  "specification": {
+    "sha256": "b1315457f3a616b0b775a5e83c0eaf339c01433684e0fbf4fc37ca234f742e9e",
+    "bytes": 13098
+  },
+  "artifact": {
+    "sha256": "0174b3006b1b7034dbedda22eb1bc419be991f3869dbb52f3786b5e8eb366a2a",
+    "bytes": 959297
+  }
+}

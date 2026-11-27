@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "8bee41d2-1b05-4160-9c81-308b9312ea43",
+  "status": "current",
+  "command": "deliver",
+  "type": "erd",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/commerce-model.erd.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/commerce-model.html",
+  "specification": {
+    "sha256": "8677099b255b3fbe83fe36350d7a429351141b1a2b35c9a200e0763868542805",
+    "bytes": 15073
+  },
+  "artifact": {
+    "sha256": "bddbd67909d66e4cf7fa7daa1ae64cb93a8125afa793a323a8d58f2999e7f13a",
+    "bytes": 1005572
+  }
+}

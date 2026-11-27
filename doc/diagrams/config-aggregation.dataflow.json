@@ -4,46 +4,384 @@
   "meta": {
     "title": "Агрегация конфигов подписки",
     "output": "doc/diagrams/config-aggregation.html",
-    "viewBox": [1068, 800],
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "provider": "github",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
     "quality_profile": "showcase",
     "views": [
-      { "id": "sources", "label": "Источники", "focus": ["xui", "proxman", "fetchnodes"], "note": "Три типа нод: две панели и read-only fetch." },
-      { "id": "pipeline", "label": "Конвейер", "focus": ["fetcher", "detect", "merge"], "note": "Параллельный fetch, детект формата, объединение по subID." },
-      { "id": "serve", "label": "Выдача", "focus": ["merge", "cache", "client"], "note": "Кэш 240s отдаёт готовую подписку клиенту." }
+      {
+        "id": "sources",
+        "label": "Источники",
+        "focus": [
+          "xui",
+          "proxman",
+          "fetchnodes"
+        ],
+        "note": "Три типа нод: две панели и read-only fetch."
+      },
+      {
+        "id": "pipeline",
+        "label": "Конвейер",
+        "focus": [
+          "fetcher",
+          "detect",
+          "configs",
+          "render"
+        ],
+        "note": "Ограниченный fan-out, детект формата, канонизация и рендер в три формата."
+      },
+      {
+        "id": "serve",
+        "label": "Выдача",
+        "focus": [
+          "render",
+          "cache",
+          "web",
+          "client"
+        ],
+        "note": "Кэш по формату отдаёт готовую подписку клиенту."
+      }
     ]
   },
   "stages": [
-    { "label": "Источники" },
-    { "label": "Fetch" },
-    { "label": "Нормализация" },
-    { "label": "Merge" },
-    { "label": "Выдача" }
+    {
+      "label": "Источники"
+    },
+    {
+      "label": "Fetch"
+    },
+    {
+      "label": "Нормализация"
+    },
+    {
+      "label": "Рендер"
+    },
+    {
+      "label": "Выдача"
+    }
   ],
   "nodes": [
-    { "id": "xui", "type": "cloud", "label": "3x-ui", "sublabel": "панель", "stage": 0, "row": 0 },
-    { "id": "proxman", "type": "cloud", "label": "proxman", "sublabel": "панель", "stage": 0, "row": 1 },
-    { "id": "fetchnodes", "type": "cloud", "label": "fetch-ноды", "sublabel": "read-only URL", "stage": 0, "row": 2 },
-    { "id": "fetcher", "type": "backend", "label": "Параллельный fetch", "sublabel": "bounded concurrency", "stage": 1, "row": 1, "width": 120, "tag": "subserver" },
-    { "id": "detect", "type": "backend", "label": "Детект формата", "sublabel": "4 формата", "stage": 2, "row": 1, "width": 120 },
-    { "id": "traffic", "type": "messagebus", "label": "Сумма трафика", "sublabel": "subscription-userinfo", "stage": 2, "row": 3, "width": 120, "tag": "заголовок" },
-    { "id": "merge", "type": "backend", "label": "Объединение", "sublabel": "единый список", "stage": 3, "row": 1, "tag": "по subID" },
-    { "id": "cache", "type": "database", "label": "Кэш 240s", "sublabel": "TTL + singleflight", "stage": 3, "row": 3 },
-    { "id": "client", "type": "external", "label": "Клиент", "sublabel": "Happ · V2Ray", "stage": 4, "row": 1, "tag": "200 ответ" }
+    {
+      "id": "xui",
+      "type": "cloud",
+      "label": "3x-ui",
+      "sublabel": "панель",
+      "stage": 0,
+      "row": 0,
+      "sources": [
+        {
+          "path": "internal/subserver/subscription_handler_split.go",
+          "line": 297,
+          "end_line": 311
+        }
+      ]
+    },
+    {
+      "id": "proxman",
+      "type": "cloud",
+      "label": "proxman",
+      "sublabel": "панель",
+      "stage": 0,
+      "row": 1,
+      "sources": [
+        {
+          "path": "internal/subserver/subscription_handler_split.go",
+          "line": 297,
+          "end_line": 311
+        }
+      ]
+    },
+    {
+      "id": "fetchnodes",
+      "type": "cloud",
+      "label": "fetch-ноды",
+      "sublabel": "read-only URL",
+      "stage": 0,
+      "row": 2,
+      "sources": [
+        {
+          "path": "internal/database/models.go",
+          "line": 45
+        }
+      ]
+    },
+    {
+      "id": "fetcher",
+      "type": "backend",
+      "label": "Fan-out ≤8",
+      "sublabel": "5s · ≤2 MiB",
+      "stage": 1,
+      "row": 1,
+      "tag": "subserver",
+      "width": 120,
+      "sources": [
+        {
+          "path": "internal/subserver/fetch.go",
+          "line": 20,
+          "end_line": 27
+        },
+        {
+          "path": "internal/subserver/fetch.go",
+          "line": 47,
+          "end_line": 122
+        }
+      ]
+    },
+    {
+      "id": "detect",
+      "type": "backend",
+      "label": "Детект формата",
+      "sublabel": "JSON · Clash · B64 · Plain",
+      "stage": 2,
+      "row": 1,
+      "width": 120,
+      "sources": [
+        {
+          "path": "internal/subserver/fetch.go",
+          "line": 157,
+          "end_line": 186
+        }
+      ]
+    },
+    {
+      "id": "configs",
+      "type": "backend",
+      "label": "Канонизация",
+      "sublabel": "[]json.RawMessage",
+      "stage": 2,
+      "row": 2,
+      "width": 120,
+      "sources": [
+        {
+          "path": "internal/subserver/subscription_handler_split.go",
+          "line": 532,
+          "end_line": 564
+        }
+      ]
+    },
+    {
+      "id": "traffic",
+      "type": "messagebus",
+      "label": "subscription-userinfo",
+      "sublabel": "Σ up/down · лимит · expire",
+      "stage": 2,
+      "row": 0,
+      "width": 140,
+      "tag": "заголовок",
+      "sources": [
+        {
+          "path": "internal/subserver/subscription_helpers.go",
+          "line": 87,
+          "end_line": 131
+        }
+      ]
+    },
+    {
+      "id": "render",
+      "type": "backend",
+      "label": "Рендер 3 форматов",
+      "sublabel": "Xray · sing-box · Clash",
+      "stage": 3,
+      "row": 1,
+      "width": 130,
+      "sources": [
+        {
+          "path": "internal/subserver/subscription_handler_split.go",
+          "line": 405,
+          "end_line": 454
+        }
+      ]
+    },
+    {
+      "id": "cache",
+      "type": "database",
+      "label": "Кэш по формату",
+      "sublabel": "TTL 240s · только полный",
+      "stage": 3,
+      "row": 4,
+      "width": 130,
+      "sources": [
+        {
+          "path": "internal/subserver/cache.go",
+          "line": 83
+        },
+        {
+          "path": "internal/config/constants.go",
+          "line": 80,
+          "end_line": 82
+        }
+      ]
+    },
+    {
+      "id": "web",
+      "type": "backend",
+      "label": "Web /sub/",
+      "sublabel": "200 · 503+RA · 404",
+      "stage": 4,
+      "row": 1,
+      "width": 120,
+      "sources": [
+        {
+          "path": "internal/web/web.go",
+          "line": 1050,
+          "end_line": 1170
+        }
+      ]
+    },
+    {
+      "id": "client",
+      "type": "external",
+      "label": "Клиент",
+      "sublabel": "?format или UA",
+      "stage": 4,
+      "row": 3,
+      "tag": "Happ · V2Ray"
+    }
   ],
   "flows": [
-    { "id": "f1", "from": "xui", "to": "fetcher", "label": "API панели", "variant": "emphasis", "labelDx": -55, "labelDy": -26, "labelSegment": 0 },
-    { "id": "f2", "from": "proxman", "to": "fetcher", "label": "API", "variant": "emphasis", "route": "straight", "labelDx": -30, "labelDy": 20 },
-    { "id": "f3", "from": "fetchnodes", "to": "fetcher", "label": "HTTP GET", "variant": "default", "labelDy": 30 },
-    { "id": "f4", "from": "fetcher", "to": "detect", "label": "сырые ответы", "variant": "emphasis", "route": "straight", "labelDy": -25 },
-    { "id": "f5", "from": "detect", "to": "traffic", "label": "usage", "variant": "dashed", "labelDx": 45, "labelDy": 24 },
-    { "id": "f6", "from": "detect", "to": "merge", "label": "конфиги", "variant": "emphasis", "route": "straight", "labelDy": -25 },
-    { "id": "f7", "from": "traffic", "to": "merge", "label": "userinfo-заголовок", "variant": "dashed", "labelDx": 45 },
-    { "id": "f8", "from": "merge", "to": "cache", "label": "результат", "variant": "default", "labelDx": 45, "labelDy": 24 },
-    { "id": "f9", "from": "cache", "to": "client", "label": "готовая подписка", "variant": "emphasis", "labelDy": 30 }
+    {
+      "id": "f1",
+      "from": "xui",
+      "to": "fetcher",
+      "label": "sub-URL+subID",
+      "variant": "emphasis",
+      "labelDy": -20
+    },
+    {
+      "id": "f2",
+      "from": "proxman",
+      "to": "fetcher",
+      "label": "sub-URL",
+      "variant": "emphasis",
+      "labelAt": [
+        120,
+        318
+      ]
+    },
+    {
+      "id": "f3",
+      "from": "fetchnodes",
+      "to": "fetcher",
+      "label": "URL as-is",
+      "variant": "default",
+      "labelAt": [
+        150,
+        429
+      ]
+    },
+    {
+      "id": "f4",
+      "from": "fetcher",
+      "to": "detect",
+      "label": "≤2 MiB",
+      "variant": "emphasis"
+    },
+    {
+      "id": "f5",
+      "from": "detect",
+      "to": "configs",
+      "label": "share-ссылки",
+      "variant": "emphasis",
+      "labelAt": [
+        540,
+        320
+      ]
+    },
+    {
+      "id": "f6",
+      "from": "detect",
+      "to": "traffic",
+      "label": "usage",
+      "variant": "dashed"
+    },
+    {
+      "id": "f7",
+      "from": "configs",
+      "to": "render",
+      "label": "[]RawMessage",
+      "variant": "emphasis"
+    },
+    {
+      "id": "f9",
+      "from": "render",
+      "to": "cache",
+      "label": "тело+headers",
+      "variant": "default",
+      "labelAt": [
+        745,
+        315
+      ]
+    },
+    {
+      "id": "f10",
+      "from": "traffic",
+      "to": "web",
+      "label": "userinfo",
+      "variant": "dashed",
+      "route": "vertical-channel",
+      "channelX": 880,
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "f11",
+      "from": "cache",
+      "to": "web",
+      "label": "hit + статус",
+      "variant": "default"
+    },
+    {
+      "id": "f12",
+      "from": "web",
+      "to": "client",
+      "label": "200 · формат",
+      "variant": "emphasis",
+      "labelAt": [
+        960,
+        315
+      ]
+    }
   ],
   "cards": [
-    { "dot": "emerald", "title": "Три типа нод", "items": ["3x-ui и proxman дают конфиги через API панелей", "fetch-ноды — простой read-only URL", "Все активные ноды опрашиваются параллельно"] },
-    { "dot": "cyan", "title": "Нормализация", "items": ["Формат детектируется автоматически: JSON, Clash, Base64, Plain", "Трафик суммируется в subscription-userinfo", "Ответ всегда в едином формате для клиента"] },
-    { "dot": "amber", "title": "Кэш", "items": ["TTL 240s и singleflight против лавины", "Инвалидация при смене плана и депровизионировании", "Access-лог опционален через SUBSERVER_ACCESS_LOG"] }
+    {
+      "dot": "emerald",
+      "title": "Три типа нод",
+      "items": [
+        "3x-ui и proxman отдают подписку по URL панели + subID",
+        "fetch-ноды — готовый read-only URL без подстановки",
+        "Опрашиваются только активные источники, параллельно ≤8"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Нормализация",
+      "items": [
+        "Формат источника детектится автоматически: JSON, Clash YAML, Base64, Plain",
+        "Некорректные ссылки и узлы пропускаются, не вали весь ответ",
+        "Трафик суммируется в subscription-userinfo: Σ up/down, лимит плана, самый ранний expire"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Transport security",
+      "items": [
+        "Xray: allowInsecure не эмитится — только pins (32-byte hex) и verifyPeerCertByName",
+        "VLESS/Trojan без TLS на публичном адресе отвергаются — узел пропускается",
+        "sing-box: reality требует uTLS (fp chrome по умолчанию), insecure при allowInsecure",
+        "Clash: skip-cert-verify → allowInsecure, reality-opts → security=reality"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Выдача",
+      "items": [
+        "Cache key = subID + формат; только полный ответ (success == total) кэшируется",
+        "Hit перечитывает статус подписки из БД",
+        "Все источники упали → 503 + Retry-After: 60; пригодных узлов нет → 404",
+        "Формат выбирает ?format-алиас, иначе User-Agent; default — Xray"
+      ]
+    }
   ]
 }

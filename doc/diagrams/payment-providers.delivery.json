@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "5d824243-564f-49a6-89f0-c65f4de24499",
+  "status": "current",
+  "command": "deliver",
+  "type": "class",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/payment-providers.class.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/payment-providers.html",
+  "specification": {
+    "sha256": "6a79e33872a8ce1112371bf0350af593ea589cdb2a905f494ef6157c56e2a1c5",
+    "bytes": 7683
+  },
+  "artifact": {
+    "sha256": "27fc8c6ab74e8e6419b1f0af03792cf1cf3344ce9b3a9ca32a52b71a2f710de7",
+    "bytes": 959001
+  }
+}

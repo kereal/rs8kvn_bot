@@ -4,44 +4,363 @@
   "meta": {
     "title": "Учёт трафика и уведомления",
     "output": "doc/diagrams/traffic-accounting.html",
-    "viewBox": [1068, 800],
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "provider": "github",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
     "quality_profile": "showcase",
     "views": [
-      { "id": "collect", "label": "Сбор", "focus": ["nodes", "fetcher", "usage"], "note": "Статистика с нод попадает в счётчики подписок." },
-      { "id": "decide", "label": "Решения по лимитам", "focus": ["usage", "reminders", "policy"], "note": "Bitmask напоминаний и сравнение с лимитом плана." },
-      { "id": "act", "label": "Действия", "focus": ["policy", "warn", "exhaust", "reenable"], "note": "90% — предупреждение, 100% — выключение, сброс — ре-включение." }
+      {
+        "id": "collect",
+        "label": "Сбор",
+        "focus": [
+          "panels",
+          "worker",
+          "agg"
+        ],
+        "note": "Живые счётчики читаются с панелей и суммируются в памяти — в БД usage не пишется."
+      },
+      {
+        "id": "decide",
+        "label": "Решения по лимитам",
+        "focus": [
+          "agg",
+          "plan",
+          "bitmask",
+          "policy"
+        ],
+        "note": "Сравнение с лимитом плана и bitmask уже отправленных напоминаний."
+      },
+      {
+        "id": "act",
+        "label": "Действия",
+        "focus": [
+          "policy",
+          "warn",
+          "exhaust",
+          "reenable"
+        ],
+        "note": "90% — предупреждение, 100% — уведомление и ожидание отключения панелью, сброс — явное ре-включение."
+      }
     ]
   },
   "stages": [
-    { "label": "Источники" },
-    { "label": "Сбор" },
-    { "label": "Состояние" },
-    { "label": "Решения" },
-    { "label": "Действия" }
+    {
+      "label": "Панели"
+    },
+    {
+      "label": "Сбор"
+    },
+    {
+      "label": "Состояние"
+    },
+    {
+      "label": "Решения"
+    },
+    {
+      "label": "Действия"
+    }
   ],
   "nodes": [
-    { "id": "nodes", "type": "cloud", "label": "VPN-ноды", "sublabel": "панели нод", "stage": 0, "row": 0, "tag": "up/down" },
-    { "id": "fetcher", "type": "backend", "label": "Сбор статистики", "sublabel": "по подпискам", "stage": 1, "row": 0, "tag": "hourly" },
-    { "id": "usage", "type": "database", "label": "Счётчики", "sublabel": "на подписках", "stage": 2, "row": 0, "tag": "bytes" },
-    { "id": "reminders", "type": "database", "label": "traffic_reminders_sent", "sublabel": "bitmask", "stage": 2, "row": 1, "tag": "миграция 038", "width": 150 },
-    { "id": "policy", "type": "security", "label": "Политика лимитов", "sublabel": "traffic_limit > 0", "stage": 3, "row": 0, "tag": "решения" },
-    { "id": "warn", "type": "backend", "label": "90% лимита", "sublabel": "CTA Premium", "stage": 4, "row": 0, "tag": "предупреждение" },
-    { "id": "exhaust", "type": "backend", "label": "Исчерпание", "sublabel": "CTA Premium", "stage": 4, "row": 2, "tag": "жёсткое" },
-    { "id": "reenable", "type": "messagebus", "label": "Ре-включение", "sublabel": "UpdateClient Enable=true", "stage": 4, "row": 4, "tag": "авто" }
+    {
+      "id": "panels",
+      "type": "cloud",
+      "label": "VPN-ноды",
+      "sublabel": "3x-ui панели",
+      "stage": 0,
+      "row": 0,
+      "tag": "live",
+      "sources": [
+        {
+          "path": "internal/service/subscription_traffic_notifications.go",
+          "line": 52,
+          "end_line": 105
+        }
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "TrafficWorker",
+      "sublabel": "тик 60 мин",
+      "stage": 1,
+      "row": 0,
+      "tag": "лимитированные",
+      "sources": [
+        {
+          "path": "internal/scheduler/subscription_traffic_worker.go",
+          "line": 14,
+          "end_line": 17
+        },
+        {
+          "path": "internal/scheduler/subscription_traffic_worker.go",
+          "line": 66,
+          "end_line": 92
+        }
+      ]
+    },
+    {
+      "id": "agg",
+      "type": "backend",
+      "label": "Агрегация",
+      "sublabel": "в памяти, без записи",
+      "stage": 1,
+      "row": 2,
+      "tag": "Σ up+down",
+      "sources": [
+        {
+          "path": "internal/service/subscription_traffic_notifications.go",
+          "line": 150,
+          "end_line": 175
+        }
+      ]
+    },
+    {
+      "id": "plan",
+      "type": "database",
+      "label": "План",
+      "sublabel": "TrafficLimit · байты",
+      "stage": 2,
+      "row": 0,
+      "tag": "лимит",
+      "sources": [
+        {
+          "path": "internal/service/subscription_traffic_notifications.go",
+          "line": 93,
+          "end_line": 99
+        }
+      ]
+    },
+    {
+      "id": "bitmask",
+      "type": "database",
+      "label": "traffic_reminders_sent",
+      "sublabel": "1=90% · 2=исчерпан · 4=сброс",
+      "stage": 2,
+      "row": 2,
+      "tag": "миграция 038",
+      "width": 150,
+      "sources": [
+        {
+          "path": "internal/database/subscription_traffic.go",
+          "line": 11,
+          "end_line": 18
+        },
+        {
+          "path": "internal/database/subscription_traffic.go",
+          "line": 40,
+          "end_line": 80
+        }
+      ]
+    },
+    {
+      "id": "policy",
+      "type": "security",
+      "label": "Правила квоты",
+      "sublabel": "≥90% · ≥100%",
+      "stage": 3,
+      "row": 1,
+      "tag": "решения",
+      "sources": [
+        {
+          "path": "internal/service/subscription_traffic_notifications.go",
+          "line": 176,
+          "end_line": 224
+        }
+      ]
+    },
+    {
+      "id": "warn",
+      "type": "backend",
+      "label": "Предупреждение 90%",
+      "sublabel": "CTA Premium",
+      "stage": 4,
+      "row": 0,
+      "tag": "once",
+      "sources": [
+        {
+          "path": "internal/service/subscription_traffic_notifications.go",
+          "line": 336,
+          "end_line": 350
+        }
+      ]
+    },
+    {
+      "id": "tg",
+      "type": "external",
+      "label": "Telegram-юзер",
+      "sublabel": "уведомления",
+      "stage": 4,
+      "row": 1,
+      "tag": "бот"
+    },
+    {
+      "id": "exhaust",
+      "type": "backend",
+      "label": "Исчерпание",
+      "sublabel": "отключает панель",
+      "stage": 4,
+      "row": 2,
+      "tag": "once",
+      "sources": [
+        {
+          "path": "internal/service/subscription_traffic_notifications.go",
+          "line": 322,
+          "end_line": 334
+        }
+      ]
+    },
+    {
+      "id": "reenable",
+      "type": "messagebus",
+      "label": "Ре-включение",
+      "sublabel": "UpdateClient Enable=true",
+      "stage": 4,
+      "row": 4,
+      "tag": "после сброса",
+      "sources": [
+        {
+          "path": "internal/service/subscription_traffic_notifications.go",
+          "line": 226,
+          "end_line": 315
+        }
+      ]
+    }
   ],
   "flows": [
-    { "id": "f1", "from": "nodes", "to": "fetcher", "label": "статистика клиентов", "variant": "emphasis" },
-    { "id": "f2", "from": "fetcher", "to": "usage", "label": "up/down байты", "variant": "emphasis" },
-    { "id": "f3", "from": "usage", "to": "policy", "label": "сравнение с лимитом", "variant": "default", "route": "straight" },
-    { "id": "f4", "from": "reminders", "to": "policy", "label": "какие напоминания уже отправлены", "variant": "dashed" },
-    { "id": "f5", "from": "policy", "to": "warn", "label": "≥90%", "variant": "default", "route": "straight", "labelDy": -20 },
-    { "id": "f6", "from": "policy", "to": "exhaust", "label": "≥100% · выключить", "variant": "security", "labelDy": 20, "labelDx": -55 },
-    { "id": "f7", "from": "policy", "to": "reenable", "label": "сброс счётчика", "variant": "dashed", "labelDy": 30 },
-    { "id": "f8", "from": "exhaust", "to": "nodes", "label": "Disable клиента на ноде", "variant": "security", "fromSide": "right", "toSide": "top", "via": [[1085, 385], [1085, 60], [100, 60]] }
+    {
+      "id": "f1",
+      "from": "panels",
+      "to": "worker",
+      "label": "live-счётчики",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "id": "f2",
+      "from": "worker",
+      "to": "agg",
+      "label": "снапшоты",
+      "variant": "emphasis",
+      "labelDy": 25
+    },
+    {
+      "id": "f3",
+      "from": "agg",
+      "to": "policy",
+      "label": "Σ up+down",
+      "variant": "default"
+    },
+    {
+      "id": "f4",
+      "from": "plan",
+      "to": "policy",
+      "label": "TrafficLimit",
+      "variant": "default"
+    },
+    {
+      "id": "f5",
+      "from": "bitmask",
+      "to": "policy",
+      "label": "биты напоминаний",
+      "variant": "dashed",
+      "labelDy": 25
+    },
+    {
+      "id": "f6",
+      "from": "policy",
+      "to": "warn",
+      "label": "used ≥ limit − limit/10",
+      "variant": "default",
+      "labelAt": [
+        853,
+        201
+      ]
+    },
+    {
+      "id": "f7",
+      "from": "policy",
+      "to": "exhaust",
+      "label": "used ≥ limit",
+      "variant": "security",
+      "labelDy": 20,
+      "labelDx": -55
+    },
+    {
+      "id": "f8",
+      "from": "policy",
+      "to": "reenable",
+      "label": "счётчик сброшен · клиент disabled",
+      "variant": "dashed",
+      "labelDy": 30
+    },
+    {
+      "id": "f9",
+      "from": "warn",
+      "to": "tg",
+      "label": "предупреждение",
+      "variant": "default",
+      "labelDy": 25
+    },
+    {
+      "id": "f10",
+      "from": "exhaust",
+      "to": "tg",
+      "label": "остановка",
+      "variant": "security",
+      "labelAt": [
+        960,
+        429
+      ]
+    },
+    {
+      "id": "f11",
+      "from": "reenable",
+      "to": "panels",
+      "label": "Enable=true",
+      "variant": "dashed",
+      "route": "bottom-channel"
+    }
   ],
   "cards": [
-    { "dot": "cyan", "title": "Сбор", "items": ["SubscriptionTrafficWorker проходит раз в час по лимитированным планам", "Статистика берётся с нод и суммируется по подписке", "Сбой одной ноды Warn и пропуск"] },
-    { "dot": "emerald", "title": "Идемпотентность", "items": ["Bitmask traffic_reminders_sent не даёт отправить дважды", "Миграция 038 добавила колонку", "Состояние напоминаний живёт в БД, не в памяти"] },
-    { "dot": "rose", "title": "Правила включения", "items": ["Исчерпание — чистый revenue CTA, без авто-включения", "Ре-включение только когда счётчик реально ниже лимита", "Клиент всё ещё disabled — воркер включает через UpdateClient"] }
+    {
+      "dot": "cyan",
+      "title": "Сбор",
+      "items": [
+        "Воркер раз в час проходит подписки с TrafficLimit > 0 (GetActiveSubscriptionsWithTrafficLimit)",
+        "Опрашиваются только ноды с активной привязкой; клиент не найден на ноде — ожидаемо, узел пропускается",
+        "Ни одного читаемого снапшота — проход по подписке пропускается",
+        "Partial-чтение при used < limit — только путь предупреждения 90%"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Идемпотентность bitmask",
+      "items": [
+        "Битовая маска в subscriptions (миграция 038): 1<<0=90%, 1<<1=исчерпан, 1<<2=сброс",
+        "Claim/Release атомарны; неудачная отправка возвращает бит следующему циклу",
+        "Состояние напоминаний живёт в БД, а не в памяти"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Usage не хранится",
+      "items": [
+        "Трафик не пишется в таблицу подписок: воркер читает live-счётчики панелей и суммирует в памяти",
+        "Явного UpdateClient Enable=false при исчерпании нет — клиента отключает сама панель",
+        "Ре-включение после сброса явное: Enable=true с прочитанным auto-renew профилем",
+        "Только ранее исчерпанная подписка (бит 2) подлежит ре-включению"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Recovery-режим",
+      "items": [
+        "NOTIFICATIONS_ENABLED=false → RunRecovery: без Telegram-сообщений",
+        "Бит exhausted всё равно ставится, чтобы post-reset проход узнал подписку",
+        "Ре-включение доступа остаётся активным и без уведомлений"
+      ]
+    }
   ]
 }

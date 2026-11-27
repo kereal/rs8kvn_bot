@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "0c2d1601-59d9-4026-b92f-7c8832b9156b",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/ci-pipeline.workflow.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/ci-pipeline.html",
+  "specification": {
+    "sha256": "9ff851e797885848e90efba9438f7c32d11bc358ff78ff264ff59227456d2fe0",
+    "bytes": 8438
+  },
+  "artifact": {
+    "sha256": "fd9dd3d3163e31bc9c7434c043e11d2495e5ce0aff9f4e3d86f225b353e545b7",
+    "bytes": 966379
+  }
+}

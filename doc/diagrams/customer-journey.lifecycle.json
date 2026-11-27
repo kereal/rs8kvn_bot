@@ -1,0 +1,337 @@
+{
+  "schema_version": 3,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Путь клиента: от инвайта до premium и удержания",
+    "subtitle": "Только код-backed состояния и переходы; реферальный бонус не начисляется",
+    "output": "doc/diagrams/customer-journey.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
+    "views": [
+      {
+        "id": "main",
+        "label": "Основной путь",
+        "focus": [
+          "invited",
+          "trial",
+          "free",
+          "buying",
+          "premium"
+        ],
+        "note": "Инвайт → анонимный trial → привязка (perpetual free) → покупка → premium."
+      },
+      {
+        "id": "retention",
+        "label": "Удержание",
+        "focus": [
+          "premium",
+          "reminder",
+          "expired",
+          "free"
+        ],
+        "note": "Напоминания 3д/1д/3ч ведут к продлению; истечение даунгрейдит на free."
+      },
+      {
+        "id": "churn",
+        "label": "Отток",
+        "focus": [
+          "trial",
+          "trial_expired",
+          "blocked",
+          "revoked"
+        ],
+        "note": "Неактивированный trial удаляется cleanup'ом; заблокировавшие бота деактивируются из отчёта рассылки."
+      }
+    ]
+  },
+  "mainPath": [
+    "invited",
+    "trial",
+    "free",
+    "buying",
+    "premium"
+  ],
+  "states": [
+    {
+      "id": "invited",
+      "type": "start",
+      "label": "Приглашён",
+      "sublabel": "ссылка",
+      "step": "01",
+      "sources": [
+        {
+          "path": "internal/bot/referral_handler.go",
+          "line": 86,
+          "end_line": 132,
+          "label": "sendInviteLink"
+        }
+      ]
+    },
+    {
+      "id": "trial",
+      "type": "active",
+      "label": "Анонимный trial",
+      "sublabel": "id < 0",
+      "step": "02",
+      "sources": [
+        {
+          "path": "internal/web/web.go",
+          "line": 727,
+          "end_line": 868,
+          "label": "HandleInvite"
+        },
+        {
+          "path": "internal/service/subscription.go",
+          "line": 703,
+          "end_line": 780,
+          "label": "CreateTrial"
+        }
+      ]
+    },
+    {
+      "id": "free",
+      "type": "active",
+      "label": "Free план",
+      "sublabel": "без срока",
+      "step": "03",
+      "sources": [
+        {
+          "path": "internal/database/trials.go",
+          "line": 163,
+          "end_line": 179,
+          "label": "bind → free"
+        },
+        {
+          "path": "internal/service/subscription.go",
+          "line": 137,
+          "end_line": 242,
+          "label": "Create"
+        }
+      ]
+    },
+    {
+      "id": "buying",
+      "type": "waiting",
+      "label": "Ожидает оплаты",
+      "sublabel": "оплата",
+      "step": "04",
+      "sources": [
+        {
+          "path": "internal/bot/subscription_handler.go",
+          "line": 427,
+          "end_line": 482,
+          "label": "handleBuyProduct"
+        }
+      ]
+    },
+    {
+      "id": "premium",
+      "type": "success",
+      "label": "Premium",
+      "sublabel": "активна",
+      "step": "05",
+      "sources": [
+        {
+          "path": "internal/service/order_platega.go",
+          "line": 664,
+          "end_line": 680,
+          "label": "CAS"
+        },
+        {
+          "path": "internal/service/order_stars.go",
+          "line": 339,
+          "end_line": 350,
+          "label": "CAS"
+        }
+      ]
+    },
+    {
+      "id": "reminder",
+      "type": "waiting",
+      "label": "CTA удержания",
+      "sublabel": "CTA 3д/1д/3ч",
+      "sources": [
+        {
+          "path": "internal/service/subscription_reminders.go",
+          "line": 28,
+          "end_line": 111,
+          "label": "напоминания"
+        },
+        {
+          "path": "internal/service/subscription_traffic_notifications.go",
+          "line": 328,
+          "end_line": 353,
+          "label": "трафик CTA"
+        }
+      ]
+    },
+    {
+      "id": "expired",
+      "type": "neutral",
+      "label": "Срок истёк",
+      "sublabel": "даунгрейд → free",
+      "sources": [
+        {
+          "path": "internal/scheduler/subscription_expire_worker.go",
+          "line": 46,
+          "end_line": 95,
+          "label": "ExpireSubscription"
+        }
+      ]
+    },
+    {
+      "id": "trial_expired",
+      "type": "failure",
+      "label": "Trial истёк",
+      "sublabel": "не активирован",
+      "sources": [
+        {
+          "path": "internal/service/subscription.go",
+          "line": 1138,
+          "end_line": 1178,
+          "label": "CleanupExpiredTrials"
+        }
+      ]
+    },
+    {
+      "id": "revoked",
+      "type": "failure",
+      "label": "Отозвана",
+      "sublabel": "revoke + deprovision",
+      "sources": [
+        {
+          "path": "internal/service/subscription_deactivate.go",
+          "line": 42,
+          "end_line": 70,
+          "label": "деактивация"
+        },
+        {
+          "path": "internal/service/subscription.go",
+          "line": 469,
+          "end_line": 529,
+          "label": "/del teardown"
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "id": "t1",
+      "from": "invited",
+      "to": "trial",
+      "label": "GET /i/{code}"
+    },
+    {
+      "id": "t2",
+      "from": "trial",
+      "to": "free",
+      "label": "привязка"
+    },
+    {
+      "id": "t3",
+      "from": "free",
+      "to": "buying",
+      "label": "заказ"
+    },
+    {
+      "id": "t4",
+      "from": "buying",
+      "to": "premium",
+      "label": "оплата"
+    },
+    {
+      "id": "t5",
+      "from": "invited",
+      "to": "free",
+      "label": "share_",
+      "variant": "dashed"
+    },
+    {
+      "id": "t6",
+      "from": "trial",
+      "to": "trial_expired",
+      "label": "не активирован",
+      "variant": "security"
+    },
+    {
+      "id": "t7",
+      "from": "premium",
+      "to": "reminder",
+      "label": "3д/1д/3ч"
+    },
+    {
+      "id": "t8",
+      "from": "reminder",
+      "to": "premium",
+      "label": "продление"
+    },
+    {
+      "id": "t11",
+      "from": "reminder",
+      "to": "expired",
+      "label": "истекло",
+      "variant": "security"
+    },
+    {
+      "id": "t12",
+      "from": "expired",
+      "to": "free",
+      "label": "даунгрейд"
+    },
+    {
+      "id": "t13",
+      "from": "free",
+      "to": "buying",
+      "label": "повтор",
+      "variant": "dashed"
+    },
+    {
+      "id": "t14",
+      "from": "premium",
+      "to": "revoked",
+      "label": "заблокировал бота",
+      "variant": "security"
+    },
+    {
+      "id": "t16",
+      "from": "free",
+      "to": "revoked",
+      "label": "удаление",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Вход через инвайт",
+      "items": [
+        "Веб-ссылка /i/{code} создаёт анонимный trial с клиентом на ноде (до вставки в БД)",
+        "Deep-link share_{code} ведёт к кнопке «Получить подписку» — сразу free план",
+        "Атрибуция referred_by / invite_code пишется в транзакции создания/привязки"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Деньги и продление",
+      "items": [
+        "Покупка: Platega (HTTP callback) или Telegram Stars (successful_payment) — один активный провайдер",
+        "Подтверждение CAS переводит план на premium; повторная оплата прибавляет дни",
+        "Напоминания 3д/1д/3ч и CTA трафика (90%/исчерпан) возвращают в покупку",
+        "Истечение срока: expire worker даунгрейдит на free, строка сохраняется"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Отток и ограничения",
+      "items": [
+        "Неактивированные trial удаляются фоновой очисткой только после успешного депровижининга клиента",
+        "Заблокировавшие бота находятся по отчёту рассылки и деактивируются в revoked",
+        "Физическое удаление — только admin /del (revoke → deprovision → delete)",
+        "Реферальный бонус НЕ начисляется: код даёт только атрибуцию, уведомление и счётчик"
+      ]
+    }
+  ]
+}

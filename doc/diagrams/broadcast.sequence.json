@@ -4,45 +4,337 @@
   "meta": {
     "title": "Админская рассылка (/broadcast)",
     "output": "doc/diagrams/broadcast.html",
-    "viewBox": [1000, 760],
+    "viewBox": [
+      980,
+      624
+    ],
     "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
     "views": [
-      { "id": "wizard", "label": "Диалог запуска", "focus": ["admin", "bot", "db"], "note": "Имя → сообщение → фильтры → preview → подтверждение." },
-      { "id": "delivery", "label": "Доставка", "focus": ["worker", "tg"], "note": "Асинхронная рассылка с resume после рестарта и классификацией ошибок." }
+      {
+        "id": "create",
+        "label": "Создание",
+        "focus": [
+          "admin",
+          "bot",
+          "db"
+        ],
+        "note": "Пошаговый wizard; подтверждение сохраняет только карточку кампании (audience snapshot — потом, в воркере)."
+      },
+      {
+        "id": "delivery",
+        "label": "Доставка",
+        "focus": [
+          "worker",
+          "db",
+          "tg"
+        ],
+        "note": "claim кампании и батчей получателей, снапшот аудитории, retry/recovery, финальные статусы."
+      },
+      {
+        "id": "controls",
+        "label": "Управление",
+        "focus": [
+          "admin",
+          "bot",
+          "subs"
+        ],
+        "note": "Отмена активной кампании, повтор failed и деактивация заблокировавших."
+      }
     ]
   },
   "participants": [
-    { "id": "admin", "type": "external", "label": "Админ", "sublabel": "Telegram" },
-    { "id": "bot", "type": "backend", "label": "Bot Handler", "sublabel": "wizard" },
-    { "id": "db", "type": "database", "label": "SQLite", "sublabel": "broadcasts" },
-    { "id": "worker", "type": "backend", "label": "Delivery", "sublabel": "worker" },
-    { "id": "tg", "type": "external", "label": "Telegram API", "sublabel": "рассылка" }
+    {
+      "id": "admin",
+      "type": "external",
+      "label": "Админ",
+      "sublabel": "Telegram",
+      "sources": [
+        {
+          "path": "internal/bot/handler.go",
+          "label": "ручная команда"
+        }
+      ]
+    },
+    {
+      "id": "bot",
+      "type": "backend",
+      "label": "Bot Handler",
+      "sublabel": "wizard + callbacks",
+      "sources": [
+        {
+          "path": "internal/bot/broadcast_flow.go",
+          "line": 71,
+          "end_line": 96,
+          "label": "/broadcast и wizard"
+        },
+        {
+          "path": "internal/bot/broadcast_callbacks.go",
+          "line": 11,
+          "end_line": 21,
+          "label": "callback id"
+        }
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "BroadcastWorker",
+      "sublabel": "durable delivery",
+      "sources": [
+        {
+          "path": "internal/bot/broadcast_worker.go",
+          "line": 41,
+          "end_line": 133,
+          "label": "worker loop + claim"
+        },
+        {
+          "path": "internal/bot/broadcast_constants.go",
+          "line": 57,
+          "end_line": 62,
+          "label": "интервалы"
+        }
+      ]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "SQLite",
+      "sublabel": "broadcasts",
+      "sources": [
+        {
+          "path": "internal/database/models.go",
+          "line": 252,
+          "end_line": 259,
+          "label": "статусы"
+        },
+        {
+          "path": "internal/database/broadcast_recipients.go",
+          "line": 163,
+          "end_line": 237,
+          "label": "snapshot + claim"
+        }
+      ]
+    },
+    {
+      "id": "tg",
+      "type": "external",
+      "label": "Telegram API",
+      "sublabel": "SendMessage",
+      "sources": [
+        {
+          "path": "internal/bot/broadcast_errors.go",
+          "line": 13,
+          "end_line": 63,
+          "label": "класс ошибок"
+        }
+      ]
+    },
+    {
+      "id": "subs",
+      "type": "backend",
+      "label": "SubSvc",
+      "sublabel": "деактивация",
+      "sources": [
+        {
+          "path": "internal/service/subscription_deactivate.go",
+          "line": 42,
+          "end_line": 70,
+          "label": "blocked→revoked"
+        }
+      ]
+    }
   ],
   "segments": [
-    { "from": 160, "to": 300, "label": "Wizard" },
-    { "from": 315, "to": 425, "label": "Очередь" },
-    { "from": 440, "to": 660, "label": "Доставка" }
+    {
+      "from": 162,
+      "to": 220,
+      "label": "Создание кампании"
+    },
+    {
+      "from": 246,
+      "to": 470,
+      "label": "Доставка и восстановление"
+    }
   ],
   "messages": [
-    { "id": "start", "from": "admin", "to": "bot", "y": 195, "label": "/broadcast", "variant": "emphasis" },
-    { "id": "collect", "from": "bot", "to": "admin", "y": 230, "label": "имя → текст → фильтры → preview", "variant": "return" },
-    { "id": "confirm", "from": "admin", "to": "bot", "y": 275, "label": "подтверждение (или отложенный запуск)", "variant": "emphasis" },
-    { "id": "persist", "from": "bot", "to": "db", "y": 360, "label": "кампания + аудитория", "variant": "emphasis", "note": "persist → resume без дублей" },
-    { "id": "queued", "from": "db", "to": "worker", "y": 400, "label": "due-кампания", "variant": "return" },
-    { "id": "send-loop", "from": "worker", "to": "tg", "y": 480, "label": "Send получателям", "variant": "emphasis", "note": "MarkdownV2 · retry с backoff" },
-    { "id": "classify", "from": "tg", "to": "worker", "y": 520, "label": "blocked / unreachable / error", "variant": "return" },
-    { "id": "progress", "from": "worker", "to": "db", "y": 560, "label": "статус получателя после каждого шага", "variant": "dashed" },
-    { "id": "report", "from": "worker", "to": "bot", "y": 625, "label": "итоги → /broadcasts", "variant": "return" }
+    {
+      "id": "open",
+      "from": "admin",
+      "to": "bot",
+      "y": 172,
+      "label": "/broadcast → имя → текст → фильтры → preview",
+      "variant": "emphasis"
+    },
+    {
+      "id": "confirm",
+      "from": "admin",
+      "to": "bot",
+      "y": 200,
+      "label": "подтверждение или расписание (MSK)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "create-row",
+      "from": "bot",
+      "to": "db",
+      "y": 228,
+      "label": "CreateBroadcast: status=scheduled + planned_at",
+      "variant": "emphasis"
+    },
+    {
+      "id": "runnable",
+      "from": "db",
+      "to": "worker",
+      "y": 256,
+      "label": "GetRunnable → ClaimBroadcast: scheduled→running (CAS)",
+      "variant": "security"
+    },
+    {
+      "id": "snapshot",
+      "from": "worker",
+      "to": "db",
+      "y": 284,
+      "label": "SnapshotBroadcastRecipients: filter → snapshot аудитории",
+      "variant": "emphasis"
+    },
+    {
+      "id": "recover",
+      "from": "worker",
+      "to": "db",
+      "y": 312,
+      "label": "RecoverStale: аренда sending>2мин → pending",
+      "variant": "security"
+    },
+    {
+      "id": "claim-batch",
+      "from": "worker",
+      "to": "db",
+      "y": 340,
+      "label": "ClaimBroadcastRecipients: до 100 pending→sending",
+      "variant": "security"
+    },
+    {
+      "id": "send",
+      "from": "worker",
+      "to": "tg",
+      "y": 368,
+      "label": "SendMarkdownV2 по чанкам",
+      "variant": "emphasis"
+    },
+    {
+      "id": "outcome",
+      "from": "tg",
+      "to": "worker",
+      "y": 396,
+      "label": "sent / blocked / unreachable / failed",
+      "variant": "return"
+    },
+    {
+      "id": "progress",
+      "from": "worker",
+      "to": "db",
+      "y": 424,
+      "label": "UpdateProgress: next_chunk после чанка",
+      "variant": "dashed"
+    },
+    {
+      "id": "finish",
+      "from": "worker",
+      "to": "db",
+      "y": 452,
+      "label": "FinishRecipient: терминальный статус + attempts guard",
+      "variant": "emphasis"
+    },
+    {
+      "id": "finalize",
+      "from": "db",
+      "to": "worker",
+      "y": 480,
+      "label": "finishCampaign: completed | canceled | running",
+      "variant": "emphasis"
+    },
+    {
+      "id": "report",
+      "from": "worker",
+      "to": "bot",
+      "y": 508,
+      "label": "отчёт админу (счётчики)",
+      "variant": "return"
+    }
   ],
   "activations": [
-    { "participant": "bot", "from": 195, "to": 370, "type": "backend" },
-    { "participant": "db", "from": 355, "to": 570, "type": "database" },
-    { "participant": "worker", "from": 395, "to": 630, "type": "backend" },
-    { "participant": "tg", "from": 475, "to": 525, "type": "external" }
+    {
+      "participant": "admin",
+      "from": 172,
+      "to": 210,
+      "type": "external"
+    },
+    {
+      "participant": "bot",
+      "from": 172,
+      "to": 238,
+      "type": "backend"
+    },
+    {
+      "participant": "worker",
+      "from": 246,
+      "to": 516,
+      "type": "backend"
+    },
+    {
+      "participant": "db",
+      "from": 224,
+      "to": 486,
+      "type": "database"
+    },
+    {
+      "participant": "tg",
+      "from": 364,
+      "to": 400,
+      "type": "external"
+    }
   ],
   "cards": [
-    { "dot": "cyan", "title": "Wizard", "items": ["Пошаговый сбор: имя, сообщение, фильтры", "Preview показывает итоговый вид перед запуском", "Запуск немедленно или по расписанию в московском времени"] },
-    { "dot": "emerald", "title": "Устойчивость доставки", "items": ["Аудитория и состояние получателя персистентны", "Рестарт продолжает кампанию без дублей", "Транзиентные сбои повторяются с экспоненциальным backoff"] },
-    { "dot": "rose", "title": "Управление", "items": ["/broadcasts показывает детали активных кампаний", "Активную кампанию можно отменить", "Неудачных получателей можно переотправить"] }
+    {
+      "dot": "cyan",
+      "title": "Статусы кампании",
+      "items": [
+        "scheduled — создана, отправка не начиналась (будущий planned_at остаётся scheduled)",
+        "running — claim + отправка; незавершённый проход тоже остаётся running",
+        "completed / failed / canceled — терминальные; failed только при ошибке БД или разборе фильтра",
+        "canceled — администратор или терминальная гонка; отчёт содержит только обработанных получателей"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Снапшот аудитории",
+      "items": [
+        "Сохраняется в строке кампании (recipients_state) — без отдельной таблицы",
+        "Идемпотентен: краш между claim и snapshot не дублирует аудиторию"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Сбои и восстановление",
+      "items": [
+        "RecoverStale: аренда sending > 2 минут снова pending",
+        "Инфраструктурный сбой: exponential backoff 5с→15мин, retry_count растёт",
+        "Admin cancel → context.Canceled: кампания остаётся resumable",
+        "Паника получателя фиксируется как failed, воркер живёт"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Управление после финала",
+      "items": [
+        "Повтор ошибок: failed/sending → pending, кампания reopen в running",
+        "Отключить заблокировавших: blocked + unreachable → revoked через deprovision",
+        "Кнопки появляются только по фактическому статусу и счётчикам"
+      ]
+    }
   ]
 }

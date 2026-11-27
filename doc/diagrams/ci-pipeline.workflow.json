@@ -2,43 +2,383 @@
   "schema_version": 2,
   "diagram_type": "workflow",
   "meta": {
-    "title": "CI-конвейер rs8kvn_bot",
+    "title": "rs8kvn_bot — CI-проверки",
+    "locale": "ru",
     "output": "doc/diagrams/ci-pipeline.html",
     "quality_profile": "showcase",
-    "views": [
-      { "id": "main", "label": "Зелёный путь", "focus": ["push", "checkout", "build", "gates", "docker", "ghcr"], "note": "От пуша до публикации образа в ghcr.io через все гейты." },
-      { "id": "quality", "label": "Гейты качества", "focus": ["checkout", "build", "gates"], "note": "Тесты, go vet, golangci-lint и gosec блокируют продвижение." },
-      { "id": "red", "label": "Красный CI", "focus": ["gates", "red"], "note": "Провал любого гейта останавливает конвейер до исправления." }
-    ]
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
+    "legend": {
+      "mode": "hidden"
+    }
   },
   "lanes": [
-    { "id": "trigger", "label": "Запуск" },
-    { "id": "checks", "label": "Проверки", "variant": "exception" },
-    { "id": "gates", "label": "Качество" },
-    { "id": "publish", "label": "Публикация" },
-    { "id": "stop", "label": "Стоп", "variant": "exception" }
+    {
+      "id": "triggers",
+      "label": "Триггеры"
+    },
+    {
+      "id": "test",
+      "label": "Job: test"
+    },
+    {
+      "id": "artifacts",
+      "label": "Security и артефакты"
+    },
+    {
+      "id": "tagjobs",
+      "label": "Только теги v*",
+      "variant": "exception"
+    }
   ],
-  "mainPath": ["push", "checkout", "build", "gates", "docker", "ghcr"],
+  "phases": [
+    {
+      "id": "setup",
+      "label": "Запуск",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "checks",
+      "label": "Проверки",
+      "fromCol": 2,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "publish",
+      "label": "Публикация",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "push_main",
+    "checkout",
+    "tests",
+    "vet",
+    "build",
+    "lint"
+  ],
   "nodes": [
-    { "id": "push", "lane": "trigger", "col": 0, "type": "frontend", "label": "Push / Tag", "sublabel": "main · PR" },
-    { "id": "checkout", "lane": "checks", "col": 1, "type": "backend", "label": "Checkout", "sublabel": "actions/checkout" },
-    { "id": "build", "lane": "checks", "col": 2, "type": "backend", "label": "go build", "sublabel": "ldflags -s -w" },
-    { "id": "gates", "lane": "gates", "col": 3, "width": 124, "type": "security", "label": "Качество", "sublabel": "go vet · golangci-lint · gosec", "tag": "blocking" },
-    { "id": "docker", "lane": "publish", "col": 4, "type": "cloud", "label": "Docker Build", "sublabel": "UPX · non-root" },
-    { "id": "ghcr", "lane": "publish", "col": 5, "type": "cloud", "label": "ghcr.io", "sublabel": "latest · SemVer · SHA" },
-    { "id": "red", "lane": "stop", "col": 3, "type": "security", "label": "Red CI", "sublabel": "PR блокирован" }
+    {
+      "id": "push_main",
+      "lane": "triggers",
+      "col": 0,
+      "type": "external",
+      "label": "push в main",
+      "sublabel": "branches: [main]",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 3,
+          "end_line": 13
+        }
+      ]
+    },
+    {
+      "id": "pr",
+      "lane": "triggers",
+      "col": 1,
+      "type": "external",
+      "label": "pull_request",
+      "sublabel": "main · dev",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 9,
+          "end_line": 13
+        }
+      ]
+    },
+    {
+      "id": "tag",
+      "lane": "triggers",
+      "col": 2,
+      "type": "external",
+      "label": "тег v*",
+      "sublabel": "SemVer",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 4,
+          "end_line": 8
+        }
+      ]
+    },
+    {
+      "id": "checkout",
+      "lane": "test",
+      "col": 1,
+      "type": "backend",
+      "label": "Checkout + Go",
+      "sublabel": "go-version из go.mod",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 24,
+          "end_line": 36
+        }
+      ]
+    },
+    {
+      "id": "tests",
+      "lane": "test",
+      "col": 2,
+      "type": "backend",
+      "label": "go test",
+      "sublabel": "-race -coverprofile",
+      "tag": "RUN_SMOKE=1",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 38,
+          "end_line": 41
+        }
+      ]
+    },
+    {
+      "id": "codecov",
+      "lane": "artifacts",
+      "col": 2,
+      "type": "messagebus",
+      "label": "Codecov",
+      "sublabel": "если CODECOV_TOKEN",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 43,
+          "end_line": 51
+        }
+      ]
+    },
+    {
+      "id": "vet",
+      "lane": "test",
+      "col": 3,
+      "type": "backend",
+      "label": "go vet",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 53,
+          "end_line": 54
+        }
+      ]
+    },
+    {
+      "id": "build",
+      "lane": "test",
+      "col": 4,
+      "type": "backend",
+      "label": "go build ./...",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 56,
+          "end_line": 57
+        }
+      ]
+    },
+    {
+      "id": "lint",
+      "lane": "test",
+      "col": 5,
+      "type": "backend",
+      "label": "golangci-lint",
+      "sublabel": "v2.15 · --timeout 5m",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 59,
+          "end_line": 63
+        }
+      ]
+    },
+    {
+      "id": "gosec",
+      "lane": "artifacts",
+      "col": 5,
+      "type": "security",
+      "label": "gosec",
+      "sublabel": "-quiet · fail на находки",
+      "tag": "только теги v*",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 65,
+          "end_line": 70
+        }
+      ]
+    },
+    {
+      "id": "upload",
+      "lane": "artifacts",
+      "col": 3,
+      "type": "database",
+      "label": "coverage artifact",
+      "sublabel": "retention 7 дней",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 72,
+          "end_line": 77
+        }
+      ]
+    },
+    {
+      "id": "dockerjob",
+      "lane": "tagjobs",
+      "col": 4,
+      "type": "cloud",
+      "label": "build-and-push",
+      "sublabel": "ghcr.io · linux/amd64",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 79,
+          "end_line": 86
+        },
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 126,
+          "end_line": 139
+        }
+      ]
+    },
+    {
+      "id": "ghrel",
+      "lane": "tagjobs",
+      "col": 5,
+      "type": "cloud",
+      "label": "GitHub Release",
+      "sublabel": "needs test + image",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 141,
+          "end_line": 147
+        },
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 178,
+          "end_line": 187
+        }
+      ]
+    }
   ],
   "edges": [
-    { "from": "push", "to": "checkout", "variant": "emphasis", "route": "drop" },
-    { "from": "checkout", "to": "build", "label": "go test ./...", "variant": "emphasis" },
-    { "from": "build", "to": "gates", "variant": "emphasis", "route": "drop" },
-    { "from": "gates", "to": "docker", "label": "зелёный", "variant": "emphasis" },
-    { "from": "docker", "to": "ghcr", "label": "push", "variant": "emphasis" },
-    { "from": "gates", "to": "red", "label": "красный", "variant": "security", "role": "error" }
+    {
+      "id": "push-checkout",
+      "from": "push_main",
+      "to": "checkout",
+      "label": "запуск",
+      "variant": "emphasis"
+    },
+    {
+      "id": "pr-checkout",
+      "from": "pr",
+      "to": "checkout",
+      "label": "запуск"
+    },
+    {
+      "id": "tag-checkout",
+      "from": "tag",
+      "to": "checkout",
+      "label": "запуск",
+      "variant": "dashed"
+    },
+    {
+      "id": "checkout-tests",
+      "from": "checkout",
+      "to": "tests",
+      "variant": "default"
+    },
+    {
+      "id": "tests-codecov",
+      "from": "tests",
+      "to": "codecov",
+      "label": "coverage.out",
+      "variant": "dashed"
+    },
+    {
+      "id": "tests-vet",
+      "from": "tests",
+      "to": "vet",
+      "variant": "default"
+    },
+    {
+      "id": "vet-build",
+      "from": "vet",
+      "to": "build",
+      "variant": "default"
+    },
+    {
+      "id": "build-lint",
+      "from": "build",
+      "to": "lint",
+      "variant": "default"
+    },
+    {
+      "id": "lint-gosec",
+      "from": "lint",
+      "to": "gosec",
+      "label": "успех job test",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "id": "tests-upload",
+      "from": "tests",
+      "to": "upload",
+      "label": "coverage.out",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "lint-docker",
+      "from": "lint",
+      "to": "dockerjob",
+      "label": "needs: test",
+      "role": "branch"
+    },
+    {
+      "id": "docker-release",
+      "from": "dockerjob",
+      "to": "ghrel",
+      "label": "needs: build-and-push"
+    }
   ],
   "cards": [
-    { "dot": "emerald", "title": "Гейты", "items": ["go test race-safe с 66% покрытием", "go vet и golangci-lint по конфигу .golangci.yml", "gosec сканирует безопасность кода"] },
-    { "dot": "cyan", "title": "Сборка", "items": ["Dockerfile: multi-stage, non-root user", "UPX сжимает бинарник, health-check встроен", "Кэш модулей ускоряет пересборки"] },
-    { "dot": "rose", "title": "Красный CI", "items": ["Любой блокирующий гейт останавливает продвижение", "PR не мержится без зелёных проверок", "Результаты проверок видны в GitHub Checks"] }
+    {
+      "dot": "cyan",
+      "title": "Триггеры",
+      "items": [
+        "push в main и PR в main/dev — одни и те же проверки",
+        "Тег v* дополнительно включает gosec, сборку образа и Release",
+        "checkout с persist-credentials: false — токен не протекает в следующие шаги"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Гейты качества",
+      "items": [
+        "go test -race обязателен; смок-тесты включены (RUN_SMOKE=1)",
+        "golangci-lint v2.15 — 0 замечаний",
+        "gosec с -quiet валид релиз только без не-подавленных находок"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Условные шаги",
+      "items": [
+        "Codecov пропускается без токена (например, Dependabot PR) и не валид CI",
+        "Недоступность Codecov не роняет сборку (fail_ci_if_error: false)",
+        "Публикация образа и Release — подробно в release-flow.workflow"
+      ]
+    }
   ]
 }

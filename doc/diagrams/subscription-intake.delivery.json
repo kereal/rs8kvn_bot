@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "191457ce-acc7-463c-ba6e-226147a3a627",
+  "status": "current",
+  "command": "deliver",
+  "type": "sequence",
+  "input": "/home/kereal/rs8kvn_bot/doc/diagrams/subscription-intake.sequence.json",
+  "output": "/home/kereal/rs8kvn_bot/doc/diagrams/subscription-intake.html",
+  "specification": {
+    "sha256": "583101cc66a251c065bfda46a782a652021505378df0039266d7d33b4a455b3e",
+    "bytes": 6617
+  },
+  "artifact": {
+    "sha256": "801906ee5e6d08a1a98b91414f57028c1d6707e70915c4806ba7c857fc3102cb",
+    "bytes": 944119
+  }
+}

@@ -1,0 +1,503 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Маркетинговая воронка: только код-backed механики",
+    "subtitle": "invite/referral → trial-лендинг → free/premium → CTA продления → рассылка",
+    "output": "doc/diagrams/marketing-funnel.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
+    "views": [
+      {
+        "id": "acquisition",
+        "label": "Привлечение",
+        "focus": [
+          "user",
+          "invite-link",
+          "share-deeplink",
+          "trial-landing"
+        ],
+        "note": "Реферальная ссылка ведёт либо в бота (share_), либо на веб-лендинг /i/{code}."
+      },
+      {
+        "id": "activation",
+        "label": "Активация",
+        "focus": [
+          "trial-landing",
+          "trial-bind",
+          "free-sub"
+        ],
+        "note": "Trial активируется привязкой и становится perpetual free plan; share-переход создаёт free сразу."
+      },
+      {
+        "id": "monetization",
+        "label": "Монетизация",
+        "focus": [
+          "premium-buy",
+          "confirm-paid"
+        ],
+        "note": "Покупка через Platega или Stars; подтверждение CAS переключает план на premium."
+      },
+      {
+        "id": "retention",
+        "label": "Удержание",
+        "focus": [
+          "expiry-reminder",
+          "traffic-cta",
+          "expire-downgrade",
+          "broadcast"
+        ],
+        "note": "CTA напоминаний и трафика ведут в покупку; истёкшие даунгрейдятся на free; рассылка возвращает аудиторию."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "users",
+      "label": "Пользователи"
+    },
+    {
+      "id": "invites",
+      "label": "Invite / Рефералы"
+    },
+    {
+      "id": "trial",
+      "label": "Trial"
+    },
+    {
+      "id": "sales",
+      "label": "Продажа"
+    },
+    {
+      "id": "retention",
+      "label": "CTA удержания",
+      "variant": "exception"
+    },
+    {
+      "id": "audience",
+      "label": "Рассылка"
+    }
+  ],
+  "phases": [
+    {
+      "id": "attract",
+      "label": "Привлечение",
+      "fromCol": 0,
+      "toCol": 2
+    },
+    {
+      "id": "activate",
+      "label": "Активация",
+      "fromCol": 3,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "monetize",
+      "label": "Монетизация и удержание",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "user",
+    "invite-link",
+    "share-deeplink",
+    "trial-landing",
+    "trial-bind",
+    "premium-buy",
+    "confirm-paid"
+  ],
+  "nodes": [
+    {
+      "id": "user",
+      "lane": "users",
+      "col": 0,
+      "type": "external",
+      "label": "Пользователь",
+      "sublabel": "Telegram / браузер",
+      "width": 128
+    },
+    {
+      "id": "invite-link",
+      "lane": "invites",
+      "col": 1,
+      "type": "backend",
+      "label": "Инвайт-код",
+      "sublabel": "GetOrCreateInvite",
+      "tag": "1 код на реферера",
+      "sources": [
+        {
+          "path": "internal/bot/referral_handler.go",
+          "line": 86,
+          "end_line": 132,
+          "label": "sendInviteLink"
+        }
+      ],
+      "width": 128
+    },
+    {
+      "id": "share-deeplink",
+      "lane": "invites",
+      "col": 2,
+      "type": "backend",
+      "label": "Deep-links",
+      "sublabel": "share_{code} · /i/{code}",
+      "tag": "код кэшируется 60 мин",
+      "sources": [
+        {
+          "path": "internal/bot/command.go",
+          "line": 166,
+          "end_line": 244,
+          "label": "handleShareStart"
+        }
+      ],
+      "width": 128
+    },
+    {
+      "id": "trial-landing",
+      "lane": "trial",
+      "col": 2,
+      "type": "frontend",
+      "label": "Trial-лендинг",
+      "sublabel": "GET /i/{code}",
+      "tag": "IP rate-limit",
+      "sources": [
+        {
+          "path": "internal/web/web.go",
+          "line": 727,
+          "end_line": 868,
+          "label": "HandleInvite"
+        },
+        {
+          "path": "internal/service/subscription.go",
+          "line": 703,
+          "end_line": 780,
+          "label": "CreateTrial"
+        }
+      ],
+      "width": 128
+    },
+    {
+      "id": "trial-bind",
+      "lane": "trial",
+      "col": 3,
+      "type": "backend",
+      "label": "Привязка trial",
+      "sublabel": "BindTrial",
+      "tag": "→ perpetual free",
+      "sources": [
+        {
+          "path": "internal/service/subscription.go",
+          "line": 786,
+          "end_line": 892,
+          "label": "BindTrial"
+        },
+        {
+          "path": "internal/database/trials.go",
+          "line": 117,
+          "end_line": 198,
+          "label": "BindTrialSubscription"
+        }
+      ],
+      "width": 128
+    },
+    {
+      "id": "free-sub",
+      "lane": "sales",
+      "col": 4,
+      "type": "backend",
+      "label": "Free подписка",
+      "sublabel": "create_subscription",
+      "tag": "без срока",
+      "sources": [
+        {
+          "path": "internal/bot/subscription_handler.go",
+          "line": 54,
+          "end_line": 96,
+          "label": "handleCreateSubscription"
+        },
+        {
+          "path": "internal/service/subscription.go",
+          "line": 137,
+          "end_line": 242,
+          "label": "Create"
+        }
+      ],
+      "width": 128
+    },
+    {
+      "id": "premium-buy",
+      "lane": "sales",
+      "col": 5,
+      "type": "backend",
+      "label": "Покупка premium",
+      "sublabel": "Platega · Stars",
+      "tag": "заказ + счёт",
+      "sources": [
+        {
+          "path": "internal/bot/subscription_handler.go",
+          "line": 427,
+          "end_line": 482,
+          "label": "handleBuyProduct"
+        },
+        {
+          "path": "internal/bot/stars_flow.go",
+          "line": 101,
+          "end_line": 110,
+          "label": "RequestPayment XTR"
+        }
+      ],
+      "width": 128
+    },
+    {
+      "id": "confirm-paid",
+      "lane": "sales",
+      "col": 5,
+      "type": "backend",
+      "label": "Оплата подтверждена",
+      "sublabel": "ConfirmOrderPaidCAS",
+      "tag": "premium-план",
+      "sources": [
+        {
+          "path": "internal/service/order_platega.go",
+          "line": 664,
+          "end_line": 680,
+          "label": "Platega CAS"
+        },
+        {
+          "path": "internal/service/order_stars.go",
+          "line": 339,
+          "end_line": 350,
+          "label": "Stars CAS"
+        }
+      ],
+      "width": 128,
+      "yOffset": 110
+    },
+    {
+      "id": "expiry-reminder",
+      "lane": "retention",
+      "col": 4,
+      "type": "messagebus",
+      "label": "CTA: срок истекает",
+      "sublabel": "3д / 1д / 3ч",
+      "tag": "Продлить Premium",
+      "sources": [
+        {
+          "path": "internal/service/subscription_reminders.go",
+          "line": 28,
+          "end_line": 111,
+          "label": "окна + SendExpiryReminder"
+        }
+      ],
+      "width": 128
+    },
+    {
+      "id": "traffic-cta",
+      "lane": "retention",
+      "col": 5,
+      "type": "messagebus",
+      "label": "CTA: трафик",
+      "sublabel": "90% · исчерпан",
+      "tag": "premium-кнопка",
+      "sources": [
+        {
+          "path": "internal/service/subscription_traffic_notifications.go",
+          "line": 328,
+          "end_line": 353,
+          "label": "notifyExhausted / notifyNinety"
+        }
+      ],
+      "width": 128
+    },
+    {
+      "id": "expire-downgrade",
+      "lane": "retention",
+      "col": 5,
+      "type": "database",
+      "label": "Истечение premium",
+      "sublabel": "даунгрейд → free",
+      "tag": "expire worker",
+      "sources": [
+        {
+          "path": "internal/scheduler/subscription_expire_worker.go",
+          "line": 46,
+          "end_line": 95,
+          "label": "ExpireSubscription"
+        }
+      ],
+      "width": 128,
+      "yOffset": 110
+    },
+    {
+      "id": "broadcast",
+      "lane": "audience",
+      "col": 5,
+      "type": "cloud",
+      "label": "Рассылка",
+      "sublabel": "BroadcastWorker",
+      "tag": "фильтр аудитории",
+      "sources": [
+        {
+          "path": "internal/bot/broadcast_flow.go",
+          "line": 527,
+          "end_line": 619,
+          "label": "startBroadcast"
+        },
+        {
+          "path": "internal/database/broadcasts.go",
+          "line": 10,
+          "end_line": 42,
+          "label": "BroadcastFilter"
+        }
+      ],
+      "width": 128
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "user",
+      "to": "invite-link",
+      "label": "/invite",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e2",
+      "from": "invite-link",
+      "to": "share-deeplink",
+      "label": "t.me share_ · веб /i/",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e3",
+      "from": "share-deeplink",
+      "to": "trial-landing",
+      "label": "веб-ссылка"
+    },
+    {
+      "id": "e4",
+      "from": "share-deeplink",
+      "to": "free-sub",
+      "label": "Получить подписку",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "e5",
+      "from": "trial-landing",
+      "to": "trial-bind",
+      "label": "start trial_{subID}"
+    },
+    {
+      "id": "e6",
+      "from": "trial-bind",
+      "to": "premium-buy",
+      "label": "меню → 💎 Premium",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e7",
+      "from": "free-sub",
+      "to": "premium-buy",
+      "label": "buy_premium_list"
+    },
+    {
+      "id": "e8",
+      "from": "premium-buy",
+      "to": "confirm-paid",
+      "label": "оплата",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e9",
+      "from": "confirm-paid",
+      "to": "expiry-reminder",
+      "label": "premium-срок",
+      "variant": "dashed"
+    },
+    {
+      "id": "e10",
+      "from": "expiry-reminder",
+      "to": "premium-buy",
+      "label": "Продлить Premium",
+      "role": "return"
+    },
+    {
+      "id": "e11",
+      "from": "traffic-cta",
+      "to": "premium-buy",
+      "label": "апгрейд лимита",
+      "role": "return"
+    },
+    {
+      "id": "e12",
+      "from": "confirm-paid",
+      "to": "expire-downgrade",
+      "label": "срок вышел",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "e13",
+      "from": "trial-bind",
+      "to": "broadcast",
+      "label": "фильтр аудитории",
+      "variant": "dashed"
+    },
+    {
+      "id": "e14",
+      "from": "confirm-paid",
+      "to": "broadcast",
+      "label": "фильтр аудитории",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Привлечение (код)",
+      "items": [
+        "У каждого реферера максимум один инвайт-код (миграция 005)",
+        "Две точки входа: deep-link бота share_{code} и веб-лендинг /i/{code}",
+        "Код приглашения кэшируется в pendingInvites на 60 минут до создания подписки",
+        "Атрибуция пишется в subscriptions.referred_by / invite_code внутри транзакции"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Механика trial",
+      "items": [
+        "Лендинг создаёт анонимный trial (telegram_id<0) и клиент на ноде до вставки в БД",
+        "IP rate-limit (TrialRateLimit в час) сериализован мьютексом",
+        "Активация через /start trial_{subID}: привязка переводит trial в perpetual free plan (expires_at=nil)",
+        "Неактивированные trial-подписки удаляет фоновой cleanup после депровижининга"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Монетизация и удержание",
+      "items": [
+        "Платные заказы: Platega (callback) или Telegram Stars (successful_payment); провайдер выбирается конфигом",
+        "Подтверждение ConfirmOrderPaidCAS активирует premium-план; продление прибавляет дни",
+        "CTA удержания: напоминания 3д/1д/3ч и порог трафика 90%/исчерпан ведут на покупку premium",
+        "После истечения срока expire worker даунгрейдит подписку на free (без удаления строки)"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Рассылка (возврат аудитории)",
+      "items": [
+        "Админская кампания таргетирует аудиторию фильтром: план, статус подписки, даты регистрации, неактивность, история оплат",
+        "Доставка с восстановлением после рестарта; получатели блок/недоступны фиксируются для деактивации",
+        "Реферальный бонус в коде НЕ начисляется: есть только атрибуция, уведомление рефереру и счётчик"
+      ]
+    }
+  ]
+}

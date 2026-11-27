@@ -1,62 +1,71 @@
 # Диаграммы проекта rs8kvn_bot
 
-Интерактивные standalone-диаграммы (archify, quality profile `showcase`). Каждая —
-самодостаточный HTML: темы dark/light, pan/zoom, поиск по узлам, трассировка связей,
-интерактивные главы (`meta.views`) для демонстрации по сценариям, экспорт PNG/SVG/WebM.
-Открывается в любом браузере, без сервера.
+Интерактивные standalone-диаграммы [Archify](https://github.com/tt-a1i/archify). Каждая
+диаграмма — самодостаточный HTML: темы dark/light, pan/zoom, поиск по узлам,
+трассировка связей, интерактивные сценарии (`meta.views`), экспорт PNG/SVG/WebM.
+Файлы открываются в браузере без сервера.
 
-Все диаграммы построены по коду репозитория (revision `849bd897`); JSON-спецификации
-лежат рядом и могут быть перегенерированы.
+Набор пересобран по коду репозитория на revision
+`300b5646189ef287ff268095da4183ff17858bbe`. JSON-спецификации лежат рядом с HTML;
+ссылки на исходники в них проверяются против зафиксированного revision.
 
-## Карта проекта
+## Система и эксплуатация
 
 | Файл | Тип | Что показывает |
 |---|---|---|
-| [project-map.html](project-map.html) | architecture | Общая карта: Telegram/HTTP вход, Service Layer, VPN-адаптеры, subserver, воркеры, SQLite, внешние системы |
+| [project-map.html](project-map.html) | architecture | Компоненты и границы: Telegram/HTTP, service layer, workers, SQLite, VPN-адаптеры, внешние платёжные системы |
+| [runtime-supervision.html](runtime-supervision.html) | architecture | Runtime-контур: fast-lane pre-checkout, financial mailbox, bounded handlers, отдельный payment BotAPI и supervisor воркеров |
+| [ci-pipeline.html](ci-pipeline.html) | workflow | PR/tag pipeline: race-тесты, vet, build, golangci-lint, gosec, Docker и публикация в GHCR |
+| [release-flow.html](release-flow.html) | workflow | Фактический релиз по SemVer-тегу: проверки → образ → GitHub Release |
+| [audit-log.html](audit-log.html) | dataflow | Append-only журнал: entity/actor/event, old/new state, best-effort и транзакционные исключения, retention |
 
-## Sequence — цепочки вызовов
+## Подписки и выдача доступа
 
-| Файл | Что показывает |
-|---|---|
-| [platega-payment-lifecycle.html](platega-payment-lifecycle.html) | Вебхук `/payment/callback`: guard-цепочка, per-order lock, `ConfirmOrderPaidCAS`, post-commit sync |
-| [sub-serving.html](sub-serving.html) | `GET /sub/{subID}`: кэш 240s с singleflight, параллельная агрегация нод, детект формата |
-| [subscription-intake.html](subscription-intake.html) | Создание подписки: DB-setup синхронно, внешний sync best-effort, выдача ссылки |
-| [trial-invite.html](trial-invite.html) | `/i/{code}`: валидация, rate-limit по IP, лендинг, race-safe привязка триала |
-| [broadcast.html](broadcast.html) | `/broadcast`: wizard, персистентная очередь, resume после рестарта, retry с классификацией |
-| [subscription-teardown.html](subscription-teardown.html) | Двухфазное удаление `/del`: revoke → депровизия → физическое удаление после пустой очереди нод |
+| Файл | Тип | Что показывает |
+|---|---|---|
+| [subscription-intake.html](subscription-intake.html) | sequence | Создание подписки: обязательный DB-setup, best-effort sync нод, выдача ссылки |
+| [sub-serving.html](sub-serving.html) | sequence | `GET /sub/{subID}`: кэш/singleflight, параллельный fetch, определение формата, клиентский ответ |
+| [subscription-nodes-sync.html](subscription-nodes-sync.html) | lifecycle | `pending_add → active ⇄ pending_update → removed`, retry/backoff и восстановление очереди |
+| [subscription-teardown.html](subscription-teardown.html) | sequence | `/del`: revoke → депровизия → физическое удаление после подтверждённой депровизии |
+| [config-aggregation.html](config-aggregation.html) | dataflow | Источники конфигов, конвертация форматов, traffic/userinfo, merge и кэш |
+| [traffic-accounting.html](traffic-accounting.html) | dataflow | Сбор трафика, 90%/100% пороги, idempotent bitmask и безопасное повторное включение |
 
-## Lifecycle — автоматы состояний
+## Продажи и платежи
 
-| Файл | Что показывает |
-|---|---|
-| [subscription-nodes-sync.html](subscription-nodes-sync.html) | `pending_add → active ⇄ pending_update → removed` + retry-очередь с backoff |
-| [order-lifecycle.html](order-lifecycle.html) | `pending → paid / expired / canceled / chargeback`: grace 5 минут, атомарный downgrade |
-| [subscription-lifecycle.html](subscription-lifecycle.html) | `created → active ⇄ expired`, отзыв `revoked` без физического удаления |
+| Файл | Тип | Что показывает |
+|---|---|---|
+| [order-lifecycle.html](order-lifecycle.html) | lifecycle | Состояния заказа, CAS-подтверждение, истечение, отмена, chargeback и повторная доставка callback |
+| [subscription-lifecycle.html](subscription-lifecycle.html) | lifecycle | Реальная политика срока, downgrade, reanimation и revoke без обычного физического удаления |
+| [stars-payment.html](stars-payment.html) | sequence | Telegram Stars: согласие, invoice, pre-checkout, successful payment, идемпотентность и авто-возврат |
+| [platega-payment-lifecycle.html](platega-payment-lifecycle.html) | sequence | Legacy Platega callback: guard-цепочка, per-order lock, CAS и post-commit sync |
+| [commerce-model.html](commerce-model.html) | erd | Физическая модель commerce-домена: subscriptions, orders, products, plans, nodes и audit log |
+| [product-catalog.html](product-catalog.html) | tree | Иерархия возможностей и продаваемых продуктов, привязанная к планам и нодам |
+| [payment-providers.html](payment-providers.html) | class | Provider-neutral контракт оплаты и реализации Platega/Telegram Stars вокруг `OrderService` |
 
-## Workflow — процессы
+## Маркетинг, продажи и коммуникации
 
-| Файл | Что показывает |
-|---|---|
-| [ci-pipeline.html](ci-pipeline.html) | CI: test → vet → golangci-lint → gosec → Docker → ghcr.io, red-CI стоп |
-| [release-flow.html](release-flow.html) | Релиз: SemVer-тег → пайплайн → образ → GitHub Release → deploy → healthcheck |
-
-## Dataflow — потоки данных
-
-| Файл | Что показывает |
-|---|---|
-| [traffic-accounting.html](traffic-accounting.html) | Учёт трафика: 90%/exhausted предупреждения, bitmask `traffic_reminders_sent`, ре-включение после сброса |
-| [config-aggregation.html](config-aggregation.html) | Агрегация конфигов: 3 типа нод → fetch → детект формата → merge → кэш → клиент |
+| Файл | Тип | Что показывает |
+|---|---|---|
+| [marketing-funnel.html](marketing-funnel.html) | workflow | Код-подтверждённая воронка: invite/referral → trial → free → premium → renewal/upsell |
+| [customer-journey.html](customer-journey.html) | lifecycle | Путь клиента от первого контакта до активации, использования, напоминаний и реактивации |
+| [referral-lifecycle.html](referral-lifecycle.html) | lifecycle | Invite-код, переход по ссылке, trial request, привязка к Telegram и очистка |
+| [broadcast.html](broadcast.html) | sequence | `/broadcast`: таргетинг, snapshot аудитории, claim/retry, resume, отчёт и отмена |
+| [trial-invite.html](trial-invite.html) | sequence | `/i/{code}`: валидация, rate-limit, лендинг, deep link и race-safe привязка триала |
 
 ## Регенерация
 
-Спецификации (`*.json`) лежат рядом с HTML. Пересборка любой диаграммы:
+Спецификации (`*.json`) лежат рядом с HTML. Основной проверяемый путь:
 
 ```bash
-node <path-to-archify>/bin/archify.mjs deliver <type> <spec.json> <output.html> --quality showcase
+node /home/kereal/.agents/skills/archify/bin/archify.mjs finalize \
+  <type> <spec.json> <output.html> \
+  --repo-root /home/kereal/rs8kvn_bot \
+  --quality showcase \
+  --json
 ```
 
-где `<type>` — `architecture` / `sequence` / `lifecycle` / `workflow` / `dataflow`
-(тип виден в суффиксе файла спецификации или в поле `diagram_type`).
-
-Для `architecture` с source-evidence добавляется `--repo-root <путь к репозиторию>` —
-пути в `sources[]` проверяются на соответствие зафиксированному revision.
+`<type>` — `architecture` / `workflow` / `sequence` / `dataflow` / `lifecycle` /
+`erd` / `tree` / `class`. `finalize` проверяет схему, source-evidence, доставляет
+HTML и прогоняет browser-check. При повторной доставке существующего HTML укажите
+отдельный `--out-dir .archify/finalize/<slug>/review-N`, чтобы не перезаписать
+привязанные к предыдущей версии evidence-файлы.

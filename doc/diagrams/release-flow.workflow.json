@@ -1,0 +1,275 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "rs8kvn_bot — релизный поток (тег v*)",
+    "locale": "ru",
+    "output": "doc/diagrams/release-flow.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
+    "legend": {
+      "mode": "hidden"
+    }
+  },
+  "lanes": [
+    {
+      "id": "trigger",
+      "label": "Триггер"
+    },
+    {
+      "id": "verify",
+      "label": "Job: test"
+    },
+    {
+      "id": "image",
+      "label": "Job: build-and-push"
+    },
+    {
+      "id": "release",
+      "label": "Job: release"
+    }
+  ],
+  "phases": [
+    {
+      "id": "setup",
+      "label": "Триггер",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "checks",
+      "label": "Гейт качества",
+      "fromCol": 2,
+      "toCol": 4,
+      "variant": "security"
+    },
+    {
+      "id": "publish",
+      "label": "Публикация",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "emphasis"
+    }
+  ],
+  "mainPath": [
+    "semver_tag",
+    "checkout_setup",
+    "race_tests",
+    "static_checks",
+    "gosec",
+    "ghcr_login",
+    "image_push",
+    "gh_release"
+  ],
+  "nodes": [
+    {
+      "id": "semver_tag",
+      "lane": "trigger",
+      "col": 0,
+      "type": "external",
+      "label": "push тега v*",
+      "sublabel": "SemVer",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 7,
+          "end_line": 8
+        }
+      ]
+    },
+    {
+      "id": "checkout_setup",
+      "lane": "verify",
+      "col": 1,
+      "type": "backend",
+      "label": "Checkout + setup-go",
+      "sublabel": "go-version из go.mod",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 24,
+          "end_line": 36
+        }
+      ]
+    },
+    {
+      "id": "race_tests",
+      "lane": "verify",
+      "col": 2,
+      "type": "backend",
+      "label": "go test -race",
+      "sublabel": "-coverprofile · RUN_SMOKE=1",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 38,
+          "end_line": 41
+        }
+      ]
+    },
+    {
+      "id": "static_checks",
+      "lane": "verify",
+      "col": 3,
+      "type": "backend",
+      "label": "vet · build · golangci-lint",
+      "sublabel": "v2.15, 0 замечаний",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 53,
+          "end_line": 63
+        }
+      ]
+    },
+    {
+      "id": "gosec",
+      "lane": "verify",
+      "col": 4,
+      "type": "security",
+      "label": "gosec -quiet",
+      "sublabel": "fail на каждую не-подавленную находку",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 65,
+          "end_line": 70
+        }
+      ]
+    },
+    {
+      "id": "ghcr_login",
+      "lane": "image",
+      "col": 4,
+      "type": "security",
+      "label": "login ghcr.io",
+      "sublabel": "GITHUB_TOKEN · packages: write",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 84,
+          "end_line": 86
+        },
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 100,
+          "end_line": 105
+        }
+      ]
+    },
+    {
+      "id": "image_push",
+      "lane": "image",
+      "col": 5,
+      "type": "cloud",
+      "label": "build & push",
+      "sublabel": "semver + sha теги",
+      "tag": "build-args VERSION/SHA/BUILD_TIME",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 107,
+          "end_line": 139
+        }
+      ]
+    },
+    {
+      "id": "gh_release",
+      "lane": "release",
+      "col": 5,
+      "type": "cloud",
+      "label": "GitHub Release",
+      "sublabel": "changelog + release notes",
+      "tag": "generateReleaseNotes",
+      "sources": [
+        {
+          "path": ".github/workflows/docker.yml",
+          "line": 150,
+          "end_line": 187
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "tag-setup",
+      "from": "semver_tag",
+      "to": "checkout_setup",
+      "label": "refs/tags/v*",
+      "variant": "emphasis"
+    },
+    {
+      "id": "setup-test",
+      "from": "checkout_setup",
+      "to": "race_tests",
+      "variant": "default"
+    },
+    {
+      "id": "test-static",
+      "from": "race_tests",
+      "to": "static_checks",
+      "variant": "default"
+    },
+    {
+      "id": "static-gosec",
+      "from": "static_checks",
+      "to": "gosec",
+      "variant": "security"
+    },
+    {
+      "id": "gosec-login",
+      "from": "gosec",
+      "to": "ghcr_login",
+      "label": "needs: test",
+      "variant": "emphasis"
+    },
+    {
+      "id": "login-push",
+      "from": "ghcr_login",
+      "to": "image_push",
+      "label": "ghcr.io/<repo>",
+      "variant": "emphasis"
+    },
+    {
+      "id": "push-release",
+      "from": "image_push",
+      "to": "gh_release",
+      "label": "needs: build-and-push",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Порядок работ",
+      "items": [
+        "needs: test → build-and-push → release: релиз публикуется только после зелёного гейта и образа",
+        "Теги образа: {{version}}, {{major}}.{{minor}} и sha; build-args VERSION, COMMIT_SHA, BUILD_TIME",
+        "build-args VERSION, COMMIT_SHA, BUILD_TIME — версия и происхождение внутри образа",
+        "Образ пушится только для linux/amd64; кэш сборки — GitHub Actions cache",
+        "Changelog: git log от предыдущего тега; GitHub Release с generateReleaseNotes"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Разрешения",
+      "items": [
+        "build-and-push: contents: read, packages: write",
+        "release: contents: write",
+        "Все checkout с persist-credentials: false"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Чего в потоке нет",
+      "items": [
+        "Шагов deploy на сервер в workflow нет",
+        "Шагов healthcheck/post-deploy в workflow нет",
+        "Артефакт релиза — образ в ghcr.io и GitHub Release с примечаниями"
+      ]
+    }
+  ]
+}

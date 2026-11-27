@@ -4,45 +4,89 @@
   "meta": {
     "title": "Subscription intake: от команды до нод",
     "output": "doc/diagrams/subscription-intake.html",
-    "viewBox": [1000, 760],
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "provider": "github",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    },
     "quality_profile": "showcase",
     "views": [
       { "id": "db-setup", "label": "Структурная фаза", "focus": ["user", "bot", "subs", "db"], "note": "Резолв плана и запись подписки с pending-связями нод — синхронно и обязательно." },
-      { "id": "external-sync", "label": "Внешний sync", "focus": ["subs", "nodes"], "note": "Создание клиентов на нодах best-effort: сбой дообгонит SyncPendingNodes." }
+      { "id": "external-sync", "label": "Внешний sync", "focus": ["subs", "nodes"], "note": "Создание клиентов на нодах best-effort: сбой дообгонит sync-воркер (5 мин)." }
     ]
   },
   "participants": [
     { "id": "user", "type": "external", "label": "Пользователь", "sublabel": "Telegram" },
-    { "id": "bot", "type": "backend", "label": "Bot Handler", "sublabel": "кнопки" },
-    { "id": "subs", "type": "backend", "label": "SubSvc", "sublabel": "intake" },
-    { "id": "db", "type": "database", "label": "SQLite", "sublabel": "GORM" },
-    { "id": "nodes", "type": "cloud", "label": "VPN-ноды", "sublabel": "адаптеры" }
+    { "id": "bot", "type": "backend", "label": "Bot Handler", "sublabel": "internal/bot", "sources": [{ "path": "internal/bot/subscription_handler.go", "line": 54, "end_line": 100 }, { "path": "internal/bot/subscription_handler.go", "line": 290, "end_line": 352 }] },
+    { "id": "subs", "type": "backend", "label": "SubSvc", "sublabel": "intake", "sources": [{ "path": "internal/service/subscription.go", "line": 137, "end_line": 252 }, { "path": "internal/service/subscription.go", "line": 253, "end_line": 311 }, { "path": "internal/service/subscription.go", "line": 1257, "end_line": 1310 }] },
+    { "id": "db", "type": "database", "label": "SQLite", "sublabel": "GORM", "sources": [{ "path": "internal/database/subscriptions.go", "line": 73, "end_line": 96 }, { "path": "internal/database/subscription_nodes.go", "line": 90 }] },
+    { "id": "nodes", "type": "cloud", "label": "VPN-ноды", "sublabel": "адаптеры", "sources": [{ "path": "internal/service/sync.go", "line": 227, "end_line": 276 }] },
+    { "id": "tg", "type": "external", "label": "Telegram", "sublabel": "админ", "sources": [{ "path": "internal/bot/admin.go", "line": 614, "end_line": 636 }] }
   ],
   "segments": [
-    { "from": 160, "to": 270, "label": "Запрос" },
-    { "from": 285, "to": 405, "label": "Запись" },
-    { "from": 420, "to": 530, "label": "Sync" },
-    { "from": 545, "to": 660, "label": "Ответ" }
+    { "from": 150, "to": 300, "label": "Запрос" },
+    { "from": 315, "to": 500, "label": "Запись" },
+    { "from": 515, "to": 710, "label": "Ноды" },
+    { "from": 725, "to": 905, "label": "Ответ" }
   ],
   "messages": [
-    { "id": "cmd", "from": "user", "to": "bot", "y": 195, "label": "/start · «Получить подписку»", "variant": "emphasis" },
-    { "id": "create", "from": "bot", "to": "subs", "y": 235, "label": "Create(план)" },
-    { "id": "db-setup", "from": "subs", "to": "db", "y": 320, "label": "INSERT подписка + pending_add", "variant": "emphasis", "note": "DB-setup: синхронно-обязателен, сбой → ошибка пользователю" },
-    { "id": "committed", "from": "db", "to": "subs", "y": 365, "label": "записи созданы", "variant": "return" },
-    { "id": "sync", "from": "subs", "to": "nodes", "y": 455, "label": "SyncSubscription", "variant": "dashed" },
-    { "id": "sync-outcome", "from": "nodes", "to": "subs", "y": 490, "label": "клиенты созданы / сбой", "variant": "return", "note": "сбой — retry воркером с backoff" },
-    { "id": "sub-url", "from": "subs", "to": "bot", "y": 560, "label": "ссылка /sub/{subID}", "variant": "return" },
-    { "id": "menu", "from": "bot", "to": "user", "y": 600, "label": "меню · QR-код", "variant": "return" }
+    { "id": "cmd", "from": "user", "to": "bot", "y": 190, "label": "/start · «Получить подписку»", "variant": "emphasis" },
+    { "id": "lookup", "from": "bot", "to": "db", "y": 235, "label": "GetByTelegramID", "variant": "default", "note": "double-click guard: inProgressSyncMap" },
+    { "id": "lookup-row", "from": "db", "to": "bot", "y": 310, "label": "найдена / нет", "variant": "return" },
+    { "id": "create", "from": "bot", "to": "subs", "y": 375, "label": "Create(chatID, inviteCode)", "variant": "emphasis" },
+    { "id": "resolve", "from": "subs", "to": "db", "y": 420, "label": "free-план · UUID · subID", "variant": "default", "note": "existing → ensureNodes · revoked → reanimate" },
+    { "id": "insert", "from": "subs", "to": "db", "y": 485, "label": "tx: INSERT подписки + invite", "variant": "emphasis", "note": "синхронно-обязателен: сбой → ошибка пользователю" },
+    { "id": "pending-add", "from": "subs", "to": "db", "y": 555, "label": "pending_add по плану", "variant": "default", "note": "GetNodesByPlanID · UpsertSubscriptionNode" },
+    { "id": "sync", "from": "subs", "to": "nodes", "y": 640, "label": "SyncSubscription", "variant": "dashed", "note": "сразу после pending_add; сбой дообгонит sync-воркер" },
+    { "id": "sync-outcome", "from": "nodes", "to": "subs", "y": 700, "label": "клиенты созданы / retry", "variant": "return" },
+    { "id": "audit", "from": "subs", "to": "db", "y": 735, "label": "audit subscription_created", "variant": "dashed" },
+    { "id": "sub-url", "from": "subs", "to": "bot", "y": 790, "label": "SubURL /sub/{subID}", "variant": "return" },
+    { "id": "admin-note", "from": "bot", "to": "tg", "y": 830, "label": "notifyAdmin (best-effort)", "variant": "dashed" },
+    { "id": "menu", "from": "bot", "to": "user", "y": 890, "label": "ссылка + QR-клавиатура", "variant": "return" }
   ],
   "activations": [
-    { "participant": "bot", "from": 195, "to": 605, "type": "backend" },
-    { "participant": "subs", "from": 235, "to": 565, "type": "backend" },
-    { "participant": "db", "from": 315, "to": 370, "type": "database" },
-    { "participant": "nodes", "from": 450, "to": 495, "type": "cloud" }
+    { "participant": "bot", "from": 190, "to": 895, "type": "backend" },
+    { "participant": "subs", "from": 375, "to": 795, "type": "backend" },
+    { "participant": "db", "from": 235, "to": 740, "type": "database" },
+    { "participant": "nodes", "from": 635, "to": 705, "type": "cloud" },
+    { "participant": "tg", "from": 825, "to": 840, "type": "external" }
   ],
   "cards": [
-    { "dot": "emerald", "title": "Двухфазная провизия", "items": ["DB-setup пишется в транзакции и обязан succeed", "Внешний sync — best-effort с экспоненциальным backoff", "Пользователь получает ответ до полной провизии нод"] },
-    { "dot": "cyan", "title": "Планы", "items": ["Plan резолвится по имени, без хардкода ID", "Free-подписка использует rolling-конфиг reset=30", "Trial привязывается позже через BindTrialSubscription"] },
-    { "dot": "amber", "title": "Ответ пользователю", "items": ["Sub URL валиден сразу: subserver отдаст конфиг после провизии", "Сбой sync не портит ответ — статус active уже записан", "Повторные попытки видны в subscription_nodes.retry_count"] }
+    {
+      "dot": "emerald",
+      "title": "Двухфазная провизия",
+      "items": [
+        "DB-setup (подписка + invite) пишется в транзакции и обязан succeed",
+        "Внешний sync — best-effort: сбой дообгонит sync-воркер (тик 5 мин)",
+        "Клиенты на нодах создаются в двухфазном цикле pending_add → active"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Планы и реанимация",
+      "items": [
+        "Free-план резолвится по имени (без хардкода ID)",
+        "Existing-подписка → сразу ссылка + ensureSubscriptionNodes",
+        "Revoked после частично-неудачного delete → reanimate: связи нод сбрасываются в pending_add"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Инвайты и trial",
+      "items": [
+        "Invite code из deep-link резолвится в tx и пишет ReferredBy",
+        "Trial-подписка идёт отдельным путём: страница /i/{code} → BindTrial",
+        "Повторный клик гасится in-progress guard'ом чата"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Ответ пользователю",
+      "items": [
+        "Sub URL валиден сразу: subserver отдаст конфиг после провизии нод",
+        "Сбой sync не портит ответ — статус active уже записан",
+        "Ссылка + QR-клавиатура уходят отдельным сообщением"
+      ]
+    }
   ]
 }

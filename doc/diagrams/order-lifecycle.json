@@ -1,38 +1,153 @@
 {
-  "schema_version": 1,
+  "schema_version": 3,
   "diagram_type": "lifecycle",
   "meta": {
-    "title": "Жизненный цикл заказа (Order)",
+    "title": "Жизненный цикл заказа (Platega / Telegram Stars)",
+    "locale": "ru",
     "output": "doc/diagrams/order-lifecycle.html",
     "quality_profile": "showcase",
-    "views": [
-      { "id": "confirm-path", "label": "Оплата", "focus": ["pending", "paid"], "note": "CONFIRMED вебхук валидирует сумму и атомарно подтверждает заказ." },
-      { "id": "grace", "label": "Settlement grace", "focus": ["pending", "expired", "paid"], "note": "Просроченный заказ принимает оплату ещё 5 минут после дедлайна ссылки." },
-      { "id": "cancel-paths", "label": "Отмены и chargeback", "focus": ["pending", "canceled", "chargebacked"], "note": "CANCELED отменяет pending-заказ, CHARGEBACKED понижает подписку до free." }
-    ]
+    "repository": {
+      "url": "https://github.com/kereal/rs8kvn_bot.git",
+      "revision": "300b5646189ef287ff268095da4183ff17858bbe"
+    }
   },
-  "lanes": [
-    { "id": "main", "label": "Оплаченный путь" },
-    { "id": "waiting", "label": "Отложенный исход" },
-    { "id": "terminal", "label": "Терминальные исходы" }
+  "mainPath": [
+    "pending",
+    "paid"
   ],
   "states": [
-    { "id": "pending", "type": "start", "label": "pending", "sublabel": "заказ создан", "lane": "main", "col": 0, "step": "01", "tag": "ожидание оплаты" },
-    { "id": "paid", "type": "success", "label": "paid", "sublabel": "ConfirmOrderPaidCAS", "lane": "main", "col": 2, "step": "02", "tag": "order+sub+plan" },
-    { "id": "expired", "type": "waiting", "label": "expired", "sublabel": "PaymentExpiresAt прошло", "lane": "waiting", "col": 1, "tag": "grace 5 мин" },
-    { "id": "canceled", "type": "failure", "label": "canceled", "sublabel": "CancelOrderCAS", "lane": "terminal", "col": 0, "tag": "терминальный" },
-    { "id": "chargebacked", "type": "failure", "label": "chargeback", "sublabel": "downgrade в free план", "lane": "terminal", "col": 2, "tag": "ручной разбор" }
+    {
+      "id": "pending",
+      "type": "start",
+      "label": "pending",
+      "sublabel": "создан при запросе оплаты",
+      "sources": [
+        {
+          "path": "internal/database/orders.go",
+          "line": 190,
+          "end_line": 220
+        },
+        {
+          "path": "internal/service/order_platega.go",
+          "line": 134,
+          "end_line": 191
+        }
+      ]
+    },
+    {
+      "id": "paid",
+      "type": "success",
+      "label": "paid",
+      "sublabel": "CAS: pending|expired → paid",
+      "sources": [
+        {
+          "path": "internal/database/orders.go",
+          "line": 402,
+          "end_line": 477
+        }
+      ]
+    },
+    {
+      "id": "expired",
+      "type": "decision",
+      "label": "expired",
+      "sublabel": "истекла; возможен поздний callback",
+      "sources": [
+        {
+          "path": "internal/database/orders.go",
+          "line": 89,
+          "end_line": 95
+        },
+        {
+          "path": "internal/service/order_reconcile.go",
+          "line": 25,
+          "end_line": 52
+        }
+      ]
+    },
+    {
+      "id": "canceled",
+      "type": "failure",
+      "label": "canceled",
+      "sublabel": "отказ провайдера, чарджбэк или возврат",
+      "sources": [
+        {
+          "path": "internal/database/orders.go",
+          "line": 801,
+          "end_line": 815
+        },
+        {
+          "path": "internal/database/orders.go",
+          "line": 591,
+          "end_line": 690
+        }
+      ]
+    }
   ],
   "transitions": [
-    { "id": "t-confirm", "from": "pending", "to": "paid", "label": "CONFIRMED вебхук · amount ≥ order", "variant": "emphasis", "route": "straight" },
-    { "id": "t-expire", "from": "pending", "to": "expired", "label": "истёк срок ссылки оплаты", "variant": "default", "route": "drop" },
-    { "id": "t-grace", "from": "expired", "to": "paid", "label": "CONFIRMED в grace", "variant": "security", "route": "drop" },
-    { "id": "t-cancel", "from": "pending", "to": "canceled", "label": "CANCELED вебхук", "variant": "security", "route": "drop" },
-    { "id": "t-chargeback", "from": "paid", "to": "chargebacked", "label": "CHARGEBACKED · если нет другого paid-заказа", "variant": "security", "route": "right-channel" }
+    {
+      "id": "pending-paid",
+      "from": "pending",
+      "to": "paid",
+      "label": "оплата подтверждена (CAS)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "pending-expired",
+      "from": "pending",
+      "to": "expired",
+      "label": "истечение платёжной ссылки"
+    },
+    {
+      "id": "expired-paid",
+      "from": "expired",
+      "to": "paid",
+      "label": "поздний callback (grace)",
+      "variant": "dashed"
+    },
+    {
+      "id": "pending-canceled",
+      "from": "pending",
+      "to": "canceled",
+      "label": "webhook CANCELED",
+      "variant": "security"
+    },
+    {
+      "id": "paid-canceled",
+      "from": "paid",
+      "to": "canceled",
+      "label": "чарджбэк / возврат",
+      "variant": "security"
+    }
   ],
   "cards": [
-    { "dot": "emerald", "title": "Подтверждение", "items": ["Повторный CONFIRMED для paid — идемпотентный no-op", "Комиссия провайдера в сумме допустима, недоплата отклоняется", "Сбой БД откатывает всё: заказ остаётся pending для retry вебхука"] },
-    { "dot": "amber", "title": "Просрочка", "items": ["Просроченный заказ принимает оплату 5 минут после дедлайна", "Позднее уведомление алертит админа (late_confirmed_callback)", "Ссылка оплаты при этом не продлевается"] },
-    { "dot": "rose", "title": "Отмены", "items": ["CANCELED отменяет только ещё не оплаченный заказ", "CHARGEBACKED на paid понижает подписку атомарно с отменой", "Понижение пропускается, если живёт другой paid-заказ"] }
+    {
+      "dot": "cyan",
+      "title": "Провайдеры",
+      "items": [
+        "Platega: HTTP-клиент + вебхук /payment/callback; допускает amount >= ожидаемого (разница = комиссия)",
+        "Stars: pre_checkout_query + successful_payment через отдельный payment BotAPI (HTTP 4s); ValidateAmount требует точного равенства",
+        "PaymentProvider хранится в orders.payment_provider: platega | telegram_stars",
+        "Поздний callback принимается в settlement grace-окне (только Platega): ConfirmOrderPaidCAS принимает pending|expired одной CAS-веткой"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Атомарность",
+      "items": [
+        "Per-payment lock: конкурентные вебхуки одного provider_payment_id сериализуются (таймаут 30s)",
+        "CAS-переход и продление подписки и аудит — в одной транзакции",
+        "Повторная доставка того же charge — тихий no-op"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Реконсиляция",
+      "items": [
+        "ReconcilePendingOrders каждые 1h: CONFIRMED — активирует, явный терминальный отказ — истекает локально",
+        "Два прохода: Stars истекает локально без обращения к провайдеру, Platega — через API",
+        "Бюджет прохода 60s; выборка последних 30 дней, более старые — ручная проверка"
+      ]
+    }
   ]
 }
