@@ -12,6 +12,7 @@
   import Overview from './views/Overview.svelte'
   import Subscriptions from './views/Subscriptions.svelte'
   import SubscriptionDetail from './views/SubscriptionDetail.svelte'
+  import SyncQueue from './views/SyncQueue.svelte'
   import Broadcasts from './views/Broadcasts.svelte'
   import BroadcastDetail from './views/BroadcastDetail.svelte'
   import TrialRequests from './views/TrialRequests.svelte'
@@ -30,6 +31,7 @@
     broadcasts: { label: 'Рассылки', component: Broadcasts, detail: BroadcastDetail },
     orders: { label: 'Заказы', component: Orders, detail: OrdersDetail },
     subscriptions: { label: 'Подписки', component: Subscriptions, detail: SubscriptionDetail },
+    'sync-queue': { label: 'Очередь синхронизации', component: SyncQueue },
     audit: { label: 'Журнал', component: AuditLog }
   }
 

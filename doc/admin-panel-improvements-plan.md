@@ -23,6 +23,8 @@
   план-документ и зафиксировать отдельным коммитом.
 - Статус выполнения: задача 0 (с задачами 4, 5, 6) — коммит `3a67e33`;
   задача 1 — коммит `a309d1f`.
+- Задача 3: отдельный экран `#/sync-queue` + `GET /admin/api/sync-queue`, ТЗ
+  `doc/specs/admin/10-sync-queue.md`.
 - Задача 2 сделана без миграции: возвраты читаются из событий аудита
   (`payment_refunded`, `payment_auto_refunded`, `chargeback_received`), которые
   добавлены в `auditRetentionExemptEvents` — долговечность, раздельные валюты и

@@ -274,6 +274,7 @@
           все привязки синхронизированы
         {/if}
       </span>
+      <button class="btn btn-ghost queue-link" onclick={() => goTo('#/sync-queue')}>Очередь</button>
     </section>
 
     <section class="panel kpi">
@@ -289,7 +290,8 @@
          предупреждение остаётся полноценным, а не сжатым до одной цифры. -->
     <div class="notice nav-warn queue-note">
       В очереди есть несинхронизированные привязки — самая старая: {formatAge(data.bindings.oldest_pending_at)}.
-      Фоновый воркер повторяет попытки сам; кнопка «Пересинхронизировать» в карточке подписки запускает синхронизацию принудительно.
+      Фоновый воркер повторяет попытки сам; кнопка «Пересинхронизировать» запускает прогон принудительно.
+      <button class="btn btn-ghost" onclick={() => goTo('#/sync-queue')}>Открыть очередь</button>
     </div>
   {/if}
 
@@ -403,6 +405,7 @@
           <span class="badge {b.cls}">{b.label}: {b.count}</span>
         {/each}
       </div>
+      <button class="btn btn-ghost" onclick={() => goTo('#/sync-queue')}>Очередь синхронизации</button>
     </section>
 
     <section class="panel card">
@@ -492,6 +495,16 @@
 
   .queue-note {
     margin-bottom: 16px;
+  }
+
+  /* Кнопка очереди в KPI-плитке: мелкая, в правом нижнем углу. */
+  .queue-link {
+    position: absolute;
+    right: 10px;
+    bottom: 8px;
+    margin: 0;
+    padding: 2px 8px;
+    font-size: 12px;
   }
 
   .columns {

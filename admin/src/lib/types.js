@@ -280,6 +280,23 @@
 /** GET /admin/api/audit/events — реестр значений фильтров (admin/audit.go). @typedef {{events: string[], entity_types: string[], actor_types: string[]}} AuditRegistry */
 
 /**
+ * GET /admin/api/sync-queue — одна пара подписка↔нода в очереди
+ * (admin/sync_queue.go syncQueueItem). last_error обрезан сервером (300
+ * символов) и может быть null.
+ * @typedef {object} SyncQueueRow
+ * @property {number} subscription_id
+ * @property {number} telegram_id
+ * @property {string} subscription_id_public
+ * @property {number} node_id
+ * @property {string} node_name
+ * @property {string} status — pending_add | pending_update | pending_remove
+ * @property {number} retry_count
+ * @property {string|null} retry_at
+ * @property {string|null} last_error
+ * @property {string} updated_at
+ */
+
+/**
  * GET /admin/api/subscriptions — строка списка подписок
  * (admin/subscriptions.go subscriptionItem).
  * @typedef {object} Subscription

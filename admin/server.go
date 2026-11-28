@@ -68,6 +68,7 @@ type Server struct {
 	subSync    SubscriptionSyncActions
 	traffic    TrafficSource  // detail card: live traffic read (SetTrafficSource)
 	nodeLive   NodeLiveSource // node detail: live panel read (SetNodeLiveSource)
+	syncQueue  SyncQueueStore // screen: sync queue (read-only)
 
 	// screen: overview — aggregates over the domain tables (see database
 	// GetOverviewSnapshot) plus the build stamp and uptime.
@@ -108,6 +109,7 @@ func NewServer(addr, token string, db *database.Service) *Server {
 		audit:      db, // screen: audit
 		broadcasts: db, // screen: broadcasts
 		subs:       db, // screen: subscriptions (reads; mutations via SetSubscriptionServices)
+		syncQueue:  db, // screen: sync queue
 		overview:   db, // screen: overview
 		startedAt:  time.Now(),
 		authLimiter: newFailedAuthLimiter(
@@ -199,6 +201,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/trials/stats", s.withAuth(s.handleTrialStats))
 
 	// --- subscriptions ---
+	mux.HandleFunc("GET /admin/api/sync-queue", s.withAuth(s.handleListSyncQueue))
 	mux.HandleFunc("GET /admin/api/subscriptions", s.withAuth(s.handleListSubscriptions))
 	mux.HandleFunc("GET /admin/api/subscriptions/{id}", s.withAuth(s.handleGetSubscription))
 	mux.HandleFunc("GET /admin/api/subscriptions/{id}/traffic", s.withAuth(s.handleGetSubscriptionTraffic))
