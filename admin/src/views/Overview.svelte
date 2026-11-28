@@ -23,6 +23,12 @@
   // (период/валюта), её время не обязано совпадать со временем основного экрана.
   let revenueUpdatedAt = $state(null)
 
+  /** @type {import('../lib/types.js').PaymentConfig|null} */
+  let payment = $state(null)
+
+  // Провайдеры — подписи, а не бизнес-логика; незнакомый код показывается сырым.
+  const PROVIDER_LABEL = { telegram_stars: 'Telegram Stars', platega: 'Platega' }
+
   async function load() {
     loading = true
     error = ''
@@ -35,6 +41,16 @@
       loading = false
     }
     loadRevenue()
+    loadPayment()
+  }
+
+  // Платёжный режим грузится отдельно и молча: без него экран живёт.
+  async function loadPayment() {
+    try {
+      payment = await api.get('/admin/api/payment/config')
+    } catch {
+      payment = null
+    }
   }
 
   async function loadRevenue() {
@@ -385,6 +401,23 @@
         </button>
       {/if}
       <button class="btn btn-ghost" onclick={() => goTo('#/orders')}>Открыть заказы</button>
+    </section>
+
+    <section class="panel card">
+      <h2>Платежи</h2>
+      {#if !payment}
+        <div class="kv"><span>Режим</span><span class="muted">недоступен</span></div>
+      {:else}
+        <div class="kv"><span>Провайдер</span><span>{PROVIDER_LABEL[payment.provider] || payment.provider || '—'}</span></div>
+        <div class="kv">
+          <span>Приём оплат</span>
+          <span class:strong={payment.enabled}>{payment.enabled ? 'включён' : 'выключен'}</span>
+        </div>
+        <div class="kv">
+          <span>Валюты</span>
+          <span class="mono">{payment.supported_currencies?.join(', ') || '—'}</span>
+        </div>
+      {/if}
     </section>
 
     <section class="panel card">

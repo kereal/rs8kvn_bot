@@ -76,6 +76,10 @@ type Server struct {
 	build     BuildInfo
 	startedAt time.Time
 
+	// payment — снимок активного платёжного режима из config.Config
+	// (SetPaymentConfig). Только чтение: панель провайдер не переключает.
+	payment PaymentConfig
+
 	// authLimiter throttles token guessing (ADR-0002 P3). Per server, so tests
 	// and the dev harness each start with a full budget.
 	authLimiter *failedAuthLimiter
@@ -134,6 +138,13 @@ func (s *Server) SetBuildInfo(b BuildInfo) {
 	s.build = b
 }
 
+// SetPaymentConfig exposes the active payment mode to the state and products
+// screens. It is the same config the bot sells with, not a second source of
+// truth, and it carries no credentials.
+func (s *Server) SetPaymentConfig(cfg PaymentConfig) {
+	s.payment = cfg
+}
+
 // SetBroadcastDeactivator wires the subscription service used by the
 // deactivate-blocked action. The panel never sends Telegram messages itself:
 // only the revocation service call goes through here (spec 06 §3).
@@ -173,6 +184,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/orders", s.withAuth(s.handleListOrders))
 	mux.HandleFunc("GET /admin/api/orders/{id}", s.withAuth(s.handleGetOrder))
 	mux.HandleFunc("GET /admin/api/revenue", s.withAuth(s.handleRevenue))
+	mux.HandleFunc("GET /admin/api/payment/config", s.withAuth(s.handlePaymentConfig))
 
 	// --- broadcasts ---
 	mux.HandleFunc("GET /admin/api/broadcasts", s.withAuth(s.handleListBroadcasts))

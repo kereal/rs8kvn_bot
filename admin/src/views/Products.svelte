@@ -13,6 +13,11 @@
   let updatedAt = $state(null)
   let notice = $state('')
 
+  /** @type {import('../lib/types.js').PaymentConfig|null} */
+  let payment = $state(null)
+
+  const PROVIDER_LABEL = { telegram_stars: 'Telegram Stars', platega: 'Platega' }
+
   let query = $state('')
   let planFilter = $state('all')
   let onlyActive = $state(false)
@@ -55,7 +60,35 @@
     }
   }
 
-  onMount(load)
+  // Платёжный режим — отдельно и молча: без него каталог всё равно читается.
+  async function loadPayment() {
+    try {
+      payment = await api.get('/admin/api/payment/config')
+    } catch {
+      payment = null
+    }
+  }
+
+  onMount(() => {
+    load()
+    loadPayment()
+  })
+
+  // Валюта продукта против capability активного провайдера. Нет данных или
+  // оплаты выключены — не предупреждаем: подсказка не должна врать.
+  function currencySupported(currency) {
+    if (!payment?.enabled || !payment.supported_currencies?.length) return true
+    return payment.supported_currencies.includes(String(currency || '').toUpperCase())
+  }
+
+  let unsupportedCurrencies = $derived.by(() => {
+    const bad = new Set()
+    for (const item of items) {
+      const currency = String(item.currency || '').toUpperCase()
+      if (currency && !currencySupported(currency)) bad.add(currency)
+    }
+    return [...bad]
+  })
 
   let rows = $derived.by(() => {
     const needle = query.trim().toLowerCase()
@@ -215,6 +248,13 @@
 {#if notice}
   <div class="notice notice-ok">{notice}</div>
 {/if}
+{#if unsupportedCurrencies.length > 0}
+  <!-- Предупреждение, а не блокировка: валюта остаётся делом каталога. -->
+  <div class="notice nav-warn">
+    Активный провайдер {PROVIDER_LABEL[payment.provider] || payment.provider} не принимает валюты:
+    {unsupportedCurrencies.join(', ')}. Такие продукты не смогут продаваться, пока провайдер не сменится.
+  </div>
+{/if}
 {#if error}
   <div class="notice notice-error">
     {error}
@@ -270,7 +310,12 @@
             <td>{displayName(item)}</td>
             <td>{item.plan_name}</td>
             <td>{formatDays(item.duration_days)}</td>
-            <td class="num">{priceLabel(item)}</td>
+            <td class="num">
+              {priceLabel(item)}
+              {#if !currencySupported(item.currency)}
+                <div class="badge badge-warn">валюта не поддерживается</div>
+              {/if}
+            </td>
             <td>
               {#if item.is_active}
                 <span class="badge badge-ok">в продаже</span>
@@ -337,6 +382,12 @@
     {#if starsCurrency}
       <span class="hint">Stars — целое число, 1 Star = 1 minor unit в API.</span>
     {/if}
+    {#if payment?.enabled && !currencySupported(form.currency)}
+      <span class="hint warn-hint">
+        Активный провайдер ({PROVIDER_LABEL[payment.provider] || payment.provider}) не принимает
+        {String(form.currency || '').toUpperCase() || '—'}. Продукт сохранится, но продать его нельзя.
+      </span>
+    {/if}
   </div>
   <div class="field">
     <label for="product-currency">Валюта</label>
@@ -373,5 +424,9 @@
 
   .toolbar select {
     width: auto;
+  }
+
+  .warn-hint {
+    color: var(--warn);
   }
 </style>

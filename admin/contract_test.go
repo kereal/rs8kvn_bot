@@ -464,6 +464,7 @@ func TestAPI_RouteRegistry(t *testing.T) {
 		"GET /admin/api/orders",
 		"GET /admin/api/orders/1",
 		"GET /admin/api/revenue",
+		"GET /admin/api/payment/config",
 		"GET /admin/api/sync-queue",
 		"GET /admin/api/broadcasts",
 		"POST /admin/api/broadcasts",

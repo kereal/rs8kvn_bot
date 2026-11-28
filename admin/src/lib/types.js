@@ -280,6 +280,16 @@
 /** GET /admin/api/audit/events — реестр значений фильтров (admin/audit.go). @typedef {{events: string[], entity_types: string[], actor_types: string[]}} AuditRegistry */
 
 /**
+ * GET /admin/api/payment/config — активный платёжный режим (admin/payment.go).
+ * Секретов нет: провайдер и capability-список валют из доменного правила.
+ * Если режим не передан (панель без конфига), provider пустой, а список — [].
+ * @typedef {object} PaymentConfig
+ * @property {string} provider — telegram_stars | platega | ""
+ * @property {boolean} enabled
+ * @property {string[]} supported_currencies
+ */
+
+/**
  * GET /admin/api/sync-queue — одна пара подписка↔нода в очереди
  * (admin/sync_queue.go syncQueueItem). last_error обрезан сервером (300
  * символов) и может быть null.
