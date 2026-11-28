@@ -60,12 +60,28 @@
  * счётчики за период. currency — запрошенная валюта, либо авто-выбор сервера
  * (RUB, если среди оплаченных есть RUB, иначе первая по алфавиту), либо ""
  * когда валюта не запрошена и оплаченных заказов нет.
- * currencies — все валюты оплаченных заказов периода независимо от выбора.
+ * currencies — все валюты оплат и возвратов периода независимо от выбора.
+ * revenue_cents — прежнее имя gross (равен gross_revenue_cents); gross —
+ * оплаты периода, refunded — возвраты/чарджбэки, случившиеся в периоде,
+ * net = gross - refunded (может быть отрицательным). refund_count — все
+ * возвраты, chargeback_count — сколько из них chargeback_received.
  * @typedef {object} RevenueResponse
  * @property {{date: string, orders: number, revenue_cents: number}[]} days
- * @property {{paid_orders: number, revenue_cents: number, avg_check_cents: number, canceled: number, expired: number}} totals
+ * @property {{paid_orders: number, revenue_cents: number, gross_revenue_cents: number, avg_check_cents: number, canceled: number, expired: number, refunded_cents: number, net_revenue_cents: number, refund_count: number, chargeback_count: number}} totals
  * @property {string} currency — валюта выборки (см. выше)
- * @property {string[]} currencies — валюты оплаченных заказов периода
+ * @property {string[]} currencies — валюты оплат и возвратов периода
+ */
+
+/**
+ * Финансовый возврат по заказу из журнала аудита (admin/orders.go orderRefund).
+ * downgraded — подписка в той же транзакции понижена до free.
+ * @typedef {object} OrderRefund
+ * @property {string} event — payment_refunded | payment_auto_refunded | chargeback_received
+ * @property {number} amount_cents
+ * @property {string} currency
+ * @property {boolean} downgraded
+ * @property {string} actor_type
+ * @property {string} created_at
  */
 
 /**
@@ -159,6 +175,7 @@
  * @property {string|null} expires_at
  * @property {string|null} payment_expires_at
  * @property {string} payment_url
+ * @property {OrderRefund[]} refunds
  */
 
 /**

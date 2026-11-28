@@ -565,6 +565,177 @@ func TestGetRevenueStats_CanceledExpiredRemainGlobal(t *testing.T) {
 	assert.Equal(t, int64(1), stats.Totals.Expired)
 }
 
+// seedRefundEvent пишет финансовый возврат в журнал аудита тем же
+// конструктором, что и боевые транзакции: details с суммой и валютой — то,
+// из чего панель считает refund/net.
+func seedRefundEvent(t *testing.T, svc *Service, event string, order *Order, sub *Subscription, amountCents int64, currency string, downgraded bool, at time.Time) {
+	t.Helper()
+
+	var entry *AuditLog
+	switch event {
+	case AuditEventChargebackReceived:
+		if amountCents != order.AmountCents || currency != order.Currency {
+			t.Fatalf("refund amount/currency must match the order for %s", event)
+		}
+		entry = AuditChargebackReceived(order, sub, downgraded)
+	case AuditEventPaymentRefunded:
+		if amountCents != order.AmountCents || currency != order.Currency {
+			t.Fatalf("refund amount/currency must match the order for %s", event)
+		}
+		entry = AuditPaymentRefunded(order, sub, downgraded)
+	case AuditEventPaymentAutoRefunded:
+		entry = AuditPaymentAutoRefunded(order, sub.TelegramID, amountCents, currency, "charge-"+currency, "duplicate_charge")
+	default:
+		t.Fatalf("unknown refund event %q", event)
+	}
+
+	entry.CreatedAt = at
+	require.NoError(t, svc.InsertAuditLog(context.Background(), entry))
+}
+
+// Возвраты — финансовый факт периода: refund уменьшает net, валюты не
+// смешиваются, chargeback отличается от обычного refund.
+func TestGetRevenueStats_RefundsGrossAndNet(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	product, sub := seedRevenueBase(t, svc)
+
+	today := revenueNow.Truncate(24 * time.Hour)
+	paidAt := today.Add(8 * time.Hour)
+
+	rubOrder := &Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid,
+		AmountCents: 10000, Currency: "RUB", PaidAt: &paidAt,
+	}
+	require.NoError(t, svc.db.Create(rubOrder).Error)
+
+	xtrOrder := &Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusPaid,
+		AmountCents: 500, Currency: "XTR", PaidAt: &paidAt,
+	}
+	require.NoError(t, svc.db.Create(xtrOrder).Error)
+
+	seedRefundEvent(t, svc, AuditEventPaymentRefunded, rubOrder, sub, 10000, "RUB", true, today.Add(9*time.Hour))
+	seedRefundEvent(t, svc, AuditEventChargebackReceived, xtrOrder, sub, 500, "XTR", false, today.Add(10*time.Hour))
+
+	// RUB: полный refund, chargeback XTR в суммы не попадает.
+	stats, err := svc.GetRevenueStats(ctx, 2, "", revenueNow)
+	require.NoError(t, err)
+	assert.Equal(t, "RUB", stats.Currency)
+	assert.Equal(t, int64(10000), stats.Totals.RevenueCents)
+	assert.Equal(t, int64(10000), stats.Totals.RefundedCents)
+	assert.Equal(t, int64(0), stats.Totals.NetRevenueCents)
+	assert.Equal(t, int64(1), stats.Totals.RefundCount)
+	assert.Equal(t, int64(0), stats.Totals.ChargebackCount)
+
+	// XTR: chargeback виден отдельным счётчиком.
+	stats, err = svc.GetRevenueStats(ctx, 2, "XTR", revenueNow)
+	require.NoError(t, err)
+	assert.Equal(t, int64(500), stats.Totals.RevenueCents)
+	assert.Equal(t, int64(500), stats.Totals.RefundedCents)
+	assert.Equal(t, int64(0), stats.Totals.NetRevenueCents)
+	assert.Equal(t, int64(1), stats.Totals.RefundCount)
+	assert.Equal(t, int64(1), stats.Totals.ChargebackCount)
+
+	// Авто-возврат дубля — тоже возврат: net уходит в минус, когда возврат в
+	// периоде относится к оплате прошлого периода.
+	seedRefundEvent(t, svc, AuditEventPaymentAutoRefunded, rubOrder, sub, 300, "RUB", false, today.Add(11*time.Hour))
+
+	stats, err = svc.GetRevenueStats(ctx, 2, "RUB", revenueNow)
+	require.NoError(t, err)
+	assert.Equal(t, int64(10300), stats.Totals.RefundedCents)
+	assert.Equal(t, int64(-300), stats.Totals.NetRevenueCents)
+	assert.Equal(t, int64(2), stats.Totals.RefundCount)
+}
+
+// Возврат в периоде без оплат не теряется: валюта агрегата выбирается и по
+// событиям возврата, иначе net-выручка молча равнялась бы нулю.
+func TestGetRevenueStats_RefundWithoutPaymentsKeepsCurrency(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	product, sub := seedRevenueBase(t, svc)
+
+	today := revenueNow.Truncate(24 * time.Hour)
+	order := &Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusCanceled,
+		AmountCents: 4000, Currency: "XTR", ProviderPaymentID: "xtr-refund",
+	}
+	require.NoError(t, svc.db.Create(order).Error)
+
+	seedRefundEvent(t, svc, AuditEventPaymentRefunded, order, sub, 4000, "XTR", false, today.Add(9*time.Hour))
+
+	stats, err := svc.GetRevenueStats(ctx, 2, "", revenueNow)
+	require.NoError(t, err)
+	assert.Equal(t, "XTR", stats.Currency)
+	assert.Equal(t, []string{"XTR"}, stats.Currencies)
+	assert.Equal(t, int64(0), stats.Totals.RevenueCents)
+	assert.Equal(t, int64(4000), stats.Totals.RefundedCents)
+	assert.Equal(t, int64(-4000), stats.Totals.NetRevenueCents)
+}
+
+// Битые details не роняют агрегат: событие без суммы/валюты в refunds не входит.
+func TestGetRevenueStats_IgnoresBrokenRefundDetails(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	entityID := "7"
+	require.NoError(t, svc.db.Create(&AuditLog{
+		EntityType: EntityOrder, EntityID: &entityID, Event: AuditEventPaymentRefunded,
+		ActorType: ActorPaymentProvider, Details: `{"amount_cents":`, CreatedAt: revenueNow,
+	}).Error)
+
+	stats, err := svc.GetRevenueStats(ctx, 2, "", revenueNow)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), stats.Totals.RefundedCents)
+	assert.Equal(t, int64(0), stats.Totals.RefundCount)
+}
+
+// История возвратов заказа: только события этого заказа и в хронологии.
+func TestListOrderRefunds_OrderScopedChronological(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	product, sub := seedRevenueBase(t, svc)
+
+	today := revenueNow.Truncate(24 * time.Hour)
+
+	order := &Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusCanceled,
+		AmountCents: 2000, Currency: "RUB", PaymentProvider: PaymentProviderPlatega,
+	}
+	require.NoError(t, svc.db.Create(order).Error)
+
+	other := &Order{
+		SubscriptionID: sub.ID, ProductID: product.ID, Status: OrderStatusCanceled,
+		AmountCents: 2000, Currency: "RUB", PaymentProvider: PaymentProviderPlatega,
+	}
+	require.NoError(t, svc.db.Create(other).Error)
+
+	seedRefundEvent(t, svc, AuditEventChargebackReceived, order, sub, 2000, "RUB", false, today.Add(10*time.Hour))
+	seedRefundEvent(t, svc, AuditEventPaymentRefunded, order, sub, 2000, "RUB", true, today.Add(9*time.Hour))
+	seedRefundEvent(t, svc, AuditEventPaymentRefunded, other, sub, 2000, "RUB", true, today.Add(9*time.Hour))
+
+	refunds, err := svc.ListOrderRefunds(ctx, order.ID)
+	require.NoError(t, err)
+	require.Len(t, refunds, 2)
+	assert.Equal(t, AuditEventPaymentRefunded, refunds[0].Event)
+	assert.True(t, refunds[0].Downgraded)
+	assert.Equal(t, int64(2000), refunds[0].AmountCents)
+	assert.Equal(t, AuditEventChargebackReceived, refunds[1].Event)
+	assert.False(t, refunds[1].Downgraded)
+
+	refunds, err = svc.ListOrderRefunds(ctx, other.ID)
+	require.NoError(t, err)
+	require.Len(t, refunds, 1)
+}
+
 func TestGetRevenueStats_DaysClampedToAtLeastOne(t *testing.T) {
 	t.Parallel()
 

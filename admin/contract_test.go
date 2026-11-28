@@ -215,7 +215,7 @@ func TestAPI_Contract_KeySets(t *testing.T) {
 				"currency", "duration_days", "expires_at", "id", "paid_at",
 				"payment_creation_uncertain", "payment_expires_at", "payment_provider",
 				"payment_url", "plan_name", "product_id", "product_name",
-				"provider_fee_cents", "provider_payment_id", "status",
+				"provider_fee_cents", "provider_payment_id", "refunds", "status",
 				"subscription_id", "telegram_id",
 			},
 		},
@@ -388,7 +388,11 @@ func TestAPI_Contract_KeySets(t *testing.T) {
 		assert.Equal(t, []string{"date", "orders", "revenue_cents"}, contractKeys(payload["days"].([]any)[0].(map[string]any)))
 		assert.Len(t, payload["days"], 7)
 		assert.Equal(t,
-			[]string{"avg_check_cents", "canceled", "expired", "paid_orders", "revenue_cents"},
+			[]string{
+				"avg_check_cents", "canceled", "chargeback_count", "expired",
+				"gross_revenue_cents", "net_revenue_cents", "paid_orders",
+				"refund_count", "refunded_cents", "revenue_cents",
+			},
 			contractKeys(payload["totals"].(map[string]any)),
 		)
 	})

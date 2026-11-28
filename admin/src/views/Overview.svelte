@@ -228,12 +228,21 @@
       {:else if !revenue}
         <span class="kpi-value">—</span>
         <span class="kpi-sub">Загружаем…</span>
-      {:else if revenue.totals.paid_orders === 0}
+      {:else if revenue.totals.paid_orders === 0 && revenue.totals.refund_count === 0}
         <span class="kpi-value">—</span>
         <span class="kpi-sub">Оплат за период нет</span>
       {:else}
-        <span class="kpi-value">{money(revenue.totals.revenue_cents)}</span>
-        <span class="kpi-sub">{revenue.totals.paid_orders} оплат · ср. чек {money(revenue.totals.avg_check_cents)}</span>
+        <!-- Net — главное число: gross минус возвраты периода. -->
+        <span class="kpi-value">{money(revenue.totals.net_revenue_cents)}</span>
+        <span class="kpi-sub">
+          gross {money(revenue.totals.gross_revenue_cents)} · возвраты {money(revenue.totals.refunded_cents)}
+        </span>
+        <span class="kpi-sub">
+          {revenue.totals.paid_orders} оплат · ср. чек {money(revenue.totals.avg_check_cents)}
+          {#if revenue.totals.chargeback_count > 0}
+            · чарджбэков {revenue.totals.chargeback_count}
+          {/if}
+        </span>
       {/if}
       <select class="period" bind:value={revenueDays} onchange={reloadRevenue} aria-label="Период выручки">
         <option value={7}>7 дней</option>
@@ -304,7 +313,9 @@
           </div>
           <div class="chart-foot">
             <span>Оплат за период нет</span>
-            <span>Отменено / истекло {revenue.totals.canceled} / {revenue.totals.expired}</span>
+            <span>
+              Возвраты {money(revenue.totals.refunded_cents)} · net {money(revenue.totals.net_revenue_cents)}
+            </span>
           </div>
         {:else}
           <div class="chart tall" role="img" aria-label="Выручка по дням">
@@ -319,6 +330,9 @@
           </div>
           <div class="chart-foot">
             <span>Оплачено {revenue.totals.paid_orders} · ср. чек {money(revenue.totals.avg_check_cents)}</span>
+            <span>Возвраты {money(revenue.totals.refunded_cents)} · net {money(revenue.totals.net_revenue_cents)}</span>
+          </div>
+          <div class="chart-foot">
             <span>Отменено / истекло {revenue.totals.canceled} / {revenue.totals.expired}</span>
           </div>
         {/if}

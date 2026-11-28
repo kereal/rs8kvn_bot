@@ -48,12 +48,20 @@ type revenueDay struct {
 	RevenueCents int64  `json:"revenue_cents"`
 }
 
+// revenueTotals — gross/refund/net одной валюты. revenue_cents оставлен как
+// прежнее имя gross (на нём уже висит UI и контрактный тест); новые поля
+// называют семантику явно.
 type revenueTotals struct {
-	PaidOrders    int64 `json:"paid_orders"`
-	RevenueCents  int64 `json:"revenue_cents"`
-	AvgCheckCents int64 `json:"avg_check_cents"`
-	Canceled      int64 `json:"canceled"`
-	Expired       int64 `json:"expired"`
+	PaidOrders        int64 `json:"paid_orders"`
+	RevenueCents      int64 `json:"revenue_cents"`
+	GrossRevenueCents int64 `json:"gross_revenue_cents"`
+	AvgCheckCents     int64 `json:"avg_check_cents"`
+	Canceled          int64 `json:"canceled"`
+	Expired           int64 `json:"expired"`
+	RefundedCents     int64 `json:"refunded_cents"`
+	NetRevenueCents   int64 `json:"net_revenue_cents"`
+	RefundCount       int64 `json:"refund_count"`
+	ChargebackCount   int64 `json:"chargeback_count"`
 }
 
 func (s *Server) handleRevenue(w http.ResponseWriter, r *http.Request) {
@@ -113,11 +121,16 @@ func (s *Server) handleRevenue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, revenueResponse{
 		Days: daysPayload,
 		Totals: revenueTotals{
-			PaidOrders:    stats.Totals.PaidOrders,
-			RevenueCents:  stats.Totals.RevenueCents,
-			AvgCheckCents: stats.Totals.AvgCheckCents,
-			Canceled:      stats.Totals.Canceled,
-			Expired:       stats.Totals.Expired,
+			PaidOrders:        stats.Totals.PaidOrders,
+			RevenueCents:      stats.Totals.RevenueCents,
+			GrossRevenueCents: stats.Totals.RevenueCents,
+			AvgCheckCents:     stats.Totals.AvgCheckCents,
+			Canceled:          stats.Totals.Canceled,
+			Expired:           stats.Totals.Expired,
+			RefundedCents:     stats.Totals.RefundedCents,
+			NetRevenueCents:   stats.Totals.NetRevenueCents,
+			RefundCount:       stats.Totals.RefundCount,
+			ChargebackCount:   stats.Totals.ChargebackCount,
 		},
 		Currency:   stats.Currency,
 		Currencies: stats.Currencies,

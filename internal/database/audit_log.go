@@ -1019,11 +1019,16 @@ func AuditPlanNodesChanged(planID uint, oldIDs, newIDs, added, removed []uint) *
 // `payment_confirmed` — единственный след оплаты, переживающий рестарт и
 // каскадное удаление заказа (/del): по нему авто-возврат отличает дубль charge
 // от денег за уже оказанную услугу (см. autoRefundStarsCharge). Вместе с ним
-// хранится `payment_auto_refunded` — иначе повторная доставка старого webhook'а
-// попыталась бы вернуть деньги второй раз.
+// хранятся `payment_auto_refunded` (иначе повторная доставка старого webhook'а
+// попыталась бы вернуть деньги второй раз) и оба события возврата —
+// `payment_refunded` и `chargeback_received`: gross/refund/net-выручка панели
+// читает факт возврата только из журнала, и потеря записи занизила бы refunds
+// после срока хранения.
 var auditRetentionExemptEvents = []string{
 	AuditEventPaymentConfirmed,
 	AuditEventPaymentAutoRefunded,
+	AuditEventPaymentRefunded,
+	AuditEventChargebackReceived,
 }
 
 // DeleteAuditLogBefore удаляет не более batch записей старше before и

@@ -14,6 +14,7 @@ import (
 type OrderStore interface {
 	ListOrderOverviews(ctx context.Context, f database.OrderAdminFilter) ([]database.OrderOverview, int64, error)
 	GetOrderOverview(ctx context.Context, id uint) (*database.OrderOverview, error)
+	ListOrderRefunds(ctx context.Context, orderID uint) ([]database.OrderRefund, error)
 }
 
 // Screen constants: pagination and whitelist boundaries per spec (P7, P8).
@@ -68,10 +69,22 @@ type orderItem struct {
 type orderDetail struct {
 	orderItem
 
-	ProductID        uint       `json:"product_id"`
-	ExpiresAt        *time.Time `json:"expires_at"`
-	PaymentURL       string     `json:"payment_url"`
-	PaymentExpiresAt *time.Time `json:"payment_expires_at"`
+	ProductID        uint          `json:"product_id"`
+	ExpiresAt        *time.Time    `json:"expires_at"`
+	PaymentURL       string        `json:"payment_url"`
+	PaymentExpiresAt *time.Time    `json:"payment_expires_at"`
+	Refunds          []orderRefund `json:"refunds"`
+}
+
+// orderRefund — финансовый возврат из журнала аудита. Экран показывает его
+// историей: инициировать возврат панель не может.
+type orderRefund struct {
+	Event       string    `json:"event"`
+	AmountCents int64     `json:"amount_cents"`
+	Currency    string    `json:"currency"`
+	Downgraded  bool      `json:"downgraded"`
+	ActorType   string    `json:"actor_type"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func (s *Server) handleListOrders(w http.ResponseWriter, r *http.Request) {
@@ -106,12 +119,31 @@ func (s *Server) handleGetOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	refunds, err := s.orders.ListOrderRefunds(r.Context(), id)
+	if err != nil {
+		s.writeStoreError(w, "get order refunds", err)
+		return
+	}
+
+	items := make([]orderRefund, 0, len(refunds))
+	for _, refund := range refunds {
+		items = append(items, orderRefund{
+			Event:       refund.Event,
+			AmountCents: refund.AmountCents,
+			Currency:    refund.Currency,
+			Downgraded:  refund.Downgraded,
+			ActorType:   refund.ActorType,
+			CreatedAt:   refund.CreatedAt,
+		})
+	}
+
 	writeJSON(w, http.StatusOK, orderDetail{
 		orderItem:        toOrderItem(*row),
 		ProductID:        row.ProductID,
 		ExpiresAt:        row.ExpiresAt,
 		PaymentURL:       row.PaymentURL,
 		PaymentExpiresAt: row.PaymentExpiresAt,
+		Refunds:          items,
 	})
 }
 

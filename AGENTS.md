@@ -156,10 +156,12 @@ Don't read and don't write
   per-item Warn-ретраи воркеров, трафик-сканы без исхода. Технические события —
   только сводки за прогон (`sync_run_degraded`, `orphaned_clients_revoked`).
 - **Retention не удаляет платёжные события** (`payment_confirmed`,
-  `payment_auto_refunded` — `auditRetentionExemptEvents`): по ним
-  `autoRefundStarsCharge` отличает дубль charge от денег за уже оказанную
-  услугу. Добавляя событие в этот список, помни: журнал для него — рабочее
-  состояние, а не история.
+  `payment_auto_refunded`, `payment_refunded`, `chargeback_received` —
+  `auditRetentionExemptEvents`): по первым двум `autoRefundStarsCharge`
+  отличает дубль charge от денег за уже оказанную услугу, по последним двум
+  панель считает refund/net-выручку — факт возврата живёт только в журнале
+  (отдельной колонки в `orders` нет). Добавляя событие в этот список, помни:
+  журнал для него — рабочее состояние, а не история.
 - **FK нет**: история сущности переживает физическое удаление (admin /del).
 - actor_id админа передаётся через context: `service.WithAuditAdmin(ctx, chatID)`
   в HandleDel/HandleSetPlan, читается `adminTelegramIDFromCtx(ctx)`.
@@ -240,6 +242,11 @@ plaintext принимают. Публичные CF-worker узлы (ws на IP 
 - **Мутации — через сервисы**: отзыв/удаление/продление/сброс трафика идут в
   `internal/service`, а не в репозитории. Аудит таких решений —
   `actor_type=admin` (`AuditSubscriptionRevokedByAdmin`, id панели = 0).
+- **Выручка — gross/refund/net**: `GET /admin/api/revenue` отдаёт оплаты
+  периода (gross), возвраты периода и net. Возвраты читаются из `audit_log`
+  (`payment_refunded`, `payment_auto_refunded`, `chargeback_received`), суммы и
+  валюта — из `details`; валюты не смешиваются, а сами события retention не
+  удаляет.
 - **Сборка**: `cd admin && npm run build` (обязательно после правок вью —
   коммитится `dist/`). Харнесс для ручного прогона: `go run ./tools/adminserve` (копирует
   `data/rs8kvn.db` в `/tmp/rs8kvn-admin-dev.db`, узлов нет — внешние

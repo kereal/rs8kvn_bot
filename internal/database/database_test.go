@@ -1837,6 +1837,16 @@ func TestDailyMaintenance_KeepsPaymentEvents(t *testing.T) {
 		EntityType: EntityOrder, EntityID: &orderEntity, Event: AuditEventPaymentAutoRefunded,
 		ActorType: ActorPaymentProvider, ActorID: &actor, CreatedAt: old,
 	}))
+	// Факт возврата — источник gross/refund/net панели: журнал для него
+	// рабочее состояние, а не история.
+	require.NoError(t, svc.InsertAuditLog(ctx, &AuditLog{
+		EntityType: EntityOrder, EntityID: &orderEntity, Event: AuditEventPaymentRefunded,
+		ActorType: ActorPaymentProvider, ActorID: &actor, CreatedAt: old,
+	}))
+	require.NoError(t, svc.InsertAuditLog(ctx, &AuditLog{
+		EntityType: EntityOrder, EntityID: &orderEntity, Event: AuditEventChargebackReceived,
+		ActorType: ActorPaymentProvider, ActorID: &actor, CreatedAt: old,
+	}))
 	require.NoError(t, svc.InsertAuditLog(ctx, &AuditLog{
 		EntityType: EntitySubscription, EntityID: &subEntity, Event: AuditEventSubscriptionCreated,
 		ActorType: ActorUser, ActorID: &actor, CreatedAt: old,
@@ -1851,7 +1861,7 @@ func TestDailyMaintenance_KeepsPaymentEvents(t *testing.T) {
 	require.NoError(t, svc.GetDB().WithContext(ctx).Model(&AuditLog{}).
 		Where("event = ?", AuditEventSubscriptionCreated).Count(&otherLeft).Error)
 
-	assert.Equal(t, int64(2), paymentLeft, "платёжные события переживают срок хранения")
+	assert.Equal(t, int64(4), paymentLeft, "платёжные события переживают срок хранения")
 	assert.Zero(t, otherLeft, "обычные события старше срока хранения удаляются")
 }
 

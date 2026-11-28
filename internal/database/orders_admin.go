@@ -2,8 +2,10 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -170,13 +172,25 @@ type RevenueDay struct {
 // RevenueTotals — сводные цифры за тот же период, что и дни.
 type RevenueTotals struct {
 	PaidOrders int64
-	// RevenueCents — сумма фактических списаний (callback_amount_cents,
+	// RevenueCents — gross: сумма фактических списаний (callback_amount_cents,
 	// если провайдер сообщил и списание не нулевое, иначе amount_cents).
 	RevenueCents int64
 	// AvgCheckCents — RevenueCents / PaidOrders, целочисленно; 0 при пустом периоде.
 	AvgCheckCents int64
 	Canceled      int64
 	Expired       int64
+	// RefundedCents — сумма финансовых возвратов (refund + chargeback) в
+	// валюте Currency, случившихся в периоде. Источник — события аудита,
+	// которые retention не удаляет (см. auditRefundEvents).
+	RefundedCents int64
+	// NetRevenueCents — RevenueCents - RefundedCents. Может быть отрицательным,
+	// если возврат в периоде относится к оплате прошлого периода.
+	NetRevenueCents int64
+	// RefundCount — число возвратов в периоде (refund + chargeback).
+	RefundCount int64
+	// ChargebackCount — сколько из RefundCount пришло как chargeback_received.
+	// Отдельный счётчик различает банковский чарджбэк и обычный refund.
+	ChargebackCount int64
 }
 
 // RevenueStats — денежные агрегаты для GET /admin/api/revenue. Pending-заказы
@@ -187,11 +201,11 @@ type RevenueStats struct {
 	Days   []RevenueDay
 	Totals RevenueTotals
 	// Currency — валюта, к которой относятся все суммы и счётчики: запрошенная,
-	// либо выбранная автоматически (RUB, если среди оплаченных есть RUB-заказы,
+	// либо выбранная автоматически (RUB, если среди оплат и возвратов есть RUB,
 	// иначе первая в стабильном порядке), либо "" — когда валюта не запрошена и
-	// оплаченных заказов в периоде нет.
+	// ни оплат, ни возвратов в периоде нет.
 	Currency string
-	// Currencies — все валюты оплаченных заказов периода в стабильном
+	// Currencies — все валюты оплат и возвратов периода в стабильном
 	// (алфавитном) порядке; список не зависит от выбранной валюты.
 	Currencies []string
 }
@@ -219,6 +233,94 @@ type revenueStatusCountsRow struct {
 // и не нулевое, иначе заявленная сумма (миграция 035).
 const revenueExpr = `COALESCE(NULLIF(callback_amount_cents, 0), amount_cents)`
 
+// auditRefundEvents — финансовые возвраты в журнале аудита. Отдельной колонки
+// в orders нет (решение владельца: без миграции), поэтому единственный
+// долговечный источник факта возврата — эти события. Их не удаляет retention
+// (auditRetentionExemptEvents): сумма возврата должна пережить срок хранения.
+var auditRefundEvents = []string{
+	AuditEventPaymentRefunded,
+	AuditEventPaymentAutoRefunded,
+	AuditEventChargebackReceived,
+}
+
+// auditRefundDetails — поля details, которые несут финансовый факт возврата.
+type auditRefundDetails struct {
+	AmountCents int64  `json:"amount_cents"`
+	Currency    string `json:"currency"`
+	Downgraded  bool   `json:"downgraded"`
+}
+
+// OrderRefund — финансовый возврат по заказу, прочитанный из audit_log.
+// Экран заказа показывает его как историю: панель возвраты не инициирует.
+type OrderRefund struct {
+	Event       string
+	AmountCents int64
+	Currency    string
+	// Downgraded — подписка была понижена до free в той же транзакции.
+	Downgraded bool
+	ActorType  string
+	CreatedAt  time.Time
+}
+
+// revenueRefundTotals — агрегаты возвратов в выбранной валюте за период.
+type revenueRefundTotals struct {
+	RefundedCents   int64
+	RefundCount     int64
+	ChargebackCount int64
+}
+
+// parseRefundDetails разбирает details события возврата. Пустые/битые details
+// или отсутствие суммы дают ok=false: факт без суммы в агрегат не попадает.
+func parseRefundDetails(raw string) (auditRefundDetails, bool) {
+	var details auditRefundDetails
+	err := json.Unmarshal([]byte(raw), &details)
+	if err != nil {
+		return details, false
+	}
+
+	if details.Currency == "" {
+		return details, false
+	}
+
+	return details, true
+}
+
+// loadRevenueRefunds читает возвраты периода из журнала аудита и раскладывает
+// их по валютам. Возвраты редки, поэтому строки разбираются в Go: SQLite
+// JSON-функции не нужны, а разбор details остаётся явным. Валюты возвратов
+// участвуют в выборе валюты агрегата: период с возвратом, но без оплат, не
+// должен терять net-выручку.
+func (s *Service) loadRevenueRefunds(ctx context.Context, from, to time.Time) (map[string]revenueRefundTotals, error) {
+	var rows []AuditLog
+
+	err := s.db.WithContext(ctx).
+		Select("event", "details", "created_at").
+		Where("event IN ?", auditRefundEvents).
+		Where("created_at >= ? AND created_at < ?", from, to).
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to load refunds: %w", err)
+	}
+
+	byCurrency := make(map[string]revenueRefundTotals, 2)
+	for _, row := range rows {
+		details, ok := parseRefundDetails(row.Details)
+		if !ok {
+			continue
+		}
+
+		totals := byCurrency[details.Currency]
+		totals.RefundedCents += details.AmountCents
+		totals.RefundCount++
+		if row.Event == AuditEventChargebackReceived {
+			totals.ChargebackCount++
+		}
+		byCurrency[details.Currency] = totals
+	}
+
+	return byCurrency, nil
+}
+
 // pickRevenueCurrency выбирает валюту агрегата, когда клиент её не задал:
 // RUB, если среди оплаченных заказов периода есть RUB, иначе первая в
 // стабильном (алфавитном) порядке; пустой список — пустая строка.
@@ -236,13 +338,17 @@ func pickRevenueCurrency(currencies []string) string {
 
 // GetRevenueStats возвращает дневную выручку и сводные цифры за последние days
 // дней (включая «сегодня» — now, UTC) в валюте currency. days < 1 трактуется
-// как 1. Пустая currency означает авто-выбор: RUB, если среди оплаченных
-// заказов периода есть RUB, иначе первая валюта в стабильном (алфавитном)
-// порядке; без оплаченных заказов Currency остаётся пустой. Запрошенная валюта,
-// которой нет среди оплаченных, даёт нулевую статистику этой валюты и полный
-// список Currencies. Все суммы, число оплат и средний чек фильтруются
-// выбранной валютой и валют не смешивают. canceled/expired — общие
-// операционные счётчики за период.
+// как 1. Пустая currency означает авто-выбор: RUB, если среди оплат и возвратов
+// периода есть RUB, иначе первая валюта в стабильном (алфавитном) порядке; без
+// них Currency остаётся пустой. Запрошенная валюта, которой нет среди оплат,
+// даёт нулевую статистику этой валюты и полный список Currencies. Все суммы,
+// число оплат и средний чек фильтруются выбранной валютой и валют не
+// смешивают. canceled/expired — общие операционные счётчики за период.
+//
+// Выручка двухуровневая: RevenueCents — gross по оплатам периода, RefundedCents
+// — возвраты, случившиеся в периоде (refund + chargeback), NetRevenueCents — их
+// разность. Возврат приходит из audit_log, поэтому возврат в периоде может
+// относиться к оплате прошлого периода — это период возврата, а не оплаты.
 //
 // Дни без оплаченных заказов заполняются нулями в Go — SQL не порождает пустые
 // дни. Отменённые и истёкшие считаются по created_at в том же окне (paid_at у
@@ -269,6 +375,20 @@ func (s *Service) GetRevenueStats(ctx context.Context, days int, currency string
 	if err != nil {
 		return RevenueStats{}, fmt.Errorf("failed to list revenue currencies: %w", err)
 	}
+
+	refundsByCurrency, err := s.loadRevenueRefunds(ctx, from, to)
+	if err != nil {
+		return RevenueStats{}, err
+	}
+
+	// Валюты возвратов входят в набор: иначе возврат в периоде без оплат
+	// потерял бы net-выручку при авто-выборе.
+	for cur := range refundsByCurrency {
+		if !slices.Contains(currencies, cur) {
+			currencies = append(currencies, cur)
+		}
+	}
+	slices.Sort(currencies)
 
 	selected := currency
 	if selected == "" {
@@ -323,20 +443,62 @@ func (s *Service) GetRevenueStats(ctx context.Context, days int, currency string
 		return RevenueStats{}, fmt.Errorf("failed to count canceled/expired orders: %w", err)
 	}
 
+	refunds := refundsByCurrency[selected]
+
 	stats := RevenueStats{
 		Days: dayList,
 		Totals: RevenueTotals{
-			PaidOrders:    paid.PaidOrders,
-			RevenueCents:  paid.Revenue,
-			AvgCheckCents: avgCheck(paid.Revenue, paid.PaidOrders),
-			Canceled:      counts.Canceled,
-			Expired:       counts.Expired,
+			PaidOrders:      paid.PaidOrders,
+			RevenueCents:    paid.Revenue,
+			AvgCheckCents:   avgCheck(paid.Revenue, paid.PaidOrders),
+			Canceled:        counts.Canceled,
+			Expired:         counts.Expired,
+			RefundedCents:   refunds.RefundedCents,
+			NetRevenueCents: paid.Revenue - refunds.RefundedCents,
+			RefundCount:     refunds.RefundCount,
+			ChargebackCount: refunds.ChargebackCount,
 		},
 		Currency:   selected,
 		Currencies: currencies,
 	}
 
 	return stats, nil
+}
+
+// ListOrderRefunds возвращает финансовые возвраты конкретного заказа из
+// журнала аудита в хронологическом порядке. Панель показывает их как историю:
+// ни один путь записи здесь не живёт.
+func (s *Service) ListOrderRefunds(ctx context.Context, orderID uint) ([]OrderRefund, error) {
+	var rows []AuditLog
+
+	err := s.db.WithContext(ctx).
+		Select("event", "details", "actor_type", "created_at").
+		Where("entity_type = ? AND entity_id = ? AND event IN ?",
+			EntityOrder, strconv.FormatUint(uint64(orderID), 10), auditRefundEvents).
+		Order("created_at ASC, id ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to list refunds for order %d: %w", orderID, err)
+	}
+
+	refunds := make([]OrderRefund, 0, len(rows))
+	for _, row := range rows {
+		details, ok := parseRefundDetails(row.Details)
+		if !ok {
+			continue
+		}
+
+		refunds = append(refunds, OrderRefund{
+			Event:       row.Event,
+			AmountCents: details.AmountCents,
+			Currency:    details.Currency,
+			Downgraded:  details.Downgraded,
+			ActorType:   string(row.ActorType),
+			CreatedAt:   row.CreatedAt.UTC(),
+		})
+	}
+
+	return refunds, nil
 }
 
 // avgCheck — средний чек целочисленно (округление вниз); 0 без заказов.

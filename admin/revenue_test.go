@@ -165,6 +165,47 @@ func TestAPI_Revenue(t *testing.T) {
 		}
 	})
 
+	// Возвраты живут только в журнале аудита и входят в totals строго своей
+	// валюты: gross/refund/net — три разных числа одного периода.
+	t.Run("refunds split gross net and currency", func(t *testing.T) {
+		t.Parallel()
+
+		srv, db := newTestServer(t)
+		seedRevenueOrder(t, db, "RUB", 49900)
+
+		now := time.Now().UTC()
+		require.NoError(t, db.GetDB().Create(&database.AuditLog{
+			EntityType: database.EntityOrder, Event: database.AuditEventPaymentRefunded,
+			ActorType: database.ActorPaymentProvider, CreatedAt: now,
+			Details: `{"amount_cents":49900,"currency":"RUB","downgraded":true}`,
+		}).Error)
+		require.NoError(t, db.GetDB().Create(&database.AuditLog{
+			EntityType: database.EntityOrder, Event: database.AuditEventChargebackReceived,
+			ActorType: database.ActorPaymentProvider, CreatedAt: now,
+			Details: `{"amount_cents":199,"currency":"XTR","downgraded":false}`,
+		}).Error)
+
+		rec := revenueRequest(t, srv, testToken, "?days=5")
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var payload revenueResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+		assert.Equal(t, "RUB", payload.Currency)
+		assert.Equal(t, int64(49900), payload.Totals.GrossRevenueCents)
+		assert.Equal(t, int64(49900), payload.Totals.RefundedCents)
+		assert.Equal(t, int64(0), payload.Totals.NetRevenueCents)
+		assert.Equal(t, int64(1), payload.Totals.RefundCount)
+		assert.Equal(t, int64(0), payload.Totals.ChargebackCount)
+
+		rec = revenueRequest(t, srv, testToken, "?days=5&currency=XTR")
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+		assert.Equal(t, int64(0), payload.Totals.GrossRevenueCents)
+		assert.Equal(t, int64(199), payload.Totals.RefundedCents)
+		assert.Equal(t, int64(-199), payload.Totals.NetRevenueCents)
+		assert.Equal(t, int64(1), payload.Totals.ChargebackCount)
+	})
+
 	t.Run("malformed currency is bad request", func(t *testing.T) {
 		t.Parallel()
 

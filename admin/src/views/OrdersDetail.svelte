@@ -32,8 +32,20 @@
 
   onMount(load)
 
+  // Возвраты приходят из журнала аудита (refunds): refund, авто-возврат дубля
+  // и chargeback различаются событием, downgraded — факт понижения до free.
+  const REFUND = {
+    payment_refunded: { label: 'Возврат', cls: 'badge-cancel' },
+    payment_auto_refunded: { label: 'Авто-возврат дубля', cls: 'badge-warn' },
+    chargeback_received: { label: 'Чарджбэк', cls: 'badge-cancel' }
+  }
+
   function statusMeta() {
     return STATUS[row.status] || { label: row.status, cls: 'badge-muted' }
+  }
+
+  function refundMeta(event) {
+    return REFUND[event] || { label: event, cls: 'badge-muted' }
   }
 
   function feeDiffers() {
@@ -129,6 +141,27 @@
       </dl>
     </section>
 
+    {#if row.refunds?.length}
+      <!-- Возвраты — только история: инициировать их из панели нельзя. -->
+      <section class="panel card refunds">
+        <h2>Возвраты</h2>
+        <div class="refund-list">
+          {#each row.refunds as r (r.created_at + r.event)}
+            <div class="refund">
+              <div class="refund-head">
+                <span class="badge {refundMeta(r.event).cls}">{refundMeta(r.event).label}</span>
+                <span class="refund-amount">{formatMoney(r.amount_cents, r.currency)}</span>
+              </div>
+              <div class="refund-meta">
+                {formatDate(r.created_at)} · {r.actor_type}
+                {#if r.downgraded}· подписка понижена до free{/if}
+              </div>
+            </div>
+          {/each}
+        </div>
+      </section>
+    {/if}
+
     {#if row.payment_creation_uncertain}
       <!-- Карточка ручной сверки: только чтение, без кнопок подтверждения.
            payment_url виден только здесь, не в списке. -->
@@ -218,5 +251,27 @@
 
   .link {
     color: var(--accent);
+  }
+
+  .refund-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .refund-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .refund-amount {
+    font-weight: 600;
+  }
+
+  .refund-meta {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--muted);
   }
 </style>

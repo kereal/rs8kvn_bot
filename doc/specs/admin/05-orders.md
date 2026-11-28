@@ -49,6 +49,11 @@ CREATE TABLE orders (
 (nullable) добавлены моделью/`SaveOrderPaymentAmounts` (см. `models.go:211-212`):
 фактически списанная сумма и комиссия провайдера.
 
+Колонок возврата в `orders` нет (решение владельца — без миграции): факт, сумма
+и валюта возврата живут в `audit_log` и читаются через `ListOrderRefunds`.
+События возврата входят в `auditRetentionExemptEvents`, поэтому не удаляются
+retention.
+
 Факты, на которые опирается реализация:
 
 - индексы: `idx_orders_subscription_id`, `idx_orders_status`,
@@ -102,6 +107,9 @@ CREATE TABLE orders (
 - `from` / `to` — дата `YYYY-MM-DD` (инпут `type="date"`), окно по
   `created_at` UTC: `from` — начало дня включительно, `to` — конец дня
   включительно;
+- `uncertain` — `true|false`: заказы с `payment_creation_uncertain` (ручная
+  сверка); иное значение — `400 bad_request`;
+- `id` — точный `orders.id` (глобальный поиск «order:42»), положительное число;
 - `sort` — белый список: `id`, `created_at` (по умолчанию), `paid_at`,
   `amount_cents`; `order` — `asc|desc`, по умолчанию `desc`;
 - `total` **обязателен** и считается по тому же WHERE, что и `items` (§5).
@@ -132,8 +140,22 @@ DTO списка (поле-в-поле):
 
 `callback_amount_cents` / `provider_fee_cents` — `null`, если ещё не записаны.
 Детальный DTO добавляет: `product_id`, `expires_at`, `payment_url`,
-`payment_expires_at`. `payment_url` — не секрет (P16 его не покрывает) и нужен
-админу для ручной сверки; отдаётся только в детали.
+`payment_expires_at`, `refunds`. `payment_url` — не секрет (P16 его не покрывает)
+и нужен админу для ручной сверки; отдаётся только в детали.
+
+`refunds` — история финансовых возвратов заказа из `audit_log` (события
+`payment_refunded`, `payment_auto_refunded`, `chargeback_received`), от старого
+к новому:
+
+```json
+[{"event":"payment_refunded","amount_cents":39900,"currency":"RUB",
+  "downgraded":true,"actor_type":"admin","created_at":"2026-11-04T12:00:00Z"}]
+```
+
+Сумма и валюта берутся из `details` события; событие без них не попадает в
+список. `downgraded=true` — подписка в той же транзакции понижена до free.
+Пустой список — `[]`, никогда `null`. Возвраты только читаются: инициирует их
+бот/admin-команда, не панель.
 
 ## 5. Сервер
 
