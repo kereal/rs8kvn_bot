@@ -24,6 +24,8 @@
   // Точный id из глобального поиска (order:42): отдельный read-only фильтр,
   // живёт до ручного сброса — так видно, что список сужен именно id.
   let idFilter = $state('')
+  // Ручная сверка: '' = все, 'true' — только неопределённые платежи.
+  let uncertain = $state('')
   let from = $state('')
   let to = $state('')
   let sort = $state('created_at')
@@ -42,6 +44,7 @@
     params.set('offset', String(offset))
     if (idFilter) params.set('id', idFilter)
     if (status) params.set('status', status)
+    if (uncertain) params.set('uncertain', uncertain)
     if (qApplied) params.set('q', qApplied)
     if (from) params.set('from', from)
     if (to) params.set('to', to)
@@ -78,6 +81,8 @@
             qApplied = preset.q
           }
         }
+        // Переход с «Состояния» к неопределённым платежам.
+        if (preset.screen === 'orders' && preset.uncertain) uncertain = preset.uncertain
       } catch {
         // мусор в хранилище — игнорируем
       }
@@ -95,6 +100,7 @@
     qInput = ''
     qApplied = ''
     idFilter = ''
+    uncertain = ''
     from = ''
     to = ''
     sort = 'created_at'
@@ -206,6 +212,11 @@
         <option {value}>{meta.label}</option>
       {/each}
     </select>
+    <select bind:value={uncertain} onchange={resetAndLoad} aria-label="Ручная сверка">
+      <option value="">Все платежи</option>
+      <option value="true">Требуют сверки</option>
+      <option value="false">Без неопределённых</option>
+    </select>
     <input class="date" type="date" bind:value={from} onchange={resetAndLoad} />
     <span class="muted">—</span>
     <input class="date" type="date" bind:value={to} onchange={resetAndLoad} />
@@ -244,7 +255,10 @@
             <td><a class="row-link mono" href="#/subscriptions/{row.subscription_id}">@{row.telegram_id}</a></td>
             <td>{row.product_name}</td>
             <td>{row.plan_name}</td>
-            <td><span class="badge {statusMeta(row).cls}">{statusMeta(row).label}</span></td>
+            <td>
+              <span class="badge {statusMeta(row).cls}">{statusMeta(row).label}</span>
+              {#if row.payment_creation_uncertain}<span class="badge badge-warn">Требует сверки</span>{/if}
+            </td>
             <td class="num">{formatMoney(row.amount_cents, row.currency)}</td>
             <td class="num">
               <span class:fee-diff={feeDiffers(row)}>

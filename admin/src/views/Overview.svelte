@@ -191,6 +191,15 @@
     sessionStorage.setItem('expiring_in', '720')
     goTo('#/subscriptions')
   }
+
+  // Ручная сверка: заказы с неопределённым исходом создания платежа.
+  function openUncertainOrders() {
+    sessionStorage.setItem(
+      'admin_search',
+      JSON.stringify({ screen: 'orders', uncertain: 'true' })
+    )
+    goTo('#/orders')
+  }
 </script>
 
 <div class="page-head">
@@ -354,6 +363,11 @@
           <span class="badge {b.cls}">{b.label}: {b.count}</span>
         {/each}
       </div>
+      {#if data.orders.uncertain > 0}
+        <button class="btn btn-ghost reconcile" onclick={openUncertainOrders}>
+          Требуют сверки: {data.orders.uncertain}
+        </button>
+      {/if}
       <button class="btn btn-ghost" onclick={() => goTo('#/orders')}>Открыть заказы</button>
     </section>
 
@@ -396,6 +410,10 @@
   /* Свежесть рядом с кнопкой обновления; кнопка прижата вправо page-head. */
   .refreshed {
     font-size: 12px;
+  }
+
+  .reconcile {
+    color: var(--warn);
   }
 
   /* Макет: строка KPI, затем два столбца — графики слева, статусы справа.

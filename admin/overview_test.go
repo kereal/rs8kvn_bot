@@ -109,4 +109,40 @@ func TestAPI_Overview(t *testing.T) {
 
 		assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	})
+
+	t.Run("counts orders requiring reconciliation", func(t *testing.T) {
+		srv, db := newTestServer(t)
+
+		plan := &database.Plan{Name: "ov-unc-plan", DevicesLimit: 1, TrafficLimit: 1024}
+		require.NoError(t, db.GetDB().Create(plan).Error)
+		sub := &database.Subscription{
+			TelegramID: 700102, ClientID: "ov-c2", SubscriptionID: "ov-sub-2", Status: "active", PlanID: plan.ID,
+		}
+		require.NoError(t, db.GetDB().Create(sub).Error)
+		product := &database.Product{PlanID: plan.ID, Name: "ov-product-2", DurationDays: 30, PriceCents: 100}
+		require.NoError(t, db.GetDB().Create(product).Error)
+		require.NoError(t, db.GetDB().Create(&database.Order{
+			SubscriptionID: sub.ID, ProductID: product.ID, Status: database.OrderStatusPending, AmountCents: 100,
+		}).Error)
+		require.NoError(t, db.GetDB().Create(&database.Order{
+			SubscriptionID: sub.ID, ProductID: product.ID, Status: database.OrderStatusPending, AmountCents: 200,
+			PaymentCreationUncertain: true,
+		}).Error)
+
+		rec := do(t, srv, http.MethodGet, "/admin/api/overview", testToken, "")
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var payload struct {
+			Orders struct {
+				Total     int64            `json:"total"`
+				Uncertain int64            `json:"uncertain"`
+				ByStatus  map[string]int64 `json:"by_status"`
+			} `json:"orders"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+
+		assert.Equal(t, int64(2), payload.Orders.Total)
+		assert.Equal(t, int64(1), payload.Orders.Uncertain)
+		assert.Equal(t, int64(2), payload.Orders.ByStatus["pending"])
+	})
 }

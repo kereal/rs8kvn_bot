@@ -169,6 +169,15 @@ func parseOrderFilter(w http.ResponseWriter, r *http.Request) (database.OrderAdm
 		f.ID = &exact
 	}
 
+	if raw := query.Get("uncertain"); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "uncertain must be true or false")
+			return f, false
+		}
+		f.Uncertain = &value
+	}
+
 	from, ok := parseOrderDate(w, r, "from")
 	if !ok {
 		return f, false

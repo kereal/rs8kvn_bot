@@ -130,6 +130,46 @@ func TestListOrderOverviews_IDFilter(t *testing.T) {
 	assert.Empty(t, items)
 }
 
+func TestListOrderOverviews_UncertainFilter(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	ctx := context.Background()
+	rows := seedOrderFixtures(t, svc)
+
+	// Один из сидированных заказов становится неопределённым.
+	uncertain := rows[1].ID
+	require.NoError(t, svc.db.Model(&Order{}).Where("id = ?", uncertain).
+		Update("payment_creation_uncertain", true).Error)
+
+	trueFlag, falseFlag := true, false
+
+	items, total, err := svc.ListOrderOverviews(ctx, OrderAdminFilter{Uncertain: &trueFlag, Limit: 50})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	// Единый WHERE: total и items строятся из одного query builder.
+	assert.Equal(t, int64(len(items)), total)
+	assert.Equal(t, uncertain, items[0].ID)
+	assert.True(t, items[0].PaymentCreationUncertain)
+
+	items, total, err = svc.ListOrderOverviews(ctx, OrderAdminFilter{Uncertain: &falseFlag, Limit: 50})
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+	for _, item := range items {
+		assert.False(t, item.PaymentCreationUncertain)
+	}
+
+	// nil = без фильтра: все четыре.
+	_, total, err = svc.ListOrderOverviews(ctx, OrderAdminFilter{Limit: 50})
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), total)
+
+	// Фильтр сочетается со статусом.
+	_, total, err = svc.ListOrderOverviews(ctx, OrderAdminFilter{Uncertain: &trueFlag, Status: string(OrderStatusPending), Limit: 50})
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), total, "uncertain row is paid, pending+uncertain must be empty")
+}
+
 func TestListOrderOverviews_QueryByTelegramID(t *testing.T) {
 	t.Parallel()
 

@@ -135,6 +135,7 @@ func TestAPI_OrdersList_BadRequests(t *testing.T) {
 		{"malformed to", "to=01.11.2026"},
 		{"non-numeric id", "id=abc"},
 		{"zero id", "id=0"},
+		{"malformed uncertain", "uncertain=yes"},
 	}
 
 	for _, tc := range cases {
@@ -168,6 +169,39 @@ func TestAPI_OrdersList_IDFilter(t *testing.T) {
 	items, total = decodeOrdersList(t, rec.Body.Bytes())
 	assert.Equal(t, int64(0), total)
 	assert.Empty(t, items)
+}
+
+func TestAPI_OrdersList_UncertainFilter(t *testing.T) {
+	t.Parallel()
+
+	srv, db := newTestServer(t)
+	_, firstID := seedOrders(t, db, 3, time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC))
+
+	// Первый заказ становится неопределённым.
+	require.NoError(t, db.GetDB().Model(&database.Order{}).Where("id = ?", firstID).
+		Update("payment_creation_uncertain", true).Error)
+
+	rec := do(t, srv, http.MethodGet, "/admin/api/orders?uncertain=true", testToken, "")
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	items, total := decodeOrdersList(t, rec.Body.Bytes())
+	assert.Equal(t, int64(1), total)
+	require.Len(t, items, 1)
+	assert.Equal(t, float64(firstID), items[0]["id"])
+	assert.Equal(t, true, items[0]["payment_creation_uncertain"])
+
+	// Обратный фильтр: остальные два.
+	rec = do(t, srv, http.MethodGet, "/admin/api/orders?uncertain=false", testToken, "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	items, total = decodeOrdersList(t, rec.Body.Bytes())
+	assert.Equal(t, int64(2), total)
+	for _, item := range items {
+		assert.Equal(t, false, item["payment_creation_uncertain"])
+	}
+
+	// 401: фильтр не открывает список без токена.
+	rec = do(t, srv, http.MethodGet, "/admin/api/orders?uncertain=true", "", "")
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestAPI_OrdersList_RequiresToken(t *testing.T) {

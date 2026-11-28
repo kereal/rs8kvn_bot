@@ -358,7 +358,7 @@ func TestAPI_Contract_KeySets(t *testing.T) {
 			"subscriptions": {"by_status", "total"},
 			"nodes":         {"total"},
 			"bindings":      {"by_status", "oldest_pending_at", "pending_total"},
-			"orders":        {"by_status", "total"},
+			"orders":        {"by_status", "total", "uncertain"},
 			"broadcasts":    {"by_status", "total"},
 			"audit":         {"events_24h"},
 		}

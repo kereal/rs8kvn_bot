@@ -23,7 +23,7 @@ type overviewResponse struct {
 	Subscriptions  overviewCounts   `json:"subscriptions"`
 	Nodes          overviewNodes    `json:"nodes"`
 	Bindings       overviewBindings `json:"bindings"`
-	Orders         overviewCounts   `json:"orders"`
+	Orders         overviewOrders   `json:"orders"`
 	Broadcasts     overviewCounts   `json:"broadcasts"`
 	Expiring       overviewExpiring `json:"expiring"`
 	Audit          overviewAudit    `json:"audit"`
@@ -42,7 +42,14 @@ type overviewDatabase struct {
 	SizeBytes int64  `json:"size_bytes"`
 }
 
-// overviewCounts is a total plus the per-status breakdown behind it.
+// overviewOrders — заказы «Состояния»: счётчик ручной сверки рядом с общим
+// total, чтобы неопределённые платежи были видны не только в списке.
+type overviewOrders struct {
+	Total     int64            `json:"total"`
+	ByStatus  map[string]int64 `json:"by_status"`
+	Uncertain int64            `json:"uncertain"`
+}
+
 type overviewCounts struct {
 	Total    int64            `json:"total"`
 	ByStatus map[string]int64 `json:"by_status"`
@@ -108,9 +115,10 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 			PendingTotal:    snapshot.PendingBindingsTotal(),
 			OldestPendingAt: snapshot.OldestPendingBinding,
 		},
-		Orders: overviewCounts{
-			Total:    sumCounts(snapshot.OrdersByStatus),
-			ByStatus: snapshot.OrdersByStatus,
+		Orders: overviewOrders{
+			Total:     sumCounts(snapshot.OrdersByStatus),
+			ByStatus:  snapshot.OrdersByStatus,
+			Uncertain: snapshot.UncertainOrders,
 		},
 		Broadcasts: overviewCounts{
 			Total:    sumCounts(snapshot.BroadcastsByStatus),

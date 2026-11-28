@@ -31,8 +31,12 @@ type OverviewSnapshot struct {
 	// 30 days, bucketed per day for the state screen mini-chart.
 	Expiring           ExpiringBuckets
 	AuditEventsLast24h int64
-	DatabasePath       string
-	DatabaseSizeBytes  int64
+	// UncertainOrders — заказы с payment_creation_uncertain: исход создания
+	// платежа неизвестен, деньги могли списаться. Показывается на «Состоянии»
+	// как счётчик ручной сверки с переходом к отфильтрованному списку.
+	UncertainOrders   int64
+	DatabasePath      string
+	DatabaseSizeBytes int64
 }
 
 // ExpiringDay — число активных подписок, истекающих в данный день. Дата —
@@ -131,6 +135,14 @@ func (s *Service) GetOverviewSnapshot(ctx context.Context) (*OverviewSnapshot, e
 		return nil, fmt.Errorf("count recent audit events: %w", err)
 	}
 
+	var uncertainOrders int64
+	err = db.Model(&Order{}).
+		Where("payment_creation_uncertain = ?", true).
+		Count(&uncertainOrders).Error
+	if err != nil {
+		return nil, fmt.Errorf("count uncertain orders: %w", err)
+	}
+
 	snapshot := &OverviewSnapshot{
 		SubscriptionsByStatus: subs,
 		OrdersByStatus:        orders,
@@ -141,6 +153,7 @@ func (s *Service) GetOverviewSnapshot(ctx context.Context) (*OverviewSnapshot, e
 		LastSubRequest:        lastSubRequest,
 		Expiring:              expiring,
 		AuditEventsLast24h:    auditEvents,
+		UncertainOrders:       uncertainOrders,
 		DatabasePath:          s.path,
 	}
 

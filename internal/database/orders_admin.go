@@ -14,15 +14,18 @@ import (
 // OrderAdminFilter — фильтры экрана «Заказы». Zero value = без фильтра.
 // Валидация строковых полей — в хендлере (белые списки P8), здесь — только SQL.
 type OrderAdminFilter struct {
-	ID     *uint      // точный orders.id (глобальный поиск «order:42»)
-	Status string     // "" | pending | paid | expired | canceled
-	Query  string     // telegram_id (цифры) или provider_payment_id
-	From   *time.Time // окно created_at, from включительно
-	To     *time.Time // to включительно (конец дня)
-	Sort   string     // id | created_at | paid_at | amount_cents
-	Desc   bool
-	Limit  int
-	Offset int
+	ID     *uint  // точный orders.id (глобальный поиск «order:42»)
+	Status string // "" | pending | paid | expired | canceled
+	// Uncertain — признак ручной сверки: true = только заказы с
+	// payment_creation_uncertain, false = только однозначные, nil = все.
+	Uncertain *bool
+	Query     string     // telegram_id (цифры) или provider_payment_id
+	From      *time.Time // окно created_at, from включительно
+	To        *time.Time // to включительно (конец дня)
+	Sort      string     // id | created_at | paid_at | amount_cents
+	Desc      bool
+	Limit     int
+	Offset    int
 }
 
 // OrderOverview — заказ с denormalized полями для панели.
@@ -57,6 +60,10 @@ func buildOrderAdminQuery(s *Service, ctx context.Context, f OrderAdminFilter) *
 
 	if f.Status != "" {
 		q = q.Where("orders.status = ?", f.Status)
+	}
+
+	if f.Uncertain != nil {
+		q = q.Where("orders.payment_creation_uncertain = ?", *f.Uncertain)
 	}
 
 	if f.Query != "" {

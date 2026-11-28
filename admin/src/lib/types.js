@@ -363,7 +363,7 @@
  * @property {{total: number, by_status: {[status: string]: number}}} subscriptions
  * @property {{total: number}} nodes
  * @property {{total: number, by_status: {[status: string]: number}, pending_total: number, oldest_pending_at: string|null}} bindings
- * @property {{total: number, by_status: {[status: string]: number}}} orders
+ * @property {{total: number, by_status: {[status: string]: number}, uncertain: number}} orders
  * @property {{total: number, by_status: {[status: string]: number}}} broadcasts
  * @property {{events_24h: number}} audit
  * @property {string|null} last_sub_request

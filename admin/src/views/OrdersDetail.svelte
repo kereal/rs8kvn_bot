@@ -66,6 +66,7 @@
       <h1>
         Заказ #{row.id}
         <span class="badge {statusMeta().cls}">{statusMeta().label}</span>
+        {#if row.payment_creation_uncertain}<span class="badge badge-warn">Требует сверки</span>{/if}
       </h1>
       <p class="subtitle">Заказ доступен только для чтения: статус двигают платёжные транзакции.</p>
     </div>
@@ -127,6 +128,32 @@
         <dd><a class="link" href="#/subscriptions/{row.subscription_id}">Подписка #{row.subscription_id}</a></dd>
       </dl>
     </section>
+
+    {#if row.payment_creation_uncertain}
+      <!-- Карточка ручной сверки: только чтение, без кнопок подтверждения.
+           payment_url виден только здесь, не в списке. -->
+      <section class="panel card uncertain">
+        <h2>Ручная сверка</h2>
+        <dl>
+          <dt>Причина</dt>
+          <dd>Исход создания платежа у провайдера неизвестен — деньги могли списаться</dd>
+          <dt>ID платежа</dt>
+          <dd class="mono">{row.provider_payment_id || '—'}</dd>
+          <dt>Валюта</dt>
+          <dd class="mono">{row.currency}</dd>
+          <dt>Сумма</dt>
+          <dd>{formatMoney(row.amount_cents, row.currency)}</dd>
+          <dt>Ссылка на оплату</dt>
+          <dd>
+            {#if row.payment_url}
+              <a class="btn btn-ghost" href={row.payment_url} target="_blank" rel="noopener noreferrer">Открыть</a>
+            {:else}
+              —
+            {/if}
+          </dd>
+        </dl>
+      </section>
+    {/if}
   </div>
 {/if}
 
@@ -183,6 +210,10 @@
   .badge-cancel {
     background: var(--danger-soft);
     color: var(--danger);
+  }
+
+  .card.uncertain {
+    border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
   }
 
   .link {
