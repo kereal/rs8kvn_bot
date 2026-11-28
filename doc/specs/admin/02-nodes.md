@@ -83,6 +83,32 @@ CREATE TABLE plan_nodes (
 | GET | `/admin/api/plans/{id}/nodes` | — | `{"node_ids":[…]}` | 400, 401, 404 |
 | PUT | `/admin/api/plans/{id}/nodes` | `{"node_ids":[…]}` | `200` + `{"node_ids":[…]}` | 400, 401, 404 |
 | POST | `/admin/api/nodes/{id}/health` | — | `200` + `{"available":bool,"latency_ms":int,"error":str,"checked_at":rfc3339}` | 400, 401, 404 |
+| POST | `/admin/api/nodes/health/check` | — | `200` + сводный результат по всем нодам | 401 |
+| GET | `/admin/api/nodes/health` | — | `200` + последний сводный результат этого процесса | 401 |
+
+Сводный ручной прогон (`admin/node_health.go`):
+
+```json
+{
+  "checked_at": "2026-11-28T12:00:00Z",
+  "items": [
+    {"node_id": 1, "name": "main-panel", "type": "3x-ui", "available": true, "latency_ms": 84, "supported": true},
+    {"node_id": 2, "name": "dead", "type": "3x-ui", "available": false, "latency_ms": 0, "supported": true, "error": "upstream returned non-200"},
+    {"node_id": 3, "name": "fetcher", "type": "fetch", "available": false, "latency_ms": 0, "supported": false, "error": "проверка не поддерживается для этого типа ноды"}
+  ],
+  "total": 3,
+  "unavailable": 1,
+  "unsupported": 1
+}
+```
+
+Правила прогона: одновременно не более 4 пингов; общий бюджет — 20 с;
+недоступная нода — `available:false`, а не HTTP `500`; `proxman`/`fetch` и
+3x-ui без токена не пингуются (`supported:false`). Текст ошибки очищается от
+токена и `user:pass@` в URL и обрезается до 200 символов. Результат живёт
+только в памяти процесса панели: `GET` до первого прогона отдаёт
+`checked_at:null, items:[]`, после рестарта — снова пусто (health не
+доменный факт и в БД не пишется). Фонового polling нет.
 
 Полный список без пагинации (P7): нод — единицы-десятки.
 
@@ -218,6 +244,12 @@ mux.HandleFunc("PUT /admin/api/plans/{id}/nodes", s.withAuth(s.handlePutPlanNode
 Привязки к планам: на этом экране — модалка «Планы ноды» (чекбоксы всех планов) или секция под таблицей; альтернативная точка входа — на экране «Планы» (01-products) не вводится, её добавит интегратор при слиянии. PUT идемпотентен, кнопка «Сохранить» всегда активна.
 
 Кнопка «Проверить» (health) — только у нод типа 3x-ui с заданным токеном; у остальных disabled с подсказкой. Результат — inline-бейдж в строке: «доступна · 84 мс» / «недоступна · <текст ошибки>», до следующей перезагрузки списка.
+
+Кнопка «Проверить все» в шапке запускает `POST /admin/api/nodes/health/check`:
+сервер сам пингует все поддерживаемые ноды (ограниченная concurrency, общий
+таймаут), а вьюха раскладывает результат по тем же inline-бейджам и
+показывает итог `notice`-строкой («всего N, недоступно M»). У нод без
+health-клиента — бейдж «без health-клиента» (не путать с «недоступна»).
 
 Удаление: confirm; при `in_use` — текст с числами («нельзя удалить: 3 плана, 12 подписок»), строка остаётся.
 

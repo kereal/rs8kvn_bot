@@ -43,6 +43,12 @@
   let health = $state({})
   let healthPending = $state({})
 
+  // Сводная ручная проверка всех нод: запускается только кнопкой, фонового
+  // polling нет.
+  let allPending = $state(false)
+  /** @type {import('../lib/types.js').NodeHealthCheck|null} */
+  let allResult = $state(null)
+
   function emptyForm() {
     return { id: 0, name: '', type: '3x-ui', host: '', subscription_url: '', inbounds: '', api_token: '', is_active: true }
   }
@@ -223,6 +229,27 @@
     }
   }
 
+  // Сводная проверка: сервер пингует ноды с ограничением concurrency и общего
+  // timeout; ошибка одной ноды приходит как available:false, а не ошибкой
+  // запроса.
+  async function checkAll() {
+    allPending = true
+    allResult = null
+    try {
+      const result = await api.post('/admin/api/nodes/health/check', {})
+      allResult = result
+      const next = { ...health }
+      for (const item of result.items || []) {
+        next[item.node_id] = item
+      }
+      health = next
+    } catch (err) {
+      error = humanError(err)
+    } finally {
+      allPending = false
+    }
+  }
+
   async function openBindings(node) {
     bindingsNode = node
     bindingsError = ''
@@ -288,9 +315,20 @@
   </div>
   <div class="head-actions">
     {#if updatedAt}<span class="muted small">Обновлено в {formatTime(updatedAt)}</span>{/if}
+    <button class="btn" onclick={checkAll} disabled={allPending || items.length === 0}>
+      {allPending ? 'Проверяем все…' : 'Проверить все'}
+    </button>
     <button class="btn btn-primary" onclick={openCreate}>Новая нода</button>
   </div>
 </div>
+
+{#if allResult}
+  <!-- Итог ручного прогона. Недоступные ноды — предупреждение, не ошибка. -->
+  <div class="notice" class:notice-error={allResult.unavailable > 0} class:notice-ok={allResult.unavailable === 0}>
+    Проверка в {formatTime(allResult.checked_at)}: всего {allResult.total}, недоступно {allResult.unavailable}.
+    {#if allResult.unsupported > 0}Без health-клиента: {allResult.unsupported}.{/if}
+  </div>
+{/if}
 
 {#if notice}
   <div class="notice notice-ok">{notice}</div>
@@ -349,6 +387,10 @@
                 {#if health[node.id].available}
                   <span class="badge badge-ok" style="margin-left:8px">
                     доступна · {health[node.id].latency_ms} мс
+                  </span>
+                {:else if health[node.id].supported === false}
+                  <span class="badge badge-muted" style="margin-left:8px" title={health[node.id].error}>
+                    без health-клиента
                   </span>
                 {:else}
                   <span class="badge badge-warn" style="margin-left:8px" title={health[node.id].error}>

@@ -416,6 +416,28 @@
 
 /** POST /admin/api/nodes/{id}/health — ошибка сети это available:false, не протокол (admin/nodes.go nodeHealthResult). @typedef {{available: boolean, latency_ms: number, error?: string, checked_at: string}} NodeHealth */
 
+/**
+ * Результат сводной ручной проверки нод (admin/node_health.go).
+ * @typedef {object} NodeHealthCheckItem
+ * @property {number} node_id
+ * @property {string} name
+ * @property {string} type
+ * @property {boolean} available
+ * @property {number} latency_ms
+ * @property {boolean} supported — false: у типа ноды нет health-клиента
+ * @property {string} [error]
+ */
+/**
+ * POST /admin/api/nodes/health/check и GET /admin/api/nodes/health — последний
+ * прогон этого процесса; checked_at null, пока проверка не запускалась.
+ * @typedef {object} NodeHealthCheck
+ * @property {string|null} checked_at
+ * @property {NodeHealthCheckItem[]} items
+ * @property {number} total
+ * @property {number} unavailable
+ * @property {number} unsupported
+ */
+
 /** GET/PUT /admin/api/plans/{id}/nodes — набор привязанных к плану нод (admin/nodes.go). @typedef {{node_ids: number[]}} PlanNodeIDs */
 
 /** GET /admin/api/broadcasts/audience — предпросмотр размера аудитории (admin/broadcasts.go). @typedef {{count: number}} AudienceCount */

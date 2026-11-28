@@ -26,6 +26,10 @@
   /** @type {import('../lib/types.js').PaymentConfig|null} */
   let payment = $state(null)
 
+  // Последний ручной health-check нод (в памяти процесса панели).
+  /** @type {import('../lib/types.js').NodeHealthCheck|null} */
+  let nodeHealth = $state(null)
+
   // Провайдеры — подписи, а не бизнес-логика; незнакомый код показывается сырым.
   const PROVIDER_LABEL = { telegram_stars: 'Telegram Stars', platega: 'Platega' }
 
@@ -42,6 +46,17 @@
     }
     loadRevenue()
     loadPayment()
+    loadNodeHealth()
+  }
+
+  // Health нод — ручной прогон, поэтому карточка показывает его итог, а не
+  // живой опрос; без результата экран живёт.
+  async function loadNodeHealth() {
+    try {
+      nodeHealth = await api.get('/admin/api/nodes/health')
+    } catch {
+      nodeHealth = null
+    }
   }
 
   // Платёжный режим грузится отдельно и молча: без него экран живёт.
@@ -429,6 +444,25 @@
         {/each}
       </div>
       <button class="btn btn-ghost" onclick={() => goTo('#/broadcasts')}>Открыть рассылки</button>
+    </section>
+
+    <section class="panel card">
+      <h2>Ноды</h2>
+      <div class="kv"><span>Всего</span><span class="strong">{data.nodes.total}</span></div>
+      {#if !nodeHealth?.checked_at}
+        <div class="muted">health ещё не запускался</div>
+      {:else}
+        <div class="kv">
+          <span>Проверка</span>
+          <span>{formatTime(nodeHealth.checked_at)}</span>
+        </div>
+        {#if nodeHealth.unavailable > 0}
+          <div class="badge badge-warn">недоступны: {nodeHealth.unavailable}</div>
+        {:else}
+          <div class="badge badge-ok">поддерживаемые ноды отвечают</div>
+        {/if}
+      {/if}
+      <button class="btn btn-ghost" onclick={() => goTo('#/nodes')}>Открыть ноды</button>
     </section>
 
     <section class="panel card">

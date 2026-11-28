@@ -80,6 +80,11 @@ type Server struct {
 	// (SetPaymentConfig). Только чтение: панель провайдер не переключает.
 	payment PaymentConfig
 
+	// nodeHealthLast — последний ручной health-check нод. Живёт только в
+	// памяти процесса: health не доменный факт и в БД не пишется.
+	nodeHealthMu   sync.Mutex
+	nodeHealthLast *nodeHealthCheckResponse
+
 	// authLimiter throttles token guessing (ADR-0002 P3). Per server, so tests
 	// and the dev harness each start with a full budget.
 	authLimiter *failedAuthLimiter
@@ -170,6 +175,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/api/nodes/{id}", s.withAuth(s.handleUpdateNode))
 	mux.HandleFunc("DELETE /admin/api/nodes/{id}", s.withAuth(s.handleDeleteNode))
 	mux.HandleFunc("POST /admin/api/nodes/{id}/health", s.withAuth(s.handleNodeHealth))
+	mux.HandleFunc("POST /admin/api/nodes/health/check", s.withAuth(s.handleNodeHealthCheck))
+	mux.HandleFunc("GET /admin/api/nodes/health", s.withAuth(s.handleNodeHealthLast))
 	mux.HandleFunc("GET /admin/api/nodes/{id}/live", s.withAuth(s.handleNodeLive))
 	mux.HandleFunc("GET /admin/api/plans/{id}/nodes", s.withAuth(s.handleGetPlanNodes))
 	mux.HandleFunc("PUT /admin/api/plans/{id}/nodes", s.withAuth(s.handlePutPlanNodes))

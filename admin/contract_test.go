@@ -455,6 +455,8 @@ func TestAPI_RouteRegistry(t *testing.T) {
 		"PUT /admin/api/nodes/1",
 		"DELETE /admin/api/nodes/1",
 		"POST /admin/api/nodes/1/health",
+		"POST /admin/api/nodes/health/check",
+		"GET /admin/api/nodes/health",
 		"GET /admin/api/nodes/1/live",
 		"GET /admin/api/products",
 		"POST /admin/api/products",
