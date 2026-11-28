@@ -107,6 +107,43 @@ func TestAPI_OrdersDetail(t *testing.T) {
 	assert.Contains(t, detail, "expires_at")
 }
 
+// Деталь отдаёт историю возвратов из журнала аудита, валюту и факт понижения
+// до free; инициировать возврат из панели нельзя.
+func TestAPI_OrdersDetail_Refunds(t *testing.T) {
+	t.Parallel()
+
+	srv, db := newTestServer(t)
+	_, firstID := seedOrders(t, db, 1, time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC))
+
+	entityID := fmt.Sprintf("%d", firstID)
+	require.NoError(t, db.GetDB().Create(&database.AuditLog{
+		EntityType: database.EntityOrder, EntityID: &entityID,
+		Event: database.AuditEventPaymentRefunded, ActorType: database.ActorPaymentProvider,
+		Details:   `{"amount_cents":10000,"currency":"RUB","downgraded":true}`,
+		CreatedAt: time.Now().UTC(),
+	}).Error)
+
+	rec := do(t, srv, http.MethodGet, fmt.Sprintf("/admin/api/orders/%d", firstID), testToken, "")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var detail orderDetail
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &detail))
+	require.Len(t, detail.Refunds, 1)
+	assert.Equal(t, database.AuditEventPaymentRefunded, detail.Refunds[0].Event)
+	assert.Equal(t, int64(10000), detail.Refunds[0].AmountCents)
+	assert.Equal(t, "RUB", detail.Refunds[0].Currency)
+	assert.True(t, detail.Refunds[0].Downgraded)
+
+	// Пустой истории — [], а не null.
+	rec = do(t, srv, http.MethodGet, fmt.Sprintf("/admin/api/orders/%d", firstID+1), testToken, "")
+	if rec.Code == http.StatusOK {
+		var other orderDetail
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &other))
+		assert.NotNil(t, other.Refunds)
+		assert.Empty(t, other.Refunds)
+	}
+}
+
 func TestAPI_OrdersDetail_NotFound(t *testing.T) {
 	t.Parallel()
 

@@ -307,6 +307,13 @@ func TestAPI_Contract_KeySets(t *testing.T) {
 			path:     "/admin/api/revenue?days=7",
 			expected: []string{"currencies", "currency", "days", "totals"},
 		},
+		// admin/src/views/Overview.svelte, Products.svelte — платёжный режим.
+		{
+			name:     "payment config",
+			method:   http.MethodGet,
+			path:     "/admin/api/payment/config",
+			expected: []string{"enabled", "provider", "supported_currencies"},
+		},
 	}
 
 	for _, tc := range cases {
